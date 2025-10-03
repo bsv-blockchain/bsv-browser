@@ -18,6 +18,101 @@ body {
     padding: 0 20px;
 }
 
+/* Privacy Policy Document Styles */
+.privacy {
+    line-height: 1.8;
+    color: #2c2c2c;
+    background-color: #fafafa;
+    min-height: 100vh;
+    padding: 40px 0;
+}
+
+.privacy .container {
+    max-width: 1000px;
+    background-color: white;
+    padding: 60px 40px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    margin: 0 auto;
+}
+
+.privacy h1 {
+    font-size: 2.3rem;
+    font-weight: 200;
+    color: #1a1a1a;
+    text-align: center;
+    margin-bottom: 0rem;
+}
+
+.privacy h3 {
+    font-size: 1rem;
+    font-weight: 100;
+    margin-bottom: 1.5rem;
+    color: #7c7c7c;
+    text-align: center;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.privacy .last-updated {
+    text-align: center;
+    font-style: italic;
+    color: #666;
+    margin-bottom: 2rem;
+    font-size: 1rem;
+}
+
+.privacy h2 {
+    font-size: 1.6rem;
+    font-weight: 200;
+    margin: 2.5rem 0 1.5rem 0;
+    color: #282828;
+    text-align: left;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 0.5rem;
+    page-break-after: avoid;
+}
+
+.privacy h4 {
+    font-size: 1.25rem;
+    font-weight: 300;
+    margin: 2.5rem 0 0.25rem 0;
+    color: #282828;
+    text-align: left;
+    page-break-after: avoid;
+}
+
+.privacy p {
+    margin-bottom: 1.5rem;
+    text-align: justify;
+    text-justify: inter-word;
+    font-size: 1rem;
+    line-height: 1.5;
+}
+
+.privacy ul, .privacy ol {
+    margin: 1rem 0 1.5rem 2rem;
+    padding-left: 1rem;
+}
+
+.privacy li {
+    margin-bottom: 0.8rem;
+    text-align: justify;
+    text-justify: inter-word;
+    font-size: 1rem;
+    line-height: 1.5;
+}
+
+.privacy a {
+    color: #0066cc;
+    text-decoration: underline;
+}
+
+.privacy a:hover {
+    color: #004499;
+}
+
 /* Typography */
 h1 {
     font-size: 3.5rem;
@@ -486,5 +581,60 @@ h4 {
     
     .store-badge {
         height: 50px;
+    }
+}
+
+/* Privacy Policy Responsive Design */
+@media (max-width: 768px) {
+    .privacy .container {
+        padding: 30px 20px;
+        margin: 0 15px;
+    }
+    
+    .privacy h1 {
+        font-size: 2rem;
+    }
+    
+    .privacy h2 {
+        font-size: 1.5rem;
+        margin: 2rem 0 1rem 0;
+    }
+    
+    .privacy p {
+        font-size: 1rem;
+        line-height: 1.6;
+    }
+    
+    .privacy li {
+        font-size: 1rem;
+        line-height: 1.5;
+    }
+    
+    .privacy ul {
+        margin-left: 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .privacy .container {
+        padding: 20px 15px;
+        margin: 0 10px;
+    }
+    
+    .privacy h1 {
+        font-size: 1.8rem;
+    }
+    
+    .privacy h2 {
+        font-size: 1.3rem;
+        margin: 1.5rem 0 1rem 0;
+    }
+    
+    .privacy p {
+        font-size: 0.95rem;
+    }
+    
+    .privacy li {
+        font-size: 0.95rem;
     }
 }
