@@ -6,7 +6,7 @@
   "version": "0.3.3",
   "license": "Open BSV",
   "scripts": {
-    "apk-android": "eas build --profile production --platform android --local --verbose-logs --build-logger-level trace",
+    "apk-android": "eas build --profile preview-apk --platform android --local --verbose-logs --build-logger-level trace",
     "aab-android": "cd android && ./gradlew bundleRelease",
     "ipa-ios": "eas build --profile production --platform ios --local --verbose-logs --build-logger-level trace",
     "start": "expo start --dev-client",
@@ -25,9 +25,9 @@
     "clean": "rm -rf yarn.lock && rm -rf .expo && rm -rf .expo-shared && rm -rf .vscode && rm -rf .idea && rm -rf ios/Pods && rm -rf android/.gradle && rm -rf android/app/build && rm -rf ./ios"
   },
   "dependencies": {
-    "@bsv/message-box-client": "^1.2.6",
-    "@bsv/sdk": "^1.6.24",
-    "@bsv/wallet-toolbox-mobile": "^1.6.4",
+    "@bsv/message-box-client": "^1.3.0",
+    "@bsv/sdk": "^1.7.6",
+    "@bsv/wallet-toolbox-mobile": "^1.6.23",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",
     "@expo/vector-icons": "^14.1.0",

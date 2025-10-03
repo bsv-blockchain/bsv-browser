@@ -150,9 +150,8 @@ export const RecommendedApps = observer(({
     if (activeTab && activeTab.url && activeTab.url !== 'about:blank' && !activeTab.url.includes('metanet://')) {
       const title = activeTab.title || activeTab.url
       bookmarkStore.addBookmark(title, activeTab.url)
-      // Close the modal after adding bookmark
+      setBookmarkRefresh(prev => prev + 1)
       if (onCloseModal) {
-        // Use setTimeout to ensure the bookmark is added first, then close
         setTimeout(() => {
           onCloseModal()
         }, 100)
