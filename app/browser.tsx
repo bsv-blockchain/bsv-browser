@@ -24,7 +24,6 @@ import {
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
-import Modal from 'react-native-modal'
 import {
   GestureHandlerRootView,
   Swipeable,
@@ -68,12 +67,14 @@ import { useWebAppManifest } from '@/hooks/useWebAppManifest'
 import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
 import PermissionModal from '@/components/PermissionModal'
 import PermissionsScreen from '@/components/PermissionsScreen'
+import BottomDrawer from '@/components/BottomDrawer'
 import {
   PermissionType,
   PermissionState,
   getDomainPermissions,
   setDomainPermission,
-  getPermissionState
+  getPermissionState,
+  checkPermissionForDomain
 } from '@/utils/permissionsManager'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
@@ -336,13 +337,13 @@ function Browser() {
 
   const [keyboardVisible, setKeyboardVisible] = useState(false)
   const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const iosSoftKeyboardShown = useRef(false)
 
   const [showInfoDrawer, setShowInfoDrawer] = useState(false)
   const [showShortcutModal, setShowShortcutModal] = useState(false)
   const [infoDrawerRoute, setInfoDrawerRoute] = useState<
     'root' | 'identity' | 'settings' | 'security' | 'trust' | 'notifications' | 'permissions'
   >('root')
-  const drawerAnim = useRef(new Animated.Value(0)).current
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [showStarDrawer, setShowStarDrawer] = useState(false)
@@ -354,7 +355,6 @@ function Browser() {
   const addressInputRef = useRef<TextInput>(null)
   const [consoleLogs, setConsoleLogs] = useState<any[]>([])
   const { manifest, fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
-  const [showBalance, setShowBalance] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const activeCameraStreams = useRef<Set<string>>(new Set())
 
@@ -368,15 +368,6 @@ function Browser() {
     }
   }, [tabStore.isInitialized, activeTab])
 
-  // Balance handling - only delay on first open
-  useEffect(() => {
-    if (showInfoDrawer && infoDrawerRoute === 'root') {
-      const t = setTimeout(() => setShowBalance(true), 260) // shorter delay
-      return () => clearTimeout(t)
-    } else {
-      setShowBalance(false)
-    }
-  }, [showInfoDrawer, infoDrawerRoute])
 
   /* ------------------------- push notifications ----------------------------- */
   // const { requestNotificationPermission, createPushSubscription, unsubscribe, getPermission, getSubscription } = usePushNotifications()
@@ -398,18 +389,21 @@ function Browser() {
       setKeyboardVisible(true)
       const height = event.endCoordinates.height
       setKeyboardHeight(height)
+      if (Platform.OS === 'ios') iosSoftKeyboardShown.current = true
     })
     const hideSub = Keyboard.addListener(hideEvent, () => {
       setKeyboardVisible(false)
       setKeyboardHeight(0)
 
+      const shouldHandleHide = Platform.OS === 'ios' ? iosSoftKeyboardShown.current : true
       setTimeout(() => {
-        if (addressEditing.current || addressInputRef.current?.isFocused()) {
+        if (shouldHandleHide && (addressEditing.current || addressInputRef.current?.isFocused())) {
           addressEditing.current = false
           setAddressFocused(false)
           setAddressSuggestions([])
           addressInputRef.current?.blur()
         }
+        if (Platform.OS === 'ios') iosSoftKeyboardShown.current = false
       }, 50)
     })
     return () => {
@@ -813,6 +807,16 @@ function Browser() {
           })
           await setDomainPermission(pendingDomain, pendingPermission, granted ? 'allow' : 'deny')
 
+          // If enabling OS-backed permissions, proactively request OS permission so it appears in system settings
+          try {
+            const osBacked: PermissionType[] = ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION'] as any
+            if (granted && osBacked.includes(pendingPermission)) {
+              await checkPermissionForDomain(pendingDomain, pendingPermission)
+            }
+          } catch (e) {
+            console.warn('[Metanet] OS permission request failed (non-fatal)', e)
+          }
+
           // Update denied list cache used by injection
           console.log('[Metanet] Updating denied-permissions cache for current tab', {
             url: activeTab?.url || ''
@@ -880,6 +884,16 @@ function Browser() {
         // Persist change (PermissionsScreen also persists, but this keeps Browser state consistent)
         if (domain) {
           await setDomainPermission(domain, permission, state)
+        }
+
+        // If enabling OS-backed permissions from the Permissions screen, proactively request OS permission
+        try {
+          const osBacked: PermissionType[] = ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION'] as any
+          if (domain && state === 'allow' && osBacked.includes(permission)) {
+            await checkPermissionForDomain(domain, permission)
+          }
+        } catch (e) {
+          console.warn('[Metanet] OS permission request (from PermissionsScreen) failed (non-fatal)', e)
         }
 
         // Update denied permissions cache
@@ -1129,13 +1143,23 @@ function Browser() {
   }, [activeTab])
 
   /* -------------------------------------------------------------------------- */
-  /*                           STAR (BOOKMARK+HISTORY)                          */
+  /*                 DRAWERS (STAR, PERMISSIONS, TRUSTS, INFO)                  */
   /* -------------------------------------------------------------------------- */
   // const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isDrawerAnimating, setIsDrawerAnimating] = useState(false)
   const windowHeight = Dimensions.get('window').height
   const drawerFullHeight = windowHeight * 0.75
   const translateY = useRef(new Animated.Value(drawerFullHeight)).current
+
+  const [showPermissionsDrawer, setShowPermissionsDrawer] = useState(false)
+  const [permissionsOrigin, setPermissionsOrigin] = useState<string>('')
+  const [showTrustDrawer, setShowTrustDrawer] = useState(false)
+  const [permissionsCloseInstant, setPermissionsCloseInstant] = useState(false)
+  const [trustCloseInstant, setTrustCloseInstant] = useState(false)
+  const [showIdentityDrawer, setShowIdentityDrawer] = useState(false)
+  const [identityCloseInstant, setIdentityCloseInstant] = useState(false)
+  const [showSettingsDrawer, setShowSettingsDrawer] = useState(false)
+  const [settingsCloseInstant, setSettingsCloseInstant] = useState(false)
 
   const closeStarDrawer = useCallback(() => {
     const runCloseDrawer = () => {
@@ -1216,6 +1240,10 @@ function Browser() {
       })
     }
   }, [showStarDrawer])
+
+  const togglePermissionsDrawer = useCallback((open: boolean) => {
+    setShowPermissionsDrawer(open)
+  }, [])
 
   const toggleStarDrawer = useCallback(
     (open: boolean) => {
@@ -1331,10 +1359,6 @@ function Browser() {
         onRemoveBookmark={removeBookmark}
         onRemoveDefaultApp={removeDefaultApp}
         removedDefaultApps={removedDefaultApps}
-        onCloseModal={() => {
-          // Just close the drawer - the bookmark is already added by the component
-          toggleInfoDrawer(false)
-        }}
         hideHeader={true}
         showOnlyBookmarks={true}
       />
@@ -1350,16 +1374,7 @@ function Browser() {
     toggleInfoDrawer
   ])
 
-  useEffect(() => {
-    Animated.timing(drawerAnim, {
-      toValue: showInfoDrawer ? 1 : 0,
-      duration: 260,
-      useNativeDriver: true
-    }).start()
-  }, [showInfoDrawer, drawerAnim])
-
-  const drawerHeight =
-    infoDrawerRoute === 'root' ? Dimensions.get('window').height * 0.75 : Dimensions.get('window').height * 0.9
+  const infoDrawerHeightPercent = infoDrawerRoute === 'root' ? 0.75 : 0.9
 
   /* -------------------------------------------------------------------------- */
   /*                               DRAWER HANDLERS                              */
@@ -1367,11 +1382,25 @@ function Browser() {
 
   const drawerHandlers = useMemo(
     () => ({
-      identity: () => setInfoDrawerRoute('identity'),
+      identity: () => {
+        setShowIdentityDrawer(true)
+        toggleInfoDrawer(false)
+      },
       security: () => setInfoDrawerRoute('security'),
-      trust: () => setInfoDrawerRoute('trust'),
-      settings: () => setInfoDrawerRoute('settings'),
-      permissions: () => setInfoDrawerRoute('permissions'),
+      trust: () => {
+        setShowTrustDrawer(true)
+        toggleInfoDrawer(false)
+      },
+      settings: () => {
+        setShowSettingsDrawer(true)
+        toggleInfoDrawer(false)
+      },
+      permissions: () => {
+        const origin = activeTab?.url ? domainForUrl(activeTab.url) : ''
+        setPermissionsOrigin(origin)
+        togglePermissionsDrawer(true)
+        toggleInfoDrawer(false)
+      },
       toggleDesktopView: () => {
         toggleDesktopView()
         toggleInfoDrawer(false)
@@ -1404,15 +1433,25 @@ function Browser() {
         toggleInfoDrawer(false)
       }
     }),
-    [activeTab, addBookmark, toggleInfoDrawer, updateActiveTab, setAddressText, addToHomeScreen, toggleDesktopView, t]
+    [
+      activeTab,
+      addBookmark,
+      toggleInfoDrawer,
+      updateActiveTab,
+      setAddressText,
+      addToHomeScreen,
+      toggleDesktopView,
+      togglePermissionsDrawer,
+      t
+    ]
   )
 
   /* -------------------------------------------------------------------------- */
   /*                                  RENDER                                    */
   /* -------------------------------------------------------------------------- */
 
-  const showAddressBar = !keyboardVisible || addressFocused
-  const showBottomBar = !(keyboardVisible && addressFocused)
+  const showAddressBar = Platform.OS === 'android' ? !keyboardVisible || addressFocused : true
+  const showBottomBar = Platform.OS === 'android' ? !(keyboardVisible || addressFocused) : !(keyboardVisible && addressFocused)
 
   // Exit fullscreen on back button or gesture when in fullscreen
   useEffect(() => {
@@ -1491,12 +1530,12 @@ function Browser() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        enabled={Platform.OS === 'ios'}
+        enabled={Platform.OS === 'ios' && addressFocused}
         behavior="padding"
         keyboardVerticalOffset={0}
       >
         <SafeAreaView
-          edges={['top', 'left', 'right']}
+          edges={['top', 'left', 'right']}  
           style={[
             styles.container,
             {
@@ -1579,10 +1618,15 @@ function Browser() {
                 )}
                 onNavigationStateChange={handleNavStateChange}
                 userAgent={isDesktopView ? desktopUserAgent : mobileUserAgent}
+                allowsFullscreenVideo={true}
                 mediaPlaybackRequiresUserAction={false}
                 allowsInlineMediaPlayback={true}
+                // Enable WebView geolocation on Android (actual OS permission is requested via our modal flow)
+                geolocationEnabled
                 // Deny all WebView permissions to prevent native camera access
                 onPermissionRequest={() => false}
+                androidLayerType={Platform.OS === 'android' ? 'software' : 'hardware'}
+                androidHardwareAccelerationDisabled={Platform.OS === 'android'}
                 onError={(syntheticEvent: any) => {
                   const { nativeEvent } = syntheticEvent
                   if (nativeEvent.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) {
@@ -1608,7 +1652,7 @@ function Browser() {
               />
             </View>
           ) : null}
-          {!isFullscreen && (
+          {!isFullscreen && showAddressBar && (
             <View
               onLayout={e => setAddressBarHeight(e.nativeEvent.layout.height)}
               style={[
@@ -1805,6 +1849,136 @@ function Browser() {
               </Animated.View>
             </View>
           )}
+
+          {!isFullscreen && (
+            <>
+              {/* Identity Drawer */}
+              <BottomDrawer
+                visible={showIdentityDrawer}
+                onClose={() => setShowIdentityDrawer(false)}
+                heightPercent={0.9}
+                backgroundColor={colors.background}
+                backdropOpacity={0.7}
+                closeInstantly={identityCloseInstant}
+              >
+                <View style={[styles.subDrawerHeader, { borderBottomColor: colors.textSecondary + '33' }]}> 
+                  <TouchableOpacity
+                    onPress={() => {
+                      setIdentityCloseInstant(true)
+                      setShowIdentityDrawer(false)
+                      setTimeout(() => setIdentityCloseInstant(false), 0)
+                      setInfoDrawerRoute('root')
+                      toggleInfoDrawer(true)
+                    }}
+                    activeOpacity={0.6}
+                    delayPressIn={0}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Text style={[styles.backBtn, { color: colors.primary }]}>‹ {t('back')}</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.subDrawerTitle, { color: colors.textPrimary }]}>{t('identity')}</Text>
+                  <View style={{ width: 60 }} />
+                </View>
+                <View style={styles.subDrawerContent}>
+                  <IdentityScreen />
+                </View>
+              </BottomDrawer>
+
+              {/* Settings Drawer */}
+              <BottomDrawer
+                visible={showSettingsDrawer}
+                onClose={() => setShowSettingsDrawer(false)}
+                heightPercent={0.9}
+                backgroundColor={colors.background}
+                backdropOpacity={0.7}
+                closeInstantly={settingsCloseInstant}
+              >
+                <View style={[styles.subDrawerHeader, { borderBottomColor: colors.textSecondary + '33' }]}> 
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSettingsCloseInstant(true)
+                      setShowSettingsDrawer(false)
+                      setTimeout(() => setSettingsCloseInstant(false), 0)
+                      setInfoDrawerRoute('root')
+                      toggleInfoDrawer(true)
+                    }}
+                    activeOpacity={0.6}
+                    delayPressIn={0}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Text style={[styles.backBtn, { color: colors.primary }]}>‹ {t('back')}</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.subDrawerTitle, { color: colors.textPrimary }]}>{t('settings')}</Text>
+                  <View style={{ width: 60 }} />
+                </View>
+                <View style={styles.subDrawerContent}>
+                  <SettingsScreen />
+                </View>
+              </BottomDrawer>
+
+              <BottomDrawer
+                visible={showPermissionsDrawer}
+                onClose={() => setShowPermissionsDrawer(false)}
+                heightPercent={0.9}
+                backgroundColor={colors.background}
+                backdropOpacity={0.7}
+                closeInstantly={permissionsCloseInstant}
+              >
+                <View style={[styles.subDrawerHeader, { borderBottomColor: colors.textSecondary + '33' }]}> 
+                  <TouchableOpacity
+                    onPress={() => {
+                      setPermissionsCloseInstant(true)
+                      setShowPermissionsDrawer(false)
+                      setTimeout(() => setPermissionsCloseInstant(false), 0)
+                      setInfoDrawerRoute('root')
+                      toggleInfoDrawer(true)
+                    }}
+                    activeOpacity={0.6}
+                    delayPressIn={0}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Text style={[styles.backBtn, { color: colors.primary }]}>‹ {t('back')}</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.subDrawerTitle, { color: colors.textPrimary }]}>{t('permissions')}</Text>
+                  <View style={{ width: 60 }} />
+                </View>
+                <View style={styles.subDrawerContent}>
+                  <PermissionsScreen origin={permissionsOrigin} onPermissionChange={handlePermissionChange} />
+                </View>
+              </BottomDrawer>
+
+              <BottomDrawer
+                visible={showTrustDrawer}
+                onClose={() => setShowTrustDrawer(false)}
+                heightPercent={0.9}
+                backgroundColor={colors.background}
+                backdropOpacity={0.7}
+                closeInstantly={trustCloseInstant}
+              >
+                <View style={[styles.subDrawerHeader, { borderBottomColor: colors.textSecondary + '33' }]}> 
+                  <TouchableOpacity
+                    onPress={() => {
+                      setTrustCloseInstant(true)
+                      setShowTrustDrawer(false)
+                      setTimeout(() => setTrustCloseInstant(false), 0)
+                      setInfoDrawerRoute('root')
+                      toggleInfoDrawer(true)
+                    }}
+                    activeOpacity={0.6}
+                    delayPressIn={0}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Text style={[styles.backBtn, { color: colors.primary }]}>‹ {t('back')}</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.subDrawerTitle, { color: colors.textPrimary }]}>{t('trust_network')}</Text>
+                  <View style={{ width: 60 }} />
+                </View>
+                <View style={styles.subDrawerContent}>
+                  <TrustScreen />
+                </View>
+              </BottomDrawer>
+            </>
+          )}
           {!isFullscreen && showBottomBar && activeTab && (
             <BottomToolbar
               activeTab={activeTab}
@@ -1819,108 +1993,79 @@ function Browser() {
             />
           )}
 
-          <Modal
-            isVisible={!isFullscreen && showInfoDrawer}
-            onBackdropPress={() => toggleInfoDrawer(false)}
-            swipeDirection="down"
-            onSwipeComplete={() => toggleInfoDrawer(false)}
-            style={{ margin: 0, justifyContent: 'flex-end' }}
+          <BottomDrawer
+            visible={!isFullscreen && showInfoDrawer}
+            onClose={() => setShowInfoDrawer(false)}
+            heightPercent={infoDrawerHeightPercent}
+            backgroundColor={colors.background}
+            backdropOpacity={0.7}
           >
-            <Animated.View
-              style={[
-                styles.infoDrawer,
-                {
-                  backgroundColor: colors.background,
-                  height: drawerHeight,
-                  transform: [
-                    {
-                      translateY: drawerAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [drawerHeight, 0]
-                      })
-                    }
-                  ]
-                }
-              ]}
-            >
-              {infoDrawerRoute === 'root' && (
-                <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
-                  <Pressable style={styles.drawerHandle} onPress={() => toggleInfoDrawer(false)}>
-                    <View style={styles.handleBar} />
-                  </Pressable>
-                  {!isWeb2Mode && showBalance && <Balance />}
-                  {!isWeb2Mode && (
-                    <>
-                      <DrawerItem
-                        label={t('identity')}
-                        icon="person-circle-outline"
-                        onPress={drawerHandlers.identity}
-                      />
-                      {/* <DrawerItem label={t('security')} icon="lock-closed-outline" onPress={drawerHandlers.security} /> */}
-                      <DrawerItem
-                        label={t('trust_network')}
-                        icon="shield-checkmark-outline"
-                        onPress={drawerHandlers.trust}
-                      />
-                      <DrawerItem label={t('settings')} icon="settings-outline" onPress={drawerHandlers.settings} />
-                      {/* <DrawerItem
-                        label={t('notifications')}
-                        icon="notifications-outline"
-                        onPress={() => setInfoDrawerRoute('notifications')}
-                      /> */}
-                      {activeTab?.url !== kNEW_TAB_URL && Platform.OS !== 'ios' && (
-                        <DrawerItem
-                          label={t('permissions')}
-                          icon="lock-closed-outline"
-                          onPress={drawerHandlers.permissions}
-                        />
-                      )}
-                      <View style={styles.divider} />
-                    </>
-                  )}
-                  {activeTab?.url !== kNEW_TAB_URL && (
+            {infoDrawerRoute === 'root' ? (
+              <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+                {!isWeb2Mode && <Balance />}
+                {!isWeb2Mode && (
+                  <>
                     <DrawerItem
-                      label={isDesktopView ? t('switch_to_mobile_view') : t('switch_to_desktop_view')}
-                      icon={isDesktopView ? 'phone-portrait-outline' : 'desktop-outline'}
-                      onPress={drawerHandlers.toggleDesktopView}
+                      label={t('identity')}
+                      icon="person-circle-outline"
+                      onPress={drawerHandlers.identity}
                     />
-                  )}
-                  {Platform.OS !== 'ios' && (
                     <DrawerItem
-                      label={t('add_to_device_homescreen')}
-                      icon="home-outline"
-                      onPress={drawerHandlers.addToHomeScreen}
+                      label={t('trust_network')}
+                      icon="shield-checkmark-outline"
+                      onPress={drawerHandlers.trust}
                     />
-                  )}
+                    <DrawerItem label={t('settings')} icon="settings-outline" onPress={drawerHandlers.settings} />
+                    {activeTab?.url !== kNEW_TAB_URL && (
+                      <DrawerItem
+                        label={t('permissions')}
+                        icon="lock-closed-outline"
+                        onPress={drawerHandlers.permissions}
+                      />
+                    )}
+                    <View style={styles.divider} />
+                  </>
+                )}
+                {activeTab?.url !== kNEW_TAB_URL && (
                   <DrawerItem
-                    label={t('back_to_homepage')}
-                    icon="apps-outline"
-                    onPress={drawerHandlers.backToHomepage}
+                    label={isDesktopView ? t('switch_to_mobile_view') : t('switch_to_desktop_view')}
+                    icon={isDesktopView ? 'phone-portrait-outline' : 'desktop-outline'}
+                    onPress={drawerHandlers.toggleDesktopView}
                   />
-                  {/* Login button for web2 mode users */}
-                  {isWeb2Mode && (
-                    <>
-                      <View style={styles.divider} />
-                      <DrawerItem
-                        label="Login to unlock Web3 features"
-                        icon="log-in-outline"
-                        onPress={drawerHandlers.goToLogin}
-                      />
-                    </>
-                  )}
-                </ScrollView>
-              )}
-
-              {infoDrawerRoute !== 'root' && (
-                <SubDrawerView
-                  route={infoDrawerRoute}
-                  onBack={() => setInfoDrawerRoute('root')}
-                  origin={activeTab?.url ? domainForUrl(activeTab.url) : ''}
-                  onPermissionChange={handlePermissionChange}
+                )}
+                {Platform.OS !== 'ios' && (
+                  <DrawerItem
+                    label={t('add_to_device_homescreen')}
+                    icon="home-outline"
+                    onPress={drawerHandlers.addToHomeScreen}
+                  />
+                )}
+                <DrawerItem
+                  label={t('back_to_homepage')}
+                  icon="apps-outline"
+                  onPress={drawerHandlers.backToHomepage}
                 />
-              )}
-            </Animated.View>
-          </Modal>
+                {/* Login button for web2 mode users */}
+                {isWeb2Mode && (
+                  <>
+                    <View style={styles.divider} />
+                    <DrawerItem
+                      label="Login to unlock Web3 features"
+                      icon="log-in-outline"
+                      onPress={drawerHandlers.goToLogin}
+                    />
+                  </>
+                )}
+              </ScrollView>
+            ) : (
+              <SubDrawerView
+                route={infoDrawerRoute}
+                onBack={() => setInfoDrawerRoute('root')}
+                origin={activeTab?.url ? domainForUrl(activeTab.url) : ''}
+                onPermissionChange={handlePermissionChange}
+              />
+            )}
+          </BottomDrawer>
 
           {/* Clear History Confirmation Modal */}
           <RNModal transparent visible={clearConfirmVisible} onRequestClose={closeClearConfirm} animationType="fade">
@@ -2117,6 +2262,8 @@ const TabsViewBase = ({
                 source={{ uri: item.url || kNEW_TAB_URL }}
                 style={{ flex: 1 }}
                 scrollEnabled={false}
+                androidLayerType={Platform.OS === 'android' ? 'software' : undefined as any}
+                androidHardwareAccelerationDisabled={Platform.OS === 'android'}
                 pointerEvents="none"
               />
             )}
@@ -2689,7 +2836,7 @@ const styles = StyleSheet.create({
   /* backdrop */
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,1)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
     zIndex: 20
   },
 
