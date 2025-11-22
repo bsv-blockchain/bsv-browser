@@ -101,7 +101,7 @@ export default function LoginScreen() {
     }
   }
 
-  // Initial app load - go directly to browser
+  // Initial app load - check if wallet exists and auto-login if available
   useEffect(() => {
     ; (async () => {
       try {
@@ -109,10 +109,10 @@ export default function LoginScreen() {
         if (snap && managers?.walletManager) {
           // Silently load wallet if available
           await managers.walletManager.loadSnapshot(snap)
+          // Only auto-redirect if wallet is successfully loaded
+          router.dismissAll()
+          router.replace('/browser')
         }
-        // Always go to browser, regardless of wallet state
-        router.dismissAll()
-        router.replace('/browser')
       } finally {
         setInitializing(false)
       }
