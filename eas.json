@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": ">=16.26.0",
+    "version": ">=16.28.0",
     "appVersionSource": "remote",
     "promptToConfigurePushNotifications": false
   },
@@ -27,12 +27,12 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_DEFAULT_WAB_URL": "https://wab-eu-1.bsvb.tech",
-        "EXPO_PUBLIC_DEFAULT_STORAGE_URL": "https://store-eu-1.bsvb.tech",
-        "EXPO_PUBLIC_DEFAULT_MESSAGEBOX_URL": "https://message-box-eu-1.bsvb.tech",
+        "EXPO_PUBLIC_DEFAULT_WAB_URL": "https://wab-us-1.bsvb.tech",
+        "EXPO_PUBLIC_DEFAULT_STORAGE_URL": "https://store-us-1.bsvb.tech",
+        "EXPO_PUBLIC_DEFAULT_MESSAGEBOX_URL": "https://message-box-us-1.bsvb.tech",
         "EXPO_PUBLIC_DEFAULT_CHAIN": "main",
         "EXPO_PUBLIC_ADMIN_ORIGINATOR": "admin.com",
-        "EXPO_PUBLIC_DEFAULT_HOMEPAGE": "https://app.commonsource.nl"
+        "EXPO_PUBLIC_DEFAULT_HOMEPAGE": "about:blank"
       }
     }
   },
