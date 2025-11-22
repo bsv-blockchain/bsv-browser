@@ -45,7 +45,7 @@
       }
     },
     "android": {
-      "package": "org.bsvblockchain.bsvbrowser",
+      "package": "org.bsvassociation.browser",
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.SYSTEM_ALERT_WINDOW",
@@ -71,7 +71,7 @@
       ]
     },
     "ios": {
-      "bundleIdentifier": "org.bsvblockchain.bsvbrowser",
+      "bundleIdentifier": "org.bsvassociation.browser",
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs camera access to scan QR codes.",
         "NSPhotoLibraryUsageDescription": "This app needs photo library access to let you select images.",
@@ -80,16 +80,11 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
-            "CFBundleURLName": "org.bsvblockchain.bsvbrowser.urlscheme",
             "CFBundleURLSchemes": ["https", "http"]
           }
         ],
         "LSApplicationQueriesSchemes": ["https", "http"],
         "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use."
-      },
-      "entitlements": {
-        "com.apple.developer.associated-domains": ["applinks:*"],
-        "com.apple.developer.web-browser": true
       }
     },
     "owner": "bsvb"

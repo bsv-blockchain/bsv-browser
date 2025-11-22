@@ -2,8 +2,6 @@ import React, { createContext, useCallback, useContext, useMemo, useRef, useStat
 import * as SecureStore from 'expo-secure-store'
 import * as LocalAuthentication from 'expo-local-authentication'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import SharedGroupPreferences from 'react-native-shared-group-preferences'
-import { Platform } from 'react-native'
 
 export interface LocalStorageContextType {
   /* non-secure */
@@ -43,8 +41,6 @@ export const LocalStorageContext = createContext<LocalStorageContextType>({
 
 export const useLocalStorage = () => useContext(LocalStorageContext)
 
-const APP_GROUP = 'group.org.bsvblockchain.metanet'
-
 export default function LocalStorageProvider({ children }: { children: React.ReactNode }) {
   /* --------------------------------- SECURE -------------------------------- */
 
@@ -79,12 +75,8 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   const setSnap = useCallback(async (snap: number[]): Promise<void> => {
     try {
-      const snapAsJSON = typeof snap === 'string' ? snap : JSON.stringify(snap);
-      if (Platform.OS === 'ios') {
-        await SharedGroupPreferences.setItem(SNAP_KEY, snapAsJSON, APP_GROUP)
-      } else {
-        await AsyncStorage.setItem(SNAP_KEY, snapAsJSON);
-      }
+      const snapAsJSON = typeof snap === 'string' ? snap : JSON.stringify(snap)
+      await AsyncStorage.setItem(SNAP_KEY, snapAsJSON)
     } catch (err) {
       console.warn('[setSnap]', err)
     }
@@ -92,12 +84,7 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   const getSnap = useCallback(async (): Promise<number[] | null> => {
     try {
-      let raw: string | null;
-      if (Platform.OS === 'ios') {
-        raw = await SharedGroupPreferences.getItem(SNAP_KEY, APP_GROUP)
-      } else {
-        raw = await AsyncStorage.getItem(SNAP_KEY)
-      }
+      const raw = await AsyncStorage.getItem(SNAP_KEY)
       return raw ? (JSON.parse(raw) as number[]) : null
     } catch (err) {
       console.warn('[getSnap]', err)
@@ -107,11 +94,7 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   const deleteSnap = useCallback(async (): Promise<void> => {
     try {
-      if (Platform.OS === 'ios') {
-        await SharedGroupPreferences.setItem(SNAP_KEY, null, APP_GROUP)
-      } else {
-        await AsyncStorage.removeItem(SNAP_KEY)
-      }
+      await AsyncStorage.removeItem(SNAP_KEY)
     } catch (err) {
       console.warn('[deleteSnap]', err)
     }

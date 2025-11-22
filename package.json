@@ -89,7 +89,6 @@
     "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
-    "react-native-shared-group-preferences": "^1.1.24",
     "react-native-shortcut-badge": "^0.1.0-beta.2",
     "react-native-tab-view": "^4.1.2",
     "react-native-vector-icons": "^10.2.0",
