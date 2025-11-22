@@ -15,7 +15,8 @@ import {
   StorageClient,
   TwilioPhoneInteractor,
   WABClient,
-  PermissionRequest
+  PermissionRequest,
+  SimpleWalletManager
 } from '@bsv/wallet-toolbox-mobile'
 import { KeyDeriver, PrivateKey, SHIPBroadcaster, LookupResolver } from '@bsv/sdk'
 import {
@@ -509,6 +510,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [selectedStorageUrl, setSelectedStorageUrl] = useState<string>(DEFAULT_STORAGE_URL)
   logWithTimestamp(F, 'Selected storage URL initialized')
 
+  // Check if we're in noWAB (self-custodial) mode
+  const isNoWABMode = selectedWabUrl === 'noWAB'
+
   // Flag that indicates configuration is complete. For returning users,
   // if a snapshot exists we auto-mark configComplete.
   const [configStatus, setConfigStatus] = useState<ConfigStatus>('initial')
@@ -573,9 +577,18 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         newManagers.settingsManager = wallet.settingsManager
 
         // Use user-selected storage provider
-        const client = new StorageClient(wallet, selectedStorageUrl)
-        await client.makeAvailable()
-        await storageManager.addWalletStorageProvider(client)
+        // Check if user selected local storage
+        if (selectedStorageUrl === 'local') {
+          console.log('[WalletContext] Using local SQLite storage')
+          // For local storage, we use the built-in storage manager without remote storage
+          // The WalletStorageManager already provides local storage capabilities
+          // We don't add a remote storage client in this case
+        } else {
+          console.log('[WalletContext] Using remote storage:', selectedStorageUrl)
+          const client = new StorageClient(wallet, selectedStorageUrl)
+          await client.makeAvailable()
+          await storageManager.addWalletStorageProvider(client)
+        }
 
         // Setup permissions with provided callbacks.
         const permissionsManager = new WalletPermissionsManager(wallet, adminOriginator, {

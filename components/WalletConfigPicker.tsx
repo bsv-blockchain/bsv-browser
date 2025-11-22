@@ -87,8 +87,35 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
         }
       }
 
-      // Add default BSV Association providers if no configs found
-      if (parsedConfigs.length === 0) {
+      // Add self-custodial option as the first choice (fully local, no backend)
+      const selfCustodialConfig: WalletConfig = {
+        name: 'Self-Custodial Wallet',
+        description: 'Complete independence - your keys, your coins. Uses a mnemonic seed phrase with no backend services required',
+        wabUrl: 'noWAB', // Special marker for no backend
+        storageUrl: 'local', // Special marker for local storage
+        network: selectedNetwork,
+        method: 'mnemonic',
+        icon: 'key-outline'
+      }
+
+      // Add local storage with WAB option as second choice
+      const localStorageConfig: WalletConfig = {
+        name: 'Local Storage + Cloud Auth',
+        description: 'Store wallet data locally but use cloud authentication for account recovery',
+        wabUrl: selectedNetwork === 'main'
+          ? 'https://wab-eu-1.bsvb.tech'
+          : 'https://wab-testnet-eu-1.bsvb.tech',
+        storageUrl: 'local', // Special marker for local storage
+        network: selectedNetwork,
+        method: 'Twilio',
+        icon: 'phone-portrait-outline'
+      }
+
+      // Insert self-custodial and local storage at the beginning
+      parsedConfigs.unshift(selfCustodialConfig, localStorageConfig)
+
+      // Add default BSV Association providers if no remote configs found
+      if (parsedConfigs.length === 2) { // Only self-custodial and local storage exist
         parsedConfigs.push({
           name: 'BSV Association (EU)',
           description: 'Official BSV Association wallet services hosted in Europe',
@@ -121,19 +148,41 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
       console.error('[WalletConfigPicker] Error loading configs:', err)
       setError(err.message || 'Failed to load wallet configurations')
 
-      // Fallback to default configs on error
-      setConfigs([{
-        name: 'BSV Association (EU)',
-        description: 'Official BSV Association wallet services hosted in Europe',
-        wabUrl: selectedNetwork === 'main'
-          ? 'https://wab-eu-1.bsvb.tech'
-          : 'https://wab-testnet-eu-1.bsvb.tech',
-        storageUrl: selectedNetwork === 'main'
-          ? 'https://store-eu-1.bsvb.tech'
-          : 'https://store-testnet-eu-1.bsvb.tech',
-        network: selectedNetwork,
-        method: 'Twilio'
-      }])
+      // Fallback to default configs on error (always include local options)
+      setConfigs([
+        {
+          name: 'Self-Custodial Wallet',
+          description: 'Complete independence - your keys, your coins. Uses a mnemonic seed phrase with no backend services required',
+          wabUrl: 'noWAB',
+          storageUrl: 'local',
+          network: selectedNetwork,
+          method: 'mnemonic',
+          icon: 'key-outline'
+        },
+        {
+          name: 'Local Storage + Cloud Auth',
+          description: 'Store wallet data locally but use cloud authentication for account recovery',
+          wabUrl: selectedNetwork === 'main'
+            ? 'https://wab-eu-1.bsvb.tech'
+            : 'https://wab-testnet-eu-1.bsvb.tech',
+          storageUrl: 'local',
+          network: selectedNetwork,
+          method: 'Twilio',
+          icon: 'phone-portrait-outline'
+        },
+        {
+          name: 'BSV Association (EU)',
+          description: 'Official BSV Association wallet services hosted in Europe',
+          wabUrl: selectedNetwork === 'main'
+            ? 'https://wab-eu-1.bsvb.tech'
+            : 'https://wab-testnet-eu-1.bsvb.tech',
+          storageUrl: selectedNetwork === 'main'
+            ? 'https://store-eu-1.bsvb.tech'
+            : 'https://store-testnet-eu-1.bsvb.tech',
+          network: selectedNetwork,
+          method: 'Twilio'
+        }
+      ])
     } finally {
       setLoading(false)
     }
@@ -141,6 +190,13 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
 
   const handleSelectConfig = async (config: WalletConfig) => {
     try {
+      // Skip WAB verification for noWAB (self-custodial) configs
+      if (config.wabUrl === 'noWAB') {
+        console.log('[WalletConfigPicker] Selected self-custodial wallet (noWAB)')
+        onSelectConfig(config as any)
+        return
+      }
+
       // Verify the WAB URL is accessible before selecting
       const response = await fetch(`${config.wabUrl}/info`, {
         method: 'GET',
@@ -202,41 +258,72 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
         {t('select_wallet_provider_description')}
       </Text>
 
-      {configs.map((config, index) => (
-        <TouchableOpacity
-          key={`${config.name}-${index}`}
-          style={{
-            padding: 15,
-            marginHorizontal: 15,
-            marginBottom: 10,
-            borderRadius: 10,
-            backgroundColor: colors.inputBackground,
-            borderWidth: 1,
-            borderColor: colors.inputBorder,
-            flexDirection: 'row',
-            alignItems: 'center'
-          }}
-          onPress={() => handleSelectConfig(config)}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.text, { fontWeight: 'bold', fontSize: 16, marginBottom: 5 }]}>
-              {config.name}
-            </Text>
-            {config.description && (
-              <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 8 }]}>
-                {config.description}
-              </Text>
+      {configs.map((config, index) => {
+        const isLocalStorage = config.storageUrl === 'local'
+        const isNoWAB = config.wabUrl === 'noWAB'
+        const isSelfCustodial = isNoWAB && isLocalStorage
+
+        return (
+          <TouchableOpacity
+            key={`${config.name}-${index}`}
+            style={{
+              padding: 15,
+              marginHorizontal: 15,
+              marginBottom: 10,
+              borderRadius: 10,
+              backgroundColor: isSelfCustodial ? colors.primary + '15' : (isLocalStorage ? colors.success + '15' : colors.inputBackground),
+              borderWidth: isSelfCustodial ? 2 : (isLocalStorage ? 2 : 1),
+              borderColor: isSelfCustodial ? colors.primary : (isLocalStorage ? colors.success : colors.inputBorder),
+              flexDirection: 'row',
+              alignItems: 'center'
+            }}
+            onPress={() => handleSelectConfig(config)}
+          >
+            {isSelfCustodial && (
+              <View style={{ marginRight: 12 }}>
+                <Ionicons name="key-outline" size={32} color={colors.primary} />
+              </View>
             )}
-            <Text style={[styles.textSecondary, { fontSize: 12 }]}>
-              WAB: {new URL(config.wabUrl).hostname}
-            </Text>
-            <Text style={[styles.textSecondary, { fontSize: 12 }]}>
-              Storage: {new URL(config.storageUrl).hostname}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={24} color={colors.secondary} />
-        </TouchableOpacity>
-      ))}
+            {isLocalStorage && !isSelfCustodial && (
+              <View style={{ marginRight: 12 }}>
+                <Ionicons name="phone-portrait-outline" size={32} color={colors.success} />
+              </View>
+            )}
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
+                <Text style={[styles.text, { fontWeight: 'bold', fontSize: 16 }]}>
+                  {config.name}
+                </Text>
+                {isSelfCustodial && (
+                  <View style={{
+                    marginLeft: 8,
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    backgroundColor: colors.primary,
+                    borderRadius: 4
+                  }}>
+                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: 'bold' }}>
+                      RECOMMENDED
+                    </Text>
+                  </View>
+                )}
+              </View>
+              {config.description && (
+                <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 8 }]}>
+                  {config.description}
+                </Text>
+              )}
+              <Text style={[styles.textSecondary, { fontSize: 12 }]}>
+                Auth: {isNoWAB ? 'Mnemonic seed phrase' : new URL(config.wabUrl).hostname}
+              </Text>
+              <Text style={[styles.textSecondary, { fontSize: 12 }]}>
+                Storage: {isLocalStorage ? 'On this device' : new URL(config.storageUrl).hostname}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color={isSelfCustodial ? colors.primary : (isLocalStorage ? colors.success : colors.secondary)} />
+          </TouchableOpacity>
+        )
+      })}
     </ScrollView>
   )
 }
