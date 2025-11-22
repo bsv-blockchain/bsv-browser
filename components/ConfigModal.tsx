@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useWallet, WABConfig } from '@/context/WalletContext'
+import WalletConfigPicker from './WalletConfigPicker'
 
 interface ConfigModalProps {
   visible: boolean
@@ -38,6 +39,9 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     selectedNetwork,
     setWalletBuilt
   } = useWallet()
+
+  // State for configuration mode
+  const [configMode, setConfigMode] = useState<'quick' | 'manual'>('quick')
 
   // State for configuration
   const [wabUrl, setWabUrl] = useState<string>(selectedWabUrl)
@@ -167,6 +171,18 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     onDismiss()
   }
 
+  // Handle config selection from picker
+  const handleQuickPickConfig = (config: any) => {
+    setWabUrl(config.wabUrl)
+    setStorageUrl(config.storageUrl)
+    setMethod(config.method)
+    setNetwork(config.network)
+    setWabInfo(config.wabInfo)
+
+    // Automatically save the configuration
+    handleSaveConfig()
+  }
+
   // Render a selectable chip
   const renderChip = (label: string, labelSelected: string, onPress: Function) => (
     <TouchableOpacity
@@ -233,9 +249,74 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
         </View>
 
         <ScrollView style={{ flex: 1 }}>
-          <View style={{ padding: 20 }}>
-            {/* WAB Configuration */}
-            <View style={styles.card}>
+          {/* Mode Toggle */}
+          <View style={{ flexDirection: 'row', padding: 15, justifyContent: 'center', gap: 10 }}>
+            <TouchableOpacity
+              style={[
+                styles.row,
+                {
+                  padding: 12,
+                  borderRadius: 20,
+                  flex: 1,
+                  justifyContent: 'center',
+                  backgroundColor: configMode === 'quick' ? colors.secondary : colors.inputBackground,
+                  borderWidth: 1,
+                  borderColor: configMode === 'quick' ? colors.secondary : colors.inputBorder
+                }
+              ]}
+              onPress={() => setConfigMode('quick')}
+            >
+              <Text
+                style={[
+                  styles.text,
+                  {
+                    textAlign: 'center',
+                    color: configMode === 'quick' ? (isDark ? colors.background : colors.buttonText) : colors.textPrimary
+                  }
+                ]}
+              >
+                {t('quick_pick')}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.row,
+                {
+                  padding: 12,
+                  borderRadius: 20,
+                  flex: 1,
+                  justifyContent: 'center',
+                  backgroundColor: configMode === 'manual' ? colors.secondary : colors.inputBackground,
+                  borderWidth: 1,
+                  borderColor: configMode === 'manual' ? colors.secondary : colors.inputBorder
+                }
+              ]}
+              onPress={() => setConfigMode('manual')}
+            >
+              <Text
+                style={[
+                  styles.text,
+                  {
+                    textAlign: 'center',
+                    color: configMode === 'manual' ? (isDark ? colors.background : colors.buttonText) : colors.textPrimary
+                  }
+                ]}
+              >
+                {t('manual_config')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {configMode === 'quick' ? (
+            <WalletConfigPicker
+              onSelectConfig={handleQuickPickConfig}
+              selectedNetwork={network}
+            />
+          ) : (
+            <View style={{ padding: 20 }}>
+              {/* WAB Configuration */}
+              <View style={styles.card}>
               <Text style={[styles.text, { fontWeight: 'bold', fontSize: 16, marginBottom: 10 }]}>
                 {t('wallet_auth_backend')}
               </Text>
@@ -308,7 +389,8 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
                 />
               </View>
             </View>
-          </View>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
