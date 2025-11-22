@@ -9,7 +9,6 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { useWallet } from '@/context/WalletContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { Utils } from '@bsv/sdk'
-import { remoteConfig, analytics } from '@/utils/firebase'
 import { useTranslation } from 'react-i18next'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 
@@ -19,31 +18,14 @@ export default function LoginScreen() {
   const { managers, selectedWabUrl, selectedStorageUrl, selectedMethod, selectedNetwork, finalizeConfig } = useWallet()
   const { getSnap, setItem, getItem } = useLocalStorage()
 
-  const [startButtonText, setStartButtonText] = useState('Get Started')
+  const [startButtonText] = useState('Get Started')
   const { t } = useTranslation()
   const { showWeb3Benefits, setWeb2Mode } = useBrowserMode()
   const [loading, setLoading] = React.useState(false)
   const [initializing, setInitializing] = useState(true)
 
-  useEffect(() => {
-    // Get the button text from Remote Config
-    const value = remoteConfig().getValue('start_button_text')
-
-    // Use the remote value if it's not the static default
-    if (value.getSource() !== 'static') {
-      setStartButtonText(value.asString())
-    }
-  }, [])
-
   // Navigate to phone auth screen
   const handleGetStarted = useCallback(async () => {
-    try {
-      await analytics().logEvent('get_started_tapped', {
-        screen: 'onboarding'
-      })
-    } catch (error) {
-      console.error('Failed to log event', error)
-    }
     try {
       setLoading(true)
 

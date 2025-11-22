@@ -33,17 +33,8 @@ export function useDeepLinking() {
     try {
       if (url.startsWith('http://') || url.startsWith('https://')) {
         await handleManifestAwareDeepLink(url)
-      } else if (url.startsWith('metanet://')) {
-        // Handle custom scheme URLs
-        const route = url.replace('metanet://', '')
-
-        const validRoutes = ['browser', 'settings', 'identity', 'security', 'trust']
-        if (validRoutes.includes(route)) {
-          router.push(`/${route}` as any)
-        } else {
-          router.push('/browser')
-        }
       } else {
+        // Default to browser for any other scheme
         router.push('/browser')
       }
     } catch (error) {

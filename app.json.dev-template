@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Metanet",
-    "slug": "metanet-mobile",
-    "version": "0.3.2",
+    "name": "BSV Browser",
+    "slug": "bsv-browser",
+    "version": "0.3.3",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "metanet",
+    "scheme": "https",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "web": {
@@ -14,7 +14,6 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "./plugins/with-fcm-manifest-fixes.js",
       "expo-router",
       [
         "expo-splash-screen",
@@ -26,16 +25,6 @@
         }
       ],
       "expo-secure-store",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/notification-icon.png",
-          "color": "#ffffff",
-          "defaultChannel": "default"
-        }
-      ],
-      "@react-native-firebase/app",
-      "./plugins/with-fcm-headless.js",
       [
         "expo-build-properties",
         {
@@ -53,15 +42,11 @@
       "router": {},
       "eas": {
         "projectId": "f18a56d2-60e6-4170-95ca-839868f329fa"
-      },
-      "useFirebase": true
+      }
     },
     "android": {
-      "package": "org.bsvblockchain.metanet",
+      "package": "org.bsvblockchain.bsvbrowser",
       "permissions": [
-        "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.VIBRATE",
-        "android.permission.WAKE_LOCK",
         "android.permission.INTERNET",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -69,7 +54,6 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
-      "googleServicesFile": "google-services.json",
       "intentFilters": [
         {
           "action": "VIEW",
@@ -83,21 +67,11 @@
             }
           ],
           "category": ["BROWSABLE", "DEFAULT"]
-        },
-        {
-          "action": "VIEW",
-          "data": [
-            {
-              "scheme": "metanet"
-            }
-          ],
-          "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
     },
     "ios": {
-      "bundleIdentifier": "org.bsvblockchain.metanet",
-      "googleServicesFile": "GoogleService-Info.plist",
+      "bundleIdentifier": "org.bsvblockchain.bsvbrowser",
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs camera access to scan QR codes.",
         "NSPhotoLibraryUsageDescription": "This app needs photo library access to let you select images.",
@@ -106,25 +80,17 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
-            "CFBundleURLName": "org.bsvblockchain.metanet.urlscheme",
-            "CFBundleURLSchemes": ["metanet"]
+            "CFBundleURLName": "org.bsvblockchain.bsvbrowser.urlscheme",
+            "CFBundleURLSchemes": ["https", "http"]
           }
         ],
         "LSApplicationQueriesSchemes": ["https", "http"],
         "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use."
       },
       "entitlements": {
-        "aps-environment": "development",
         "com.apple.developer.associated-domains": ["applinks:*"],
         "com.apple.developer.web-browser": true
       }
-    },
-    "notification": {
-      "icon": "./assets/images/notification-icon.png",
-      "color": "#000000",
-      "iosDisplayInForeground": true,
-      "androidMode": "default",
-      "androidCollapsedTitle": "#{unread_notifications} new interactions"
     },
     "owner": "bsvb"
   }

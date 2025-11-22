@@ -60,8 +60,6 @@ import Shortcuts from '@rn-bridge/react-native-shortcuts'
 /*                                   HELPERS                                   */
 /* -------------------------------------------------------------------------- */
 
-// import { usePushNotifications } from '@/hooks/usePushNotifications'
-
 import { getPendingUrl, clearPendingUrl } from '@/hooks/useDeepLinking'
 import { useWebAppManifest } from '@/hooks/useWebAppManifest'
 import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
@@ -299,16 +297,6 @@ function Browser() {
     [homepageSettings, setItem]
   )
 
-  // Initialize notification system and set up bridge
-  useEffect(() => {
-    console.log('🚀 Initializing WebView-Native notification bridge')
-
-    // Initialize Firebase notifications
-    if (!managers.permissionsManager) {
-      console.error('No wallet manager found')
-      return
-    }
-  }, [managers.permissionsManager, adminOriginator])
 
   const addBookmark = useCallback((title: string, url: string) => {
     // Only add bookmarks for valid URLs that aren't the new tab page
@@ -342,7 +330,7 @@ function Browser() {
   const [showInfoDrawer, setShowInfoDrawer] = useState(false)
   const [showShortcutModal, setShowShortcutModal] = useState(false)
   const [infoDrawerRoute, setInfoDrawerRoute] = useState<
-    'root' | 'identity' | 'settings' | 'security' | 'trust' | 'notifications' | 'permissions'
+    'root' | 'identity' | 'settings' | 'security' | 'trust' | 'permissions'
   >('root')
 
   const [showTabsView, setShowTabsView] = useState(false)
@@ -367,10 +355,6 @@ function Browser() {
       setAddressFocused(false)
     }
   }, [tabStore.isInitialized, activeTab])
-
-
-  /* ------------------------- push notifications ----------------------------- */
-  // const { requestNotificationPermission, createPushSubscription, unsubscribe, getPermission, getSubscription } = usePushNotifications()
 
   const [permissionModalVisible, setPermissionModalVisible] = useState(false)
 
@@ -764,25 +748,6 @@ function Browser() {
         }
       : {}
 
-  /* -------------------------------------------------------------------------- */
-  /*                           NOTIFICATION HANDLERS                            */
-  /* -------------------------------------------------------------------------- */
-
-  const handleNotificationPermissionRequest = async (origin: string): Promise<'granted' | 'denied' | 'default'> => {
-    return new Promise(resolve => {
-      console.log('[Metanet] Requesting notification permission for', origin)
-      // Set generic PermissionModal context
-      const domain = domainForUrl(origin)
-      setPendingDomain(domain)
-      setPendingPermission('NOTIFICATIONS' as PermissionType)
-      // Use the generic pendingCallback to resolve this flow
-      setPendingCallback(() => (granted: boolean) => {
-        resolve(granted ? 'granted' : 'denied')
-      })
-      setPermissionModalVisible(true)
-    })
-  }
-
   // Unified permission decision handler for PermissionModal
   const onDecision = useCallback(
     async (granted: boolean) => {
@@ -944,10 +909,9 @@ function Browser() {
         setPendingCallback: (cb: (granted: boolean) => void) => setPendingCallback(() => cb),
         setPermissionModalVisible: (v: boolean) => setPermissionModalVisible(v),
         activeCameraStreams,
-        setIsFullscreen: (v: boolean) => setIsFullscreen(v),
-        handleNotificationPermissionRequest
+        setIsFullscreen: (v: boolean) => setIsFullscreen(v)
       }),
-    [domainForUrl, getPermissionState, setPermissionModalVisible, handleNotificationPermissionRequest]
+    [domainForUrl, getPermissionState, setPermissionModalVisible]
   )
 
   const handleMessage = useCallback(
@@ -2379,14 +2343,12 @@ const SubDrawerView = React.memo(
     route,
     onBack,
     origin,
-    onPermissionChange,
-    onOpenNotificationSettings
+    onPermissionChange
   }: {
-    route: 'identity' | 'settings' | 'security' | 'trust' | 'notifications' | 'permissions'
+    route: 'identity' | 'settings' | 'security' | 'trust' | 'permissions'
     onBack: () => void
     origin?: string
     onPermissionChange?: (permission: PermissionType, state: PermissionState) => void
-    onOpenNotificationSettings?: () => void
   }) => {
     const { colors } = useTheme()
     const { t } = useTranslation()
@@ -2414,28 +2376,6 @@ const SubDrawerView = React.memo(
         <View style={styles.subDrawerContent}>
           {route === 'permissions' ? (
             <PermissionsScreen origin={origin || ''} onPermissionChange={onPermissionChange} />
-          ) : route === 'notifications' ? (
-            <View>
-              <Text style={{ color: colors.textSecondary, fontSize: 16, marginBottom: 20 }}>
-                Manage notifications from websites and apps.
-              </Text>
-              <TouchableOpacity
-                style={[styles.drawerItem, { backgroundColor: colors.inputBackground, borderRadius: 8 }]}
-                onPress={onOpenNotificationSettings}
-              >
-                <Ionicons
-                  name="notifications-outline"
-                  size={22}
-                  color={colors.textSecondary}
-                  style={styles.drawerIcon}
-                />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.drawerLabel, { color: colors.textPrimary }]}>Notification Settings</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 14 }}>Manage website permissions</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
           ) : // Only show web3 screens when not in web2 mode and when route matches available screens
           !isWeb2Mode && (route === 'identity' || route === 'settings' || route === 'trust') ? (
             screens[route as 'identity' | 'settings' | 'trust']

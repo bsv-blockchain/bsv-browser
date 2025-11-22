@@ -1,7 +1,7 @@
 import 'react-native-quick-crypto'
 import { Buffer } from 'buffer'
 global.Buffer = Buffer
-import React, { useEffect, useState } from 'react'
+import React from 'react'
 import { Stack } from 'expo-router'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'
 import packageJson from '../package.json'
@@ -17,8 +17,6 @@ import CertificateAccessModal from '@/components/CertificateAccessModal'
 import SpendingAuthorizationModal from '@/components/SpendingAuthorizationModal'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
 import DefaultBrowserPrompt from '@/components/DefaultBrowserPrompt'
-import * as Notifications from 'expo-notifications'
-import { initializeFirebase } from '@/utils/firebase'
 import { LanguageProvider } from '@/utils/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/Web3BenefitsModalHandler'
@@ -46,17 +44,6 @@ const nativeHandlers: NativeHandlers = {
   }
 }
 
-// Configure global notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true
-  })
-})
-
 // Deep link handler component
 function DeepLinkHandler() {
   useDeepLinking()
@@ -64,19 +51,6 @@ function DeepLinkHandler() {
 }
 
 export default function RootLayout() {
-  const [configLoaded, setConfigLoaded] = useState(false)
-  useEffect(() => {
-    const initialize = async () => {
-      await initializeFirebase()
-      setConfigLoaded(true)
-    }
-    initialize()
-  }, [])
-
-  if (!configLoaded) {
-    return null
-  }
-
   return (
     <LanguageProvider>
       <LocalStorageProvider>
