@@ -356,6 +356,16 @@ function Browser() {
     }
   }, [tabStore.isInitialized, activeTab])
 
+  // Auto-focus address bar on new tab
+  useEffect(() => {
+    if (activeTab && activeTab.url === kNEW_TAB_URL && !addressFocused) {
+      // Small delay to ensure rendering is complete
+      setTimeout(() => {
+        addressInputRef.current?.focus()
+      }, 100)
+    }
+  }, [activeTab?.id, activeTab?.url, addressFocused])
+
   const [permissionModalVisible, setPermissionModalVisible] = useState(false)
 
   // Pending permission request state (for generic PermissionModal)
@@ -971,7 +981,19 @@ function Browser() {
 
       // Handling of wallet before api call.
       if (msg.call && (!wallet || isWeb2Mode)) {
-        // console.log('Wallet not ready or in web2 mode, ignoring call:', msg.call);
+        // Show Web3 setup prompt if a website tries to use Web3 features
+        if (!wallet && !isWeb2Mode) {
+          showWeb3Benefits(
+            // onContinue - stay in Web2 mode
+            () => {
+              console.log('User chose to continue without Web3')
+            },
+            // onGoToLogin - set up Web3 identity
+            () => {
+              router.push('/')
+            }
+          )
+        }
         return
       }
 

@@ -101,17 +101,18 @@ export default function LoginScreen() {
     }
   }
 
-  // Initial app load
+  // Initial app load - go directly to browser
   useEffect(() => {
     ; (async () => {
       try {
         const snap = await getSnap()
-        if (snap) {
-          await managers?.walletManager?.loadSnapshot(snap)
-          router.dismissAll()
-          router.replace('/browser')
+        if (snap && managers?.walletManager) {
+          // Silently load wallet if available
+          await managers.walletManager.loadSnapshot(snap)
         }
+        // Always go to browser, regardless of wallet state
         router.dismissAll()
+        router.replace('/browser')
       } finally {
         setInitializing(false)
       }
