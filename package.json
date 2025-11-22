@@ -3,7 +3,7 @@
   "description": "BSV Browser - Enabling identity, micropayments, and use of BSV websites on mobile devices",
   "author": "BSV Association",
   "main": "index.js",
-  "version": "0.3.3",
+  "version": "1.0.0",
   "license": "Open BSV",
   "scripts": {
     "start": "expo start --dev-client",
@@ -27,8 +27,8 @@
   },
   "dependencies": {
     "@bsv/message-box-client": "^1.3.0",
-    "@bsv/sdk": "^1.9.9",
-    "@bsv/wallet-toolbox-mobile": "^1.7.13",
+    "@bsv/sdk": "^1.7.6",
+    "@bsv/wallet-toolbox-mobile": "^1.6.23",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",
     "@expo/vector-icons": "^14.1.0",
@@ -103,7 +103,6 @@
     "@expo/config-plugins": "~10.1.1",
     "@expo/prebuild-config": "~9.0.0",
     "@types/react": "~19.0.10",
-    "eas-cli": "^16.13.3",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~9.2.0",
     "typescript": "~5.8.3"
