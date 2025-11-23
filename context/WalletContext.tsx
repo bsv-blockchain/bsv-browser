@@ -158,7 +158,7 @@ type SpendingRequest = {
 
 export interface WABConfig {
   wabUrl: string
-  wabInfo: any
+  wabInfo?: any // Optional for noWAB (self-custodial) mode
   method: string
   network: 'main' | 'test'
   storageUrl: string
@@ -530,7 +530,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         return false
       }
 
-      if (!wabInfo || !method) {
+      // For noWAB (self-custodial) mode, wabInfo is not required
+      const isNoWAB = wabUrl === 'noWAB'
+      if (!isNoWAB && !wabInfo) {
+        console.error('WAB Info is required for non-self-custodial wallets')
+        return false
+      }
+
+      if (!method) {
         console.error('Auth Method selection is required')
         return false
       }

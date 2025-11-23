@@ -24,10 +24,17 @@ export default function LoginScreen() {
   const [loading, setLoading] = React.useState(false)
   const [initializing, setInitializing] = useState(true)
 
-  // Navigate to phone auth screen
+  // Navigate to appropriate auth screen based on method
   const handleGetStarted = useCallback(async () => {
     try {
       setLoading(true)
+
+      // Check if this is a self-custodial (noWAB) setup
+      if (selectedWabUrl === 'noWAB' || selectedMethod === 'mnemonic') {
+        console.log('[Index] Self-custodial wallet selected, routing to mnemonic screen')
+        router.push('/auth/mnemonic')
+        return
+      }
 
       // Fetch WAB info
       const res = await fetch(`${selectedWabUrl}/info`)
@@ -85,6 +92,14 @@ export default function LoginScreen() {
     try {
       // The ConfigModal has already called finalizeConfig() with the new configuration
       // No need to load from storage - the wallet context already has the updated values
+
+      // Check if this is a self-custodial (noWAB) setup
+      if (selectedWabUrl === 'noWAB' || selectedMethod === 'mnemonic') {
+        console.log('[Index] Self-custodial wallet configured, routing to mnemonic screen')
+        router.push('/auth/mnemonic')
+        return
+      }
+
       const snap = await getSnap()
       if (!snap) {
         router.push('/auth/phone')

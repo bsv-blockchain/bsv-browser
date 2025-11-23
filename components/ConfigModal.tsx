@@ -58,6 +58,10 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
 
   // Validation
   const isUrlValid = (url: string) => {
+    // Allow special markers for noWAB and local storage
+    if (url === 'noWAB' || url === 'local') {
+      return true
+    }
     try {
       new URL(url)
       return true
@@ -177,7 +181,7 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     setStorageUrl(config.storageUrl)
     setMethod(config.method)
     setNetwork(config.network)
-    setWabInfo(config.wabInfo)
+    setWabInfo(config.wabInfo || null) // Set to null for noWAB configs
 
     // Automatically save the configuration
     handleSaveConfig()

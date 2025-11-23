@@ -50,10 +50,10 @@ export function generateMnemonicWallet(config: MnemonicWalletConfig = {}): Mnemo
   // Derive primary key at path m/0'/0' (hardened derivation)
   // This is the key used as the wallet's primary key
   const derivedHdKey = hdKey.derive("m/0'/0'")
-  const primaryKey = Array.from(derivedHdKey.privKey.toArray())
+  const primaryKey = derivedHdKey.privKey.toArray()
 
   // Get identity key (public key) for the derived key
-  const identityKey = derivedHdKey.privKey.toPubKey().toString()
+  const identityKey = derivedHdKey.privKey.toPublicKey().toString()
 
   return {
     mnemonic: mnemonicString,
