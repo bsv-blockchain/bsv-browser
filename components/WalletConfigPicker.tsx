@@ -77,9 +77,12 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
               icon: result.icon || result.iconUrl
             }
 
-            // Only add configs that have required URLs
-            if (config.wabUrl && config.storageUrl) {
+            // Only add configs that have valid, non-empty URLs
+            if (config.wabUrl && config.wabUrl.trim() !== '' &&
+                config.storageUrl && config.storageUrl.trim() !== '') {
               parsedConfigs.push(config)
+            } else {
+              console.log('[WalletConfigPicker] Skipping config with empty URLs:', config.name)
             }
           } catch (err) {
             console.error('[WalletConfigPicker] Error parsing config:', err)
@@ -314,10 +317,10 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
                 </Text>
               )}
               <Text style={[styles.textSecondary, { fontSize: 12 }]}>
-                Auth: {isNoWAB ? 'Mnemonic seed phrase' : new URL(config.wabUrl).hostname}
+                Auth: {isNoWAB ? 'Mnemonic seed phrase' : (config.wabUrl ? new URL(config.wabUrl).hostname : 'Not configured')}
               </Text>
               <Text style={[styles.textSecondary, { fontSize: 12 }]}>
-                Storage: {isLocalStorage ? 'On this device' : new URL(config.storageUrl).hostname}
+                Storage: {isLocalStorage ? 'On this device' : (config.storageUrl ? new URL(config.storageUrl).hostname : 'Not configured')}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={24} color={isSelfCustodial ? colors.primary : (isLocalStorage ? colors.success : colors.secondary)} />
