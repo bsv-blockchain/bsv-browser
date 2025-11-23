@@ -22,6 +22,7 @@ import {
   formatMnemonicForDisplay
 } from '@/utils/mnemonicWallet'
 import * as Clipboard from 'expo-clipboard'
+import { useLocalStorage } from '@/context/LocalStorageProvider'
 
 type MnemonicMode = 'choose' | 'generate' | 'import'
 
@@ -29,6 +30,7 @@ export default function MnemonicScreen() {
   const { colors, isDark } = useTheme()
   const styles = useThemeStyles()
   const { managers, selectedNetwork } = useWallet()
+  const { setMnemonic: storeMnemonic } = useLocalStorage();
 
   const [mode, setMode] = useState<MnemonicMode>('choose')
   const [mnemonic, setMnemonic] = useState<string>('')
@@ -87,38 +89,25 @@ export default function MnemonicScreen() {
   const initializeWallet = async (mnemonicPhrase: string) => {
     setLoading(true)
     try {
-      // Recover wallet from mnemonic
+      // Recover wallet keys from mnemonic - this gives us the primary key
       const wallet = recoverMnemonicWallet(mnemonicPhrase)
 
-      console.log('[Mnemonic] Wallet generated:', {
+      console.log('[Mnemonic] Wallet keys generated:', {
         identityKey: wallet.identityKey,
+        primaryKey: wallet.primaryKey,
         network: selectedNetwork
       })
 
-      // TODO: Initialize SimpleWalletManager with the primary key
-      // For now, we'll store the mnemonic securely and navigate to browser
-      // This will need to be integrated with WalletContext to properly initialize
-      // the SimpleWalletManager
+      // Store the mnemonic securely for later recovery
+      storeMnemonic(mnemonicPhrase);
 
-      // Store encrypted mnemonic in secure storage
-      // await SecureStore.setItemAsync('encrypted_mnemonic', encryptMnemonic(mnemonicPhrase))
+      console.log('[Mnemonic] NoWAB wallet setup complete, navigating to browser')
 
-      Alert.alert(
-        'Success',
-        'Your self-custodial wallet has been created! Integration with wallet manager is pending.',
-        [
-          {
-            text: 'Continue',
-            onPress: () => {
-              router.dismissAll()
-              router.replace('/browser')
-            }
-          }
-        ]
-      )
+      router.dismissAll()
+      router.replace('/browser')
     } catch (error: any) {
-      console.error('[Mnemonic] Error initializing wallet:', error)
-      Alert.alert('Error', `Failed to initialize wallet: ${error.message}`)
+      console.error('[Mnemonic] Error setting up wallet:', error)
+      Alert.alert('Error', `Failed to set up wallet: ${error.message}`)
     } finally {
       setLoading(false)
     }

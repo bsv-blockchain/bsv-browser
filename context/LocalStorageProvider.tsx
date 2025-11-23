@@ -13,6 +13,9 @@ export interface LocalStorageContextType {
   setPassword: (password: string) => Promise<void>
   getPassword: () => Promise<string | null>
   deletePassword: () => Promise<void>
+  setMnemonic: (mnemonic: string) => Promise<void>
+  getMnemonic: () => Promise<string | null>
+  deleteMnemonic: () => Promise<void>
 
   /* general */
   setItem: (item: string, value: string) => Promise<void>
@@ -22,6 +25,7 @@ export interface LocalStorageContextType {
 
 const SNAP_KEY = 'snap'
 const PASSWORD_KEY = 'password'
+const MNEMONIC_KEY = 'mnemonic'
 
 export const LocalStorageContext = createContext<LocalStorageContextType>({
   /* non-secure */
@@ -33,6 +37,9 @@ export const LocalStorageContext = createContext<LocalStorageContextType>({
   setPassword: async () => { },
   getPassword: async () => null,
   deletePassword: async () => { },
+  setMnemonic: async () => { },
+  getMnemonic: async () => null,
+  deleteMnemonic: async () => { },
 
   getItem: AsyncStorage.getItem,
   setItem: AsyncStorage.setItem,
@@ -102,6 +109,38 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   /* -------------------------------- secure --------------------------------- */
 
+  const setMnemonic = useCallback(async (mnemonic: string): Promise<void> => {
+    try {
+      // we don’t force auth for setting—iOS/Android will handle any keychain UI
+      await SecureStore.setItemAsync(MNEMONIC_KEY, mnemonic, {
+        keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
+      })
+    } catch (err) {
+      console.warn('[setMnemonic]', err)
+    }
+  }, [])
+
+  const getMnemonic = useCallback(async (): Promise<string | null> => {
+    try {
+      if (!(await ensureAuth())) return null
+      return await SecureStore.getItemAsync(MNEMONIC_KEY)
+    } catch (err) {
+      console.warn('[getMnemonic]', err)
+      return null
+    }
+  }, [ensureAuth])
+
+  const deleteMnemonic = useCallback(async (): Promise<void> => {
+    try {
+      if (!(await ensureAuth())) return
+      await SecureStore.deleteItemAsync(MNEMONIC_KEY)
+    } catch (err) {
+      console.warn('[deleteMnemonic]', err)
+    }
+  }, [ensureAuth])
+
+  /* -------------------------------- secure --------------------------------- */
+
   const setPassword = useCallback(async (password: string): Promise<void> => {
     try {
       // we don’t force auth for setting—iOS/Android will handle any keychain UI
@@ -145,13 +184,16 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
       setPassword,
       getPassword,
       deletePassword,
+      setMnemonic,
+      getMnemonic,
+      deleteMnemonic,
 
       /* general */
       getItem: AsyncStorage.getItem,
       setItem: AsyncStorage.setItem,
       deleteItem: AsyncStorage.removeItem
     }),
-    [setSnap, getSnap, deleteSnap, setPassword, getPassword, deletePassword]
+    [setSnap, getSnap, deleteSnap, setPassword, getPassword, deletePassword, setMnemonic, getMnemonic, deleteMnemonic]
   )
 
   return <LocalStorageContext.Provider value={value}>{children}</LocalStorageContext.Provider>

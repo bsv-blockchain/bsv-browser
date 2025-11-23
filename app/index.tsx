@@ -143,6 +143,7 @@ export default function LoginScreen() {
         </View>
         {!initializing && (
           <>
+
             <Text style={[styles.welcomeTitle, { color: colors.textPrimary }]}>{t('metanet')}</Text>
             <Text style={[styles.welcomeText, { color: colors.textSecondary }]}>
               {t('browser_with_identity_payments')}

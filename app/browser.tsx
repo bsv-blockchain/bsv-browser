@@ -983,16 +983,17 @@ function Browser() {
       if (msg.call && (!wallet || isWeb2Mode)) {
         // Show Web3 setup prompt if a website tries to use Web3 features
         if (!wallet && !isWeb2Mode) {
-          showWeb3Benefits(
-            // onContinue - stay in Web2 mode
-            () => {
-              console.log('User chose to continue without Web3')
-            },
-            // onGoToLogin - set up Web3 identity
-            () => {
-              router.push('/')
-            }
-          )
+          router.push('/')
+          // showWeb3Benefits(
+          //   // onContinue - stay in Web2 mode
+          //   () => {
+          //     console.log('User chose to continue without Web3')
+          //   },
+          //   // onGoToLogin - set up Web3 identity
+          //   () => {
+          //     router.push('/')
+          //   }
+          // )
         }
         return
       }

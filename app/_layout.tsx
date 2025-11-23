@@ -20,7 +20,9 @@ import DefaultBrowserPrompt from '@/components/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/utils/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/Web3BenefitsModalHandler'
+import { useWallet } from '@/context/WalletContext'
 import '@/utils/translations'
+import { Text } from 'react-native'
 
 const nativeHandlers: NativeHandlers = {
   isFocused: async () => false,
@@ -50,6 +52,22 @@ function DeepLinkHandler() {
   return null
 }
 
+const ShowThings = () => {
+  const [toggle, setToggle] = React.useState(false);
+  const v = useWallet()
+  if (!toggle) return <>
+  <Text onPress={() => setToggle(true)} style={{ top: 100, backgroundColor: 'yellow', position: 'fixed', left: 100, padding: 10, zIndex: 1000 }}>SHOW</Text>
+  </>;
+  return (
+  <>
+    <Text onPress={() => setToggle(false)} style={{ position: 'fixed', top: 100, left: 200, backgroundColor: 'red', padding: 10, zIndex: 1000 }}>HIDE</Text>
+    <Text className="text-xs text-gray-500">
+      {JSON.stringify({ wab: v.selectedWabUrl, storage: v.selectedStorageUrl, configStatus: v.configStatus }, null, 2)}
+    </Text>
+  </>
+  )
+}
+
 export default function RootLayout() {
   return (
     <LanguageProvider>
@@ -59,6 +77,7 @@ export default function RootLayout() {
             <WalletContextProvider>
               <BrowserModeProvider>
                 <ThemeProvider>
+                  <ShowThings />
                   <DeepLinkHandler />
                   <Web3BenefitsModalHandler />
                   {/* <TranslationTester /> */}

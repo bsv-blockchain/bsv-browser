@@ -35,13 +35,15 @@ import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { getApps } from '@/utils/getApps'
 import { router } from 'expo-router'
 import { logWithTimestamp } from '@/utils/logging'
+import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
+
 
 // -----
 // Context Types
 // -----
 
 interface ManagerState {
-  walletManager?: WalletAuthenticationManager
+  walletManager?: WalletAuthenticationManager | SimpleWalletManager
   permissionsManager?: WalletPermissionsManager
   settingsManager?: WalletSettingsManager
 }
@@ -175,7 +177,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [recentApps, setRecentApps] = useState<any[]>([])
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
 
-  const { getSnap, deleteSnap, getItem, setItem } = useLocalStorage()
+  const { getSnap, deleteSnap, getItem, setItem, setMnemonic, getMnemonic, deleteMnemonic } = useLocalStorage()
   const { setWeb2Mode } = useBrowserMode()
 
   const {
@@ -770,6 +772,58 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     adminOriginator
   ])
 
+  // ---- Initialize noWAB (self-custodial) wallet if primary key exists
+  useEffect(() => {
+    ; (async () => {
+      // Skip if wallet already built or not in noWAB mode
+      if (walletBuilt || selectedWabUrl !== 'noWAB') {
+        return
+      }
+
+      logWithTimestamp(F, 'Checking for noWAB primary key')
+
+      try {
+        const mnemonic = await getMnemonic()
+        if (!mnemonic) {
+          logWithTimestamp(F, 'No noWAB mnemonic found')
+          return
+        }
+
+        const { rootKey, primaryKey } = recoverMnemonicWallet(mnemonic)
+        logWithTimestamp(F, 'NoWAB primary key found, building wallet')
+
+        // For noWAB, we don't need a PrivilegedKeyManager from WAB
+        // We can create a simple one that always returns the primary key
+        const privilegedKeyManager = new PrivilegedKeyManager(async () => rootKey)
+
+        // Build the wallet using the existing buildWallet function
+        const permissionsManager = await buildWallet(primaryKey, privilegedKeyManager)
+
+        if (permissionsManager) {
+          logWithTimestamp(F, 'NoWAB wallet built successfully')
+
+          // Mark as authenticated by creating a minimal walletManager interface
+          const snap = await getSnap()
+          const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
+
+          setManagers(m => ({
+            ...m,
+            walletManager: swm
+          }))
+          setWalletBuilt(true)
+
+          // Save mnemonic for next time
+          await setMnemonic(mnemonic);
+
+          logWithTimestamp(F, 'NoWAB wallet initialization completed')
+        }
+      } catch (error: any) {
+        console.error('[WalletContext] Error initializing noWAB wallet:', error)
+        logWithTimestamp(F, 'Error initializing noWAB wallet', error.message)
+      }
+    })()
+  }, [walletBuilt, selectedWabUrl, buildWallet])
+
   // When Settings manager becomes available, populate the user's settings
   useEffect(() => {
     logWithTimestamp(F, 'Checking settings manager availability')
@@ -801,6 +855,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setConfigStatus('initial')
       setSnapshotLoaded(false)
       setWalletBuilt(false)
+      deleteMnemonic()
       logWithTimestamp(F, 'Configuration and state reset')
 
       // Clear recent apps (web3-specific data)
