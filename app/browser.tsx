@@ -60,7 +60,7 @@ import Shortcuts from '@rn-bridge/react-native-shortcuts'
 /*                                   HELPERS                                   */
 /* -------------------------------------------------------------------------- */
 
-import { getPendingUrl, clearPendingUrl } from '@/hooks/useDeepLinking'
+// Removed: getPendingUrl, clearPendingUrl - no longer needed with direct navigation
 import { useWebAppManifest } from '@/hooks/useWebAppManifest'
 import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
 import PermissionModal from '@/components/PermissionModal'
@@ -407,25 +407,8 @@ function Browser() {
   }, [])
 
   // Deep linking useEffect
-  useEffect(() => {
-    const checkPendingUrl = async () => {
-      try {
-        const pendingUrl = await getPendingUrl()
-        if (pendingUrl) {
-          console.log('Loading pending URL from deep link:', pendingUrl)
-          updateActiveTab({ url: pendingUrl })
-          setAddressText(pendingUrl)
-          await clearPendingUrl()
-        }
-      } catch (error) {
-        console.error('Error checking pending URL:', error)
-      }
-    }
-
-    checkPendingUrl()
-    const timer = setTimeout(checkPendingUrl, 500)
-    return () => clearTimeout(timer)
-  }, [])
+  // REMOVED: Pending URL check - deep links now navigate directly to browser
+  // The useDeepLinking hook handles URL opening immediately
   // Shortcut launch handling
   useEffect(() => {
     const decodeUrlFromShortcutId = (shortcutId: string): string | null => {

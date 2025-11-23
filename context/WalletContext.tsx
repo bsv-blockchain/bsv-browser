@@ -699,7 +699,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   }, [managers?.walletManager?.authenticated])
 
   // ---- Build the wallet manager once all required inputs are ready.
+  // DISABLED: Only build wallet when explicitly requested after configuration
   useEffect(() => {
+    // TEMPORARILY DISABLED - wallet should only build after explicit configuration
+    // User must complete auth flow (phone/OTP/password or mnemonic) before wallet builds
+    return
+
     if (
       passwordRetriever &&
       recoveryKeySaver &&
@@ -773,7 +778,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   ])
 
   // ---- Initialize noWAB (self-custodial) wallet if primary key exists
+  // DISABLED: Only build wallet when explicitly requested after configuration
   useEffect(() => {
+    // TEMPORARILY DISABLED - wallet should only build after explicit configuration
+    return
+
     ; (async () => {
       // Skip if wallet already built or not in noWAB mode
       if (walletBuilt || selectedWabUrl !== 'noWAB') {

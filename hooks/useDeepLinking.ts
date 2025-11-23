@@ -1,26 +1,29 @@
 import { useEffect } from 'react'
 import { Linking } from 'react-native'
 import { router } from 'expo-router'
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { useWebAppManifest } from './useWebAppManifest'
+import tabStore from '@/stores/TabStore'
 
-const PENDING_URL_KEY = 'pendingDeepLinkUrl'
-
+/**
+ * Simplified deep linking: when app receives http/https URL, navigate browser directly to it
+ * No more storing URLs for later - just open them immediately
+ */
 export function useDeepLinking() {
-  const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
-
   useEffect(() => {
     // Handle app opened from deep link while closed
     const getInitialURL = async () => {
       const url = await Linking.getInitialURL()
-      if (url) {
+      if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+        console.log('[Deep Link] Opening URL directly:', url)
         handleDeepLink(url)
       }
     }
 
     // Handle app opened from deep link while running
     const handleUrl = (event: { url: string }) => {
-      handleDeepLink(event.url)
+      if (event.url && (event.url.startsWith('http://') || event.url.startsWith('https://'))) {
+        console.log('[Deep Link] Opening URL directly:', event.url)
+        handleDeepLink(event.url)
+      }
     }
 
     getInitialURL()
@@ -31,54 +34,34 @@ export function useDeepLinking() {
 
   const handleDeepLink = async (url: string) => {
     try {
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        await handleManifestAwareDeepLink(url)
+      // Navigate to browser if not already there
+      router.replace('/browser')
+
+      // Create new tab or update active tab with the URL
+      const activeTab = tabStore.activeTab
+      if (activeTab && activeTab.url === 'about:blank') {
+        // Update existing blank tab
+        tabStore.updateTab(activeTab.id, { url })
       } else {
-        // Default to browser for any other scheme
-        router.push('/browser')
+        // Create new tab with URL
+        tabStore.newTab(url)
       }
     } catch (error) {
-      console.error('Error handling deep link:', error)
-      router.push('/browser')
+      console.error('[Deep Link] Error handling URL:', error)
+      router.replace('/browser')
     }
-  }
-
-  const handleManifestAwareDeepLink = async (incomingUrl: string) => {
-    try {
-      const manifest = await fetchManifest(incomingUrl)
-
-      if (manifest) {
-        // Check if we should use start_url for onboarding
-        if (shouldRedirectToStartUrl(manifest, incomingUrl)) {
-          const startUrl = getStartUrl(manifest, incomingUrl)
-          await AsyncStorage.setItem(PENDING_URL_KEY, startUrl)
-          router.replace('/browser')
-          return
-        }
-
-        // Handle Babbage permissions if needed
-        if (manifest.babbage?.protocolPermissions) {
-          // Will add special handling for Babbage apps here
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching manifest:', error)
-    }
-
-    // Fallback to original URL
-    await AsyncStorage.setItem(PENDING_URL_KEY, incomingUrl)
-    router.replace('/browser')
   }
 }
 
-export const setPendingUrl = async (url: string) => {
-  await AsyncStorage.setItem(PENDING_URL_KEY, url)
+// Legacy exports - no longer used but kept for backward compatibility
+export const setPendingUrl = async (_url: string) => {
+  console.warn('[Deep Link] setPendingUrl is deprecated - URLs are now opened directly')
 }
 
 export const getPendingUrl = async (): Promise<string | null> => {
-  return await AsyncStorage.getItem(PENDING_URL_KEY)
+  return null // Always return null - no more pending URLs
 }
 
 export const clearPendingUrl = async () => {
-  await AsyncStorage.removeItem(PENDING_URL_KEY)
+  // No-op - nothing to clear
 }
