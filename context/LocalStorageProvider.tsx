@@ -64,7 +64,7 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
       if (authenticated) return true
 
       const { success } = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Authenticate to auto-fill your password',
+        promptMessage: 'Decrypt wallet keys',
         cancelLabel: 'Cancel',
         disableDeviceFallback: false
       })

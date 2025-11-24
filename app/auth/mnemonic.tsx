@@ -17,7 +17,6 @@ import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useWallet } from '@/context/WalletContext'
 import {
   generateMnemonicWallet,
-  recoverMnemonicWallet,
   validateMnemonic,
   formatMnemonicForDisplay
 } from '@/utils/mnemonicWallet'
@@ -29,7 +28,7 @@ type MnemonicMode = 'choose' | 'generate' | 'import'
 export default function MnemonicScreen() {
   const { colors, isDark } = useTheme()
   const styles = useThemeStyles()
-  const { managers, selectedNetwork } = useWallet()
+  const { managers, selectedNetwork, buildWalletFromMnemonic } = useWallet()
   const { setMnemonic: storeMnemonic } = useLocalStorage();
 
   const [mode, setMode] = useState<MnemonicMode>('choose')
@@ -89,17 +88,13 @@ export default function MnemonicScreen() {
   const initializeWallet = async (mnemonicPhrase: string) => {
     setLoading(true)
     try {
-      // Recover wallet keys from mnemonic - this gives us the primary key
-      const wallet = recoverMnemonicWallet(mnemonicPhrase)
-
-      console.log('[Mnemonic] Wallet keys generated:', {
-        identityKey: wallet.identityKey,
-        primaryKey: wallet.primaryKey,
-        network: selectedNetwork
-      })
+      console.log('[Mnemonic] Starting wallet initialization with mnemonic')
 
       // Store the mnemonic securely for later recovery
-      storeMnemonic(mnemonicPhrase);
+      await storeMnemonic(mnemonicPhrase)
+
+      // Build the wallet using WalletContext's buildWalletFromMnemonic
+      await buildWalletFromMnemonic()
 
       console.log('[Mnemonic] NoWAB wallet setup complete, navigating to browser')
 
