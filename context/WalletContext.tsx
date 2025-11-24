@@ -808,9 +808,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       if (permissionsManager) {
         logWithTimestamp(F, 'NoWAB wallet built successfully')
 
-        // Mark as authenticated by creating a minimal walletManager interface
+        // Create SimpleWalletManager and provide keys for authentication
         const snap = await getSnap()
         const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
+
+        // Provide the primary key and privileged key manager to authenticate the wallet
+        await swm.providePrimaryKey(primaryKey)
+        await swm.providePrivilegedKeyManager(privilegedKeyManager)
+
+        logWithTimestamp(F, 'SimpleWalletManager authenticated:', swm.authenticated)
 
         setManagers(m => ({
           ...m,
