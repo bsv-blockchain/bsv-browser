@@ -113,7 +113,7 @@ const ConfigScreen = () => {
       await managers?.walletManager?.loadSnapshot(snapArr)
 
       router.dismissAll()
-      router.replace('/')
+      router.push('/')
     } catch (error) {
       console.error(error)
       Alert.alert(t('error'), t('failed_to_authenticate'))
