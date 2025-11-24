@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, Alert } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { LookupResolver } from '@bsv/sdk'
+import { LookupResolver, LookupAnswer, Transaction, PushDrop, Utils } from '@bsv/sdk'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useTranslation } from 'react-i18next'
@@ -9,11 +9,14 @@ import { useTranslation } from 'react-i18next'
 interface WalletConfig {
   name: string
   description?: string
+  icon?: string
   wabUrl: string
   storageUrl: string
+  messageBoxURL?: string
+  trustSuppliers?: string[]
+  recommendedApps?: string[]
   network: 'main' | 'test'
   method: string
-  icon?: string
 }
 
 interface WalletConfigPickerProps {
@@ -39,18 +42,38 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
     setError(null)
 
     try {
-      // Initialize LookupResolver for the selected network
-      const lookupUrl = selectedNetwork === 'main'
-        ? 'https://lookup.bsvb.tech'
-        : 'https://lookup-testnet.bsvb.tech'
-
-      const resolver = new LookupResolver(lookupUrl)
+      const resolver = new LookupResolver()
 
       // Query for ls_config topic
-      const results = await resolver.query({
-        service: 'ls_config',
-        query: {}
-      })
+      // const response = await resolver.query({
+      //   service: 'ls_config',
+      //   query: {}
+      // })
+      const response: LookupAnswer = { 
+        type: 'output-list',
+        outputs: [] as Array<{
+          beef: number[]
+          outputIndex: number
+          context?: number[]
+        }>
+      }
+      const results = response.outputs.map(o => {
+        const tx = Transaction.fromBEEF(o.beef)
+        const output = tx.outputs[o.outputIndex]
+        const decoded = PushDrop.decode(output.lockingScript)
+        console.log('[WalletConfigPicker] Decoded PushDrop:', decoded);
+        return {
+          name: Utils.toUTF8(decoded.fields[0]),
+          description: Utils.toUTF8(decoded.fields[1]),
+          icon: Utils.toUTF8(decoded.fields[2]),
+          wabUrl: Utils.toUTF8(decoded.fields[3]),
+          storageUrl: Utils.toUTF8(decoded.fields[4]),
+          messageBoxURL: Utils.toUTF8(decoded.fields[5]),
+          method: Utils.toUTF8(decoded.fields[6]),
+          trustSuppliers: JSON.parse(Utils.toUTF8(decoded.fields[7]) || '[]'),
+          recommendedApps: JSON.parse(Utils.toUTF8(decoded.fields[8]) || '[]'),
+        }
+    })
 
       console.log('[WalletConfigPicker] LookupResolver results:', results)
 
@@ -68,13 +91,16 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
             // - description: Provider description
 
             const config: WalletConfig = {
-              name: result.name || result.domain || 'Unknown Provider',
+              name: result.name || 'Unknown Provider',
               description: result.description || '',
-              wabUrl: result.wabUrl || result.wab_url || '',
-              storageUrl: result.storageUrl || result.storage_url || '',
+              icon: result.icon || '',
+              wabUrl: result.wabUrl || '',
+              storageUrl: result.storageUrl || '',
               network: selectedNetwork,
-              method: result.method || result.authMethod || 'Twilio',
-              icon: result.icon || result.iconUrl
+              method: result.method || 'Twilio',
+              messageBoxURL: result.messageBoxURL || '',
+              trustSuppliers: result.trustSuppliers || [],
+              recommendedApps: result.recommendedApps || [],
             }
 
             // Only add configs that have valid, non-empty URLs
@@ -105,9 +131,7 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
       const localStorageConfig: WalletConfig = {
         name: 'Local Storage + Cloud Auth',
         description: 'Store wallet data locally but use cloud authentication for account recovery',
-        wabUrl: selectedNetwork === 'main'
-          ? 'https://wab-eu-1.bsvb.tech'
-          : 'https://wab-testnet-eu-1.bsvb.tech',
+        wabUrl: 'https://wab-eu-1.bsvb.tech',
         storageUrl: 'local', // Special marker for local storage
         network: selectedNetwork,
         method: 'Twilio',
@@ -122,26 +146,18 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
         parsedConfigs.push({
           name: 'BSV Association (EU)',
           description: 'Official BSV Association wallet services hosted in Europe',
-          wabUrl: selectedNetwork === 'main'
-            ? 'https://wab-eu-1.bsvb.tech'
-            : 'https://wab-testnet-eu-1.bsvb.tech',
-          storageUrl: selectedNetwork === 'main'
-            ? 'https://store-eu-1.bsvb.tech'
-            : 'https://store-testnet-eu-1.bsvb.tech',
-          network: selectedNetwork,
+          wabUrl:  'https://wab-eu-1.bsvb.tech',
+          storageUrl: 'https://store-eu-1.bsvb.tech',
+          network: 'main',
           method: 'Twilio'
         })
 
         parsedConfigs.push({
           name: 'BSV Association (US)',
           description: 'Official BSV Association wallet services hosted in United States',
-          wabUrl: selectedNetwork === 'main'
-            ? 'https://wab-us-1.bsvb.tech'
-            : 'https://wab-testnet-us-1.bsvb.tech',
-          storageUrl: selectedNetwork === 'main'
-            ? 'https://store-us-1.bsvb.tech'
-            : 'https://store-testnet-us-1.bsvb.tech',
-          network: selectedNetwork,
+          wabUrl: 'https://wab-us-1.bsvb.tech',
+          storageUrl: 'https://store-us-1.bsvb.tech',
+          network: 'main',
           method: 'Twilio'
         })
       }
@@ -154,35 +170,29 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
       // Fallback to default configs on error (always include local options)
       setConfigs([
         {
-          name: 'Self-Custodial Wallet',
-          description: 'Complete independence - your keys, your coins. Uses a mnemonic seed phrase with no backend services required',
+          name: 'Device Only',
+          description: 'Complete independence - your keys, your storage. Uses a mnemonic seed phrase with no backend services required',
           wabUrl: 'noWAB',
           storageUrl: 'local',
-          network: selectedNetwork,
+          network: 'main',
           method: 'mnemonic',
           icon: 'key-outline'
         },
         {
-          name: 'Local Storage + Cloud Auth',
+          name: 'BSVA WAB, Local Storage',
           description: 'Store wallet data locally but use cloud authentication for account recovery',
-          wabUrl: selectedNetwork === 'main'
-            ? 'https://wab-eu-1.bsvb.tech'
-            : 'https://wab-testnet-eu-1.bsvb.tech',
+          wabUrl: 'https://wab-testnet-us-1.bsvb.tech',
           storageUrl: 'local',
-          network: selectedNetwork,
+          network: 'main',
           method: 'Twilio',
           icon: 'phone-portrait-outline'
         },
         {
           name: 'BSV Association (EU)',
           description: 'Official BSV Association wallet services hosted in Europe',
-          wabUrl: selectedNetwork === 'main'
-            ? 'https://wab-eu-1.bsvb.tech'
-            : 'https://wab-testnet-eu-1.bsvb.tech',
-          storageUrl: selectedNetwork === 'main'
-            ? 'https://store-eu-1.bsvb.tech'
-            : 'https://store-testnet-eu-1.bsvb.tech',
-          network: selectedNetwork,
+          wabUrl: 'https://wab-eu-1.bsvb.tech',
+          storageUrl: 'https://store-eu-1.bsvb.tech',
+          network: 'main',
           method: 'Twilio'
         }
       ])
@@ -256,7 +266,7 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
   }
 
   return (
-    <ScrollView style={{ maxHeight: 400 }}>
+    <ScrollView>
       <Text style={[styles.textSecondary, { padding: 15, paddingBottom: 10 }]}>
         {t('select_wallet_provider_description')}
       </Text>
@@ -297,19 +307,6 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
                 <Text style={[styles.text, { fontWeight: 'bold', fontSize: 16 }]}>
                   {config.name}
                 </Text>
-                {isSelfCustodial && (
-                  <View style={{
-                    marginLeft: 8,
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    backgroundColor: colors.primary,
-                    borderRadius: 4
-                  }}>
-                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: 'bold' }}>
-                      RECOMMENDED
-                    </Text>
-                  </View>
-                )}
               </View>
               {config.description && (
                 <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 8 }]}>

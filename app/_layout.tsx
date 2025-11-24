@@ -1,6 +1,4 @@
 import 'react-native-quick-crypto'
-import { Buffer } from 'buffer'
-global.Buffer = Buffer
 import React from 'react'
 import { Stack } from 'expo-router'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'
@@ -96,6 +94,10 @@ export default function RootLayout() {
                   >
                     <Stack.Screen name="index" />
                     <Stack.Screen name="config" />
+                    <Stack.Screen name="auth/mnemonic" />
+                    <Stack.Screen name="auth/phone" />
+                    <Stack.Screen name="auth/otp" />
+                    <Stack.Screen name="auth/password" />
                   </Stack>
                 </ThemeProvider>
               </BrowserModeProvider>

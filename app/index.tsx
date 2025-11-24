@@ -51,10 +51,7 @@ import SettingsScreen from './settings'
 import IdentityScreen from './identity'
 import { useTranslation } from 'react-i18next'
 import { useBrowserMode } from '@/context/BrowserModeContext'
-import { useLanguage } from '@/utils/translations'
-// import SecurityScreen from './security'
 import TrustScreen from './trust'
-import HomescreenShortcut from '@/components/HomescreenShortcut'
 import Shortcuts from '@rn-bridge/react-native-shortcuts'
 /* -------------------------------------------------------------------------- */
 /*                                   HELPERS                                   */
@@ -76,6 +73,7 @@ import {
 } from '@/utils/permissionsManager'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
+import { Utils } from '@bsv/sdk'
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
@@ -421,7 +419,7 @@ function Browser() {
           while (base64Url.length % 4) {
             base64Url += '='
           }
-          const decodedUrl = Buffer.from(base64Url, 'base64').toString('utf-8')
+          const decodedUrl = Utils.toUTF8(Utils.toArray(base64Url, 'base64'))
           return isValidUrl(decodedUrl) ? decodedUrl : null
         }
       } catch (error) {
@@ -1565,12 +1563,6 @@ function Browser() {
                   <Ionicons name="contract-outline" size={20} color="white" />
                 </TouchableOpacity>
               )}
-              <HomescreenShortcut
-                visible={showShortcutModal}
-                onClose={() => setShowShortcutModal(false)}
-                currentUrl={activeTab?.url || ''}
-                currentTitle={activeTab?.title}
-              />
               <WebView
                 ref={activeTab?.webviewRef}
                 source={{

@@ -15,6 +15,7 @@ import {
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import * as Linking from 'expo-linking'
+import { Utils } from '@bsv/sdk'
 
 interface HomescreenShortcutProps {
   visible: boolean
@@ -108,8 +109,7 @@ const HomescreenShortcut: React.FC<HomescreenShortcutProps> = ({
     try {
       if (Platform.OS === 'android') {
         console.log('📱 [Android] Creating shortcut:', { name: shortcutName, url: shortcutUrl })
-        const encodedUrl = Buffer.from(shortcutUrl.trim())
-          .toString('base64')
+        const encodedUrl = Utils.toBase64(Utils.toArray(shortcutUrl.trim()))
           .replace(/\+/g, '-')
           .replace(/\//g, '_')
           .replace(/=/g, '')

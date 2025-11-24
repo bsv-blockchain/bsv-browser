@@ -924,7 +924,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         }
         // Parse out the app data from the domains
         logWithTimestamp(F, 'Fetching app domains')
-        const appDomains = await getApps({ permissionsManager: managers.permissionsManager!, adminOriginator })
+        const appDomains: string[] = [] //await getApps({ permissionsManager: managers.permissionsManager!, adminOriginator })
         logWithTimestamp(F, 'App domains fetched, resolving data')
         const parsedAppData = await resolveAppDataFromDomain({ appDomains })
         logWithTimestamp(F, 'App data resolved, sorting')
