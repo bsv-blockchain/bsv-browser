@@ -1,6 +1,4 @@
 const F = 'context/WalletContext'
-import 'expo-crypto'
-import 'react-native-get-random-values'
 
 import React, { useState, useEffect, createContext, useMemo, useCallback, useContext } from 'react'
 import {
