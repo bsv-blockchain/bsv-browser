@@ -19,6 +19,7 @@ import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useWallet } from '@/context/WalletContext'
 import { Utils } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { WalletAuthenticationManager } from '@bsv/wallet-toolbox-mobile'
 
 export default function PasswordScreen() {
   const { t } = useTranslation()
@@ -53,13 +54,14 @@ export default function PasswordScreen() {
     setLoading(true)
 
     try {
-      await managers!.walletManager!.providePassword(password)
+      const cwiManager = managers!.walletManager as WalletAuthenticationManager
+      await cwiManager.providePassword(password)
 
-      if (managers!.walletManager!.authenticated) {
-        const snapshot = managers!.walletManager!.saveSnapshot()
+      if (cwiManager.authenticated) {
+        const snapshot = cwiManager.saveSnapshot()
         await setSnap(snapshot)
         router.dismissAll()
-        router.replace('/index')
+        router.replace('/')
       } else {
         Alert.alert(t('error'), t('auth_failed_maybe_password'))
       }

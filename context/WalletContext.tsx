@@ -882,8 +882,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       }
 
       router.dismissAll()
-      router.replace('/web3')
-      logWithTimestamp(F, 'Logout completed, navigating to root')
+      router.push('/config')
+      logWithTimestamp(F, 'Logout completed, navigating to config')
     })
   }, [deleteSnap, setWeb2Mode, setItem])
 

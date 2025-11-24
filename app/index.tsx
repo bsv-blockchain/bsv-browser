@@ -966,7 +966,7 @@ function Browser() {
       if (msg.call && (!wallet || isWeb2Mode)) {
         // Show Web3 setup prompt if a website tries to use Web3 features
         if (!wallet && !isWeb2Mode) {
-          router.push('/web3')
+          router.push('/config')
           // showWeb3Benefits(
           //   // onContinue - stay in Web2 mode
           //   () => {
@@ -974,7 +974,7 @@ function Browser() {
           //   },
           //   // onGoToLogin - set up Web3 identity
           //   () => {
-          //     router.push('/web3')
+          //     router.push('/config')
           //   }
           // )
         }
@@ -1399,7 +1399,7 @@ function Browser() {
       },
       goToLogin: () => {
         // Navigate back to the main route for login
-        router.replace('/web3')
+        router.push('/config')
         toggleInfoDrawer(false)
       }
     }),

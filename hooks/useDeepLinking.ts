@@ -35,7 +35,7 @@ export function useDeepLinking() {
   const handleDeepLink = async (url: string) => {
     try {
       // Navigate to browser if not already there
-      router.replace('/')
+      router.push('/')
 
       // Create new tab or update active tab with the URL
       const activeTab = tabStore.activeTab
@@ -48,7 +48,7 @@ export function useDeepLinking() {
       }
     } catch (error) {
       console.error('[Deep Link] Error handling URL:', error)
-      router.replace('/')
+      router.push('/')
     }
   }
 }

@@ -95,7 +95,6 @@ export default function RootLayout() {
                     }}
                   >
                     <Stack.Screen name="index" />
-                    <Stack.Screen name="web3" />
                     <Stack.Screen name="config" />
                   </Stack>
                 </ThemeProvider>
