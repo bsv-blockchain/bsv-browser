@@ -52,7 +52,6 @@ import IdentityScreen from './identity'
 import { useTranslation } from 'react-i18next'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import TrustScreen from './trust'
-import Shortcuts from '@rn-bridge/react-native-shortcuts'
 /* -------------------------------------------------------------------------- */
 /*                                   HELPERS                                   */
 /* -------------------------------------------------------------------------- */
@@ -326,7 +325,6 @@ function Browser() {
   const iosSoftKeyboardShown = useRef(false)
 
   const [showInfoDrawer, setShowInfoDrawer] = useState(false)
-  const [showShortcutModal, setShowShortcutModal] = useState(false)
   const [infoDrawerRoute, setInfoDrawerRoute] = useState<
     'root' | 'identity' | 'settings' | 'security' | 'trust' | 'permissions'
   >('root')
@@ -404,71 +402,6 @@ function Browser() {
     }
   }, [])
 
-  // Deep linking useEffect
-  // REMOVED: Pending URL check - deep links now navigate directly to browser
-  // The useDeepLinking hook handles URL opening immediately
-  // Shortcut launch handling
-  useEffect(() => {
-    const decodeUrlFromShortcutId = (shortcutId: string): string | null => {
-      try {
-        if (shortcutId.startsWith('metanet_')) {
-          const encodedUrl = shortcutId.replace('metanet_', '')
-          console.log('📱 [Shortcut] Encoded URL from ID:', encodedUrl)
-          let base64Url = encodedUrl.replace(/-/g, '+').replace(/_/g, '/')
-
-          while (base64Url.length % 4) {
-            base64Url += '='
-          }
-          const decodedUrl = Utils.toUTF8(Utils.toArray(base64Url, 'base64'))
-          return isValidUrl(decodedUrl) ? decodedUrl : null
-        }
-      } catch (error) {
-        console.error('Error decoding URL from shortcut ID:', error)
-      }
-      return null
-    }
-
-    const navigateToShortcutUrl = (url: string) => {
-      console.log('📱 [Shortcut] Navigating to URL:', url)
-      updateActiveTab({ url })
-      setAddressText(url)
-    }
-
-    const handleShortcutLaunch = async () => {
-      try {
-        // Check if app was launched from a shortcut
-        const initialShortcutId = await Shortcuts.getInitialShortcutId()
-        if (initialShortcutId) {
-          console.log('📱 [Shortcut] App launched from shortcut ID:', initialShortcutId)
-          const url = decodeUrlFromShortcutId(initialShortcutId)
-          if (url) {
-            navigateToShortcutUrl(url)
-          }
-        }
-      } catch (error) {
-        console.error('Error handling initial shortcut:', error)
-      }
-    }
-
-    const handleShortcutUsed = (shortcutId: string) => {
-      console.log('📱 [Shortcut] Shortcut used:', shortcutId)
-      const url = decodeUrlFromShortcutId(shortcutId)
-      console.log('📱 [Shortcut] Decoded URL:', url)
-      if (url) {
-        navigateToShortcutUrl(url)
-      }
-    }
-
-    // Handle app launch from shortcut
-    handleShortcutLaunch()
-
-    // Listen for shortcut usage while app is running
-    const subscription = Shortcuts.addOnShortcutUsedListener(handleShortcutUsed)
-
-    return () => {
-      subscription?.remove?.()
-    }
-  }, [])
   // Manifest checking useEffect
   useEffect(() => {
     if (!activeTab) return
@@ -1092,7 +1025,7 @@ function Browser() {
   }
 
   /* -------------------------------------------------------------------------- */
-  /*                          SHARE / HOMESCREEN SHORTCUT                       */
+  /*                          SHARE                                             */
   /* -------------------------------------------------------------------------- */
   const shareCurrent = useCallback(async () => {
     const currentTab = tabStore.activeTab
@@ -1104,11 +1037,6 @@ function Browser() {
       console.warn('Share cancelled/failed', err)
     }
   }, [])
-  const addToHomeScreen = useCallback(async () => {
-    if (activeTab && activeTab.url && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
-      setShowShortcutModal(true)
-    }
-  }, [activeTab])
 
   /* -------------------------------------------------------------------------- */
   /*                 DRAWERS (STAR, PERMISSIONS, TRUSTS, INFO)                  */
@@ -1386,10 +1314,6 @@ function Browser() {
           toggleInfoDrawer(false)
         }
       },
-      addToHomeScreen: async () => {
-        await addToHomeScreen()
-        toggleInfoDrawer(false)
-      },
       backToHomepage: () => {
         updateActiveTab({ url: kNEW_TAB_URL })
         setAddressText(kNEW_TAB_URL)
@@ -1407,7 +1331,6 @@ function Browser() {
       toggleInfoDrawer,
       updateActiveTab,
       setAddressText,
-      addToHomeScreen,
       toggleDesktopView,
       togglePermissionsDrawer,
       t
@@ -1995,13 +1918,6 @@ function Browser() {
                     onPress={drawerHandlers.toggleDesktopView}
                   />
                 )}
-                {Platform.OS !== 'ios' && (
-                  <DrawerItem
-                    label={t('add_to_device_homescreen')}
-                    icon="home-outline"
-                    onPress={drawerHandlers.addToHomeScreen}
-                  />
-                )}
                 <DrawerItem
                   label={t('back_to_homepage')}
                   icon="apps-outline"
@@ -2012,7 +1928,7 @@ function Browser() {
                   <>
                     <View style={styles.divider} />
                     <DrawerItem
-                      label="Login to unlock Web3 features"
+                      label=" unlock Web3 features"
                       icon="log-in-outline"
                       onPress={drawerHandlers.goToLogin}
                     />

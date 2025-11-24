@@ -32,7 +32,8 @@
             "useModularHeaders": true
           }
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true
@@ -65,7 +66,10 @@
               "scheme": "http"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -79,10 +83,16 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
-            "CFBundleURLSchemes": ["https", "http"]
+            "CFBundleURLSchemes": [
+              "https",
+              "http"
+            ]
           }
         ],
-        "LSApplicationQueriesSchemes": ["https", "http"],
+        "LSApplicationQueriesSchemes": [
+          "https",
+          "http"
+        ],
         "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use."
       }
     },
