@@ -143,13 +143,13 @@ const ConfigScreen = () => {
       if (success) {
         setConfigStatus('configured')
         console.log('Configuration saved successfully')
-        router.push('/')
+        router.push('/web3')
       } else {
         Alert.alert('Configuration Error', 'Failed to save configuration. Please try again.')
       }
     } else {
       console.log('Configuration would be saved:', wabConfig)
-      router.push('/')
+      router.push('/web3')
     }
   }
 

@@ -104,7 +104,7 @@ export default function MnemonicScreen() {
       console.log('[Mnemonic] NoWAB wallet setup complete, navigating to browser')
 
       router.dismissAll()
-      router.replace('/browser')
+      router.replace('/index')
     } catch (error: any) {
       console.error('[Mnemonic] Error setting up wallet:', error)
       Alert.alert('Error', `Failed to set up wallet: ${error.message}`)

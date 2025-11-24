@@ -52,15 +52,15 @@ function DeepLinkHandler() {
   return null
 }
 
-const ShowThings = () => {
+const DebuggerDisplay = () => {
   const [toggle, setToggle] = React.useState(false);
   const v = useWallet()
   if (!toggle) return <>
-  <Text onPress={() => setToggle(true)} style={{ top: 100, backgroundColor: 'yellow', position: 'fixed', left: 100, padding: 10, zIndex: 1000 }}>SHOW</Text>
+  <Text onPress={() => setToggle(true)} style={{ top: 100, backgroundColor: 'yellow', position: 'absolute', left: 0, padding: 10, zIndex: 1000,  }}>SHOW</Text>
   </>;
   return (
   <>
-    <Text onPress={() => setToggle(false)} style={{ position: 'fixed', top: 100, left: 200, backgroundColor: 'red', padding: 10, zIndex: 1000 }}>HIDE</Text>
+    <Text onPress={() => setToggle(false)} style={{ position: 'absolute', top: 100, left: 0, backgroundColor: 'red', padding: 10, zIndex: 1000 }}>HIDE</Text>
     <Text className="text-xs text-gray-500">
       {JSON.stringify({ wab: v.selectedWabUrl, storage: v.selectedStorageUrl, configStatus: v.configStatus }, null, 2)}
     </Text>
@@ -77,7 +77,7 @@ export default function RootLayout() {
             <WalletContextProvider>
               <BrowserModeProvider>
                 <ThemeProvider>
-                  <ShowThings />
+                  <DebuggerDisplay />
                   <DeepLinkHandler />
                   <Web3BenefitsModalHandler />
                   {/* <TranslationTester /> */}
@@ -95,15 +95,8 @@ export default function RootLayout() {
                     }}
                   >
                     <Stack.Screen name="index" />
-                    <Stack.Screen name="browser" />
-                    <Stack.Screen
-                      name="config"
-                      options={{
-                        headerShown: false,
-                        animation: 'slide_from_bottom',
-                        presentation: 'modal'
-                      }}
-                    />
+                    <Stack.Screen name="web3" />
+                    <Stack.Screen name="config" />
                   </Stack>
                 </ThemeProvider>
               </BrowserModeProvider>

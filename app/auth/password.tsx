@@ -59,7 +59,7 @@ export default function PasswordScreen() {
         const snapshot = managers!.walletManager!.saveSnapshot()
         await setSnap(snapshot)
         router.dismissAll()
-        router.replace('/browser')
+        router.replace('/index')
       } else {
         Alert.alert(t('error'), t('auth_failed_maybe_password'))
       }
