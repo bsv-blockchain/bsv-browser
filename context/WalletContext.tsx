@@ -699,17 +699,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   }, [managers?.walletManager?.authenticated])
 
   // ---- Build the wallet manager once all required inputs are ready.
-  // DISABLED: Only build wallet when explicitly requested after configuration
   useEffect(() => {
-    // TEMPORARILY DISABLED - wallet should only build after explicit configuration
-    // User must complete auth flow (phone/OTP/password or mnemonic) before wallet builds
-    return
-
     if (
       passwordRetriever &&
       recoveryKeySaver &&
       configStatus !== 'editing' && // either user configured or snapshot exists
-      !walletBuilt // build only once
+      !walletBuilt && // build only once
+      selectedWabUrl !== 'noWAB' // Skip for noWAB mode (handled by separate useEffect)
     ) {
       logWithTimestamp(F, 'Starting wallet manager initialization')
       try {
@@ -778,14 +774,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   ])
 
   // ---- Initialize noWAB (self-custodial) wallet if primary key exists
-  // DISABLED: Only build wallet when explicitly requested after configuration
   useEffect(() => {
-    // TEMPORARILY DISABLED - wallet should only build after explicit configuration
-    return
-
     ; (async () => {
       // Skip if wallet already built or not in noWAB mode
       if (walletBuilt || selectedWabUrl !== 'noWAB') {
+        return
+      }
+
+      // Also skip if configuration is still being edited
+      if (configStatus === 'editing') {
         return
       }
 
@@ -831,7 +828,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         logWithTimestamp(F, 'Error initializing noWAB wallet', error.message)
       }
     })()
-  }, [walletBuilt, selectedWabUrl, buildWallet])
+  }, [walletBuilt, selectedWabUrl, buildWallet, configStatus, getMnemonic, getSnap, setMnemonic])
 
   // When Settings manager becomes available, populate the user's settings
   useEffect(() => {
