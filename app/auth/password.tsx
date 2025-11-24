@@ -61,7 +61,7 @@ export default function PasswordScreen() {
         const snapshot = cwiManager.saveSnapshot()
         await setSnap(snapshot)
         router.dismissAll()
-        router.replace('/')
+        router.push('/')
       } else {
         Alert.alert(t('error'), t('auth_failed_maybe_password'))
       }
