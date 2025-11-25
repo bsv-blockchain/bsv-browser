@@ -76,7 +76,6 @@
     "react-i18next": "^15.5.3",
     "react-native": "0.79.6",
     "react-native-gesture-handler": "~2.24.0",
-    "react-native-get-random-values": "^1.11.0",
     "react-native-localize": "^3.4.1",
     "react-native-modal": "^14.0.0-rc.1",
     "react-native-otp-inputs": "^7.4.0",
