@@ -249,6 +249,11 @@ const resources = {
       storage_description: 'Used for your transactions and metadata storage.',
       storage_url: 'Storage URL',
       enter_storage_url: 'Enter Storage URL',
+      quick_pick: 'Quick Pick',
+      manual_config: 'Manual',
+      loading_wallet_providers: 'Loading wallet providers...',
+      select_wallet_provider_description: 'Select a wallet provider from the list below:',
+      retry: 'Retry',
 
       // States
       loading: 'Loading...',

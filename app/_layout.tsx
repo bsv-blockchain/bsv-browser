@@ -1,7 +1,5 @@
 import 'react-native-quick-crypto'
-import { Buffer } from 'buffer'
-global.Buffer = Buffer
-import React, { useEffect, useState } from 'react'
+import React from 'react'
 import { Stack } from 'expo-router'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'
 import packageJson from '../package.json'
@@ -17,12 +15,12 @@ import CertificateAccessModal from '@/components/CertificateAccessModal'
 import SpendingAuthorizationModal from '@/components/SpendingAuthorizationModal'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
 import DefaultBrowserPrompt from '@/components/DefaultBrowserPrompt'
-import * as Notifications from 'expo-notifications'
-import { initializeFirebase } from '@/utils/firebase'
 import { LanguageProvider } from '@/utils/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/Web3BenefitsModalHandler'
+import { useWallet } from '@/context/WalletContext'
 import '@/utils/translations'
+import { Text } from 'react-native'
 
 const nativeHandlers: NativeHandlers = {
   isFocused: async () => false,
@@ -46,37 +44,29 @@ const nativeHandlers: NativeHandlers = {
   }
 }
 
-// Configure global notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true
-  })
-})
-
 // Deep link handler component
 function DeepLinkHandler() {
   useDeepLinking()
   return null
 }
 
+const DebuggerDisplay = () => {
+  const [toggle, setToggle] = React.useState(false);
+  const v = useWallet()
+  if (!toggle) return <>
+  <Text onPress={() => setToggle(true)} style={{ top: 100, backgroundColor: 'yellow', position: 'absolute', left: 0, padding: 10, zIndex: 1000,  }}>SHOW</Text>
+  </>;
+  return (
+  <>
+    <Text onPress={() => setToggle(false)} style={{ position: 'absolute', top: 100, left: 0, backgroundColor: 'red', padding: 10, zIndex: 1000 }}>HIDE</Text>
+    <Text className="text-xs text-gray-500">
+      {JSON.stringify({ wab: v.selectedWabUrl, storage: v.selectedStorageUrl, configStatus: v.configStatus }, null, 2)}
+    </Text>
+  </>
+  )
+}
+
 export default function RootLayout() {
-  const [configLoaded, setConfigLoaded] = useState(false)
-  useEffect(() => {
-    const initialize = async () => {
-      await initializeFirebase()
-      setConfigLoaded(true)
-    }
-    initialize()
-  }, [])
-
-  if (!configLoaded) {
-    return null
-  }
-
   return (
     <LanguageProvider>
       <LocalStorageProvider>
@@ -85,6 +75,7 @@ export default function RootLayout() {
             <WalletContextProvider>
               <BrowserModeProvider>
                 <ThemeProvider>
+                  <DebuggerDisplay />
                   <DeepLinkHandler />
                   <Web3BenefitsModalHandler />
                   {/* <TranslationTester /> */}
@@ -102,15 +93,11 @@ export default function RootLayout() {
                     }}
                   >
                     <Stack.Screen name="index" />
-                    <Stack.Screen name="browser" />
-                    <Stack.Screen
-                      name="config"
-                      options={{
-                        headerShown: false,
-                        animation: 'slide_from_bottom',
-                        presentation: 'modal'
-                      }}
-                    />
+                    <Stack.Screen name="config" />
+                    <Stack.Screen name="auth/mnemonic" />
+                    <Stack.Screen name="auth/phone" />
+                    <Stack.Screen name="auth/otp" />
+                    <Stack.Screen name="auth/password" />
                   </Stack>
                 </ThemeProvider>
               </BrowserModeProvider>

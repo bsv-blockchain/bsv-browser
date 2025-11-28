@@ -14,6 +14,9 @@ export const getApps = async ({
   adminOriginator
 }: GetAppsParams): Promise<string[]> => {
   try {
+    if (!permissionsManager || !permissionsManager.isAuthenticated) {
+      return []
+    }
     // Fetch transaction outputs from the specified basket.
     const { outputs } = await permissionsManager.listOutputs(
       {

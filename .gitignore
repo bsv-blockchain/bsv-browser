@@ -38,3 +38,5 @@ expo-env.d.ts
 # @end expo-cli
 .expo
 *.aab
+/BSVBrowser.app
+build-*.tar.gz

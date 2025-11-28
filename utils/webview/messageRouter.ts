@@ -1,6 +1,5 @@
 import type { MutableRefObject } from 'react'
 import type { PermissionType, PermissionState } from '@/utils/permissionsManager'
-import * as Notifications from 'expo-notifications'
 import { Platform } from 'react-native'
 import { setDomainPermission } from '@/utils/permissionsManager'
 
@@ -26,7 +25,6 @@ export type MessageRouterCtx = {
   setPermissionModalVisible: (v: boolean) => void
   activeCameraStreams: MutableRefObject<Set<string>>
   setIsFullscreen: (v: boolean) => void
-  handleNotificationPermissionRequest: (origin: string) => Promise<'granted' | 'denied' | 'default'>
 }
 
 function injectIntoActiveTab(ctx: MessageRouterCtx, js: string) {
@@ -320,71 +318,6 @@ export function createWebViewMessageRouter(ctx: MessageRouterCtx) {
     return true
   }
 
-  const handleNotificationPermission = async () => {
-    const tab = ctx.getActiveTab()
-    if (!tab) return true
-    const permission = await ctx.handleNotificationPermissionRequest(tab.url)
-    injectIntoActiveTab(
-      ctx,
-      `
-      window.Notification.permission = '${permission}';
-      window.dispatchEvent(new MessageEvent('message', {
-        data: JSON.stringify({ type: 'NOTIFICATION_PERMISSION_RESPONSE', permission: '${permission}' })
-      }));
-      (function(){ try{ const mapped = '${permission}' === 'default' ? 'prompt' : '${permission}'; const evt = new CustomEvent('permissionchange', { detail: { permission: 'NOTIFICATIONS', state: mapped } }); document.dispatchEvent(evt);}catch(e){} })();
-      `
-    )
-    return true
-  }
-
-  const handleShowNotification = async (payload: any) => {
-    try {
-      // Gate by domain-level NOTIFICATIONS permission
-      const tab = ctx.getActiveTab()
-      const originUrl = tab?.url || ''
-      const domain = originUrl ? ctx.domainForUrl(originUrl) : ''
-      if (domain) {
-        const state = await ctx.getPermissionState(domain, 'NOTIFICATIONS')
-        if (state !== 'allow') {
-          // Do not show notification; report back to page for compatibility
-          injectIntoActiveTab(
-            ctx,
-            `window.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'NOTIFICATION_SHOWN', ok: false, error: 'Notification permission not granted' }) }));`
-          )
-          return true
-        }
-      }
-
-      const title = typeof payload?.title === 'string' ? payload.title : 'Notification'
-      const body = typeof payload?.body === 'string' ? payload.body : ''
-      const data = {
-        ...(payload?.data || {}),
-        tag: payload?.tag ?? null,
-        icon: payload?.icon ?? null,
-        origin: originUrl
-      }
-
-      await Notifications.scheduleNotificationAsync({
-        content: { title, body, data },
-        trigger: null
-      })
-
-      injectIntoActiveTab(
-        ctx,
-        `window.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'NOTIFICATION_SHOWN', ok: true, tag: ${JSON.stringify(
-          payload?.tag ?? null
-        )} }) }));`
-      )
-    } catch (e) {
-      console.warn('[Notifications] Failed to present local notification', e)
-      injectIntoActiveTab(
-        ctx,
-        `window.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'NOTIFICATION_SHOWN', ok: false }) }));`
-      )
-    }
-    return true
-  }
-
   return async function route(msg: WebViewMessage): Promise<boolean> {
     switch (msg.type) {
       case 'REQUEST_FULLSCREEN':
@@ -399,10 +332,6 @@ export function createWebViewMessageRouter(ctx: MessageRouterCtx) {
         return handlePermissionRequest('MICROPHONE_REQUEST', 'RECORD_AUDIO', 'MICROPHONE_RESPONSE')
       case 'REQUEST_LOCATION':
         return handleLocationRequest()
-      case 'REQUEST_NOTIFICATION_PERMISSION':
-        return handleNotificationPermission()
-      case 'SHOW_NOTIFICATION':
-        return handleShowNotification(msg)
       default:
         return false
     }

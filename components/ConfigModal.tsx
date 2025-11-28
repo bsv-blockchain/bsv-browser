@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useWallet, WABConfig } from '@/context/WalletContext'
+import WalletConfigPicker from './WalletConfigPicker'
 
 interface ConfigModalProps {
   visible: boolean
@@ -39,6 +40,9 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     setWalletBuilt
   } = useWallet()
 
+  // State for configuration mode
+  const [configMode, setConfigMode] = useState<'quick' | 'manual'>('quick')
+
   // State for configuration
   const [wabUrl, setWabUrl] = useState<string>(selectedWabUrl)
   const [wabInfo, setWabInfo] = useState<{
@@ -54,6 +58,10 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
 
   // Validation
   const isUrlValid = (url: string) => {
+    // Allow special markers for noWAB and local storage
+    if (url === 'noWAB' || url === 'local') {
+      return true
+    }
     try {
       new URL(url)
       return true
@@ -167,6 +175,18 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     onDismiss()
   }
 
+  // Handle config selection from picker
+  const handleQuickPickConfig = (config: any) => {
+    setWabUrl(config.wabUrl)
+    setStorageUrl(config.storageUrl)
+    setMethod(config.method)
+    setNetwork(config.network)
+    setWabInfo(config.wabInfo || null) // Set to null for noWAB configs
+
+    // Automatically save the configuration
+    handleSaveConfig()
+  }
+
   // Render a selectable chip
   const renderChip = (label: string, labelSelected: string, onPress: Function) => (
     <TouchableOpacity
@@ -233,82 +253,11 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
         </View>
 
         <ScrollView style={{ flex: 1 }}>
-          <View style={{ padding: 20 }}>
-            {/* WAB Configuration */}
-            <View style={styles.card}>
-              <Text style={[styles.text, { fontWeight: 'bold', fontSize: 16, marginBottom: 10 }]}>
-                {t('wallet_auth_backend')}
-              </Text>
-              <Text style={[styles.textSecondary, { marginBottom: 15 }]}>{t('wab_description')}</Text>
-
-              {isLoadingConfig && (
-                <View style={{ padding: 20, alignItems: 'center' }}>
-                  <ActivityIndicator size="large" color={colors.secondary} />
-                </View>
-              )}
-
-              <Text style={styles.inputLabel}>{t('wab_url')}</Text>
-              <View style={styles.input}>
-                <TextInput
-                  style={styles.inputText}
-                  value={wabUrl}
-                  onChangeText={setWabUrl}
-                  placeholder={t('enter_wab_url')}
-                  placeholderTextColor={colors.textSecondary}
-                  autoCapitalize="none"
-                  keyboardType="url"
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.button, { marginTop: 10 }]}
-                onPress={fetchWalletConfig}
-                disabled={isLoadingConfig}
-              >
-                <Text style={styles.buttonText}>{t('refresh_info')}</Text>
-              </TouchableOpacity>
-
-              {/* Phone Verification Service */}
-              <Text style={[styles.inputLabel, { marginTop: 15 }]}>{t('phone_verification_service')}</Text>
-              <View style={[styles.row, { flexWrap: 'wrap', marginVertical: 10 }]}>
-                {renderChip('Twilio', method, setMethod)}
-                {renderChip('Persona', method, setMethod)}
-              </View>
-            </View>
-
-            {/* Network Configuration */}
-            <View style={[styles.card, { marginTop: 15 }]}>
-              <Text style={[styles.text, { fontWeight: 'bold', fontSize: 16, marginBottom: 10 }]}>
-                {t('bsv_network')}
-              </Text>
-
-              <View style={[styles.row, { flexWrap: 'wrap', marginVertical: 10 }]}>
-                {renderChip('main', network, setNetwork)}
-                {renderChip('test', network, setNetwork)}
-              </View>
-            </View>
-
-            {/* Storage Configuration */}
-            <View style={[styles.card, { marginTop: 15 }]}>
-              <Text style={[styles.text, { fontWeight: 'bold', fontSize: 16, marginBottom: 10 }]}>
-                {t('wallet_storage_provider')}
-              </Text>
-              <Text style={[styles.textSecondary, { marginBottom: 15 }]}>{t('storage_description')}</Text>
-
-              <Text style={styles.inputLabel}>{t('storage_url')}</Text>
-              <View style={styles.input}>
-                <TextInput
-                  style={styles.inputText}
-                  value={storageUrl}
-                  onChangeText={setStorageUrl}
-                  placeholder={t('enter_storage_url')}
-                  placeholderTextColor={colors.textSecondary}
-                  autoCapitalize="none"
-                  keyboardType="url"
-                />
-              </View>
-            </View>
-          </View>
+          {/* Only show Quick Pick - Manual config removed per requirements */}
+          <WalletConfigPicker
+            onSelectConfig={handleQuickPickConfig}
+            selectedNetwork={network}
+          />
         </ScrollView>
       </KeyboardAvoidingView>
     </Modal>

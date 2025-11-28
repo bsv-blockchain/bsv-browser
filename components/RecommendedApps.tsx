@@ -147,7 +147,7 @@ export const RecommendedApps = observer(({
 
   const handleAddBookmark = useCallback(() => {
     const activeTab = tabStore.activeTab
-    if (activeTab && activeTab.url && activeTab.url !== 'about:blank' && !activeTab.url.includes('metanet://')) {
+    if (activeTab && activeTab.url && activeTab.url !== 'about:blank') {
       const title = activeTab.title || activeTab.url
       bookmarkStore.addBookmark(title, activeTab.url)
       setBookmarkRefresh(prev => prev + 1)

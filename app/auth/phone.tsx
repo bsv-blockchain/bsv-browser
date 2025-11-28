@@ -79,7 +79,7 @@ export default function PhoneScreen() {
       // onContinue - if they still want to skip
       () => {
         router.replace({
-          pathname: '/browser',
+          pathname: '/',
           params: { mode: 'web2' }
         })
       },
