@@ -77,36 +77,49 @@ export class StorageExpoSQLite {
       return this.db
     }
 
-    // Open database
-    this.db = await SQLite.openDatabaseAsync(this.dbName)
+    try {
+      console.log('[StorageExpoSQLite] Opening database:', this.dbName)
 
-    // Create tables
-    await createTables(this.db)
+      // Open database
+      this.db = await SQLite.openDatabaseAsync(this.dbName)
+      console.log('[StorageExpoSQLite] Database opened successfully')
 
-    // Initialize settings if needed
-    if (storageName && storageIdentityKey) {
-      const existingSettings = await this.db.getFirstAsync(
-        'SELECT * FROM settings WHERE storageIdentityKey = ?',
-        [storageIdentityKey]
-      ) as TableSettings | null
+      // Create tables
+      await createTables(this.db)
+      console.log('[StorageExpoSQLite] Tables created successfully')
 
-      if (!existingSettings) {
-        const now = new Date().toISOString()
-        await this.db.runAsync(
-          `INSERT INTO settings (storageIdentityKey, storageName, chain, dbtype, maxOutputScript, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [storageIdentityKey, storageName, this.chain, 'SQLite', 1024, now, now]
-        )
+      // Initialize settings if needed
+      if (storageName && storageIdentityKey) {
+        const existingSettings = await this.db.getFirstAsync(
+          'SELECT * FROM settings WHERE storageIdentityKey = ?',
+          [storageIdentityKey]
+        ) as TableSettings | null
+
+        if (!existingSettings) {
+          const now = new Date().toISOString()
+          await this.db.runAsync(
+            `INSERT INTO settings (storageIdentityKey, storageName, chain, dbtype, maxOutputScript, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [storageIdentityKey, storageName, this.chain, 'SQLite', 1024, now, now]
+          )
+        }
+
+        // Load settings
+        this._settings = await this.db.getFirstAsync(
+          'SELECT * FROM settings WHERE storageIdentityKey = ?',
+          [storageIdentityKey]
+        ) as TableSettings | null
       }
 
-      // Load settings
-      this._settings = await this.db.getFirstAsync(
-        'SELECT * FROM settings WHERE storageIdentityKey = ?',
-        [storageIdentityKey]
-      ) as TableSettings | null
+      console.log('[StorageExpoSQLite] Database initialization complete')
+      return this.db
+    } catch (error) {
+      console.error('[StorageExpoSQLite] Failed to initialize database:', error)
+      // Clean up on error
+      this.db = null
+      this._settings = null
+      throw new Error(`Database initialization failed: ${error instanceof Error ? error.message : String(error)}`)
     }
-
-    return this.db
   }
 
   /**

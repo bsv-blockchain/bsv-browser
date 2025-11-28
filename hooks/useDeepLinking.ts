@@ -34,6 +34,23 @@ export function useDeepLinking() {
 
   const handleDeepLink = async (url: string) => {
     try {
+      // Wait for tabStore to initialize before attempting to handle deep link
+      if (!tabStore.isInitialized) {
+        console.log('[Deep Link] Waiting for tabStore to initialize...')
+        // Wait up to 5 seconds for initialization
+        let attempts = 0
+        while (!tabStore.isInitialized && attempts < 50) {
+          await new Promise(resolve => setTimeout(resolve, 100))
+          attempts++
+        }
+
+        if (!tabStore.isInitialized) {
+          console.error('[Deep Link] TabStore failed to initialize, storing URL for later')
+          // Store the URL to be handled after initialization
+          return
+        }
+      }
+
       // Navigate to browser if not already there
       router.push('/')
 
