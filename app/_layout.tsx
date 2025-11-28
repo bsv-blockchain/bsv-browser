@@ -1,4 +1,3 @@
-import 'react-native-quick-crypto'
 import React from 'react'
 import { Stack } from 'expo-router'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'
