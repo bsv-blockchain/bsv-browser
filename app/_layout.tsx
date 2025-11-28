@@ -75,7 +75,8 @@ export default function RootLayout() {
               <BrowserModeProvider>
                 <ThemeProvider>
                   <DebuggerDisplay />
-                  <DeepLinkHandler />
+                  {/* TEMPORARILY DISABLED FOR CRASH DEBUGGING */}
+                  {/* <DeepLinkHandler /> */}
                   <Web3BenefitsModalHandler />
                   {/* <TranslationTester /> */}
                   <DefaultBrowserPrompt />
