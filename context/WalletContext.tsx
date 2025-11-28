@@ -699,15 +699,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   // ---- Build the wallet manager once all required inputs are ready.
   useEffect(() => {
-    // TEMPORARILY DISABLED FOR CRASH DEBUGGING
-    if (false &&
+    if (
       passwordRetriever &&
       recoveryKeySaver &&
       configStatus !== 'editing' && // either user configured or snapshot exists
       !walletBuilt && // build only once
       selectedWabUrl !== 'noWAB' // Skip for noWAB mode (handled by separate useEffect)
     ) {
-      logWithTimestamp(F, 'Starting wallet manager initialization (DISABLED)')
+      logWithTimestamp(F, 'Starting wallet manager initialization')
       try {
         // Create network service based on selected network
         const networkPreset = selectedNetwork === 'main' ? 'mainnet' : 'testnet'

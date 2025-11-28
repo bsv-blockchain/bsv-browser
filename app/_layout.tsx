@@ -20,6 +20,7 @@ import Web3BenefitsModalHandler from '@/components/Web3BenefitsModalHandler'
 import { useWallet } from '@/context/WalletContext'
 import '@/utils/translations'
 import { Text } from 'react-native'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 const nativeHandlers: NativeHandlers = {
   isFocused: async () => false,
@@ -67,44 +68,45 @@ const DebuggerDisplay = () => {
 
 export default function RootLayout() {
   return (
-    <LanguageProvider>
-      <LocalStorageProvider>
-        <UserContextProvider nativeHandlers={nativeHandlers} appVersion={packageJson.version} appName="BSV Browser">
-          <ExchangeRateContextProvider>
-            <WalletContextProvider>
-              <BrowserModeProvider>
-                <ThemeProvider>
-                  <DebuggerDisplay />
-                  {/* TEMPORARILY DISABLED FOR CRASH DEBUGGING */}
-                  {/* <DeepLinkHandler /> */}
-                  <Web3BenefitsModalHandler />
-                  {/* <TranslationTester /> */}
-                  <DefaultBrowserPrompt />
-                  <PasswordHandler />
-                  <RecoveryKeySaver />
-                  <ProtocolAccessModal />
-                  <BasketAccessModal />
-                  <CertificateAccessModal />
-                  <SpendingAuthorizationModal />
-                  <Stack
-                    screenOptions={{
-                      animation: 'slide_from_right',
-                      headerShown: false
-                    }}
-                  >
-                    <Stack.Screen name="index" />
-                    <Stack.Screen name="config" />
-                    <Stack.Screen name="auth/mnemonic" />
-                    <Stack.Screen name="auth/phone" />
-                    <Stack.Screen name="auth/otp" />
-                    <Stack.Screen name="auth/password" />
-                  </Stack>
-                </ThemeProvider>
-              </BrowserModeProvider>
-            </WalletContextProvider>
-          </ExchangeRateContextProvider>
-        </UserContextProvider>
-      </LocalStorageProvider>
-    </LanguageProvider>
+    <ErrorBoundary>
+      <LanguageProvider>
+        <LocalStorageProvider>
+          <UserContextProvider nativeHandlers={nativeHandlers} appVersion={packageJson.version} appName="BSV Browser">
+            <ExchangeRateContextProvider>
+              <WalletContextProvider>
+                <BrowserModeProvider>
+                  <ThemeProvider>
+                    <DebuggerDisplay />
+                    <DeepLinkHandler />
+                    <Web3BenefitsModalHandler />
+                    {/* <TranslationTester /> */}
+                    <DefaultBrowserPrompt />
+                    <PasswordHandler />
+                    <RecoveryKeySaver />
+                    <ProtocolAccessModal />
+                    <BasketAccessModal />
+                    <CertificateAccessModal />
+                    <SpendingAuthorizationModal />
+                    <Stack
+                      screenOptions={{
+                        animation: 'slide_from_right',
+                        headerShown: false
+                      }}
+                    >
+                      <Stack.Screen name="index" />
+                      <Stack.Screen name="config" />
+                      <Stack.Screen name="auth/mnemonic" />
+                      <Stack.Screen name="auth/phone" />
+                      <Stack.Screen name="auth/otp" />
+                      <Stack.Screen name="auth/password" />
+                    </Stack>
+                  </ThemeProvider>
+                </BrowserModeProvider>
+              </WalletContextProvider>
+            </ExchangeRateContextProvider>
+          </UserContextProvider>
+        </LocalStorageProvider>
+      </LanguageProvider>
+    </ErrorBoundary>
   )
 }
