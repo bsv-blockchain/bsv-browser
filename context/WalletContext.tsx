@@ -575,6 +575,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const buildWallet = useCallback(
     async (primaryKey: number[], privilegedKeyManager: PrivilegedKeyManager): Promise<any> => {
       try {
+        logWithTimestamp(F, 'Building wallet')
         const newManagers = {} as any
         const chain = selectedNetwork
         const keyDeriver = new KeyDeriver(new PrivateKey(primaryKey))
@@ -583,6 +584,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const services = new Services(chain)
         const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)
         newManagers.settingsManager = wallet.settingsManager
+
+        logWithTimestamp(F, 'Wallet built successfully')
 
         // Use user-selected storage provider
         // Check if user selected local storage
@@ -598,28 +601,32 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           await storageManager.addWalletStorageProvider(client)
         }
 
+        logWithTimestamp(F, 'Storage manager built successfully')
+        
         // Setup permissions with provided callbacks.
         const permissionsManager = new WalletPermissionsManager(wallet, adminOriginator, {
-          differentiatePrivilegedOperations: true,
+          differentiatePrivilegedOperations: false,
           seekBasketInsertionPermissions: false,
           seekBasketListingPermissions: false,
           seekBasketRemovalPermissions: false,
-          seekCertificateAcquisitionPermissions: true,
-          seekCertificateDisclosurePermissions: true,
-          seekCertificateRelinquishmentPermissions: true,
+          seekCertificateAcquisitionPermissions: false,
+          seekCertificateDisclosurePermissions: false,
+          seekCertificateRelinquishmentPermissions: false,
           seekCertificateListingPermissions: false,
-          seekGroupedPermission: true,
+          seekGroupedPermission: false,
           seekPermissionsForIdentityKeyRevelation: false,
           seekPermissionsForIdentityResolution: false,
-          seekPermissionsForKeyLinkageRevelation: true,
-          seekPermissionsForPublicKeyRevelation: true,
+          seekPermissionsForKeyLinkageRevelation: false,
+          seekPermissionsForPublicKeyRevelation: false,
           seekPermissionWhenApplyingActionLabels: false,
           seekPermissionWhenListingActionsByLabel: false,
           seekProtocolPermissionsForEncrypting: false,
           seekProtocolPermissionsForHMAC: false,
-          seekProtocolPermissionsForSigning: true,
+          seekProtocolPermissionsForSigning: false,
           seekSpendingPermissions: true,
         })
+
+        logWithTimestamp(F, 'Permissions manager built successfully')
 
         if (protocolPermissionCallback) {
           permissionsManager.bindCallback('onProtocolPermissionRequested', protocolPermissionCallback)
@@ -705,7 +712,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       configStatus !== 'editing' && // either user configured or snapshot exists
       !walletBuilt && // build only once
       selectedWabUrl !== 'noWAB' // Skip for noWAB mode (handled by separate useEffect)
-    ) {
+      ) {
       logWithTimestamp(F, 'Starting wallet manager initialization')
       try {
         // Create network service based on selected network
@@ -749,6 +756,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           // Set initial managers state to prevent null references
           setManagers(m => ({ ...m, walletManager }))
           setWalletBuilt(true)
+          setWeb2Mode(false)
           logWithTimestamp(F, 'Wallet manager initialization completed successfully')
         })
       } catch (err: any) {
@@ -799,34 +807,38 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       // We can create a simple one that always returns the primary key
       const privilegedKeyManager = new PrivilegedKeyManager(async () => rootKey)
 
-      // Build the wallet using the existing buildWallet function
-      const permissionsManager = await buildWallet(primaryKey, privilegedKeyManager)
+      logWithTimestamp(F, 'privilegedKeyManager built successfully')
 
-      if (permissionsManager) {
-        logWithTimestamp(F, 'NoWAB wallet built successfully')
+      // Create SimpleWalletManager and provide keys for authentication
+      const snap = await getSnap()
 
-        // Create SimpleWalletManager and provide keys for authentication
-        const snap = await getSnap()
-        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
+      logWithTimestamp(F, 'snap built successfully')
+      const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
 
-        // Provide the primary key and privileged key manager to authenticate the wallet
-        await swm.providePrimaryKey(primaryKey)
-        await swm.providePrivilegedKeyManager(privilegedKeyManager)
+      logWithTimestamp(F, 'SimpleWalletManager built successfully')
 
-        logWithTimestamp(F, 'SimpleWalletManager authenticated:', swm.authenticated)
+      // Provide the primary key and privileged key manager to authenticate the wallet
+      await swm.providePrimaryKey(primaryKey)
 
-        setManagers(m => ({
-          ...m,
-          walletManager: swm
-        }))
-        setWalletBuilt(true)
-        setWeb2Mode(false)
+      logWithTimestamp(F, 'primaryKey provided successfully')
 
-        // Save mnemonic for next time
-        await setMnemonic(mnemonic);
+      await swm.providePrivilegedKeyManager(privilegedKeyManager)
 
-        logWithTimestamp(F, 'NoWAB wallet initialization completed')
-      }
+      logWithTimestamp(F, 'privilegedKeyManager provided successfully')
+
+      setManagers(m => ({
+        ...m,
+        walletManager: swm
+      }))
+      setWalletBuilt(true)
+      setWeb2Mode(false)
+
+      logWithTimestamp(F, 'walletManager built successfully')
+
+      // Save mnemonic for next time
+      await setMnemonic(mnemonic);
+
+      logWithTimestamp(F, 'NoWAB wallet initialization completed')
     } catch (error: any) {
       console.error('[WalletContext] Error initializing noWAB wallet:', error)
       logWithTimestamp(F, 'Error initializing noWAB wallet', error.message)
@@ -840,6 +852,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     setMnemonic,
     buildWallet
   ]);
+
+  // energy slab subway number party awake arena expire target fee over cost
 
   // When Settings manager becomes available, populate the user's settings
   useEffect(() => {
@@ -883,7 +897,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
       // Clear web3-related data from localStorage to ensure clean state
       try {
-        await setItem('browserMode', 'web2')
+        await setItem('browserMode', 'null')
         await setItem('recentApps', JSON.stringify([])) // Clear recent web3 apps
       } catch (error) {
         console.warn('Failed to clear browser mode from localStorage:', error)

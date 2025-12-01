@@ -309,8 +309,6 @@ export class TabStore {
   handleNavigationStateChange(tabId: number, navState: WebViewNavigation) {
     const tab = this.tabs.find(t => t.id === tabId)
 
-    console.log(`handleNavigationStateChange(): tabId=${tabId}, url=${navState.url}, loading=${navState.loading}`)
-
     if (!tab) {
       console.log(`handleNavigationStateChange(): Tab ${tabId} not found, skipping`)
       return
@@ -327,7 +325,6 @@ export class TabStore {
     if (!navState.loading && currentUrl && isValidUrl(currentUrl)) {
       // Only update if URL actually changed
       if (currentUrl !== tab.url) {
-        console.log(`handleNavigationStateChange(): URL changed for tab ${tabId} from "${tab.url}" to "${currentUrl}"`)
         tab.url = currentUrl
 
         // Update title
@@ -390,19 +387,7 @@ export class TabStore {
       // Fall back to WebView's native state for single-page scenarios
       tab.canGoBack = navState.canGoBack
       tab.canGoForward = navState.canGoForward
-      console.log(`🔄 Using WebView native navigation state: canGoBack=${tab.canGoBack}, canGoForward=${tab.canGoForward}`)
     }
-
-    console.log(`handleNavigationStateChange(): Final tab state:`, {
-      id: tab.id,
-      url: tab.url,
-      title: tab.title,
-      isLoading: tab.isLoading,
-      canGoBack: tab.canGoBack,
-      canGoForward: tab.canGoForward,
-      webViewCanGoBack: navState.canGoBack,
-      webViewCanGoForward: navState.canGoForward
-    })
   }
 
   async clearAllTabs() {

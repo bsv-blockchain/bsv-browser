@@ -992,29 +992,12 @@ function Browser() {
       `)
     }
 
-    // Log navigation state changes with back/forward capabilities
-    console.log('🌐 Navigation State Change:', {
-      url: navState.url,
-      title: navState.title,
-      loading: navState.loading,
-      canGoBack: navState.canGoBack,
-      canGoForward: navState.canGoForward,
-      timestamp: new Date().toISOString()
-    })
-
     // Make sure we're updating the correct tab's navigation state
     tabStore.handleNavigationStateChange(activeTab.id, navState)
 
     if (!addressEditing.current) setAddressText(navState.url)
 
     if (!navState.loading && navState.url !== kNEW_TAB_URL) {
-      console.log('📄 Webpage Loaded:', {
-        url: navState.url,
-        title: navState.title,
-        canGoBack: navState.canGoBack,
-        canGoForward: navState.canGoForward,
-        timestamp: new Date().toISOString()
-      })
 
       pushHistory({
         title: navState.title || navState.url,
@@ -2330,30 +2313,9 @@ const BottomToolbar = ({
   const handleStarPress = useCallback(() => toggleStarDrawer(true), [toggleStarDrawer])
   const handleTabsPress = useCallback(() => setShowTabsView(true), [setShowTabsView])
 
-  // Debug: Log activeTab state on every render
-  useEffect(() => {
-    console.log('🔧 BottomToolbar activeTab state:', {
-      id: activeTab.id,
-      url: activeTab.url,
-      canGoBack: activeTab.canGoBack,
-      canGoForward: activeTab.canGoForward,
-      isNewTab: activeTab.url === kNEW_TAB_URL,
-      kNEW_TAB_URL: kNEW_TAB_URL,
-      backButtonDisabled: !activeTab.canGoBack || activeTab.url === kNEW_TAB_URL
-    })
-  })
-
   // Calculate disabled state
   const isBackDisabled = !activeTab.canGoBack || activeTab.url === kNEW_TAB_URL
   const isForwardDisabled = !activeTab.canGoForward || activeTab.url === kNEW_TAB_URL
-
-  console.log('🔧 BottomToolbar Button States:', {
-    isBackDisabled,
-    isForwardDisabled,
-    canGoBack: activeTab.canGoBack,
-    url: activeTab.url,
-    isNewTab: activeTab.url === kNEW_TAB_URL
-  })
 
   return (
     <View

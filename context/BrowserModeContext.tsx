@@ -91,10 +91,8 @@ export const BrowserModeProvider: React.FC<BrowserModeProviderProps> = ({ childr
         // Load from stored preference
         try {
           const storedMode = await getItem('browserMode')
-          console.log('[BrowserMode] Loaded stored mode:', storedMode)
-          setIsWeb2Mode(true)
+          setIsWeb2Mode(false)
         } catch (error) {
-          console.log('[BrowserMode] No stored browser mode, defaulting to web3')
           setIsWeb2Mode(true)
         }
       }
