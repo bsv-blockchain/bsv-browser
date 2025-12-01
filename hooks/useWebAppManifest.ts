@@ -13,15 +13,6 @@ interface WebAppManifest {
     sizes: string
     type: string
   }>
-  shortcuts?: Array<{
-    name: string
-    url: string
-    description?: string
-    icons?: Array<{
-      src: string
-      sizes: string
-    }>
-  }>
   babbage?: {
     protocolPermissions?: {
       [key: string]: string

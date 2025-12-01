@@ -90,7 +90,7 @@ export default function RootLayout() {
                     <Stack
                       screenOptions={{
                         animation: 'slide_from_right',
-                        headerShown: false
+                        headerShown: false,
                       }}
                     >
                       <Stack.Screen name="index" />
@@ -99,6 +99,7 @@ export default function RootLayout() {
                       <Stack.Screen name="auth/phone" />
                       <Stack.Screen name="auth/otp" />
                       <Stack.Screen name="auth/password" />
+                      <Stack.Screen name="not-found" />
                     </Stack>
                   </ThemeProvider>
                 </BrowserModeProvider>

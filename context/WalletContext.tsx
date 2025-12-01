@@ -773,10 +773,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   ])
 
   const buildWalletFromMnemonic = useCallback(async () => {
-    // TEMPORARILY DISABLED FOR CRASH DEBUGGING
-    logWithTimestamp(F, 'buildWalletFromMnemonic called but DISABLED for crash debugging')
-    return
-
     // Skip if wallet already built or not in noWAB mode
     if (walletBuilt || selectedWabUrl !== 'noWAB') {
       return

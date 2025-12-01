@@ -20,6 +20,7 @@ import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useWallet } from '@/context/WalletContext'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { countryCodes } from '@/utils/countryCodes'
+import { WalletAuthenticationManager } from '@bsv/wallet-toolbox-mobile'
 
 export default function PhoneScreen() {
   const { t } = useTranslation()
@@ -55,7 +56,8 @@ export default function PhoneScreen() {
     setLoading(true)
 
     try {
-      await managers!.walletManager!.startAuth({
+      const cwiManager = managers!.walletManager as WalletAuthenticationManager
+      await cwiManager.startAuth({
         phoneNumber: formattedNumber
       })
 

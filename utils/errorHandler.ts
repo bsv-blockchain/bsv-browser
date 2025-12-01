@@ -19,6 +19,12 @@ export function installGlobalErrorHandler() {
 
   console.log('[ErrorHandler] Installing global error handler')
 
+  // Check if ErrorUtils is available and has getGlobalHandler
+  if (!ErrorUtils || typeof ErrorUtils.getGlobalHandler !== 'function') {
+    console.warn('[ErrorHandler] ErrorUtils.getGlobalHandler not available yet, skipping error handler installation')
+    return
+  }
+
   // Store the original error handler
   const originalHandler = ErrorUtils.getGlobalHandler()
 
