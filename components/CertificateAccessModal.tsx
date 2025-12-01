@@ -25,7 +25,13 @@ const CertificateAccessModal = () => {
   // Handle denying the top request in the queue
   const handleDeny = async () => {
     if (certificateRequests.length > 0) {
-      managers.permissionsManager?.denyPermission(certificateRequests[0].requestID)
+      try {
+        await managers.permissionsManager?.denyPermission(certificateRequests[0].requestID)
+      } catch (error) {
+        console.log({ error })
+        // User denial is expected - this is a normal user choice, not an error condition
+        console.log('User denied certificate access')
+      }
     }
     advanceCertificateQueue()
     setCertificateAccessModalOpen(false)

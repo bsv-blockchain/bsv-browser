@@ -14,7 +14,12 @@ const BasketAccessModal = () => {
   // Handle denying the top request in the queue
   const handleDeny = async () => {
     if (basketRequests.length > 0) {
-      managers.permissionsManager?.denyPermission(basketRequests[0].requestID)
+      try {
+        await managers.permissionsManager?.denyPermission(basketRequests[0].requestID)
+      } catch (error) {
+        // User denial is expected - this is a normal user choice, not an error condition
+        console.log('User denied basket access')
+      }
     }
     advanceBasketQueue()
     setBasketAccessModalOpen(false)

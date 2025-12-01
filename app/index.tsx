@@ -954,6 +954,7 @@ function Browser() {
         sendResponseToWebView(msg.id, response)
       } catch (error) {
         console.error('Error processing wallet API call:', msg.call, error)
+        sendResponseToWebView(msg.id, { error: error?.message || 'unknown error' })
       }
     },
     [activeTab, wallet, routeWebViewMessage, t]

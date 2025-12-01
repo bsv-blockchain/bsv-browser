@@ -20,7 +20,13 @@ const SpendingAuthorizationModal = () => {
   // Handle denying the request
   const handleDeny = async () => {
     if (spendingRequests.length > 0) {
-      managers.permissionsManager?.denyPermission(spendingRequests[0].requestID)
+      try {
+        await managers.permissionsManager?.denyPermission(spendingRequests[0].requestID)
+      } catch (error) {
+        console.log({ error })
+        // User denial is expected - this is a normal user choice, not an error condition
+        console.log('User denied spending authorization')
+      }
       advanceSpendingQueue()
     }
     // Close the modal
