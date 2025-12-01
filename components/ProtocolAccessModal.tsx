@@ -36,8 +36,8 @@ const ProtocolAccessModal = () => {
   const { protocolID, originator, description, renewal, protocolSecurityLevel } = protocolRequests[0]
 
   return (
-    <Modal visible={protocolAccessModalOpen} animationType="slide" transparent={true} onRequestClose={handleDeny}>
-      <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
+    <Modal visible={protocolAccessModalOpen} animationType="fade" transparent={true} onRequestClose={handleDeny}>
+      <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.69)' }]}>
         <View style={[styles.modalContent, themeStyles.card]}>
           {/* Title */}
           <Text style={[styles.title, themeStyles.text]}>

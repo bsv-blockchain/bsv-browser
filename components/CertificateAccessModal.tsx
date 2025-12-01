@@ -48,8 +48,8 @@ const CertificateAccessModal = () => {
     certificateRequests[0] as CertificateAccessRequest
 
   return (
-    <Modal visible={certificateAccessModalOpen} animationType="slide" transparent={true} onRequestClose={handleDeny}>
-      <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
+    <Modal visible={certificateAccessModalOpen} animationType="fade" transparent={true} onRequestClose={handleDeny}>
+      <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.69)' }]}>
         <View style={[styles.modalContent, themeStyles.card]}>
           <ScrollView>
             {/* Title */}
