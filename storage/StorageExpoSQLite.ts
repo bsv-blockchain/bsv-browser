@@ -35,6 +35,7 @@ export class StorageExpoSQLite {
   private dbName: string
   private _settings: TableSettings | null = null
   private whenLastAccess: Date = new Date()
+  private _services: any = null // WalletServices from @bsv/sdk
 
   // All table names
   readonly allTables = [
@@ -354,5 +355,50 @@ export class StorageExpoSQLite {
     booleanFields: string[] = []
   ): T[] {
     return entities.map(entity => this.validateEntity(entity, dateFields, booleanFields))
+  }
+
+  // ============================================================================
+  // WalletStorageProvider interface methods
+  // ============================================================================
+
+  /**
+   * Set the services instance for blockchain operations
+   */
+  setServices(services: any): void {
+    this._services = services
+  }
+
+  /**
+   * Get the services instance for blockchain operations
+   */
+  getServices(): any {
+    if (!this._services) {
+      throw new Error('Services not initialized. Call setServices() first.')
+    }
+    return this._services
+  }
+
+  /**
+   * Initialize backend services - required for wallet storage provider
+   * This method sets up the necessary blockchain services for the storage
+   */
+  async initializeBackendServices(): Promise<void> {
+    // Verify database is ready
+    await this.verifyDB()
+
+    // Services should already be set via setServices()
+    if (!this._services) {
+      throw new Error('Services must be set before initializing backend services')
+    }
+
+    console.log('[StorageExpoSQLite] Backend services initialized')
+  }
+
+  /**
+   * Check if this is a storage provider (vs a remote storage client)
+   * @returns true since this is a local storage provider
+   */
+  isStorageProvider(): boolean {
+    return true
   }
 }

@@ -33,6 +33,7 @@ import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { router } from 'expo-router'
 import { logWithTimestamp } from '@/utils/logging'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
+import { StorageExpoSQLite } from '@/storage'
 
 
 // -----
@@ -591,9 +592,29 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         // Check if user selected local storage
         if (selectedStorageUrl === 'local') {
           console.log('[WalletContext] Using local SQLite storage')
-          // For local storage, we use the built-in storage manager without remote storage
-          // The WalletStorageManager already provides local storage capabilities
-          // We don't add a remote storage client in this case
+
+          // Create StorageExpoSQLite instance for local storage
+          const phoneStorage = new StorageExpoSQLite({ chain })
+
+          // Initialize the storage with identity key
+          const identityKey = keyDeriver.identityKey
+          await phoneStorage.migrate('bsv-wallet', identityKey)
+
+          // Set services on the storage
+          phoneStorage.setServices(services)
+
+          // Initialize backend services
+          await phoneStorage.initializeBackendServices()
+
+          // Make storage available and verify initialization
+          await phoneStorage.makeAvailable()
+
+          console.log('[WalletContext] Local SQLite storage initialized successfully')
+
+          // Store the phoneStorage instance for direct access
+          // Note: StorageExpoSQLite is initialized and available for use
+          // The wallet will use WalletStorageManager's default behavior for local storage
+          ;(window as any).phoneStorage = phoneStorage
         } else {
           console.log('[WalletContext] Using remote storage:', selectedStorageUrl)
           const client = new StorageClient(wallet, selectedStorageUrl)
