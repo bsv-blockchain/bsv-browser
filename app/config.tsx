@@ -87,18 +87,22 @@ const ConfigScreen = () => {
       await setItem('finalConfig', JSON.stringify(wabConfig))
 
       // Navigate to appropriate auth screen based on method
-      await handleConfigured()
+      await handleConfigured(wabConfig)
     } else {
       Alert.alert(t('configuration_error'), t('failed_to_save_config'))
       resetCurrentConfig()
     }
   }
 
-  const handleConfigured = async () => {
+  const handleConfigured = async (config?: WABConfig) => {
     // After successful config, proceed with auth
+    // Use the provided config if available, otherwise fall back to context state
+    const wabUrl = config?.wabUrl ?? selectedWabUrl
+    const method = config?.method ?? selectedMethod
+
     try {
       // Check if this is a self-custodial (noWAB) setup
-      if (selectedWabUrl === 'noWAB' || selectedMethod === 'mnemonic') {
+      if (wabUrl === 'noWAB' || method === 'mnemonic') {
         console.log('[Config] Self-custodial wallet configured, routing to mnemonic screen')
         router.push('/auth/mnemonic')
         return
