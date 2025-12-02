@@ -15,7 +15,7 @@ import SpendingAuthorizationModal from '@/components/SpendingAuthorizationModal'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
 import DefaultBrowserPrompt from '@/components/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/utils/translations'
-import { BrowserModeProvider } from '@/context/BrowserModeContext'
+import { BrowserModeProvider, useBrowserMode } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/Web3BenefitsModalHandler'
 import { useWallet } from '@/context/WalletContext'
 import '@/utils/translations'
@@ -53,6 +53,7 @@ function DeepLinkHandler() {
 const DebuggerDisplay = () => {
   const [toggle, setToggle] = React.useState(false);
   const v = useWallet()
+  const b = useBrowserMode()
   if (!toggle) return <>
   <Text onPress={() => setToggle(true)} style={{ top: 100, backgroundColor: 'yellow', position: 'absolute', left: 0, padding: 10, zIndex: 1000,  }}>SHOW</Text>
   </>;
@@ -60,7 +61,7 @@ const DebuggerDisplay = () => {
   <>
     <Text onPress={() => setToggle(false)} style={{ position: 'absolute', top: 100, left: 0, backgroundColor: 'red', padding: 10, zIndex: 1000 }}>HIDE</Text>
     <Text className="text-xs text-gray-500" style={{ position: 'absolute', top: 150, left: 0, zIndex: 1000, backgroundColor: 'white', padding: 10 }}>
-      {JSON.stringify({ wab: v.selectedWabUrl, storage: v.selectedStorageUrl, configStatus: v.configStatus }, null, 2)}
+      {JSON.stringify({ wab: v.selectedWabUrl, storage: v.selectedStorageUrl, configStatus: v.configStatus, browserMode: b }, null, 2)}
     </Text>
   </>
   )

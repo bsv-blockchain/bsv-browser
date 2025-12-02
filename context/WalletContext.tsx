@@ -691,6 +691,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // Load snapshot function
   const loadWalletSnapshot = useCallback(
     async (walletManager: WalletAuthenticationManager) => {
+      // Only load snapshot if wallet is properly configured
+      if (configStatus !== 'configured') {
+        logWithTimestamp(F, 'Skipping snapshot load - wallet not configured')
+        return walletManager
+      }
+
       const snap = await getSnap()
       if (snap) {
         try {
@@ -709,7 +715,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       }
       return walletManager
     },
-    [deleteSnap, getSnap]
+    [deleteSnap, getSnap, configStatus]
   )
 
   // Watch for wallet authentication after snapshot is loaded
@@ -720,17 +726,21 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       if (managers?.walletManager?.authenticated && snap) {
         setSnapshotLoaded(true)
         logWithTimestamp(F, 'Authentication confirmed, snapshot loaded')
+      } else if (!snap && snapshotLoaded) {
+        // If snap was deleted (e.g., during logout), reset snapshotLoaded
+        setSnapshotLoaded(false)
+        logWithTimestamp(F, 'Snapshot no longer exists, resetting snapshotLoaded state')
       }
       logWithTimestamp(F, 'Authentication state check complete')
     })()
-  }, [managers?.walletManager?.authenticated])
+  }, [managers?.walletManager?.authenticated, snapshotLoaded, getSnap])
 
   // ---- Build the wallet manager once all required inputs are ready.
   useEffect(() => {
     if (
       passwordRetriever &&
       recoveryKeySaver &&
-      configStatus !== 'editing' && // either user configured or snapshot exists
+      configStatus === 'configured' && // only build after user explicitly configures
       !walletBuilt && // build only once
       selectedWabUrl !== 'noWAB' // Skip for noWAB mode (handled by separate useEffect)
       ) {
@@ -807,8 +817,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       return
     }
 
-    // Also skip if configuration is still being edited
-    if (configStatus === 'editing') {
+    // Only build if wallet is properly configured
+    if (configStatus !== 'configured') {
       return
     }
 
@@ -904,6 +914,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       logWithTimestamp(F, 'Managers reset')
 
       // Reset configuration state
+      // Set to 'initial' - wallet building requires 'configured' status
       setConfigStatus('initial')
       setSnapshotLoaded(false)
       setWalletBuilt(false)
@@ -913,22 +924,22 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       // Clear recent apps (web3-specific data)
       setRecentApps([])
 
-      // Set mode back to web2 when logging out
-      setWeb2Mode(true)
+      // Set to web2 mode after logout so user can browse normally
+      // When they try to use web3 features, they'll be prompted to configure
+      await setWeb2Mode(true)
 
       // Clear web3-related data from localStorage to ensure clean state
       try {
-        await setItem('browserMode', 'null')
         await setItem('recentApps', JSON.stringify([])) // Clear recent web3 apps
       } catch (error) {
-        console.warn('Failed to clear browser mode from localStorage:', error)
+        console.warn('Failed to clear recent apps from localStorage:', error)
       }
 
       router.dismissAll()
-      router.push('/config')
-      logWithTimestamp(F, 'Logout completed, navigating to config')
+      router.push('/')
+      logWithTimestamp(F, 'Logout completed, navigating to home')
     })
-  }, [deleteSnap, setWeb2Mode, setItem])
+  }, [deleteSnap, setItem, deleteMnemonic, setWeb2Mode])
 
   const resolveAppDataFromDomain = async ({ appDomains }: { appDomains: string[] }) => {
     const dataPromises = appDomains.map(async (domain, index) => {
