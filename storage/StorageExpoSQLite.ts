@@ -271,7 +271,8 @@ export class StorageExpoSQLite {
 
     for (const [key, value] of Object.entries(partial)) {
       if (value !== undefined && value !== null) {
-        conditions.push(`${key} = ?`)
+        // Escape column name with double quotes to handle reserved keywords
+        conditions.push(`"${key}" = ?`)
         values.push(value)
       }
     }

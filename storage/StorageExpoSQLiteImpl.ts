@@ -328,7 +328,7 @@ Object.assign(StorageExpoSQLite.prototype, {
     const prepared = (this as any).prepareEntity(syncState)
 
     const result = await db.runAsync(
-      `INSERT INTO sync_states (created_at, updated_at, userId, storageIdentityKey, storageName, status, refNum, init, when, error)
+      `INSERT INTO sync_states (created_at, updated_at, userId, storageIdentityKey, storageName, status, refNum, init, "when", error)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         prepared.created_at,

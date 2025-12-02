@@ -274,7 +274,7 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       status TEXT NOT NULL,
       refNum TEXT NOT NULL UNIQUE,
       init TEXT,
-      when TEXT,
+      "when" TEXT,
       error TEXT,
       FOREIGN KEY (userId) REFERENCES users(userId)
     );
