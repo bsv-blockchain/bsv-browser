@@ -146,6 +146,7 @@ const resources = {
       ask: 'Ask',
       deny: 'Deny',
       later: 'Later',
+      show: 'Show',
 
       // Navigation actions
       switch_to_mobile_view: 'Switch to Mobile View',
@@ -190,6 +191,16 @@ const resources = {
       wallet_configuration: 'Wallet Configuration',
       wallet_storage_url: 'Wallet Storage URL',
       logout_to_change_urls: 'You need to logout to change these URLs.',
+
+      // Recovery Phrase (Mnemonic)
+      recovery_phrase: 'Mnemonic',
+      recovery_phrase_description: 'Save these words in order to recover your wallet later',
+      show_recovery_phrase: 'Reveal Mnemonic',
+      hide_recovery_phrase: 'Hide Mnemonic',
+      recovery_phrase_warning: 'Warning: Anyone with access to your recovery phrase can access your funds. Make sure you are in a private location before revealing it.',
+      recovery_phrase_security_warning: 'Never share your recovery phrase with anyone. Store it securely offline. Anyone with these words can access your wallet and funds.',
+      no_recovery_phrase_found: 'No recovery phrase found',
+      failed_to_retrieve_recovery_phrase: 'Failed to retrieve recovery phrase',
 
       // Security
       security: 'Security',

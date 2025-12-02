@@ -611,10 +611,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
           console.log('[WalletContext] Local SQLite storage initialized successfully')
 
-          // Store the phoneStorage instance for direct access
-          // Note: StorageExpoSQLite is initialized and available for use
-          // The wallet will use WalletStorageManager's default behavior for local storage
-          ;(window as any).phoneStorage = phoneStorage
+          // Add the local storage provider to wallet storage manager
+          try {
+            await storageManager.addWalletStorageProvider(phoneStorage as any)
+            console.log('[WalletContext] Local storage provider added to wallet')
+          } catch (error) {
+            console.error('[WalletContext] Failed to add local storage provider:', error)
+          }
         } else {
           console.log('[WalletContext] Using remote storage:', selectedStorageUrl)
           const client = new StorageClient(wallet, selectedStorageUrl)

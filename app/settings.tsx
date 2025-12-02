@@ -1,16 +1,20 @@
-import React from 'react'
-import { View, Text, SafeAreaView, TouchableOpacity, ScrollView } from 'react-native'
+import React, { useState } from 'react'
+import { View, Text, SafeAreaView, TouchableOpacity, ScrollView, Alert } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme, ThemeMode } from '@/context/theme/ThemeContext'
 import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { Ionicons } from '@expo/vector-icons'
 import { useWallet } from '@/context/WalletContext'
+import { useLocalStorage } from '@/context/LocalStorageProvider'
 
 export default function SettingsScreen() {
   const { t } = useTranslation()
   const { colors, mode, setThemeMode } = useTheme()
   const styles = useThemeStyles()
-  const { updateSettings, settings, logout, selectedWabUrl, selectedStorageUrl, selectedNetwork } = useWallet()
+  const { updateSettings, settings, logout, selectedWabUrl, selectedStorageUrl, selectedNetwork, selectedMethod } = useWallet()
+  const { getMnemonic } = useLocalStorage()
+  const [showMnemonic, setShowMnemonic] = useState(false)
+  const [mnemonic, setMnemonic] = useState<string | null>(null)
 
   // Handle theme mode change
   const handleThemeChange = async (newMode: ThemeMode) => {
@@ -27,6 +31,47 @@ export default function SettingsScreen() {
       })
     }
   }
+
+  // Handle showing mnemonic with confirmation
+  const handleShowMnemonic = async () => {
+    Alert.alert(
+      t('show_recovery_phrase'),
+      t('recovery_phrase_warning'),
+      [
+        {
+          text: t('cancel'),
+          style: 'cancel'
+        },
+        {
+          text: t('show'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const mnemonicValue = await getMnemonic()
+              if (mnemonicValue) {
+                setMnemonic(mnemonicValue)
+                setShowMnemonic(true)
+              } else {
+                Alert.alert(t('error'), t('no_recovery_phrase_found'))
+              }
+            } catch (error) {
+              console.error('Error retrieving mnemonic:', error)
+              Alert.alert(t('error'), t('failed_to_retrieve_recovery_phrase'))
+            }
+          }
+        }
+      ]
+    )
+  }
+
+  // Handle hiding mnemonic
+  const handleHideMnemonic = () => {
+    setShowMnemonic(false)
+    setMnemonic(null)
+  }
+
+  // Check if we're in noWAB mode (mnemonic/self-custodial mode)
+  const isNoWABMode = selectedWabUrl === 'noWAB' || selectedMethod === 'mnemonic'
 
   return (
     <SafeAreaView style={styles.container}>
@@ -119,6 +164,102 @@ export default function SettingsScreen() {
               </View>
             </TouchableOpacity>
           </View>
+
+          {/* Recovery Phrase Section (only for mnemonic/noWAB mode) */}
+          {isNoWABMode && (
+            <View style={styles.card}>
+              <Text style={[styles.text, { fontWeight: 'bold', fontSize: 18, marginBottom: 15 }]}>
+                {t('recovery_phrase')}
+              </Text>
+
+              <Text style={[styles.textSecondary, { fontSize: 13, marginBottom: 15 }]}>
+                {t('recovery_phrase_description')}
+              </Text>
+
+              {!showMnemonic ? (
+                <TouchableOpacity
+                  style={[
+                    styles.row,
+                    {
+                      padding: 15,
+                      borderRadius: 8,
+                      backgroundColor: colors.secondary + '20',
+                      justifyContent: 'center'
+                    }
+                  ]}
+                  onPress={handleShowMnemonic}
+                >
+                  <Ionicons name="eye-outline" size={24} color={colors.secondary} style={{ marginRight: 10 }} />
+                  <Text style={[styles.text, { color: colors.secondary }]}>{t('show_recovery_phrase')}</Text>
+                </TouchableOpacity>
+              ) : (
+                <View>
+                  {/* Mnemonic Display */}
+                  <View
+                    style={{
+                      padding: 15,
+                      borderRadius: 8,
+                      backgroundColor: colors.paperBackground,
+                      borderWidth: 2,
+                      borderColor: colors.secondary,
+                      marginBottom: 15
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.text,
+                        {
+                          fontSize: 16,
+                          lineHeight: 24,
+                          fontFamily: 'monospace',
+                          textAlign: 'center'
+                        }
+                      ]}
+                      selectable
+                    >
+                      {mnemonic}
+                    </Text>
+                  </View>
+
+                  {/* Warning Message */}
+                  <View
+                    style={{
+                      padding: 12,
+                      borderRadius: 8,
+                      backgroundColor: colors.error + '10',
+                      marginBottom: 15,
+                      flexDirection: 'row',
+                      alignItems: 'flex-start'
+                    }}
+                  >
+                    <Ionicons name="warning-outline" size={20} color={colors.error} style={{ marginRight: 8, marginTop: 2 }} />
+                    <Text style={[styles.textSecondary, { fontSize: 13, flex: 1 }]}>
+                      {t('recovery_phrase_security_warning')}
+                    </Text>
+                  </View>
+
+                  {/* Hide Button */}
+                  <TouchableOpacity
+                    style={[
+                      styles.row,
+                      {
+                        padding: 15,
+                        borderRadius: 8,
+                        backgroundColor: colors.paperBackground,
+                        borderWidth: 1,
+                        borderColor: colors.inputBorder,
+                        justifyContent: 'center'
+                      }
+                    ]}
+                    onPress={handleHideMnemonic}
+                  >
+                    <Ionicons name="eye-off-outline" size={24} color={colors.textPrimary} style={{ marginRight: 10 }} />
+                    <Text style={styles.text}>{t('hide_recovery_phrase')}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Theme Section */}
           <View style={styles.card}>

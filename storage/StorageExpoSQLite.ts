@@ -402,4 +402,219 @@ export class StorageExpoSQLite {
   isStorageProvider(): boolean {
     return true
   }
+
+  // ============================================================================
+  // WalletStorageProvider list methods (required by wallet)
+  // ============================================================================
+
+  /**
+   * List outputs for the authenticated user
+   * Required by wallet for balance and UTXO operations
+   */
+  async listOutputs(auth: any, vargs: any): Promise<any> {
+    const db = await this.verifyDB()
+    const userId = auth.userId
+
+    if (!userId) {
+      throw new Error('auth.userId is required for listOutputs')
+    }
+
+    const limit = vargs.limit || 10
+    const offset = vargs.offset || 0
+    const basket = vargs.basket
+
+    // Build query for outputs
+    let query = `
+      SELECT o.*, t.txid, t.status as txStatus
+      FROM outputs o
+      INNER JOIN transactions t ON o.transactionId = t.transactionId
+      WHERE o.userId = ?
+    `
+    const params: any[] = [userId]
+
+    // Filter by basket if specified
+    if (basket) {
+      const basketResult = await db.getAllAsync(
+        'SELECT basketId FROM output_baskets WHERE userId = ? AND name = ?',
+        [userId, basket]
+      ) as any[]
+      if (basketResult.length === 0) {
+        return { totalOutputs: 0, outputs: [] }
+      }
+      query += ' AND o.basketId = ?'
+      params.push(basketResult[0].basketId)
+    }
+
+    // Filter by spendable (exclude spent outputs by default)
+    if (!vargs.includeSpent) {
+      query += ' AND o.spendable = 1'
+    }
+
+    // Filter by transaction status (only completed, unproven, nosend)
+    query += ' AND t.status IN (?, ?, ?)'
+    params.push('completed', 'unproven', 'nosend')
+
+    // Get total count first
+    const countQuery = query.replace('SELECT o.*, t.txid, t.status as txStatus', 'SELECT COUNT(*) as total')
+    const countResult = await db.getAllAsync(countQuery, params) as any[]
+    const totalOutputs = countResult[0]?.total || 0
+
+    // Add pagination
+    query += ' LIMIT ? OFFSET ?'
+    params.push(limit, offset)
+
+    // Execute query
+    const rows = await db.getAllAsync(query, params) as any[]
+
+    // Transform to WalletOutput format
+    const outputs = rows.map((row: any) => {
+      const output: any = {
+        satoshis: Number(row.satoshis),
+        spendable: !!row.spendable,
+        outpoint: row.outpoint
+      }
+
+      if (vargs.includeCustomInstructions && row.customInstructions) {
+        output.customInstructions = row.customInstructions
+      }
+
+      return output
+    })
+
+    return {
+      totalOutputs,
+      outputs
+    }
+  }
+
+  /**
+   * List actions for the authenticated user
+   * Required by wallet for transaction history
+   */
+  async listActions(auth: any, vargs: any): Promise<any> {
+    const db = await this.verifyDB()
+    const userId = auth.userId
+
+    if (!userId) {
+      throw new Error('auth.userId is required for listActions')
+    }
+
+    const limit = vargs.limit || 10
+    const offset = vargs.offset || 0
+
+    // Build query for transactions (actions)
+    let query = `
+      SELECT t.*
+      FROM transactions t
+      WHERE t.userId = ?
+    `
+    const params: any[] = [userId]
+
+    // Filter by labels if specified
+    if (vargs.labels && vargs.labels.length > 0) {
+      query += ` AND t.transactionId IN (
+        SELECT tlm.transactionId FROM tx_labels_map tlm
+        INNER JOIN tx_labels tl ON tlm.txLabelId = tl.txLabelId
+        WHERE tl.label IN (${vargs.labels.map(() => '?').join(',')})
+      )`
+      params.push(...vargs.labels)
+    }
+
+    // Order by created_at descending (most recent first)
+    query += ' ORDER BY t.created_at DESC'
+
+    // Get total count first
+    const countQuery = query.replace('SELECT t.*', 'SELECT COUNT(*) as total').replace('ORDER BY t.created_at DESC', '')
+    const countResult = await db.getAllAsync(countQuery, params) as any[]
+    const totalActions = countResult[0]?.total || 0
+
+    // Add pagination
+    query += ' LIMIT ? OFFSET ?'
+    params.push(limit, offset)
+
+    // Execute query
+    const rows = await db.getAllAsync(query, params) as any[]
+
+    // Transform to action format
+    const actions = rows.map((row: any) => ({
+      txid: row.txid || row.reference,
+      satoshis: Number(row.satoshis),
+      status: row.status,
+      isOutgoing: !!row.isOutgoing,
+      description: row.description,
+      version: Number(row.version),
+      lockTime: Number(row.lockTime),
+      reference: row.reference
+    }))
+
+    return {
+      totalActions,
+      actions
+    }
+  }
+
+  /**
+   * List certificates for the authenticated user
+   * Required by wallet for identity operations
+   */
+  async listCertificates(auth: any, vargs: any): Promise<any> {
+    const db = await this.verifyDB()
+    const userId = auth.userId
+
+    if (!userId) {
+      throw new Error('auth.userId is required for listCertificates')
+    }
+
+    const limit = vargs.limit || 10
+    const offset = vargs.offset || 0
+
+    // Build query for certificates
+    let query = `
+      SELECT c.*
+      FROM certificates c
+      WHERE c.userId = ?
+        AND c.isDeleted = 0
+    `
+    const params: any[] = [userId]
+
+    // Filter by certifiers if specified
+    if (vargs.certifiers && vargs.certifiers.length > 0) {
+      query += ` AND c.certifier IN (${vargs.certifiers.map(() => '?').join(',')})`
+      params.push(...vargs.certifiers)
+    }
+
+    // Filter by types if specified
+    if (vargs.types && vargs.types.length > 0) {
+      query += ` AND c.type IN (${vargs.types.map(() => '?').join(',')})`
+      params.push(...vargs.types)
+    }
+
+    // Get total count first
+    const countQuery = query.replace('SELECT c.*', 'SELECT COUNT(*) as total')
+    const countResult = await db.getAllAsync(countQuery, params) as any[]
+    const totalCertificates = countResult[0]?.total || 0
+
+    // Add pagination
+    query += ' LIMIT ? OFFSET ?'
+    params.push(limit, offset)
+
+    // Execute query
+    const rows = await db.getAllAsync(query, params) as any[]
+
+    // Transform to certificate format
+    const certificates = rows.map((row: any) => ({
+      type: row.type,
+      subject: row.subject,
+      serialNumber: row.serialNumber,
+      certifier: row.certifier,
+      revocationOutpoint: row.revocationOutpoint,
+      signature: row.signature,
+      fields: {} // Fields would be loaded separately if needed
+    }))
+
+    return {
+      totalCertificates,
+      certificates
+    }
+  }
 }
