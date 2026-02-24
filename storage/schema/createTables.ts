@@ -2,7 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite'
 
 /**
  * SQL statements to create all wallet storage tables
- * Based on @bsv/wallet-toolbox StorageIdb schema
+ * Schema aligned with @bsv/wallet-toolbox-mobile Table type definitions
  */
 export async function createTables(db: SQLiteDatabase): Promise<void> {
   // Users table
@@ -25,7 +25,7 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       updated_at TEXT NOT NULL,
       txid TEXT NOT NULL UNIQUE,
       height INTEGER NOT NULL,
-      idx INTEGER NOT NULL,
+      "index" INTEGER NOT NULL,
       merklePath BLOB NOT NULL,
       rawTx BLOB NOT NULL,
       blockHash TEXT NOT NULL,
@@ -45,7 +45,9 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       attempts INTEGER NOT NULL DEFAULT 0,
       notified INTEGER NOT NULL DEFAULT 0,
       history TEXT,
+      notify TEXT,
       rawTx BLOB,
+      inputBEEF BLOB,
       batch TEXT,
       provenTxId INTEGER,
       FOREIGN KEY (provenTxId) REFERENCES proven_txs(provenTxId)
@@ -67,6 +69,7 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       subject TEXT NOT NULL,
       serialNumber TEXT NOT NULL,
       certifier TEXT NOT NULL,
+      verifier TEXT,
       revocationOutpoint TEXT NOT NULL,
       signature TEXT NOT NULL,
       isDeleted INTEGER NOT NULL DEFAULT 0,
@@ -102,6 +105,8 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       updated_at TEXT NOT NULL,
       userId INTEGER NOT NULL,
       name TEXT NOT NULL,
+      numberOfDesiredUTXOs INTEGER NOT NULL DEFAULT 144,
+      minimumDesiredUTXOValue INTEGER NOT NULL DEFAULT 32,
       isDeleted INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (userId) REFERENCES users(userId)
     );
@@ -118,15 +123,15 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       userId INTEGER NOT NULL,
       status TEXT NOT NULL,
       reference TEXT NOT NULL UNIQUE,
+      isOutgoing INTEGER NOT NULL DEFAULT 0,
       satoshis INTEGER NOT NULL DEFAULT 0,
       description TEXT,
-      rawTx BLOB,
+      version INTEGER,
+      lockTime INTEGER,
+      txid TEXT,
       inputBEEF BLOB,
-      isOutgoing INTEGER NOT NULL DEFAULT 0,
-      version INTEGER NOT NULL DEFAULT 1,
-      lockTime INTEGER NOT NULL DEFAULT 0,
+      rawTx BLOB,
       provenTxId INTEGER,
-      truncatedExternalInputs TEXT,
       FOREIGN KEY (userId) REFERENCES users(userId),
       FOREIGN KEY (provenTxId) REFERENCES proven_txs(provenTxId)
     );
@@ -134,6 +139,7 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
     CREATE INDEX IF NOT EXISTS idx_transactions_reference ON transactions(reference);
     CREATE INDEX IF NOT EXISTS idx_transactions_provenTxId ON transactions(provenTxId);
+    CREATE INDEX IF NOT EXISTS idx_transactions_txid ON transactions(txid);
   `)
 
   // Commissions table
@@ -145,9 +151,9 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       userId INTEGER NOT NULL,
       transactionId INTEGER NOT NULL UNIQUE,
       satoshis INTEGER NOT NULL,
-      isRedeemed INTEGER NOT NULL DEFAULT 0,
       keyOffset TEXT,
-      lockingScript TEXT,
+      isRedeemed INTEGER NOT NULL DEFAULT 0,
+      lockingScript BLOB,
       FOREIGN KEY (userId) REFERENCES users(userId),
       FOREIGN KEY (transactionId) REFERENCES transactions(transactionId)
     );
@@ -163,21 +169,26 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       updated_at TEXT NOT NULL,
       userId INTEGER NOT NULL,
       transactionId INTEGER NOT NULL,
-      vout INTEGER NOT NULL,
-      satoshis INTEGER NOT NULL,
-      basketId INTEGER NOT NULL,
+      basketId INTEGER,
       spendable INTEGER NOT NULL DEFAULT 1,
       change INTEGER NOT NULL DEFAULT 0,
-      outpoint TEXT NOT NULL,
-      spentBy TEXT,
+      outputDescription TEXT,
+      vout INTEGER NOT NULL,
+      satoshis INTEGER NOT NULL,
       providedBy TEXT NOT NULL,
       purpose TEXT,
+      type TEXT,
+      txid TEXT,
+      senderIdentityKey TEXT,
       derivationPrefix TEXT,
       derivationSuffix TEXT,
-      paymailHandle TEXT,
-      senderIdentityKey TEXT,
-      lockingScript BLOB,
       customInstructions TEXT,
+      spentBy INTEGER,
+      sequenceNumber INTEGER,
+      spendingDescription TEXT,
+      scriptLength INTEGER,
+      scriptOffset INTEGER,
+      lockingScript BLOB,
       FOREIGN KEY (userId) REFERENCES users(userId),
       FOREIGN KEY (transactionId) REFERENCES transactions(transactionId),
       FOREIGN KEY (basketId) REFERENCES output_baskets(basketId)
@@ -272,10 +283,13 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       storageIdentityKey TEXT NOT NULL,
       storageName TEXT NOT NULL,
       status TEXT NOT NULL,
+      init INTEGER NOT NULL DEFAULT 0,
       refNum TEXT NOT NULL UNIQUE,
-      init TEXT,
+      syncMap TEXT,
       "when" TEXT,
-      error TEXT,
+      satoshis INTEGER,
+      errorLocal TEXT,
+      errorOther TEXT,
       FOREIGN KEY (userId) REFERENCES users(userId)
     );
     CREATE INDEX IF NOT EXISTS idx_sync_states_userId ON sync_states(userId);

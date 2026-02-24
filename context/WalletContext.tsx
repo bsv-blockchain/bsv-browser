@@ -28,6 +28,7 @@ import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { router } from 'expo-router'
 import { logWithTimestamp } from '@/utils/logging'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
+import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from '@/storage'
 
 
@@ -553,7 +554,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         await setItem('finalConfig', JSON.stringify({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' }))
       }
     })()
-  }, []) // Only run once on mount
+  }, [configStatus]) // Re-run whenever configStatus resets to 'initial' (e.g. after logout)
 
   // Build wallet function
   const buildWallet = useCallback(
@@ -576,25 +577,16 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         if (selectedStorageUrl === 'local') {
           console.log('[WalletContext] Using local SQLite storage')
 
-          // Create StorageExpoSQLite instance for local storage
-          const phoneStorage = new StorageExpoSQLite({ chain })
-
-          // Initialize the storage with identity key
           const identityKey = keyDeriver.identityKey
-          await phoneStorage.migrate('bsv-wallet', identityKey)
-
-          // Set services on the storage
+          const phoneStorage = new StorageExpoSQLite({
+            ...StorageProvider.createStorageBaseOptions(chain)
+          })
           phoneStorage.setServices(services)
-
-          // Initialize backend services
-          await phoneStorage.initializeBackendServices()
-
-          // Make storage available and verify initialization
-          await phoneStorage.makeAvailable()
+          await phoneStorage.migrate('bsv-wallet', identityKey)
 
           console.log('[WalletContext] Local SQLite storage initialized successfully')
 
-          // Add the local storage provider to wallet storage manager
+          // addWalletStorageProvider calls makeAvailable internally
           try {
             await storageManager.addWalletStorageProvider(phoneStorage as any)
             console.log('[WalletContext] Local storage provider added to wallet')

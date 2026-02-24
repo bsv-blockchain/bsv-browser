@@ -5,6 +5,7 @@
  * until StorageExpoSQLite fully implements the WalletStorageProvider interface
  */
 
+import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from './StorageExpoSQLite'
 
 export interface LocalStorageConfig {
@@ -20,7 +21,9 @@ export async function initializeLocalStorage(config: LocalStorageConfig): Promis
   const { network, identityKey, storageName = 'bsv-wallet' } = config
 
   // Create storage instance
-  const storage = new StorageExpoSQLite({ chain: network })
+  const storage = new StorageExpoSQLite({
+    ...StorageProvider.createStorageBaseOptions(network)
+  })
 
   // Initialize database
   await storage.migrate(storageName, identityKey)
