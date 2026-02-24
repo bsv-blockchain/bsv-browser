@@ -579,7 +579,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
           const identityKey = keyDeriver.identityKey
           const phoneStorage = new StorageExpoSQLite({
-            ...StorageProvider.createStorageBaseOptions(chain)
+            ...StorageProvider.createStorageBaseOptions(chain),
+            identityKey
           })
           phoneStorage.setServices(services)
           await phoneStorage.migrate('bsv-wallet', identityKey)

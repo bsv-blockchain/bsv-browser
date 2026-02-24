@@ -54,9 +54,10 @@ export default function MnemonicScreen() {
   // Share mnemonic as text file via system share dialog
   const handleShareMnemonic = async () => {
     try {
+      const timestamp = new Date().toISOString().slice(0, 10)
       const result = await Share.share({
         message: mnemonic,
-        title: 'BSV Wallet Recovery Phrase'
+        title: `bsv-recovery-phrase-${timestamp}`
       })
       if (result.action === Share.sharedAction) {
         setHasShared(true)

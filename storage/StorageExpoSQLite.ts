@@ -55,6 +55,7 @@ import { listOutputsSql } from './methods/listOutputsSql'
 
 export interface StorageExpoSQLiteOptions extends StorageProviderOptions {
   databaseName?: string
+  identityKey?: string
 }
 
 /**
@@ -68,7 +69,8 @@ export class StorageExpoSQLite extends StorageProvider {
 
   constructor(options: StorageExpoSQLiteOptions) {
     super(options)
-    this.dbName = options.databaseName || `wallet-toolbox-${this.chain}net.db`
+    const keySuffix = (options.identityKey || 'default').slice(-8)
+    this.dbName = options.databaseName || `wallet-${keySuffix}-${this.chain}net.db`
   }
 
   // ============================================================================
