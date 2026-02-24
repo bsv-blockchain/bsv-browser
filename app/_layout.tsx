@@ -2,7 +2,7 @@
 if (typeof AbortSignal !== 'undefined' && !AbortSignal.timeout) {
   AbortSignal.timeout = (ms: number) => {
     const controller = new AbortController()
-    setTimeout(() => controller.abort(new DOMException('TimeoutError', 'TimeoutError')), ms)
+    setTimeout(() => controller.abort(new Error('TimeoutError')), ms)
     return controller.signal
   }
 }
