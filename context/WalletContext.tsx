@@ -581,6 +581,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           const identityKey = keyDeriver.identityKey
           const phoneStorage = new StorageExpoSQLite({
             ...StorageProvider.createStorageBaseOptions(chain),
+            feeModel: { model: 'sat/kb', value: 100 },
             identityKey
           })
           phoneStorage.setServices(services)

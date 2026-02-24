@@ -201,6 +201,9 @@ export class StorageExpoSQLite extends StorageProvider {
         v[key] = Uint8Array.from(val)
       } else if (val === null) {
         v[key] = undefined
+      } else if (typeof val === 'boolean') {
+        // SQLite: always convert booleans to 0/1
+        v[key] = val ? 1 : 0
       }
     }
     this.isDirty = true
@@ -230,6 +233,9 @@ export class StorageExpoSQLite extends StorageProvider {
         v[key] = Uint8Array.from(val)
       } else if (val === null) {
         v[key] = undefined
+      } else if (typeof val === 'boolean') {
+        // SQLite: always convert booleans to 0/1
+        v[key] = val ? 1 : 0
       }
     }
     this.isDirty = true
@@ -1120,6 +1126,7 @@ export class StorageExpoSQLite extends StorageProvider {
       partial: { userId, basketId, spendable: true as any },
       txStatus: txStatus as any
     })
+    console.log(`[StorageExpoSQLite] allocateChangeInput: userId=${userId} basketId=${basketId} target=${targetSatoshis} found ${outputs.length} spendable outputs, satoshis: [${outputs.map(o => o.satoshis).join(',')}]`)
     let output: TableOutput | undefined
     let scores: { output: TableOutput; score: number }[] = []
     for (const o of outputs) {
