@@ -32,6 +32,7 @@ export async function listOutputsSql(
   let basketId: number | undefined
   if (basket) {
     const baskets = await storage.findOutputBaskets({ partial: { userId, name: basket } })
+    console.log(`[listOutputsSql] basket="${basket}" found ${baskets.length} matches${baskets.length > 0 ? ` (id=${baskets[0].basketId})` : ''}`)
     if (baskets.length !== 1) return r
     basketId = baskets[0].basketId
   }
@@ -93,6 +94,18 @@ export async function listOutputsSql(
     tagIds.length > 0 ? tagIds : undefined,
     isQueryModeAll
   )
+  if (outputs.length === 0 && basketId !== undefined) {
+    // Debug: check what's in the basket without filters
+    const db = (storage as any).getDB()
+    const raw = await db.getAllAsync(
+      `SELECT o.outputId, o.spendable, o.satoshis, t.status as txStatus
+       FROM outputs o JOIN transactions t ON o.transactionId = t.transactionId
+       WHERE o.userId = ? AND o.basketId = ?`,
+      [userId, basketId]
+    )
+    console.log(`[listOutputsSql] DEBUG basket=${basketId} raw outputs:`, JSON.stringify(raw))
+  }
+  console.log(`[listOutputsSql] basket="${basket}" specOp=${specOp?.name || 'none'} found ${outputs.length} outputs, satoshis: [${outputs.slice(0, 5).map(o => o.satoshis).join(',')}]`)
 
   // Count total
   if (outputs.length === limit) {

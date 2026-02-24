@@ -9,7 +9,8 @@ import {
   WalletSigner,
   Services,
   PermissionRequest,
-  SimpleWalletManager
+  SimpleWalletManager,
+  Monitor
 } from '@bsv/wallet-toolbox-mobile'
 import { KeyDeriver, PrivateKey } from '@bsv/sdk'
 import {
@@ -646,6 +647,19 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         // Store in window for debugging
         ;(window as any).permissionsManager = permissionsManager
         newManagers.permissionsManager = permissionsManager
+
+        // Start background monitor for transaction status updates (sending → unproven → completed)
+        try {
+          const monitorOptions = Monitor.createDefaultWalletMonitorOptions(chain, storageManager, services)
+          const monitor = new Monitor(monitorOptions)
+          monitor.addDefaultTasks()
+          // startTasks runs in background — don't await (it never resolves until stopTasks)
+          monitor.startTasks().catch(e => console.error('[WalletContext] Monitor error:', e))
+          ;(window as any).walletMonitor = monitor
+          logWithTimestamp(F, 'Monitor started successfully')
+        } catch (error: any) {
+          console.warn('[WalletContext] Failed to start monitor:', error.message)
+        }
 
         setManagers(m => ({ ...m, ...newManagers }))
         logWithTimestamp(F, 'Wallet build completed successfully')
