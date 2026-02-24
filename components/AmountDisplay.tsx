@@ -1,5 +1,4 @@
 import React, { ReactNode, useState, useEffect, useContext } from 'react'
-import { Text, TouchableOpacity, View, StyleSheet, Modal } from 'react-native'
 import { formatSatoshis, formatSatoshisAsFiat, satoshisOptions } from '@/utils/amountFormatHelpers'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -48,18 +47,12 @@ const AmountDisplay: React.FC<Props> = ({ color, abbreviate, showPlus, descripti
     // Shared display format context...
     isFiatPreferred,
     fiatFormatIndex,
-    satsFormatIndex,
-    // display format update methods...
-    toggleIsFiatPreferred,
-    cycleFiatFormat,
-    cycleSatsFormat
+    satsFormatIndex
   } = ctx
 
   const opts = satoshisOptions
   const fiatFormat = opts.fiatFormats[fiatFormatIndex % opts.fiatFormats.length]
   const satsFormat = opts.satsFormats[satsFormatIndex % opts.satsFormats.length]
-
-  const [textColor, setTextColor] = useState(colors.textPrimary)
 
   // Update the satoshis and formattedSatoshis whenever the relevant props change
   useEffect(() => {
@@ -68,27 +61,12 @@ const AmountDisplay: React.FC<Props> = ({ color, abbreviate, showPlus, descripti
       setSatoshis(newSatoshis)
       // Figure out the correctly formatted amount, prefix, and color
       const satoshisToDisplay = formatSatoshis(newSatoshis, showPlus, abbreviate, satsFormat, settingsCurrency)
-      if (description === 'Return to your BSV Balance') {
-        setFormattedSatoshis(`+${satoshisToDisplay}`)
-        setTextColor(colors.success)
-      } else if (description === 'Spend from your BSV Balance') {
-        setFormattedSatoshis(`-${satoshisToDisplay}`)
-        setTextColor(colors.error)
-      } else if (satoshisToDisplay.startsWith('+')) {
-        setFormattedSatoshis(satoshisToDisplay)
-        setTextColor(colors.success)
-      } else if (satoshisToDisplay.startsWith('-')) {
-        setFormattedSatoshis(satoshisToDisplay)
-        setTextColor(colors.error)
-      } else {
-        setFormattedSatoshis(satoshisToDisplay)
-        setTextColor(color || colors.textPrimary)
-      }
+      setFormattedSatoshis(satoshisToDisplay)
     } else {
       setSatoshis(0)
       setFormattedSatoshis('...')
     }
-  }, [children, showPlus, abbreviate, satsFormat, settingsCurrency, settings, colors])
+  }, [children, showPlus, abbreviate, satsFormat, settingsCurrency, settings, colors, description, color])
 
   // When satoshis or the exchange rate context changes, update the formatted fiat amount
   useEffect(() => {
@@ -106,7 +84,7 @@ const AmountDisplay: React.FC<Props> = ({ color, abbreviate, showPlus, descripti
     } else {
       setFormattedFiatAmount('...')
     }
-  }, [satoshis, satoshisPerUSD, fiatFormat, settingsCurrency, settings])
+  }, [satoshis, satoshisPerUSD, fiatFormat, settingsCurrency, settings, eurPerUSD, gbpPerUSD, showFiatAsInteger])
 
   // Mobile component rendering
   if (settingsCurrency) {

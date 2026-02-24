@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'rea
 import { WalletContext } from '../context/WalletContext'
 import { UserContext } from '../context/UserContext'
 import { useThemeStyles } from '../context/theme/useThemeStyles'
-import AppChip from './AppChip'
 import { deterministicColor } from '../utils/deterministicColor'
 
 type CertificateAccessRequest = {
@@ -25,7 +24,13 @@ const CertificateAccessModal = () => {
   // Handle denying the top request in the queue
   const handleDeny = async () => {
     if (certificateRequests.length > 0) {
-      managers.permissionsManager?.denyPermission(certificateRequests[0].requestID)
+      try {
+        await managers.permissionsManager?.denyPermission(certificateRequests[0].requestID)
+      } catch (error) {
+        console.log({ error })
+        // User denial is expected - this is a normal user choice, not an error condition
+        console.log('User denied certificate access')
+      }
     }
     advanceCertificateQueue()
     setCertificateAccessModalOpen(false)
@@ -48,8 +53,8 @@ const CertificateAccessModal = () => {
     certificateRequests[0] as CertificateAccessRequest
 
   return (
-    <Modal visible={certificateAccessModalOpen} animationType="slide" transparent={true} onRequestClose={handleDeny}>
-      <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
+    <Modal visible={certificateAccessModalOpen} animationType="fade" transparent={true} onRequestClose={handleDeny}>
+      <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.69)' }]}>
         <View style={[styles.modalContent, themeStyles.card]}>
           <ScrollView>
             {/* Title */}

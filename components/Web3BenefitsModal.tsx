@@ -2,7 +2,6 @@ import React from 'react'
 import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { useTranslation } from 'react-i18next'
 
 interface Web3BenefitsModalProps {
   visible: boolean
@@ -18,35 +17,6 @@ const Web3BenefitsModal: React.FC<Web3BenefitsModalProps> = ({
   onGoToLogin
 }) => {
   const { colors } = useTheme()
-  const { t } = useTranslation()
-
-  const benefits = [
-    {
-      icon: 'key-outline' as const,
-      title: 'Never login again',
-      description: 'One identity for every Web3 app. No more passwords or sign-ups.'
-    },
-    {
-      icon: 'flash-outline' as const,
-      title: 'Instant everything',
-      description: 'Payments, access, verification - all happen in seconds.'
-    },
-    {
-      icon: 'shield-checkmark-outline' as const,
-      title: 'You own your data',
-      description: 'No companies tracking you or selling your information.'
-    },
-    {
-      icon: 'planet-outline' as const,
-      title: 'Works everywhere',
-      description: 'Access thousands of Web3 apps with the same identity.'
-    },
-    {
-      icon: 'trending-up-outline' as const,
-      title: 'Future-proof',
-      description: 'Be early to the next generation of the internet.'
-    }
-  ]
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onDismiss}>
@@ -76,7 +46,7 @@ const Web3BenefitsModal: React.FC<Web3BenefitsModalProps> = ({
             </Text>
             <Text style={[{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>Data Sovereignty</Text>
             <Text style={[{ fontSize: 14, lineHeight: 20, marginBottom: 8, color: colors.textPrimary }]}>
-             you're in control, with no 3rd party tracking.
+             you&apos;re in control, with no 3rd party tracking.
             </Text>
           </View>
 

@@ -1,6 +1,7 @@
 import { Bookmark } from './types/browser'
 
 export const kNEW_TAB_URL = 'about:blank'
+export const DEFAULT_HOMEPAGE_URL = 'https://home.bsvb.tech'
 
 export const defaultBookmarks: Bookmark[] = [
   // { title: 'BSV Association', url: 'https://bitcoinsv.com', added: 0 },

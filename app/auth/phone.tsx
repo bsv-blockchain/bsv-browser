@@ -20,6 +20,7 @@ import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useWallet } from '@/context/WalletContext'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { countryCodes } from '@/utils/countryCodes'
+import { WalletAuthenticationManager } from '@bsv/wallet-toolbox-mobile'
 
 export default function PhoneScreen() {
   const { t } = useTranslation()
@@ -38,9 +39,9 @@ export default function PhoneScreen() {
   const formattedNumber = `${selectedCountry.dialCode}${phoneNumber}`
 
   // Check if phone number is valid
-  const isValidPhoneNumber = () => {
+  const isValidPhoneNumber = useCallback(() => {
     return phoneNumber.length > 6 // Simple validation, adjust as needed
-  }
+  }, [phoneNumber])
 
   // Handle country selection
   const handleSelectCountry = (country: (typeof countryCodes)[0]) => {
@@ -55,7 +56,8 @@ export default function PhoneScreen() {
     setLoading(true)
 
     try {
-      await managers!.walletManager!.startAuth({
+      const cwiManager = managers!.walletManager as WalletAuthenticationManager
+      await cwiManager.startAuth({
         phoneNumber: formattedNumber
       })
 
@@ -70,7 +72,7 @@ export default function PhoneScreen() {
     } finally {
       setLoading(false)
     }
-  }, [managers?.walletManager, formattedNumber])
+  }, [managers, formattedNumber, isValidPhoneNumber])
 
   // Handle skip login for web2 mode
   const handleSkipLogin = useCallback(() => {
@@ -79,7 +81,7 @@ export default function PhoneScreen() {
       // onContinue - if they still want to skip
       () => {
         router.replace({
-          pathname: '/browser',
+          pathname: '/',
           params: { mode: 'web2' }
         })
       },

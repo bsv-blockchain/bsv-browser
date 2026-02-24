@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -121,6 +121,31 @@ export default function TrustScreen() {
     (settings?.trustSettings?.trustLevel ?? 0) !== trustLevel ||
     !deepEqualCertifierArrays(settings?.trustSettings?.trustedCertifiers || [], trustedEntities)
 
+  // Save to settings (parity with web)
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    try {
+      setSaving(true)
+      await updateSettings(
+        JSON.parse(
+          JSON.stringify({
+            ...settings,
+            trustSettings: {
+              trustLevel,
+              trustedCertifiers: trustedEntities
+            }
+          })
+        )
+      )
+      setSnack(t('trust_updated') || 'Trust relationships updated!')
+      return true
+    } catch (e: any) {
+      setSnack(e?.message || (t('failed_to_save') as string) || 'Failed to save settings')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }, [updateSettings, settings, trustLevel, trustedEntities, t])
+
   // Block leaving the screen if there are unsaved changes
   useEffect(() => {
     const sub = navigation.addListener('beforeRemove', (e: any) => {
@@ -143,32 +168,7 @@ export default function TrustScreen() {
       )
     })
     return sub
-  }, [navigation, settingsNeedsUpdate, trustLevel, trustedEntities])
-
-  // Save to settings (parity with web)
-  const handleSave = async (): Promise<boolean> => {
-    try {
-      setSaving(true)
-      await updateSettings(
-        JSON.parse(
-          JSON.stringify({
-            ...settings,
-            trustSettings: {
-              trustLevel,
-              trustedCertifiers: trustedEntities
-            }
-          })
-        )
-      )
-      setSnack(t('trust_updated') || 'Trust relationships updated!')
-      return true
-    } catch (e: any) {
-      setSnack(e?.message || (t('failed_to_save') as string) || 'Failed to save settings')
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }
+  }, [navigation, settingsNeedsUpdate, trustLevel, trustedEntities, handleSave, t])
 
   // Search
   const filtered = useMemo(() => {
@@ -509,7 +509,7 @@ function AddProviderModal({
 
           {!advanced ? (
             <>
-              <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>Enter the domain name for the provider you'd like to add.</Text>
+              <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>Enter the domain name for the provider you&apos;d like to add.</Text>
               <View style={[styles.inputRow, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>
                 <Ionicons name="globe-outline" size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
                 <TextInput
@@ -538,7 +538,7 @@ function AddProviderModal({
             </>
           ) : (
             <>
-              <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>Directly enter the details for the provider you'd like to add.</Text>
+              <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>Directly enter the details for the provider you&apos;d like to add.</Text>
 
               {/* Name */}
               <View style={[styles.inputRow, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>

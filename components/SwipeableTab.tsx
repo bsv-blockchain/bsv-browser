@@ -1,5 +1,5 @@
 import React, { useRef } from 'react'
-import { Animated, PanResponder, Text, View, StyleSheet } from 'react-native'
+import { Animated, PanResponder, Text, StyleSheet } from 'react-native'
 
 type SwipeableTabProps = {
   tab: string

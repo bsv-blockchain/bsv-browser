@@ -97,8 +97,6 @@ export const RecommendedApps = observer(({
   const { t } = useTranslation()
   const [searchQuery, setSearchQuery] = useState('')
   const [showCustomizeModal, setShowCustomizeModal] = useState(false)
-  const [bookmarkRefresh, setBookmarkRefresh] = useState(0)
-
   // Context menu state
   const [contextMenuVisible, setContextMenuVisible] = useState(false)
   const [selectedApp, setSelectedApp] = useState<App | null>(null)
@@ -147,10 +145,9 @@ export const RecommendedApps = observer(({
 
   const handleAddBookmark = useCallback(() => {
     const activeTab = tabStore.activeTab
-    if (activeTab && activeTab.url && activeTab.url !== 'about:blank' && !activeTab.url.includes('metanet://')) {
+    if (activeTab && activeTab.url && activeTab.url !== 'about:blank') {
       const title = activeTab.title || activeTab.url
       bookmarkStore.addBookmark(title, activeTab.url)
-      setBookmarkRefresh(prev => prev + 1)
       if (onCloseModal) {
         setTimeout(() => {
           onCloseModal()
@@ -195,7 +192,7 @@ export const RecommendedApps = observer(({
     }
 
     return bookmarks
-  }, [bookmarkStore.bookmarks, showOnlyBookmarks, limitBookmarks, bookmarkRefresh])
+  }, [showOnlyBookmarks, limitBookmarks])
 
   // Combined for search functionality
   const allApps = useMemo(() => {
@@ -218,7 +215,7 @@ export const RecommendedApps = observer(({
   const visibleApps = useMemo(() => {
     if (!searchQuery.trim()) return null // Return null when not searching
     return fuse.search(searchQuery).map(r => r.item)
-  }, [allApps, fuse, searchQuery])
+  }, [fuse, searchQuery])
 
   const searchResults = visibleApps
 

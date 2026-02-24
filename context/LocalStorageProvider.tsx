@@ -2,8 +2,6 @@ import React, { createContext, useCallback, useContext, useMemo, useRef, useStat
 import * as SecureStore from 'expo-secure-store'
 import * as LocalAuthentication from 'expo-local-authentication'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import SharedGroupPreferences from 'react-native-shared-group-preferences'
-import { Platform } from 'react-native'
 
 export interface LocalStorageContextType {
   /* non-secure */
@@ -15,6 +13,9 @@ export interface LocalStorageContextType {
   setPassword: (password: string) => Promise<void>
   getPassword: () => Promise<string | null>
   deletePassword: () => Promise<void>
+  setMnemonic: (mnemonic: string) => Promise<void>
+  getMnemonic: () => Promise<string | null>
+  deleteMnemonic: () => Promise<void>
 
   /* general */
   setItem: (item: string, value: string) => Promise<void>
@@ -24,6 +25,7 @@ export interface LocalStorageContextType {
 
 const SNAP_KEY = 'snap'
 const PASSWORD_KEY = 'password'
+const MNEMONIC_KEY = 'mnemonic'
 
 export const LocalStorageContext = createContext<LocalStorageContextType>({
   /* non-secure */
@@ -35,6 +37,9 @@ export const LocalStorageContext = createContext<LocalStorageContextType>({
   setPassword: async () => { },
   getPassword: async () => null,
   deletePassword: async () => { },
+  setMnemonic: async () => { },
+  getMnemonic: async () => null,
+  deleteMnemonic: async () => { },
 
   getItem: AsyncStorage.getItem,
   setItem: AsyncStorage.setItem,
@@ -42,8 +47,6 @@ export const LocalStorageContext = createContext<LocalStorageContextType>({
 })
 
 export const useLocalStorage = () => useContext(LocalStorageContext)
-
-const APP_GROUP = 'group.org.bsvblockchain.metanet'
 
 export default function LocalStorageProvider({ children }: { children: React.ReactNode }) {
   /* --------------------------------- SECURE -------------------------------- */
@@ -61,7 +64,7 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
       if (authenticated) return true
 
       const { success } = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Authenticate to auto-fill your password',
+        promptMessage: 'Decrypt wallet keys',
         cancelLabel: 'Cancel',
         disableDeviceFallback: false
       })
@@ -79,12 +82,8 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   const setSnap = useCallback(async (snap: number[]): Promise<void> => {
     try {
-      const snapAsJSON = typeof snap === 'string' ? snap : JSON.stringify(snap);
-      if (Platform.OS === 'ios') {
-        await SharedGroupPreferences.setItem(SNAP_KEY, snapAsJSON, APP_GROUP)
-      } else {
-        await AsyncStorage.setItem(SNAP_KEY, snapAsJSON);
-      }
+      const snapAsJSON = typeof snap === 'string' ? snap : JSON.stringify(snap)
+      await AsyncStorage.setItem(SNAP_KEY, snapAsJSON)
     } catch (err) {
       console.warn('[setSnap]', err)
     }
@@ -92,12 +91,7 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   const getSnap = useCallback(async (): Promise<number[] | null> => {
     try {
-      let raw: string | null;
-      if (Platform.OS === 'ios') {
-        raw = await SharedGroupPreferences.getItem(SNAP_KEY, APP_GROUP)
-      } else {
-        raw = await AsyncStorage.getItem(SNAP_KEY)
-      }
+      const raw = await AsyncStorage.getItem(SNAP_KEY)
       return raw ? (JSON.parse(raw) as number[]) : null
     } catch (err) {
       console.warn('[getSnap]', err)
@@ -107,15 +101,43 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   const deleteSnap = useCallback(async (): Promise<void> => {
     try {
-      if (Platform.OS === 'ios') {
-        await SharedGroupPreferences.setItem(SNAP_KEY, null, APP_GROUP)
-      } else {
-        await AsyncStorage.removeItem(SNAP_KEY)
-      }
+      await AsyncStorage.removeItem(SNAP_KEY)
     } catch (err) {
       console.warn('[deleteSnap]', err)
     }
   }, [])
+
+  /* -------------------------------- secure --------------------------------- */
+
+  const setMnemonic = useCallback(async (mnemonic: string): Promise<void> => {
+    try {
+      // we don’t force auth for setting—iOS/Android will handle any keychain UI
+      await SecureStore.setItemAsync(MNEMONIC_KEY, mnemonic, {
+        keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
+      })
+    } catch (err) {
+      console.warn('[setMnemonic]', err)
+    }
+  }, [])
+
+  const getMnemonic = useCallback(async (): Promise<string | null> => {
+    try {
+      if (!(await ensureAuth())) return null
+      return await SecureStore.getItemAsync(MNEMONIC_KEY)
+    } catch (err) {
+      console.warn('[getMnemonic]', err)
+      return null
+    }
+  }, [ensureAuth])
+
+  const deleteMnemonic = useCallback(async (): Promise<void> => {
+    try {
+      if (!(await ensureAuth())) return
+      await SecureStore.deleteItemAsync(MNEMONIC_KEY)
+    } catch (err) {
+      console.warn('[deleteMnemonic]', err)
+    }
+  }, [ensureAuth])
 
   /* -------------------------------- secure --------------------------------- */
 
@@ -162,13 +184,16 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
       setPassword,
       getPassword,
       deletePassword,
+      setMnemonic,
+      getMnemonic,
+      deleteMnemonic,
 
       /* general */
       getItem: AsyncStorage.getItem,
       setItem: AsyncStorage.setItem,
       deleteItem: AsyncStorage.removeItem
     }),
-    [setSnap, getSnap, deleteSnap, setPassword, getPassword, deletePassword]
+    [setSnap, getSnap, deleteSnap, setPassword, getPassword, deletePassword, setMnemonic, getMnemonic, deleteMnemonic]
   )
 
   return <LocalStorageContext.Provider value={value}>{children}</LocalStorageContext.Provider>

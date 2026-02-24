@@ -1,6 +1,4 @@
 const F = 'context/WalletContext'
-import 'expo-crypto'
-import 'react-native-get-random-values'
 
 import React, { useState, useEffect, createContext, useMemo, useCallback, useContext } from 'react'
 import {
@@ -8,16 +6,13 @@ import {
   WalletPermissionsManager,
   PrivilegedKeyManager,
   WalletStorageManager,
-  WalletAuthenticationManager,
-  OverlayUMPTokenInteractor,
   WalletSigner,
   Services,
-  StorageClient,
-  TwilioPhoneInteractor,
-  WABClient,
-  PermissionRequest
+  PermissionRequest,
+  SimpleWalletManager,
+  Monitor
 } from '@bsv/wallet-toolbox-mobile'
-import { KeyDeriver, PrivateKey, SHIPBroadcaster, LookupResolver } from '@bsv/sdk'
+import { KeyDeriver, PrivateKey } from '@bsv/sdk'
 import {
   DEFAULT_SETTINGS,
   WalletSettings,
@@ -31,16 +26,20 @@ import { useBrowserMode } from './BrowserModeContext'
 import isImageUrl from '../utils/isImageUrl'
 import parseAppManifest from '../utils/parseAppManifest'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
-import { getApps } from '@/utils/getApps'
 import { router } from 'expo-router'
 import { logWithTimestamp } from '@/utils/logging'
+import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
+import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
+import { StorageExpoSQLite } from '@/storage'
+import { createBtmsModule } from '@bsv/btms-permission-module'
+
 
 // -----
 // Context Types
 // -----
 
 interface ManagerState {
-  walletManager?: WalletAuthenticationManager
+  walletManager?: SimpleWalletManager
   permissionsManager?: WalletPermissionsManager
   settingsManager?: WalletSettingsManager
 }
@@ -57,10 +56,6 @@ export interface WalletContextValue {
   // Logout
   logout: () => void
   adminOriginator: string
-  setPasswordRetriever: (
-    retriever: (reason: string, test: (passwordCandidate: string) => boolean) => Promise<string>
-  ) => void
-  setRecoveryKeySaver: (saver: (key: number[]) => Promise<true>) => void
   snapshotLoaded: boolean
   basketRequests: BasketAccessRequest[]
   certificateRequests: CertificateAccessRequest[]
@@ -79,6 +74,7 @@ export interface WalletContextValue {
   selectedMethod: string
   selectedNetwork: 'main' | 'test'
   setWalletBuilt: (current: boolean) => void
+  buildWalletFromMnemonic: () => Promise<void>
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -88,8 +84,6 @@ export const WalletContext = createContext<WalletContextValue>({
   updateSettings: async () => {},
   logout: () => {},
   adminOriginator: ADMIN_ORIGINATOR,
-  setPasswordRetriever: () => {},
-  setRecoveryKeySaver: () => {},
   snapshotLoaded: false,
   basketRequests: [],
   certificateRequests: [],
@@ -107,7 +101,8 @@ export const WalletContext = createContext<WalletContextValue>({
   selectedStorageUrl: '',
   selectedMethod: '',
   selectedNetwork: 'main',
-  setWalletBuilt: (current: boolean) => {}
+  setWalletBuilt: (current: boolean) => {},
+  buildWalletFromMnemonic: async () => {}
 })
 
 type PermissionType = 'identity' | 'protocol' | 'renewal' | 'basket'
@@ -157,7 +152,7 @@ type SpendingRequest = {
 
 export interface WABConfig {
   wabUrl: string
-  wabInfo: any
+  wabInfo?: any // Optional for noWAB (self-custodial) mode
   method: string
   network: 'main' | 'test'
   storageUrl: string
@@ -174,7 +169,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [recentApps, setRecentApps] = useState<any[]>([])
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
 
-  const { getSnap, deleteSnap, getItem, setItem } = useLocalStorage()
+  const { getSnap, deleteSnap, getItem, setItem, setMnemonic, getMnemonic, deleteMnemonic } = useLocalStorage()
   const { setWeb2Mode } = useBrowserMode()
 
   const {
@@ -271,13 +266,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     },
     [managers.settingsManager]
   )
-
-  // ---- Callbacks for password/recovery/etc.
-  const [passwordRetriever, setPasswordRetriever] =
-    useState<(reason: string, test: (passwordCandidate: string) => boolean) => Promise<string>>()
-  logWithTimestamp(F, 'Password retriever initialized')
-  const [recoveryKeySaver, setRecoveryKeySaver] = useState<(key: number[]) => Promise<true>>()
-  logWithTimestamp(F, 'Recovery key saver initialized')
 
   // Provide a handler for basket-access requests that enqueues them
   const basketAccessCallback = useCallback(
@@ -517,52 +505,64 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [snapshotLoaded, setSnapshotLoaded] = useState<boolean>(false)
   logWithTimestamp(F, 'Snapshot loaded state initialized')
 
-  // For new users: mark configuration complete when WalletConfig is submitted.
+  // Mark configuration complete. Auto-configured for local-only mode.
   const finalizeConfig = (wabConfig: WABConfig): boolean => {
-    const { wabUrl, wabInfo, method, network, storageUrl } = wabConfig
+    const { method, network, storageUrl } = wabConfig
     try {
-      if (!wabUrl) {
-        console.error('WAB Server URL is required')
-        return false
-      }
-
-      if (!wabInfo || !method) {
-        console.error('Auth Method selection is required')
-        return false
-      }
-
       if (!network) {
         console.error('Network selection is required')
         return false
       }
 
-      if (!storageUrl) {
-        console.error('Storage URL is required')
-        return false
-      }
-
-      setSelectedWabUrl(wabUrl)
-      setSelectedMethod(method)
+      setSelectedWabUrl('noWAB')
+      setSelectedMethod(method || 'mnemonic')
       setSelectedNetwork(network)
-      setSelectedStorageUrl(storageUrl)
+      setSelectedStorageUrl(storageUrl || 'local')
 
-      // Save the configuration
-      toast.success('Configuration applied successfully!')
       setConfigStatus('configured')
       logWithTimestamp(F, 'Configuration finalized successfully')
       return true
     } catch (error: any) {
       console.error('Error applying configuration:', error)
-      toast.error('Failed to apply configuration: ' + (error.message || 'Unknown error'))
       logWithTimestamp(F, 'Error applying configuration', error.message)
       return false
     }
   }
 
+  // Auto-configure on first launch: if no stored config, set defaults
+  useEffect(() => {
+    ;(async () => {
+      if (configStatus !== 'initial') return
+      const storedConfig = await getItem('finalConfig')
+      if (storedConfig) {
+        try {
+          const config = JSON.parse(storedConfig)
+          finalizeConfig(config)
+          logWithTimestamp(F, 'Auto-loaded stored configuration')
+          // If mnemonic exists, auto-build wallet
+          const mnemonic = await getMnemonic()
+          if (mnemonic) {
+            logWithTimestamp(F, 'Mnemonic found, will auto-build wallet')
+          }
+        } catch (e) {
+          logWithTimestamp(F, 'Failed to parse stored config, using defaults')
+          finalizeConfig({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' })
+          await setItem('finalConfig', JSON.stringify({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' }))
+        }
+      } else {
+        // First launch: auto-configure with defaults
+        logWithTimestamp(F, 'No stored config found, auto-configuring with defaults')
+        finalizeConfig({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' })
+        await setItem('finalConfig', JSON.stringify({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' }))
+      }
+    })()
+  }, [configStatus]) // Re-run whenever configStatus resets to 'initial' (e.g. after logout)
+
   // Build wallet function
   const buildWallet = useCallback(
     async (primaryKey: number[], privilegedKeyManager: PrivilegedKeyManager): Promise<any> => {
       try {
+        logWithTimestamp(F, 'Building wallet')
         const newManagers = {} as any
         const chain = selectedNetwork
         const keyDeriver = new KeyDeriver(new PrivateKey(primaryKey))
@@ -572,33 +572,64 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)
         newManagers.settingsManager = wallet.settingsManager
 
-        // Use user-selected storage provider
-        const client = new StorageClient(wallet, selectedStorageUrl)
-        await client.makeAvailable()
-        await storageManager.addWalletStorageProvider(client)
+        logWithTimestamp(F, 'Wallet built successfully')
 
-        // Setup permissions with provided callbacks.
+        // Use user-selected storage provider
+        // Check if user selected local storage
+        if (selectedStorageUrl === 'local') {
+          console.log('[WalletContext] Using local SQLite storage')
+
+          const identityKey = keyDeriver.identityKey
+          const phoneStorage = new StorageExpoSQLite({
+            ...StorageProvider.createStorageBaseOptions(chain),
+            feeModel: { model: 'sat/kb', value: 100 },
+            identityKey
+          })
+          phoneStorage.setServices(services)
+          await phoneStorage.migrate('bsv-wallet', identityKey)
+
+          console.log('[WalletContext] Local SQLite storage initialized successfully')
+
+          // addWalletStorageProvider calls makeAvailable internally
+          try {
+            await storageManager.addWalletStorageProvider(phoneStorage as any)
+            console.log('[WalletContext] Local storage provider added to wallet')
+          } catch (error) {
+            console.error('[WalletContext] Failed to add local storage provider:', error)
+          }
+        }
+        // TODO: Re-add remote storage support in future version
+
+        logWithTimestamp(F, 'Storage manager built successfully')
+        
+        // Create BTMS permission module
+        const btmsModule = createBtmsModule({ wallet })
+
+        // Setup permissions with provided callbacks and BTMS module.
         const permissionsManager = new WalletPermissionsManager(wallet, adminOriginator, {
           differentiatePrivilegedOperations: true,
           seekBasketInsertionPermissions: false,
           seekBasketListingPermissions: false,
           seekBasketRemovalPermissions: false,
-          seekCertificateAcquisitionPermissions: true,
-          seekCertificateDisclosurePermissions: true,
-          seekCertificateRelinquishmentPermissions: true,
+          seekCertificateAcquisitionPermissions: false,
+          seekCertificateDisclosurePermissions: false,
+          seekCertificateRelinquishmentPermissions: false,
           seekCertificateListingPermissions: false,
           seekGroupedPermission: true,
           seekPermissionsForIdentityKeyRevelation: false,
           seekPermissionsForIdentityResolution: false,
-          seekPermissionsForKeyLinkageRevelation: true,
-          seekPermissionsForPublicKeyRevelation: true,
+          seekPermissionsForKeyLinkageRevelation: false,
+          seekPermissionsForPublicKeyRevelation: false,
           seekPermissionWhenApplyingActionLabels: false,
           seekPermissionWhenListingActionsByLabel: false,
           seekProtocolPermissionsForEncrypting: false,
           seekProtocolPermissionsForHMAC: false,
-          seekProtocolPermissionsForSigning: true,
+          seekProtocolPermissionsForSigning: false,
           seekSpendingPermissions: true,
-        })
+          permissionModules: { btms: btmsModule }
+        } as any)
+
+        logWithTimestamp(F, 'Permissions manager built successfully')
 
         if (protocolPermissionCallback) {
           permissionsManager.bindCallback('onProtocolPermissionRequested', protocolPermissionCallback)
@@ -616,6 +647,19 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         // Store in window for debugging
         ;(window as any).permissionsManager = permissionsManager
         newManagers.permissionsManager = permissionsManager
+
+        // Start background monitor for transaction status updates (sending → unproven → completed)
+        try {
+          const monitorOptions = Monitor.createDefaultWalletMonitorOptions(chain, storageManager, services)
+          const monitor = new Monitor(monitorOptions)
+          monitor.addDefaultTasks()
+          // startTasks runs in background — don't await (it never resolves until stopTasks)
+          monitor.startTasks().catch(e => console.error('[WalletContext] Monitor error:', e))
+          ;(window as any).walletMonitor = monitor
+          logWithTimestamp(F, 'Monitor started successfully')
+        } catch (error: any) {
+          console.warn('[WalletContext] Failed to start monitor:', error.message)
+        }
 
         setManagers(m => ({ ...m, ...newManagers }))
         logWithTimestamp(F, 'Wallet build completed successfully')
@@ -639,31 +683,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     ]
   )
 
-  // Load snapshot function
-  const loadWalletSnapshot = useCallback(
-    async (walletManager: WalletAuthenticationManager) => {
-      const snap = await getSnap()
-      if (snap) {
-        try {
-          await walletManager.loadSnapshot(snap)
-          await walletManager.waitForAuthentication({})
-          logWithTimestamp(F, 'Snapshot loaded and authenticated successfully')
-          // We'll handle setting snapshotLoaded in a separate effect watching authenticated state
-        } catch (err: any) {
-          console.error('Error loading snapshot', err)
-          deleteSnap() // Clear invalid snapshot
-          toast.error("Couldn't load saved data: " + err.message)
-          logWithTimestamp(F, 'Error loading snapshot', err.message)
-        }
-      } else {
-        logWithTimestamp(F, 'No snapshot found')
-      }
-      return walletManager
-    },
-    [deleteSnap, getSnap]
-  )
-
-  // Watch for wallet authentication after snapshot is loaded
+  // Watch for wallet authentication state
   useEffect(() => {
     ;(async () => {
       logWithTimestamp(F, 'Checking authentication state')
@@ -671,84 +691,94 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       if (managers?.walletManager?.authenticated && snap) {
         setSnapshotLoaded(true)
         logWithTimestamp(F, 'Authentication confirmed, snapshot loaded')
+      } else if (!snap && snapshotLoaded) {
+        setSnapshotLoaded(false)
+        logWithTimestamp(F, 'Snapshot no longer exists, resetting snapshotLoaded state')
       }
       logWithTimestamp(F, 'Authentication state check complete')
     })()
-  }, [managers?.walletManager?.authenticated])
+  }, [managers?.walletManager?.authenticated, snapshotLoaded, getSnap])
 
-  // ---- Build the wallet manager once all required inputs are ready.
-  useEffect(() => {
-    if (
-      passwordRetriever &&
-      recoveryKeySaver &&
-      configStatus !== 'editing' && // either user configured or snapshot exists
-      !walletBuilt // build only once
-    ) {
-      logWithTimestamp(F, 'Starting wallet manager initialization')
-      try {
-        // Create network service based on selected network
-        const networkPreset = selectedNetwork === 'main' ? 'mainnet' : 'testnet'
+  // TODO: Re-add WAB (WalletAuthenticationManager) support in future version
 
-        // Create a LookupResolver instance
-        const resolver = new LookupResolver({
-          networkPreset
-        })
+  const buildWalletFromMnemonic = useCallback(async () => {
+    // Skip if wallet already built
+    if (walletBuilt) {
+      return
+    }
 
-        // Create a broadcaster with proper network settings
-        const broadcaster = new SHIPBroadcaster(['tm_users'], {
-          networkPreset
-        })
+    // Only build if wallet is properly configured
+    if (configStatus !== 'configured') {
+      return
+    }
 
-        // Create a WAB Client with proper URL
-        const wabClient = new WABClient(selectedWabUrl)
+    logWithTimestamp(F, 'Checking for noWAB primary key')
 
-        // Create a phone interactor
-        const phoneInteractor = new TwilioPhoneInteractor()
-
-        // Create the wallet manager with proper error handling
-        const walletManager = new WalletAuthenticationManager(
-          adminOriginator,
-          buildWallet,
-          new OverlayUMPTokenInteractor(resolver, broadcaster),
-          recoveryKeySaver,
-          passwordRetriever,
-          // Type assertions needed due to interface mismatch between our WABClient and the expected SDK client
-          wabClient,
-          phoneInteractor
-        )
-
-        // Store in window for debugging
-        ;(window as any).walletManager = walletManager
-
-        // Load snapshot if available
-        logWithTimestamp(F, 'Loading wallet snapshot')
-        loadWalletSnapshot(walletManager).then(walletManager => {
-          logWithTimestamp(F, 'Wallet snapshot loaded')
-          // Set initial managers state to prevent null references
-          setManagers(m => ({ ...m, walletManager }))
-          setWalletBuilt(true)
-          logWithTimestamp(F, 'Wallet manager initialization completed successfully')
-        })
-      } catch (err: any) {
-        console.error('Error initializing wallet manager:', err)
-        toast.error('Failed to initialize wallet: ' + err.message)
-        logWithTimestamp(F, 'Error initializing wallet manager', err.message)
-        // Reset configuration if wallet initialization fails
-        setConfigStatus('editing')
+    try {
+      const mnemonic = await getMnemonic()
+      if (!mnemonic) {
+        logWithTimestamp(F, 'No noWAB mnemonic found')
+        return
       }
-      logWithTimestamp(F, 'Wallet manager initialization process complete')
+
+      const { rootKey, primaryKey } = recoverMnemonicWallet(mnemonic)
+      logWithTimestamp(F, 'NoWAB primary key found, building wallet')
+
+      // For noWAB, we don't need a PrivilegedKeyManager from WAB
+      // We can create a simple one that always returns the primary key
+      const privilegedKeyManager = new PrivilegedKeyManager(async () => rootKey)
+
+      logWithTimestamp(F, 'privilegedKeyManager built successfully')
+
+      // Create SimpleWalletManager and provide keys for authentication
+      const snap = await getSnap()
+
+      logWithTimestamp(F, 'snap built successfully')
+      const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
+
+      logWithTimestamp(F, 'SimpleWalletManager built successfully')
+
+      // Provide the primary key and privileged key manager to authenticate the wallet
+      await swm.providePrimaryKey(primaryKey)
+
+      logWithTimestamp(F, 'primaryKey provided successfully')
+
+      await swm.providePrivilegedKeyManager(privilegedKeyManager)
+
+      logWithTimestamp(F, 'privilegedKeyManager provided successfully')
+
+      setManagers(m => ({
+        ...m,
+        walletManager: swm
+      }))
+      setWalletBuilt(true)
+      setWeb2Mode(false)
+
+      logWithTimestamp(F, 'walletManager built successfully')
+
+      // Save mnemonic for next time
+      await setMnemonic(mnemonic);
+
+      logWithTimestamp(F, 'NoWAB wallet initialization completed')
+    } catch (error: any) {
+      console.error('[WalletContext] Error initializing noWAB wallet:', error)
+      logWithTimestamp(F, 'Error initializing noWAB wallet', error.message)
     }
   }, [
-    passwordRetriever,
-    recoveryKeySaver,
-    configStatus,
     walletBuilt,
-    selectedNetwork,
-    selectedWabUrl,
-    buildWallet,
-    loadWalletSnapshot,
-    adminOriginator
-  ])
+    configStatus,
+    getMnemonic,
+    getSnap,
+    setMnemonic,
+    buildWallet
+  ]);
+
+  // Auto-build wallet from mnemonic for returning users
+  useEffect(() => {
+    if (configStatus === 'configured' && !walletBuilt) {
+      buildWalletFromMnemonic()
+    }
+  }, [configStatus, walletBuilt, buildWalletFromMnemonic])
 
   // When Settings manager becomes available, populate the user's settings
   useEffect(() => {
@@ -778,30 +808,32 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       logWithTimestamp(F, 'Managers reset')
 
       // Reset configuration state
+      // Set to 'initial' - wallet building requires 'configured' status
       setConfigStatus('initial')
       setSnapshotLoaded(false)
       setWalletBuilt(false)
+      deleteMnemonic()
       logWithTimestamp(F, 'Configuration and state reset')
 
       // Clear recent apps (web3-specific data)
       setRecentApps([])
 
-      // Set mode back to web2 when logging out
-      setWeb2Mode(true)
+      // Set to web2 mode after logout so user can browse normally
+      // When they try to use web3 features, they'll be prompted to configure
+      await setWeb2Mode(true)
 
       // Clear web3-related data from localStorage to ensure clean state
       try {
-        await setItem('browserMode', 'web2')
         await setItem('recentApps', JSON.stringify([])) // Clear recent web3 apps
       } catch (error) {
-        console.warn('Failed to clear browser mode from localStorage:', error)
+        console.warn('Failed to clear recent apps from localStorage:', error)
       }
 
       router.dismissAll()
-      router.replace('/')
-      logWithTimestamp(F, 'Logout completed, navigating to root')
+      router.push('/')
+      logWithTimestamp(F, 'Logout completed, navigating to home')
     })
-  }, [deleteSnap, setWeb2Mode, setItem])
+  }, [deleteSnap, setItem, deleteMnemonic, setWeb2Mode])
 
   const resolveAppDataFromDomain = async ({ appDomains }: { appDomains: string[] }) => {
     const dataPromises = appDomains.map(async (domain, index) => {
@@ -843,7 +875,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         }
         // Parse out the app data from the domains
         logWithTimestamp(F, 'Fetching app domains')
-        const appDomains = await getApps({ permissionsManager: managers.permissionsManager!, adminOriginator })
+        const appDomains: string[] = [] //await getApps({ permissionsManager: managers.permissionsManager!, adminOriginator })
         logWithTimestamp(F, 'App domains fetched, resolving data')
         const parsedAppData = await resolveAppDataFromDomain({ appDomains })
         logWithTimestamp(F, 'App data resolved, sorting')
@@ -867,8 +899,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       updateSettings,
       logout,
       adminOriginator,
-      setPasswordRetriever,
-      setRecoveryKeySaver,
       snapshotLoaded,
       basketRequests,
       certificateRequests,
@@ -886,7 +916,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedStorageUrl,
       selectedMethod,
       selectedNetwork,
-      setWalletBuilt
+      setWalletBuilt,
+      buildWalletFromMnemonic
     }),
     [
       managers,
@@ -894,8 +925,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       updateSettings,
       logout,
       adminOriginator,
-      setPasswordRetriever,
-      setRecoveryKeySaver,
       snapshotLoaded,
       basketRequests,
       certificateRequests,
@@ -913,7 +942,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedStorageUrl,
       selectedMethod,
       selectedNetwork,
-      setWalletBuilt
+      setWalletBuilt,
+      buildWalletFromMnemonic
     ]
   )
 
