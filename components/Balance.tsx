@@ -17,6 +17,40 @@ export default function Balance() {
   const [accountBalance, setAccountBalance] = React.useState<number | null>(null)
   const [balanceLoading, setBalanceLoading] = React.useState(false)
 
+  const refreshBalance = useCallback(async () => {
+    try {
+
+      if (!managers.permissionsManager) {
+        return
+      }
+
+      // Only show loading if we don't have cached data
+      if (accountBalance === null) {
+        setBalanceLoading(true)
+      }
+
+      // Fetch the first page
+      const { totalOutputs } = await managers.permissionsManager.listOutputs(
+        { basket: sdk.specOpWalletBalance },
+        adminOriginator
+      )
+
+      const total = totalOutputs ?? 0
+      setAccountBalance(total)
+
+      // Cache the new balance
+      await Promise.all([
+        AsyncStorage.setItem(BALANCE_CACHE_KEY, String(total)),
+        AsyncStorage.setItem(BALANCE_CACHE_TIMESTAMP_KEY, String(Date.now()))
+      ])
+
+      setBalanceLoading(false)
+    } catch (e) {
+      console.error('Error refreshing balance:', e)
+      setBalanceLoading(false)
+    }
+  }, [managers, adminOriginator, accountBalance])
+
   // Load cached balance immediately on mount
   useEffect(() => {
     let mounted = true
@@ -55,38 +89,6 @@ export default function Balance() {
     }
   }, [refreshBalance])
 
-  const refreshBalance = useCallback(async () => {
-    try {
-      if (!managers?.permissionsManager) {
-        return
-      }
-
-      // Only show loading if we don't have cached data
-      if (accountBalance === null) {
-        setBalanceLoading(true)
-      }
-
-      // Fetch the first page
-      const { totalOutputs } = await managers?.permissionsManager?.listOutputs(
-        { basket: sdk.specOpWalletBalance },
-        adminOriginator
-      )
-
-      const total = totalOutputs ?? 0
-      setAccountBalance(total)
-
-      // Cache the new balance
-      await Promise.all([
-        AsyncStorage.setItem(BALANCE_CACHE_KEY, String(total)),
-        AsyncStorage.setItem(BALANCE_CACHE_TIMESTAMP_KEY, String(Date.now()))
-      ])
-
-      setBalanceLoading(false)
-    } catch (e) {
-      console.error('Error refreshing balance:', e)
-      setBalanceLoading(false)
-    }
-  }, [managers, adminOriginator, accountBalance])
   return (
     <View style={[componentStyles.container, { backgroundColor: colors.paperBackground }]}>
       <Text style={[componentStyles.sectionTitle, { color: colors.textPrimary }]}>you have</Text>

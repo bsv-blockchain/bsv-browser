@@ -246,7 +246,11 @@ export class StorageExpoSQLite extends StorageProvider {
     for (const [key, value] of Object.entries(partial)) {
       if (value !== undefined) {
         conditions.push(`"${key}" = ?`)
-        params.push(value instanceof Date ? this.validateDateForWhere(value) : value)
+        // Convert booleans to 0/1 for SQLite, Dates to strings
+        const v = typeof value === 'boolean' ? (value ? 1 : 0)
+          : value instanceof Date ? this.validateDateForWhere(value)
+          : value
+        params.push(v)
       }
     }
     if (extras) {
@@ -321,11 +325,14 @@ export class StorageExpoSQLite extends StorageProvider {
         vals.push(value)
       }
     }
-    const result = await db.runAsync(
-      `INSERT INTO "${table}" (${cols.join(', ')}) VALUES (${placeholders.join(', ')})`,
-      vals
-    )
-    return result.lastInsertRowId
+    const sql = `INSERT INTO "${table}" (${cols.join(', ')}) VALUES (${placeholders.join(', ')})`
+    try {
+      const result = await db.runAsync(sql, vals)
+      return result.lastInsertRowId
+    } catch (e: any) {
+      console.error(`[StorageExpoSQLite] INSERT into ${table} failed:`, e.message, '\nSQL:', sql, '\nCols:', cols)
+      throw e
+    }
   }
 
   private async sqlUpdate(table: string, ids: number | number[], update: Record<string, any>, pkCol: string): Promise<number> {
@@ -335,7 +342,7 @@ export class StorageExpoSQLite extends StorageProvider {
     for (const [key, value] of Object.entries(update)) {
       if (value !== undefined && key !== pkCol) {
         setClauses.push(`"${key}" = ?`)
-        vals.push(value)
+        vals.push(value instanceof Date ? this.validateDateForWhere(value) : value)
       }
     }
     if (setClauses.length === 0) return 0
@@ -1168,6 +1175,26 @@ export class StorageExpoSQLite extends StorageProvider {
 
   async adminStats(_adminIdentityKey: string): Promise<AdminStatsResult> {
     throw new Error('Method intentionally not implemented for personal storage.')
+  }
+
+  // Override internalizeAction for debugging
+  async internalizeAction(auth: AuthId, args: any): Promise<any> {
+    console.log('[StorageExpoSQLite] internalizeAction called, userId:', auth.userId)
+    try {
+      const result = await super.internalizeAction(auth, args)
+      console.log('[StorageExpoSQLite] internalizeAction result:', JSON.stringify({
+        accepted: result.accepted,
+        isMerge: result.isMerge,
+        txid: result.txid,
+        satoshis: result.satoshis,
+        hasSendWithResults: !!result.sendWithResults,
+        hasNotDelayedResults: !!result.notDelayedResults
+      }))
+      return result
+    } catch (e: any) {
+      console.error('[StorageExpoSQLite] internalizeAction ERROR:', e.message, e.stack?.slice(0, 500))
+      throw e
+    }
   }
 
   // processSyncChunk — delegate to inherited implementation if available, stub otherwise
