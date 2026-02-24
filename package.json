@@ -24,6 +24,8 @@
     "clean": "rm -rf yarn.lock && rm -rf .expo && rm -rf .expo-shared && rm -rf .vscode && rm -rf .idea && rm -rf ios/Pods && rm -rf android/.gradle && rm -rf android/app/build && rm -rf ./ios"
   },
   "dependencies": {
+    "@bsv/btms": "^1.0.0",
+    "@bsv/btms-permission-module": "^1.0.1",
     "@bsv/message-box-client": "^2.0.2",
     "@bsv/sdk": "^2.0.4",
     "@bsv/wallet-toolbox-mobile": "^2.0.20",

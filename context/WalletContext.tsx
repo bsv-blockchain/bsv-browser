@@ -30,6 +30,7 @@ import { logWithTimestamp } from '@/utils/logging'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from '@/storage'
+import { createBtmsModule } from '@bsv/btms-permission-module'
 
 
 // -----
@@ -599,9 +600,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         logWithTimestamp(F, 'Storage manager built successfully')
         
-        // Setup permissions with provided callbacks.
+        // Create BTMS permission module
+        const btmsModule = createBtmsModule({ wallet })
+
+        // Setup permissions with provided callbacks and BTMS module.
         const permissionsManager = new WalletPermissionsManager(wallet, adminOriginator, {
-          differentiatePrivilegedOperations: false,
+          differentiatePrivilegedOperations: true,
           seekBasketInsertionPermissions: false,
           seekBasketListingPermissions: false,
           seekBasketRemovalPermissions: false,
@@ -609,7 +613,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           seekCertificateDisclosurePermissions: false,
           seekCertificateRelinquishmentPermissions: false,
           seekCertificateListingPermissions: false,
-          seekGroupedPermission: false,
+          seekGroupedPermission: true,
           seekPermissionsForIdentityKeyRevelation: false,
           seekPermissionsForIdentityResolution: false,
           seekPermissionsForKeyLinkageRevelation: false,
@@ -620,7 +624,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           seekProtocolPermissionsForHMAC: false,
           seekProtocolPermissionsForSigning: false,
           seekSpendingPermissions: true,
-        })
+          permissionModules: { btms: btmsModule }
+        } as any)
 
         logWithTimestamp(F, 'Permissions manager built successfully')
 
