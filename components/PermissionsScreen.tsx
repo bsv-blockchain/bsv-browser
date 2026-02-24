@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, memo } from 'react'
+import React, { useState, useEffect, useRef, memo } from 'react'
 import { View, Text, StyleSheet, ActivityIndicator, SectionList, Pressable, Platform } from 'react-native'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { getDomainPermissions, setDomainPermission, PermissionState, PermissionType } from '@/utils/permissionsManager'
@@ -123,7 +123,7 @@ const PermissionsScreen: React.FC<PermissionsScreenProps> = ({ origin, onPermiss
       cancelled = true
     }
     // Only rerun when origin changes or when local permissions are empty for first load
-  }, [origin])
+  }, [origin, permissions])
 
   const handleValueChange = (permission: PermissionType, value: string) => {
     const state = value.toLowerCase() as PermissionState

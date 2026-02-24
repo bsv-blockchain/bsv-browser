@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Modal,
   View,
@@ -18,16 +18,13 @@ import { Ionicons } from '@expo/vector-icons'
 import { Utils } from '@bsv/sdk'
 import { useWallet } from '@/context/WalletContext'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { useThemeStyles } from '@/context/theme/useThemeStyles'
 
 const RecoveryKeySaver = () => {
   // Theme hooks
-  const { colors, isDark } = useTheme()
-  const themeStyles = useThemeStyles()
+  const { colors } = useTheme()
 
   // State management
   const [open, setOpen] = useState(false)
-  const [wasOriginallyFocused, setWasOriginallyFocused] = useState<boolean>(false)
   const [recoveryKey, setRecoveryKey] = useState('')
   const [resolve, setResolve] = useState<Function>(() => {})
   const [reject, setReject] = useState<Function>(() => {})
@@ -41,12 +38,6 @@ const RecoveryKeySaver = () => {
   const { managers, setRecoveryKeySaver } = useWallet()
 
   const isAllChecked = affirmative1 && affirmative2 && affirmative3
-
-  // Define a dummy function for initialization
-  const dummyHandler = useCallback((key: number[]): Promise<true> => {
-    console.warn('Recovery key handler called before initialization')
-    return Promise.resolve(true)
-  }, [])
 
   useEffect(() => {
     setRecoveryKeySaver((): any => {
@@ -64,7 +55,7 @@ const RecoveryKeySaver = () => {
         })
       }
     })
-  }, [managers])
+  }, [managers, setRecoveryKeySaver])
 
   const handleClose = () => {
     setOpen(false)
@@ -90,7 +81,7 @@ const RecoveryKeySaver = () => {
       setCopied(true)
       Alert.alert('Success', 'Recovery key copied to clipboard')
       setTimeout(() => setCopied(false), 3000)
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Failed to copy recovery key')
     }
   }

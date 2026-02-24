@@ -39,9 +39,9 @@ export default function PhoneScreen() {
   const formattedNumber = `${selectedCountry.dialCode}${phoneNumber}`
 
   // Check if phone number is valid
-  const isValidPhoneNumber = () => {
+  const isValidPhoneNumber = useCallback(() => {
     return phoneNumber.length > 6 // Simple validation, adjust as needed
-  }
+  }, [phoneNumber])
 
   // Handle country selection
   const handleSelectCountry = (country: (typeof countryCodes)[0]) => {
@@ -72,7 +72,7 @@ export default function PhoneScreen() {
     } finally {
       setLoading(false)
     }
-  }, [managers?.walletManager, formattedNumber])
+  }, [managers, formattedNumber, isValidPhoneNumber])
 
   // Handle skip login for web2 mode
   const handleSkipLogin = useCallback(() => {

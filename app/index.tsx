@@ -1,4 +1,4 @@
-/* eslint-disable react/no-unstable-nested-components */
+ 
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import {
   Animated,
@@ -22,6 +22,7 @@ import {
   ActivityIndicator
 } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
+import * as Haptics from 'expo-haptics'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import {
@@ -38,11 +39,12 @@ import { router } from 'expo-router'
 
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useWallet } from '@/context/WalletContext'
-import { WalletInterface } from '@bsv/sdk'
+import { WalletInterface, LookupResolver, Transaction , Utils } from '@bsv/sdk'
 import { RecommendedApps } from '@/components/RecommendedApps'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import Balance from '@/components/Balance'
 import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'
+import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
 import { HistoryList } from '@/components/HistoryList'
 import { isValidUrl } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
@@ -72,14 +74,12 @@ import {
 } from '@/utils/permissionsManager'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
-import { Utils } from '@bsv/sdk'
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
 /* -------------------------------------------------------------------------- */
 
 const kNEW_TAB_URL = 'about:blank'
-const kGOOGLE_PREFIX = 'https://www.google.com/search?q='
 const HISTORY_KEY = 'history'
 
 function getInjectableJSMessage(message: any = {}) {
@@ -197,7 +197,7 @@ function Browser() {
   }, [i18n.language])
 
   /* ----------------------------- wallet context ----------------------------- */
-  const { managers, adminOriginator } = useWallet()
+  const { managers } = useWallet()
   const [wallet, setWallet] = useState<WalletInterface | undefined>()
   useEffect(() => {
     // Only initialize wallet if not in web2 mode
@@ -258,6 +258,9 @@ function Browser() {
   /* -------------------------------- bookmarks ------------------------------- */
   const [removedDefaultApps, setRemovedDefaultApps] = useState<string[]>([])
 
+  // Homepage URL (configurable in settings)
+  const [homepageUrl, setHomepageUrlState] = useState(DEFAULT_HOMEPAGE_URL)
+
   // Homepage customization settings
   const [homepageSettings, setHomepageSettings] = useState({
     showBookmarks: true,
@@ -265,7 +268,7 @@ function Browser() {
     showRecommendedApps: true
   })
 
-  // Load homepage settings from storage
+  // Load homepage settings and homepage URL from storage
   useEffect(() => {
     const loadHomepageSettings = async () => {
       try {
@@ -273,6 +276,10 @@ function Browser() {
         if (savedSettings) {
           const parsedSettings = JSON.parse(savedSettings)
           setHomepageSettings(prev => ({ ...prev, ...parsedSettings }))
+        }
+        const storedHomepage = await getItem('homepageUrl')
+        if (storedHomepage) {
+          setHomepageUrlState(storedHomepage)
         }
       } catch (error) {
         console.error('Error loading homepage settings:', error)
@@ -318,10 +325,10 @@ function Browser() {
   const addressEditing = useRef(false)
   const [addressText, setAddressText] = useState(kNEW_TAB_URL)
   const [addressFocused, setAddressFocused] = useState(false)
-  const [addressBarHeight, setAddressBarHeight] = useState(0)
+  const [, setAddressBarHeight] = useState(0)
 
   const [keyboardVisible, setKeyboardVisible] = useState(false)
-  const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const [, setKeyboardHeight] = useState(0)
   const iosSoftKeyboardShown = useRef(false)
 
   const [showInfoDrawer, setShowInfoDrawer] = useState(false)
@@ -337,8 +344,7 @@ function Browser() {
   const [isToggleDesktopCooldown, setIsToggleDesktopCooldown] = useState(false)
 
   const addressInputRef = useRef<TextInput>(null)
-  const [consoleLogs, setConsoleLogs] = useState<any[]>([])
-  const { manifest, fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
+  const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
   const activeCameraStreams = useRef<Set<string>>(new Set())
 
@@ -350,7 +356,18 @@ function Browser() {
       Keyboard.dismiss()
       setAddressFocused(false)
     }
-  }, [tabStore.isInitialized, activeTab])
+  }, [activeTab])
+
+  // On first launch, navigate the initial tab to the homepage URL
+  const hasSetHomepage = useRef(false)
+  useEffect(() => {
+    if (hasSetHomepage.current) return
+    if (activeTab && (activeTab.url === kNEW_TAB_URL || activeTab.url === 'about:blank') && homepageUrl) {
+      hasSetHomepage.current = true
+      tabStore.updateTab(tabStore.activeTabId, { url: homepageUrl })
+      setAddressText(homepageUrl)
+    }
+  }, [homepageUrl, activeTab, activeTab?.url])
 
   // Auto-focus address bar on new tab
   useEffect(() => {
@@ -360,7 +377,7 @@ function Browser() {
         addressInputRef.current?.focus()
       }, 100)
     }
-  }, [activeTab?.id, activeTab?.url, addressFocused])
+  }, [activeTab, activeTab?.id, activeTab?.url, addressFocused])
 
   const [permissionModalVisible, setPermissionModalVisible] = useState(false)
 
@@ -401,6 +418,28 @@ function Browser() {
       hideSub.remove()
     }
   }, [])
+
+  const updateActiveTab = useCallback(
+    (patch: Partial<Tab>) => {
+      const raw = patch.url?.trim()
+      if (raw) {
+        if (!isValidUrl(raw)) {
+          // Try only adding https:// (no other fixes)
+          const candidate =
+            raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw.replace(/^\/+/, '')}`
+
+          if (candidate !== raw && isValidUrl(candidate)) {
+            patch.url = candidate
+          } else if (raw !== kNEW_TAB_URL) {
+            patch.url = kNEW_TAB_URL
+          }
+        }
+      }
+
+      tabStore.updateTab(tabStore.activeTabId, patch)
+    },
+    []
+  )
 
   // Manifest checking useEffect
   useEffect(() => {
@@ -452,7 +491,7 @@ function Browser() {
       isCancelled = true
       clearTimeout(timeoutId)
     }
-  }, [activeTab])
+  }, [activeTab, fetchManifest, getStartUrl, shouldRedirectToStartUrl, updateActiveTab])
 
   /* -------------------------------------------------------------------------- */
   /*                                 UTILITIES                                  */
@@ -497,27 +536,44 @@ function Browser() {
   /*                              ADDRESS HANDLING                              */
   /* -------------------------------------------------------------------------- */
 
-  const updateActiveTab = useCallback(
-    (patch: Partial<Tab>) => {
-      const raw = patch.url?.trim()
-      if (raw) {
-        if (!isValidUrl(raw)) {
-          // Try only adding https:// (no other fixes)
-          const candidate =
-            raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw.replace(/^\/+/, '')}`
-
-          if (candidate !== raw && isValidUrl(candidate)) {
-            patch.url = candidate
-          } else if (raw !== kNEW_TAB_URL) {
-            patch.url = kNEW_TAB_URL
+  // Overlay lookup for non-URL queries
+  const performOverlayLookup = useCallback(async (searchParam: string) => {
+    try {
+      const overlay = new LookupResolver()
+      const response = await overlay.query({
+        service: 'ls_apps',
+        query: { name: searchParam }
+      }, 10000)
+      if (response?.outputs?.length) {
+        const searchResults = response.outputs.map((o: any) => {
+          try {
+            const data = JSON.parse(Utils.toUTF8(
+              Transaction.fromBEEF(o.beef).outputs[0].lockingScript.chunks[2].data as number[]
+            ))
+            return data.domain
+          } catch {
+            return null
           }
+        }).filter(Boolean) as string[]
+
+        if (searchResults.length === 1) {
+          // Single result: navigate directly
+          const domain = searchResults[0]
+          const url = domain.startsWith('http') ? domain : `https://${domain}`
+          updateActiveTab({ url })
+        } else if (searchResults.length > 1) {
+          // Multiple results: show as suggestions
+          setAddressSuggestions(searchResults.map(domain => ({
+            title: domain,
+            url: domain.startsWith('http') ? domain : `https://${domain}`,
+            timestamp: Date.now()
+          })))
         }
       }
-
-      tabStore.updateTab(tabStore.activeTabId, patch)
-    },
-    [tabStore /*, isValidUrl, kNEW_TAB_URL if not from module scope */]
-  )
+    } catch (error) {
+      console.warn('[OverlayLookup] Search failed:', error)
+    }
+  }, [updateActiveTab])
 
   const onAddressSubmit = useCallback(() => {
     let entry = addressText.trim()
@@ -534,15 +590,15 @@ function Browser() {
     if (entry === '') {
       entry = kNEW_TAB_URL
     } else if (!isProbablyUrl) {
-      // Not a URL, treat as a search query
-      entry = kGOOGLE_PREFIX + encodeURI(entry)
+      // Not a URL — query the BSV app overlay
+      performOverlayLookup(entry)
+      addressEditing.current = false
+      return
     } else if (!hasProtocol) {
       // Add appropriate protocol based on whether it's an IP address or regular domain
       if (isIpAddress) {
-        // For IP addresses, default to HTTP which is more common for local network devices
         entry = 'http://' + entry
       } else {
-        // For regular domains, use HTTPS for security
         entry = 'https://' + entry
       }
     }
@@ -554,7 +610,7 @@ function Browser() {
 
     updateActiveTab({ url: entry })
     addressEditing.current = false
-  }, [addressText, updateActiveTab])
+  }, [addressText, updateActiveTab, performOverlayLookup])
 
   /* -------------------------------------------------------------------------- */
   /*                               TAB NAVIGATION                               */
@@ -652,7 +708,7 @@ function Browser() {
       setAddressFocused(false)
       Keyboard.dismiss()
     }
-  }, [tabStore.isInitialized])
+  }, [])
   useEffect(() => {
     if (activeTab && !addressEditing.current) {
       setAddressText(activeTab.url)
@@ -760,7 +816,7 @@ function Browser() {
         })
       }
     },
-    [pendingDomain, pendingPermission, activeTab, permissionsDeniedForCurrentDomain, pendingCallback]
+    [pendingDomain, pendingPermission, activeTab, permissionsDeniedForCurrentDomain, pendingCallback, domainForUrl, updateDeniedPermissionsForDomain]
   )
 
   // Handle permission changes from PermissionsScreen
@@ -835,7 +891,7 @@ function Browser() {
         activeCameraStreams,
         setIsFullscreen: (v: boolean) => setIsFullscreen(v)
       }),
-    [domainForUrl, getPermissionState, setPermissionModalVisible]
+    [domainForUrl, setPermissionModalVisible]
   )
 
   const handleMessage = useCallback(
@@ -957,7 +1013,7 @@ function Browser() {
         sendResponseToWebView(msg.id, { error: error?.message || 'unknown error' })
       }
     },
-    [activeTab, wallet, routeWebViewMessage, t]
+    [activeTab, wallet, routeWebViewMessage, isWeb2Mode]
   )
 
   /* -------------------------------------------------------------------------- */
@@ -1119,7 +1175,7 @@ function Browser() {
         setIsDrawerAnimating(false)
       })
     }
-  }, [showStarDrawer])
+  }, [showStarDrawer, drawerFullHeight, translateY])
 
   const togglePermissionsDrawer = useCallback((open: boolean) => {
     setShowPermissionsDrawer(open)
@@ -1142,8 +1198,15 @@ function Browser() {
       updateActiveTab({ url })
       toggleStarDrawer(false)
     },
-    [updateActiveTab]
+    [updateActiveTab, toggleStarDrawer]
   )
+
+  /* ---------------------------- clear history modal ------------------------- */
+  const [clearConfirmVisible, setClearConfirmVisible] = useState(false)
+
+  const showClearConfirm = useCallback(() => {
+    setClearConfirmVisible(true)
+  }, [])
 
   // BookmarksScene will be defined after toggleInfoDrawer
 
@@ -1159,14 +1222,7 @@ function Browser() {
         onClear={() => showClearConfirm()}
       />
     )
-  }, [history, updateActiveTab, toggleStarDrawer, removeHistoryItem])
-
-  /* ---------------------------- clear history modal ------------------------- */
-  const [clearConfirmVisible, setClearConfirmVisible] = useState(false)
-
-  const showClearConfirm = useCallback(() => {
-    setClearConfirmVisible(true)
-  }, [])
+  }, [history, updateActiveTab, toggleStarDrawer, removeHistoryItem, showClearConfirm])
 
   const handleConfirmClearAll = useCallback(() => {
     clearHistory()
@@ -1189,7 +1245,7 @@ function Browser() {
   )
   useEffect(() => {
     fuseRef.current.setCollection([...history, ...bookmarkStore.bookmarks])
-  }, [history, bookmarkStore.bookmarks])
+  }, [history])
   const [addressSuggestions, setAddressSuggestions] = useState<(HistoryEntry | Bookmark)[]>([])
 
   const onChangeAddressText = useCallback((txt: string) => {
@@ -1219,7 +1275,7 @@ function Browser() {
     setInfoDrawerRoute(route)
     setShowInfoDrawer(open)
     console.log('After setShowInfoDrawer, new value should be:', open)
-  }, [])
+  }, [isFullscreen, showInfoDrawer])
 
   const BookmarksScene = useMemo(() => {
     const Comp: React.FC = () => (
@@ -1246,12 +1302,10 @@ function Browser() {
     Comp.displayName = 'BookmarksScene'
     return Comp
   }, [
-    bookmarkStore.bookmarks,
     handleSetStartingUrl,
     removeBookmark,
     removeDefaultApp,
-    removedDefaultApps,
-    toggleInfoDrawer
+    removedDefaultApps
   ])
 
   const infoDrawerHeightPercent = infoDrawerRoute === 'root' ? 0.75 : 0.9
@@ -1299,19 +1353,20 @@ function Browser() {
         }
       },
       backToHomepage: () => {
-        updateActiveTab({ url: kNEW_TAB_URL })
-        setAddressText(kNEW_TAB_URL)
+        updateActiveTab({ url: homepageUrl })
+        setAddressText(homepageUrl)
         toggleInfoDrawer(false)
       },
       goToLogin: () => {
-        // Navigate back to the main route for login
-        router.push('/config')
+        router.push('/auth/mnemonic')
         toggleInfoDrawer(false)
       }
     }),
     [
       activeTab,
       addBookmark,
+      domainForUrl,
+      homepageUrl,
       toggleInfoDrawer,
       updateActiveTab,
       setAddressText,
@@ -1363,7 +1418,7 @@ function Browser() {
         transform: [{ translateY }]
       }
     ],
-    [styles.starDrawer, colors.background, drawerFullHeight, windowHeight, translateY]
+    [colors.background, drawerFullHeight, windowHeight, translateY]
   )
 
   const addressDisplay = addressFocused ? addressText : domainForUrl(addressText)
@@ -1859,6 +1914,7 @@ function Browser() {
               toggleStarDrawer={toggleStarDrawer}
               setShowTabsView={setShowTabsView}
               toggleInfoDrawer={toggleInfoDrawer}
+              isAuthenticated={!isWeb2Mode}
             />
           )}
 
@@ -2008,7 +2064,6 @@ const TabsViewBase = ({
   const insets = useSafeAreaInsets()
 
   // Animation for new tab button
-  const newTabScale = useRef(new Animated.Value(1)).current
   // Add cooldown state
   const [isCreatingTab, setIsCreatingTab] = useState(false)
 
@@ -2025,7 +2080,7 @@ const TabsViewBase = ({
       onDismiss()
       setIsCreatingTab(false)
     }, 300)
-  }, [newTabScale, onDismiss, setAddressText, isCreatingTab, setAddressFocused])
+  }, [onDismiss, setAddressText, isCreatingTab, setAddressFocused])
 
   const renderItem = ({ item }: { item: Tab }) => {
     const renderRightActions = (
@@ -2195,9 +2250,8 @@ const TabsViewBase = ({
           onPress={() => {
             if (Platform.OS === 'ios') {
               try {
-                const { ImpactFeedbackGenerator } = require('expo-haptics')
-                ImpactFeedbackGenerator.impactAsync(ImpactFeedbackGenerator.ImpactFeedbackStyle.Medium)
-              } catch (e) {}
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+              } catch {}
             }
             onDismiss()
             setAddressFocused(false)
@@ -2299,7 +2353,8 @@ const BottomToolbar = ({
   shareCurrent,
   toggleStarDrawer,
   setShowTabsView,
-  toggleInfoDrawer
+  toggleInfoDrawer,
+  isAuthenticated
 }: {
   activeTab: Tab
   colors: any
@@ -2310,13 +2365,18 @@ const BottomToolbar = ({
   toggleStarDrawer: (open: boolean) => void
   setShowTabsView: (show: boolean) => void
   toggleInfoDrawer: (open: boolean) => void
+  isAuthenticated: boolean
 }) => {
   const handleStarPress = useCallback(() => toggleStarDrawer(true), [toggleStarDrawer])
   const handleTabsPress = useCallback(() => setShowTabsView(true), [setShowTabsView])
 
-  // Calculate disabled state
-  const isBackDisabled = !activeTab.canGoBack || activeTab.url === kNEW_TAB_URL
-  const isForwardDisabled = !activeTab.canGoForward || activeTab.url === kNEW_TAB_URL
+  const handleProfilePress = useCallback(() => {
+    if (isAuthenticated) {
+      toggleInfoDrawer(true)
+    } else {
+      router.push('/auth/mnemonic')
+    }
+  }, [isAuthenticated, toggleInfoDrawer])
 
   return (
     <View
@@ -2328,8 +2388,8 @@ const BottomToolbar = ({
         }
       ]}
     >
-      <TouchableOpacity onPress={() => toggleInfoDrawer(true)} style={styles.toolbarButton}>
-        <Ionicons name="person-circle-outline" size={26} color={colors.primary} />
+      <TouchableOpacity onPress={handleProfilePress} style={styles.toolbarButton}>
+        <Ionicons name="person-circle-outline" size={26} color={isAuthenticated ? colors.primary : colors.textSecondary} />
       </TouchableOpacity>
       {/* <TouchableOpacity
         style={styles.toolbarButton}

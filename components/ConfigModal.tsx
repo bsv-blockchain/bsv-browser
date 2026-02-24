@@ -2,16 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react'
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   Alert,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
   Modal
 } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useThemeStyles } from '@/context/theme/useThemeStyles'
@@ -27,7 +24,7 @@ interface ConfigModalProps {
 const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigured }) => {
   // Access theme and translation
   const { t } = useTranslation()
-  const { colors, isDark } = useTheme()
+  const { colors } = useTheme()
   const styles = useThemeStyles()
   const {
     finalizeConfig,
@@ -40,9 +37,6 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     setWalletBuilt
   } = useWallet()
 
-  // State for configuration mode
-  const [configMode, setConfigMode] = useState<'quick' | 'manual'>('quick')
-
   // State for configuration
   const [wabUrl, setWabUrl] = useState<string>(selectedWabUrl)
   const [wabInfo, setWabInfo] = useState<{
@@ -50,7 +44,6 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     faucetEnabled: boolean
     faucetAmount: number
   } | null>(null)
-  const [isLoadingConfig, setIsLoadingConfig] = useState(false)
   const [method, setMethod] = useState<WABConfig['method']>(selectedMethod)
   const [network, setNetwork] = useState<WABConfig['network']>(selectedNetwork)
   const [storageUrl, setStorageUrl] = useState<string>(selectedStorageUrl)
@@ -65,7 +58,7 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     try {
       new URL(url)
       return true
-    } catch (e) {
+    } catch {
       return false
     }
   }
@@ -75,8 +68,7 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
   }
 
   // Fetch wallet configuration info
-  const fetchWalletConfig = async () => {
-    setIsLoadingConfig(true)
+  const fetchWalletConfig = useCallback(async () => {
     try {
       const res = await fetch(`${wabUrl}/info`)
       if (!res.ok) {
@@ -92,17 +84,15 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     } catch (error: any) {
       console.error('Error fetching wallet config:', error)
       Alert.alert(t('error'), t('could_not_fetch_wallet_config') + ' ' + error.message)
-    } finally {
-      setIsLoadingConfig(false)
     }
-  }
+  }, [wabUrl, t])
 
   // Auto-fetch wallet configuration info when component mounts
   useEffect(() => {
     if (visible && !wabInfo && !managers?.walletManager?.authenticated) {
       fetchWalletConfig()
     }
-  }, [visible])
+  }, [visible, fetchWalletConfig, wabInfo, managers?.walletManager?.authenticated])
 
   // Force the manager to use the "presentation-key-and-password" flow
   useEffect(() => {
@@ -186,42 +176,6 @@ const ConfigModal: React.FC<ConfigModalProps> = ({ visible, onDismiss, onConfigu
     // Automatically save the configuration
     handleSaveConfig()
   }
-
-  // Render a selectable chip
-  const renderChip = (label: string, labelSelected: string, onPress: Function) => (
-    <TouchableOpacity
-      style={[
-        styles.row,
-        {
-          padding: 12,
-          borderRadius: 20,
-          marginRight: 10,
-          marginBottom: 5,
-          backgroundColor: labelSelected === label ? colors.secondary : colors.inputBackground,
-          borderWidth: 1,
-          borderColor: labelSelected === label ? colors.secondary : colors.inputBorder
-        }
-      ]}
-      onPress={() => onPress(label)}
-    >
-      {labelSelected === label && (
-        <Ionicons
-          name="checkmark-circle"
-          size={18}
-          color={isDark ? colors.background : colors.buttonText}
-          style={{ marginRight: 6 }}
-        />
-      )}
-      <Text
-        style={[
-          styles.text,
-          { color: labelSelected === label ? (isDark ? colors.background : colors.buttonText) : colors.textPrimary }
-        ]}
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
-  )
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={handleCancel}>

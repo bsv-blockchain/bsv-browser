@@ -8,7 +8,7 @@ interface CustomSafeAreaProps {
   style?: StyleProp<ViewStyle>
   minTopInset?: number // Customizable minimum top inset
   minBottomInset?: number // Customizable minimum bottom inset
-  edges?: Array<'top' | 'right' | 'bottom' | 'left'>
+  edges?: ('top' | 'right' | 'bottom' | 'left')[]
 }
 
 /**
@@ -19,7 +19,6 @@ export default function CustomSafeArea({
   children,
   style,
   minTopInset = 30, // Default minimum top inset for Android
-  minBottomInset = 0,
   edges
 }: CustomSafeAreaProps) {
   const insets = useSafeAreaInsets()
@@ -27,8 +26,6 @@ export default function CustomSafeArea({
 
   // Apply minimum insets only on Android
   const appliedTopInset = Platform.OS === 'android' ? Math.max(insets.top, minTopInset) : insets.top
-
-  const appliedBottomInset = Platform.OS === 'android' ? Math.max(insets.bottom, minBottomInset) : insets.bottom
 
   // If edges are specified, use SafeAreaView with edges
   if (edges) {

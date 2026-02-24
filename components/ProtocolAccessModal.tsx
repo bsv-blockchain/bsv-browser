@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native'
 import { WalletContext } from '../context/WalletContext'
 import { UserContext } from '../context/UserContext'
 import { useThemeStyles } from '../context/theme/useThemeStyles'
-import AppChip from './AppChip'
 import { deterministicColor } from '../utils/deterministicColor'
 
 const ProtocolAccessModal = () => {
@@ -16,7 +15,7 @@ const ProtocolAccessModal = () => {
     if (protocolRequests.length > 0) {
       try {
         await managers.permissionsManager?.denyPermission(protocolRequests[0].requestID)
-      } catch (error) {
+      } catch {
         // User denial is expected - this is a normal user choice, not an error condition
         console.log('User denied protocol access')
       }

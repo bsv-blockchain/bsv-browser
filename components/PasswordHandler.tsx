@@ -15,26 +15,18 @@ import {
 import { Ionicons } from '@expo/vector-icons'
 import { useWallet } from '@/context/WalletContext'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { useThemeStyles } from '@/context/theme/useThemeStyles'
 
-// Type definition for any focus-related functions we need
-type FocusHandler = {
-  isFocused: () => Promise<boolean>
-  onFocusRequested: () => void
-  onFocusRelinquished: () => void
+// Stable dummy focus handlers (defined outside component to avoid recreation on every render)
+const focusHandler = {
+  isFocused: async () => true,
+  onFocusRequested: () => {},
+  onFocusRelinquished: () => {}
 }
 
 const PasswordHandler: React.FC = () => {
-  // For now we'll use dummy focus handlers - you can replace with your real implementation
-  const focusHandler: FocusHandler = {
-    isFocused: async () => true,
-    onFocusRequested: () => {},
-    onFocusRelinquished: () => {}
-  }
 
   // Get theme colors
-  const { colors, isDark } = useTheme()
-  const themeStyles = useThemeStyles()
+  const { colors } = useTheme()
 
   const [wasOriginallyFocused, setWasOriginallyFocused] = useState<boolean>(false)
   const [open, setOpen] = useState(false)
@@ -55,7 +47,7 @@ const PasswordHandler: React.FC = () => {
         focusHandler.onFocusRequested()
       }
     })
-  }, [focusHandler])
+  }, [])
 
   // Define a dummy function for initialization
   const dummyPasswordHandler = useCallback((reason: string, test: (pwd: string) => boolean): Promise<string> => {
@@ -90,7 +82,7 @@ const PasswordHandler: React.FC = () => {
     }
 
     setPasswordRetriever(stableHandler)
-  }, [])
+  }, [setPasswordRetriever])
 
   const handleClose = useCallback(() => {
     setOpen(false)
@@ -100,7 +92,7 @@ const PasswordHandler: React.FC = () => {
     if (!wasOriginallyFocused) {
       focusHandler.onFocusRelinquished()
     }
-  }, [focusHandler, wasOriginallyFocused])
+  }, [wasOriginallyFocused])
 
   const handleCancel = useCallback(() => {
     reject(new Error('User cancelled'))
@@ -116,7 +108,7 @@ const PasswordHandler: React.FC = () => {
       } else {
         Alert.alert('Error', 'Password validation failed')
       }
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Password validation failed')
     }
   }, [handleClose, password, resolve, test])

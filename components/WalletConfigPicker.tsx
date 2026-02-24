@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, Alert } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { LookupResolver, LookupAnswer, Transaction, PushDrop, Utils } from '@bsv/sdk'
+import { LookupAnswer, Transaction, PushDrop, Utils } from '@bsv/sdk'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useTranslation } from 'react-i18next'
@@ -33,29 +33,24 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadWalletConfigs()
-  }, [selectedNetwork])
-
-  const loadWalletConfigs = async () => {
+  const loadWalletConfigs = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const resolver = new LookupResolver()
-
       // Query for ls_config topic
+      // const resolver = new LookupResolver()
       // const response = await resolver.query({
       //   service: 'ls_config',
       //   query: {}
       // })
       const response: LookupAnswer = { 
         type: 'output-list',
-        outputs: [] as Array<{
+        outputs: [] as {
           beef: number[]
           outputIndex: number
           context?: number[]
-        }>
+        }[]
       }
       const results = response.outputs.map(o => {
         const tx = Transaction.fromBEEF(o.beef)
@@ -199,7 +194,11 @@ const WalletConfigPicker: React.FC<WalletConfigPickerProps> = ({ onSelectConfig,
     } finally {
       setLoading(false)
     }
-  }
+  }, [selectedNetwork])
+
+  useEffect(() => {
+    loadWalletConfigs()
+  }, [selectedNetwork, loadWalletConfigs])
 
   const handleSelectConfig = async (config: WalletConfig) => {
     try {

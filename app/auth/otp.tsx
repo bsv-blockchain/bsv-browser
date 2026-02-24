@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   SafeAreaView,
   ActivityIndicator,
-  Platform,
   KeyboardAvoidingView,
   Alert,
   TextInput
@@ -15,14 +14,12 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useWallet } from '@/context/WalletContext'
 
 export default function OtpScreen() {
   const { t } = useTranslation()
   // Apply theme
   const { colors, isDark } = useTheme()
-  const themeStyles = useThemeStyles()
 
   const { managers } = useWallet()
   const params = useLocalSearchParams()
@@ -34,7 +31,7 @@ export default function OtpScreen() {
   const [canResend, setCanResend] = useState(false)
 
   // Create refs for the input fields
-  const inputRefs = useRef<Array<TextInput | null>>([])
+  const inputRefs = useRef<(TextInput | null)[]>([])
 
   // Start countdown timer when component mounts
   useEffect(() => {
@@ -78,7 +75,7 @@ export default function OtpScreen() {
         setLoading(false)
       }
     },
-    [otp, managers, phoneNumber]
+    [managers, phoneNumber, t]
   )
 
   // Handle resend OTP
@@ -101,7 +98,7 @@ export default function OtpScreen() {
     } finally {
       setLoading(false)
     }
-  }, [canResend, managers, phoneNumber])
+  }, [canResend, managers, phoneNumber, t])
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>

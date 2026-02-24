@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'rea
 import { WalletContext } from '../context/WalletContext'
 import { UserContext } from '../context/UserContext'
 import { useThemeStyles } from '../context/theme/useThemeStyles'
-import AppChip from './AppChip'
 import { deterministicColor } from '../utils/deterministicColor'
 
 type CertificateAccessRequest = {

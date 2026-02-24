@@ -1,20 +1,16 @@
-import React, { useContext, useState, useEffect } from 'react'
+import React, { useContext } from 'react'
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'react-native'
 import { WalletContext } from '../context/WalletContext'
 import { UserContext } from '../context/UserContext'
 import { useThemeStyles } from '../context/theme/useThemeStyles'
 import { useTheme } from '../context/theme/ThemeContext'
-import AppChip from './AppChip'
-import { deterministicColor } from '../utils/deterministicColor'
 import AmountDisplay from './AmountDisplay'
-import { ExchangeRateContext } from '../context/ExchangeRateContext'
 
 const SpendingAuthorizationModal = () => {
   const { spendingRequests, advanceSpendingQueue, managers } = useContext(WalletContext)
   const { colors } = useTheme() // Import colors from theme
 
   const { spendingAuthorizationModalOpen, setSpendingAuthorizationModalOpen } = useContext(UserContext)
-  const { satoshisPerUSD } = useContext(ExchangeRateContext)
   const themeStyles = useThemeStyles()
 
   // Handle denying the request
@@ -47,42 +43,14 @@ const SpendingAuthorizationModal = () => {
     setSpendingAuthorizationModalOpen(false)
   }
 
-  const determineUpgradeAmount = (previousAmountInSats: any, returnType = 'sats') => {
-    let usdAmount
-    const previousAmountInUsd = previousAmountInSats / satoshisPerUSD
-
-    // The supported spending limits are $5, $10, $20, $50
-    if (previousAmountInUsd <= 5) {
-      usdAmount = 5
-    } else if (previousAmountInUsd <= 10) {
-      usdAmount = 10
-    } else if (previousAmountInUsd <= 20) {
-      usdAmount = 20
-    } else {
-      usdAmount = 50
-    }
-
-    if (returnType === 'sats') {
-      return Math.round(usdAmount * satoshisPerUSD)
-    }
-    return usdAmount
-  }
-
   // Use debug data for testing, otherwise check if we should display modal
   if (!spendingAuthorizationModalOpen || spendingRequests.length === 0) return null
 
   const {
     originator,
     description,
-    transactionAmount,
-    totalPastSpending,
-    amountPreviouslyAuthorized,
-    authorizationAmount,
-    renewal,
-    lineItems
+    authorizationAmount
   } = spendingRequests[0]
-
-  const upgradeAmount = determineUpgradeAmount(amountPreviouslyAuthorized)
 
   return (
     <Modal visible={spendingAuthorizationModalOpen} transparent={true} animationType="fade">

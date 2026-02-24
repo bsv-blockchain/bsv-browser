@@ -2,11 +2,10 @@ import React from 'react'
 import { Stack } from 'expo-router'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'
 import packageJson from '../package.json'
-import { WalletContextProvider } from '@/context/WalletContext'
+import { WalletContextProvider , useWallet } from '@/context/WalletContext'
 import { ExchangeRateContextProvider } from '@/context/ExchangeRateContext'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
-import PasswordHandler from '@/components/PasswordHandler'
-import RecoveryKeySaver from '@/components/RecoveryKeySaver'
+// TODO: Re-add RecoveryKeySaver when WAB support returns
 import LocalStorageProvider from '@/context/LocalStorageProvider'
 import ProtocolAccessModal from '@/components/ProtocolAccessModal'
 import BasketAccessModal from '@/components/BasketAccessModal'
@@ -17,8 +16,6 @@ import DefaultBrowserPrompt from '@/components/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/utils/translations'
 import { BrowserModeProvider, useBrowserMode } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/Web3BenefitsModalHandler'
-import { useWallet } from '@/context/WalletContext'
-import '@/utils/translations'
 import { Text } from 'react-native'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 
@@ -61,7 +58,7 @@ const DebuggerDisplay = () => {
   <>
     <Text onPress={() => setToggle(false)} style={{ position: 'absolute', top: 100, left: 0, backgroundColor: 'red', padding: 10, zIndex: 1000 }}>HIDE</Text>
     <Text className="text-xs text-gray-500" style={{ position: 'absolute', top: 150, left: 0, zIndex: 1000, backgroundColor: 'white', padding: 10 }}>
-      {JSON.stringify({ wab: v.selectedWabUrl, storage: v.selectedStorageUrl, configStatus: v.configStatus, browserMode: b }, null, 2)}
+      {JSON.stringify({ configStatus: v.configStatus, network: v.selectedNetwork, browserMode: b }, null, 2)}
     </Text>
   </>
   )
@@ -82,8 +79,6 @@ export default function RootLayout() {
                     <Web3BenefitsModalHandler />
                     {/* <TranslationTester /> */}
                     <DefaultBrowserPrompt />
-                    <PasswordHandler />
-                    <RecoveryKeySaver />
                     <ProtocolAccessModal />
                     <BasketAccessModal />
                     <CertificateAccessModal />
@@ -97,9 +92,6 @@ export default function RootLayout() {
                       <Stack.Screen name="index" />
                       <Stack.Screen name="config" />
                       <Stack.Screen name="auth/mnemonic" />
-                      <Stack.Screen name="auth/phone" />
-                      <Stack.Screen name="auth/otp" />
-                      <Stack.Screen name="auth/password" />
                       <Stack.Screen name="not-found" />
                     </Stack>
                   </ThemeProvider>

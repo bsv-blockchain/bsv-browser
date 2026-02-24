@@ -16,7 +16,6 @@ export default function Balance() {
   const { managers, adminOriginator } = useWallet()
   const [accountBalance, setAccountBalance] = React.useState<number | null>(null)
   const [balanceLoading, setBalanceLoading] = React.useState(false)
-  const [isFromCache, setIsFromCache] = React.useState(false)
 
   // Load cached balance immediately on mount
   useEffect(() => {
@@ -35,7 +34,6 @@ export default function Balance() {
           const isRecent = timestamp && Date.now() - timestamp < CACHE_DURATION
 
           setAccountBalance(balance)
-          setIsFromCache(true)
 
           // If cache is old, fetch fresh data
           if (!isRecent) {
@@ -55,7 +53,7 @@ export default function Balance() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [refreshBalance])
 
   const refreshBalance = useCallback(async () => {
     try {
@@ -76,7 +74,6 @@ export default function Balance() {
 
       const total = totalOutputs ?? 0
       setAccountBalance(total)
-      setIsFromCache(false)
 
       // Cache the new balance
       await Promise.all([

@@ -6,17 +6,12 @@ import {
   WalletPermissionsManager,
   PrivilegedKeyManager,
   WalletStorageManager,
-  WalletAuthenticationManager,
-  OverlayUMPTokenInteractor,
   WalletSigner,
   Services,
-  StorageClient,
-  TwilioPhoneInteractor,
-  WABClient,
   PermissionRequest,
   SimpleWalletManager
 } from '@bsv/wallet-toolbox-mobile'
-import { KeyDeriver, PrivateKey, SHIPBroadcaster, LookupResolver } from '@bsv/sdk'
+import { KeyDeriver, PrivateKey } from '@bsv/sdk'
 import {
   DEFAULT_SETTINGS,
   WalletSettings,
@@ -41,7 +36,7 @@ import { StorageExpoSQLite } from '@/storage'
 // -----
 
 interface ManagerState {
-  walletManager?: WalletAuthenticationManager | SimpleWalletManager
+  walletManager?: SimpleWalletManager
   permissionsManager?: WalletPermissionsManager
   settingsManager?: WalletSettingsManager
 }
@@ -58,10 +53,6 @@ export interface WalletContextValue {
   // Logout
   logout: () => void
   adminOriginator: string
-  setPasswordRetriever: (
-    retriever: (reason: string, test: (passwordCandidate: string) => boolean) => Promise<string>
-  ) => void
-  setRecoveryKeySaver: (saver: (key: number[]) => Promise<true>) => void
   snapshotLoaded: boolean
   basketRequests: BasketAccessRequest[]
   certificateRequests: CertificateAccessRequest[]
@@ -90,8 +81,6 @@ export const WalletContext = createContext<WalletContextValue>({
   updateSettings: async () => {},
   logout: () => {},
   adminOriginator: ADMIN_ORIGINATOR,
-  setPasswordRetriever: () => {},
-  setRecoveryKeySaver: () => {},
   snapshotLoaded: false,
   basketRequests: [],
   certificateRequests: [],
@@ -274,13 +263,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     },
     [managers.settingsManager]
   )
-
-  // ---- Callbacks for password/recovery/etc.
-  const [passwordRetriever, setPasswordRetriever] =
-    useState<(reason: string, test: (passwordCandidate: string) => boolean) => Promise<string>>()
-  logWithTimestamp(F, 'Password retriever initialized')
-  const [recoveryKeySaver, setRecoveryKeySaver] = useState<(key: number[]) => Promise<true>>()
-  logWithTimestamp(F, 'Recovery key saver initialized')
 
   // Provide a handler for basket-access requests that enqueues them
   const basketAccessCallback = useCallback(
@@ -512,9 +494,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [selectedStorageUrl, setSelectedStorageUrl] = useState<string>(DEFAULT_STORAGE_URL)
   logWithTimestamp(F, 'Selected storage URL initialized')
 
-  // Check if we're in noWAB (self-custodial) mode
-  const isNoWABMode = selectedWabUrl === 'noWAB'
-
   // Flag that indicates configuration is complete. For returning users,
   // if a snapshot exists we auto-mark configComplete.
   const [configStatus, setConfigStatus] = useState<ConfigStatus>('initial')
@@ -523,54 +502,58 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [snapshotLoaded, setSnapshotLoaded] = useState<boolean>(false)
   logWithTimestamp(F, 'Snapshot loaded state initialized')
 
-  // For new users: mark configuration complete when WalletConfig is submitted.
+  // Mark configuration complete. Auto-configured for local-only mode.
   const finalizeConfig = (wabConfig: WABConfig): boolean => {
-    const { wabUrl, wabInfo, method, network, storageUrl } = wabConfig
+    const { method, network, storageUrl } = wabConfig
     try {
-      if (!wabUrl) {
-        console.error('WAB Server URL is required')
-        return false
-      }
-
-      // For noWAB (self-custodial) mode, wabInfo is not required
-      const isNoWAB = wabUrl === 'noWAB'
-      if (!isNoWAB && !wabInfo) {
-        console.error('WAB Info is required for non-self-custodial wallets')
-        return false
-      }
-
-      if (!method) {
-        console.error('Auth Method selection is required')
-        return false
-      }
-
       if (!network) {
         console.error('Network selection is required')
         return false
       }
 
-      if (!storageUrl) {
-        console.error('Storage URL is required')
-        return false
-      }
-
-      setSelectedWabUrl(wabUrl)
-      setSelectedMethod(method)
+      setSelectedWabUrl('noWAB')
+      setSelectedMethod(method || 'mnemonic')
       setSelectedNetwork(network)
-      setSelectedStorageUrl(storageUrl)
+      setSelectedStorageUrl(storageUrl || 'local')
 
-      // Save the configuration
-      toast.success('Configuration applied successfully!')
       setConfigStatus('configured')
       logWithTimestamp(F, 'Configuration finalized successfully')
       return true
     } catch (error: any) {
       console.error('Error applying configuration:', error)
-      toast.error('Failed to apply configuration: ' + (error.message || 'Unknown error'))
       logWithTimestamp(F, 'Error applying configuration', error.message)
       return false
     }
   }
+
+  // Auto-configure on first launch: if no stored config, set defaults
+  useEffect(() => {
+    ;(async () => {
+      if (configStatus !== 'initial') return
+      const storedConfig = await getItem('finalConfig')
+      if (storedConfig) {
+        try {
+          const config = JSON.parse(storedConfig)
+          finalizeConfig(config)
+          logWithTimestamp(F, 'Auto-loaded stored configuration')
+          // If mnemonic exists, auto-build wallet
+          const mnemonic = await getMnemonic()
+          if (mnemonic) {
+            logWithTimestamp(F, 'Mnemonic found, will auto-build wallet')
+          }
+        } catch (e) {
+          logWithTimestamp(F, 'Failed to parse stored config, using defaults')
+          finalizeConfig({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' })
+          await setItem('finalConfig', JSON.stringify({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' }))
+        }
+      } else {
+        // First launch: auto-configure with defaults
+        logWithTimestamp(F, 'No stored config found, auto-configuring with defaults')
+        finalizeConfig({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' })
+        await setItem('finalConfig', JSON.stringify({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' }))
+      }
+    })()
+  }, []) // Only run once on mount
 
   // Build wallet function
   const buildWallet = useCallback(
@@ -618,12 +601,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           } catch (error) {
             console.error('[WalletContext] Failed to add local storage provider:', error)
           }
-        } else {
-          console.log('[WalletContext] Using remote storage:', selectedStorageUrl)
-          const client = new StorageClient(wallet, selectedStorageUrl)
-          await client.makeAvailable()
-          await storageManager.addWalletStorageProvider(client)
         }
+        // TODO: Re-add remote storage support in future version
 
         logWithTimestamp(F, 'Storage manager built successfully')
         
@@ -691,37 +670,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     ]
   )
 
-  // Load snapshot function
-  const loadWalletSnapshot = useCallback(
-    async (walletManager: WalletAuthenticationManager) => {
-      // Only load snapshot if wallet is properly configured
-      if (configStatus !== 'configured') {
-        logWithTimestamp(F, 'Skipping snapshot load - wallet not configured')
-        return walletManager
-      }
-
-      const snap = await getSnap()
-      if (snap) {
-        try {
-          await walletManager.loadSnapshot(snap)
-          await walletManager.waitForAuthentication({})
-          logWithTimestamp(F, 'Snapshot loaded and authenticated successfully')
-          // We'll handle setting snapshotLoaded in a separate effect watching authenticated state
-        } catch (err: any) {
-          console.error('Error loading snapshot', err)
-          deleteSnap() // Clear invalid snapshot
-          toast.error("Couldn't load saved data: " + err.message)
-          logWithTimestamp(F, 'Error loading snapshot', err.message)
-        }
-      } else {
-        logWithTimestamp(F, 'No snapshot found')
-      }
-      return walletManager
-    },
-    [deleteSnap, getSnap, configStatus]
-  )
-
-  // Watch for wallet authentication after snapshot is loaded
+  // Watch for wallet authentication state
   useEffect(() => {
     ;(async () => {
       logWithTimestamp(F, 'Checking authentication state')
@@ -730,7 +679,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         setSnapshotLoaded(true)
         logWithTimestamp(F, 'Authentication confirmed, snapshot loaded')
       } else if (!snap && snapshotLoaded) {
-        // If snap was deleted (e.g., during logout), reset snapshotLoaded
         setSnapshotLoaded(false)
         logWithTimestamp(F, 'Snapshot no longer exists, resetting snapshotLoaded state')
       }
@@ -738,85 +686,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })()
   }, [managers?.walletManager?.authenticated, snapshotLoaded, getSnap])
 
-  // ---- Build the wallet manager once all required inputs are ready.
-  useEffect(() => {
-    if (
-      passwordRetriever &&
-      recoveryKeySaver &&
-      configStatus === 'configured' && // only build after user explicitly configures
-      !walletBuilt && // build only once
-      selectedWabUrl !== 'noWAB' // Skip for noWAB mode (handled by separate useEffect)
-      ) {
-      logWithTimestamp(F, 'Starting wallet manager initialization')
-      try {
-        // Create network service based on selected network
-        const networkPreset = selectedNetwork === 'main' ? 'mainnet' : 'testnet'
-
-        // Create a LookupResolver instance
-        const resolver = new LookupResolver({
-          networkPreset
-        })
-
-        // Create a broadcaster with proper network settings
-        const broadcaster = new SHIPBroadcaster(['tm_users'], {
-          networkPreset
-        })
-
-        // Create a WAB Client with proper URL
-        const wabClient = new WABClient(selectedWabUrl)
-
-        // Create a phone interactor
-        const phoneInteractor = new TwilioPhoneInteractor()
-
-        // Create the wallet manager with proper error handling
-        const walletManager = new WalletAuthenticationManager(
-          adminOriginator,
-          buildWallet,
-          new OverlayUMPTokenInteractor(resolver, broadcaster),
-          recoveryKeySaver,
-          passwordRetriever,
-          // Type assertions needed due to interface mismatch between our WABClient and the expected SDK client
-          wabClient,
-          phoneInteractor
-        )
-
-        // Store in window for debugging
-        ;(window as any).walletManager = walletManager
-
-        // Load snapshot if available
-        logWithTimestamp(F, 'Loading wallet snapshot')
-        loadWalletSnapshot(walletManager).then(walletManager => {
-          logWithTimestamp(F, 'Wallet snapshot loaded')
-          // Set initial managers state to prevent null references
-          setManagers(m => ({ ...m, walletManager }))
-          setWalletBuilt(true)
-          setWeb2Mode(false)
-          logWithTimestamp(F, 'Wallet manager initialization completed successfully')
-        })
-      } catch (err: any) {
-        console.error('Error initializing wallet manager:', err)
-        toast.error('Failed to initialize wallet: ' + err.message)
-        logWithTimestamp(F, 'Error initializing wallet manager', err.message)
-        // Reset configuration if wallet initialization fails
-        setConfigStatus('editing')
-      }
-      logWithTimestamp(F, 'Wallet manager initialization process complete')
-    }
-  }, [
-    passwordRetriever,
-    recoveryKeySaver,
-    configStatus,
-    walletBuilt,
-    selectedNetwork,
-    selectedWabUrl,
-    buildWallet,
-    loadWalletSnapshot,
-    adminOriginator
-  ])
+  // TODO: Re-add WAB (WalletAuthenticationManager) support in future version
 
   const buildWalletFromMnemonic = useCallback(async () => {
-    // Skip if wallet already built or not in noWAB mode
-    if (walletBuilt || selectedWabUrl !== 'noWAB') {
+    // Skip if wallet already built
+    if (walletBuilt) {
       return
     }
 
@@ -879,7 +753,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     }
   }, [
     walletBuilt,
-    selectedWabUrl,
     configStatus,
     getMnemonic,
     getSnap,
@@ -887,7 +760,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     buildWallet
   ]);
 
-  // energy slab subway number party awake arena expire target fee over cost
+  // Auto-build wallet from mnemonic for returning users
+  useEffect(() => {
+    if (configStatus === 'configured' && !walletBuilt) {
+      buildWalletFromMnemonic()
+    }
+  }, [configStatus, walletBuilt, buildWalletFromMnemonic])
 
   // When Settings manager becomes available, populate the user's settings
   useEffect(() => {
@@ -1008,8 +886,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       updateSettings,
       logout,
       adminOriginator,
-      setPasswordRetriever,
-      setRecoveryKeySaver,
       snapshotLoaded,
       basketRequests,
       certificateRequests,
@@ -1036,8 +912,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       updateSettings,
       logout,
       adminOriginator,
-      setPasswordRetriever,
-      setRecoveryKeySaver,
       snapshotLoaded,
       basketRequests,
       certificateRequests,

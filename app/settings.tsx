@@ -1,20 +1,40 @@
-import React, { useState } from 'react'
-import { View, Text, SafeAreaView, TouchableOpacity, ScrollView, Alert } from 'react-native'
+import React, { useState, useEffect } from 'react'
+import { View, Text, SafeAreaView, TouchableOpacity, ScrollView, Alert, TextInput } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme, ThemeMode } from '@/context/theme/ThemeContext'
 import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { Ionicons } from '@expo/vector-icons'
 import { useWallet } from '@/context/WalletContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
 
 export default function SettingsScreen() {
   const { t } = useTranslation()
   const { colors, mode, setThemeMode } = useTheme()
   const styles = useThemeStyles()
-  const { updateSettings, settings, logout, selectedWabUrl, selectedStorageUrl, selectedNetwork, selectedMethod } = useWallet()
-  const { getMnemonic } = useLocalStorage()
+  const { updateSettings, settings, logout, selectedNetwork } = useWallet()
+  const { getMnemonic, getItem, setItem } = useLocalStorage()
   const [showMnemonic, setShowMnemonic] = useState(false)
   const [mnemonic, setMnemonic] = useState<string | null>(null)
+  const [homepageUrl, setHomepageUrl] = useState(DEFAULT_HOMEPAGE_URL)
+  const [editingHomepage, setEditingHomepage] = useState(false)
+
+  // Load homepage URL from storage
+  useEffect(() => {
+    ;(async () => {
+      const stored = await getItem('homepageUrl')
+      if (stored) setHomepageUrl(stored)
+    })()
+  }, [getItem])
+
+  const saveHomepageUrl = async (url: string) => {
+    const trimmed = url.trim()
+    if (trimmed) {
+      setHomepageUrl(trimmed)
+      await setItem('homepageUrl', trimmed)
+    }
+    setEditingHomepage(false)
+  }
 
   // Handle theme mode change
   const handleThemeChange = async (newMode: ThemeMode) => {
@@ -70,92 +90,136 @@ export default function SettingsScreen() {
     setMnemonic(null)
   }
 
-  // Check if we're in noWAB mode (mnemonic/self-custodial mode)
-  const isNoWABMode = selectedWabUrl === 'noWAB' || selectedMethod === 'mnemonic'
-
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={{ flex: 1 }}>          
-          {/* Account Section */}
+      <ScrollView style={{ flex: 1 }}>
+          {/* Homepage Section */}
           <View style={[styles.card, { marginTop: 20 }]}>
-            <Text style={[styles.text, { fontWeight: 'bold', fontSize: 18, marginBottom: 15 }]}>{t('wallet_configuration')}</Text>
+            <Text style={[styles.text, { fontWeight: 'bold', fontSize: 18, marginBottom: 15 }]}>Homepage</Text>
 
-            {/* Wallet Configuration URLs */}
-            <View style={{ marginBottom: 20 }}>              
-              {/* WAB URL */}
-              <View style={{ marginBottom: 12 }}>
-                <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 4 }]}>
-                  {t('wab_url')}
-                </Text>
-                <View style={[
+            <Text style={[styles.textSecondary, { fontSize: 13, marginBottom: 10 }]}>
+              The page that loads when you open the app.
+            </Text>
+
+            {editingHomepage ? (
+              <View>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      fontSize: 14,
+                      marginBottom: 10,
+                      padding: 12,
+                      borderRadius: 8,
+                      backgroundColor: colors.paperBackground,
+                      borderWidth: 1,
+                      borderColor: colors.inputBorder,
+                      color: colors.textPrimary
+                    }
+                  ]}
+                  value={homepageUrl}
+                  onChangeText={setHomepageUrl}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  returnKeyType="done"
+                  onSubmitEditing={() => saveHomepageUrl(homepageUrl)}
+                  placeholder={DEFAULT_HOMEPAGE_URL}
+                  placeholderTextColor={colors.textSecondary}
+                />
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity
+                    style={[styles.row, { flex: 1, padding: 12, borderRadius: 8, backgroundColor: colors.primary, justifyContent: 'center' }]}
+                    onPress={() => saveHomepageUrl(homepageUrl)}
+                  >
+                    <Text style={[styles.text, { color: colors.buttonText }]}>Save</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.row, { flex: 1, padding: 12, borderRadius: 8, backgroundColor: colors.paperBackground, borderWidth: 1, borderColor: colors.inputBorder, justifyContent: 'center' }]}
+                    onPress={() => {
+                      setEditingHomepage(false)
+                      ;(async () => {
+                        const stored = await getItem('homepageUrl')
+                        setHomepageUrl(stored || DEFAULT_HOMEPAGE_URL)
+                      })()
+                    }}
+                  >
+                    <Text style={styles.text}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[
                   styles.row,
                   {
                     paddingHorizontal: 12,
-                    paddingVertical: 6,
+                    paddingVertical: 10,
                     borderRadius: 8,
                     backgroundColor: colors.paperBackground,
                     borderWidth: 1,
                     borderColor: colors.inputBorder,
                   }
-                ]}>
-                  <Text style={[styles.textSecondary, { fontSize: 14, flex: 1, textAlign: 'center' }]} numberOfLines={1}>
-                    {selectedWabUrl || 'Not configured'}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Wallet Storage URL */}
-              <View style={{ marginBottom: 12 }}>
-                <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 4 }]}>
-                  {t('wallet_storage_url')}
+                ]}
+                onPress={() => setEditingHomepage(true)}
+              >
+                <Text style={[styles.textSecondary, { fontSize: 14, flex: 1 }]} numberOfLines={1}>
+                  {homepageUrl}
                 </Text>
-                <View style={[
-                  styles.row,
-                  {
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
-                    borderRadius: 8,
-                    backgroundColor: colors.paperBackground,
-                    borderWidth: 1,
-                    borderColor: colors.inputBorder
-                  }
-                ]}>
-                  <Text style={[styles.textSecondary, { fontSize: 14, flex: 1, textAlign: 'center' }]} numberOfLines={1}>
-                    {selectedStorageUrl || 'Not configured'}
-                  </Text>
-                </View>
-              </View>
+                <Ionicons name="pencil-outline" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
 
-              {/* NETWORK */}
-              <View style={{ marginBottom: 12 }}>
-                <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 4 }]}>
-                  {t('bsv_network')}
-                </Text>
-                <View style={[
-                  styles.row,
-                  {
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
-                    borderRadius: 8,
-                    backgroundColor: colors.paperBackground,
-                    borderWidth: 1,
-                    borderColor: colors.inputBorder
-                  }
-                ]}>
-                  <Text style={[styles.textSecondary, { fontSize: 14, flex: 1, textAlign: 'center' }]} numberOfLines={1}>
-                    {selectedNetwork || 'Not configured'}
-                  </Text>
-                </View>
-              </View>
+          {/* Account Section */}
+          <View style={styles.card}>
+            <Text style={[styles.text, { fontWeight: 'bold', fontSize: 18, marginBottom: 15 }]}>{t('wallet_configuration')}</Text>
 
-              {/* Explanation text */}
-              <Text style={[styles.textSecondary, { fontSize: 13, fontStyle: 'italic', marginBottom: 15 }]}>
-                {t('logout_to_change_urls')}
+            {/* Network */}
+            <View style={{ marginBottom: 12 }}>
+              <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 4 }]}>
+                {t('bsv_network')}
               </Text>
+              <View style={[
+                styles.row,
+                {
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 8,
+                  backgroundColor: colors.paperBackground,
+                  borderWidth: 1,
+                  borderColor: colors.inputBorder
+                }
+              ]}>
+                <Text style={[styles.textSecondary, { fontSize: 14, flex: 1, textAlign: 'center' }]} numberOfLines={1}>
+                  {selectedNetwork || 'main'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ marginBottom: 12 }}>
+              <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 4 }]}>
+                Storage
+              </Text>
+              <View style={[
+                styles.row,
+                {
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 8,
+                  backgroundColor: colors.paperBackground,
+                  borderWidth: 1,
+                  borderColor: colors.inputBorder
+                }
+              ]}>
+                <Text style={[styles.textSecondary, { fontSize: 14, flex: 1, textAlign: 'center' }]} numberOfLines={1}>
+                  Local (on-device)
+                </Text>
+              </View>
             </View>
 
             <TouchableOpacity
-              style={[styles.row, { padding: 15, borderRadius: 8, backgroundColor: colors.error + '20' }]}
+              style={[styles.row, { padding: 15, borderRadius: 8, backgroundColor: colors.error + '20', marginTop: 10 }]}
               onPress={logout}
             >
               <View style={[styles.row, { flex: 1 }]}>
@@ -165,9 +229,8 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Recovery Phrase Section (only for mnemonic/noWAB mode) */}
-          {isNoWABMode && (
-            <View style={styles.card}>
+          {/* Recovery Phrase Section */}
+          <View style={styles.card}>
               <Text style={[styles.text, { fontWeight: 'bold', fontSize: 18, marginBottom: 15 }]}>
                 {t('recovery_phrase')}
               </Text>
@@ -259,7 +322,6 @@ export default function SettingsScreen() {
                 </View>
               )}
             </View>
-          )}
 
           {/* Theme Section */}
           <View style={styles.card}>

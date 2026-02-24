@@ -5,26 +5,22 @@ import {
   TouchableOpacity,
   SafeAreaView,
   ActivityIndicator,
-  Platform,
   KeyboardAvoidingView,
   TextInput,
   Alert
 } from 'react-native'
-import { router, useLocalSearchParams } from 'expo-router'
+import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useThemeStyles } from '@/context/theme/useThemeStyles'
 import { useWallet } from '@/context/WalletContext'
-import { Utils } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { WalletAuthenticationManager } from '@bsv/wallet-toolbox-mobile'
 
 export default function PasswordScreen() {
   const { t } = useTranslation()
-  const params = useLocalSearchParams()
-  const phoneNumber = params.phoneNumber as string
   const { setSnap } = useLocalStorage()
 
   const [password, setPassword] = useState('')

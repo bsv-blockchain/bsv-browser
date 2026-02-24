@@ -87,7 +87,7 @@ const BottomDrawer: React.FC<BottomDrawerProps> = ({
       }
     }
     wasVisibleRef.current = visible
-  }, [visible, sheetHeight, translateY, closeInstantly])
+  }, [visible, sheetHeight, translateY, closeInstantly, backdropLingerMs])
 
   useEffect(() => {
     return () => {
