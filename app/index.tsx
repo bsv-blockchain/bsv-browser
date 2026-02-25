@@ -1038,7 +1038,7 @@ const shareCurrent = useCallback(async () => {
 
           {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
           {menuPopoverOpen && (
-            <Animated.View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, animatedMenuPopoverStyle]}>
+            <Animated.View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }, animatedMenuPopoverStyle]}>
               <MenuPopover
                 isNewTab={isNewTab}
                 canShare={!isNewTab}
