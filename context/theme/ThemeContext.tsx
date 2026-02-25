@@ -1,6 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext } from 'react'
 import { useColorScheme } from 'react-native'
-import { WalletContext } from '../WalletContext'
 import {
   lightColors as tokenLightColors,
   darkColors as tokenDarkColors
@@ -135,34 +134,18 @@ interface ThemeProviderProps {
 }
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
-  // Get system color scheme
+  // Always follow the device's appearance setting — no manual override.
   const colorScheme = useColorScheme()
-  const { settings } = useContext(WalletContext)
-
-  // Initialize theme mode from settings or default to 'system'
-  const initialMode = settings?.theme?.mode || 'system'
-  const [themeMode, setThemeMode] = useState<ThemeMode>(initialMode as ThemeMode)
-
-  // Determine if we should use dark mode
-  const shouldUseDarkMode = themeMode === 'dark' || (themeMode === 'system' && colorScheme === 'dark')
-
-  // Set the active color scheme based on the mode
-  const colors = shouldUseDarkMode ? darkColors : lightColors
-
-  // Update theme mode when settings change
-  useEffect(() => {
-    if (settings?.theme?.mode) {
-      setThemeMode(settings.theme.mode as ThemeMode)
-    }
-  }, [settings?.theme?.mode])
+  const isDark = colorScheme === 'dark'
+  const colors = isDark ? darkColors : lightColors
 
   return (
     <ThemeContext.Provider
       value={{
-        mode: themeMode,
-        setThemeMode,
+        mode: 'system',
+        setThemeMode: () => {},
         colors,
-        isDark: shouldUseDarkMode
+        isDark,
       }}
     >
       {children}

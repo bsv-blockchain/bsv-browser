@@ -66,6 +66,8 @@ export interface StorageExpoSQLiteOptions extends StorageProviderOptions {
 export class StorageExpoSQLite extends StorageProvider {
   dbName: string
   db?: SQLiteDatabase
+  /** Promise-chain mutex: ensures only one withTransactionAsync runs at a time. */
+  private _txQueue: Promise<any> = Promise.resolve()
 
   constructor(options: StorageExpoSQLiteOptions) {
     super(options)
@@ -116,14 +118,30 @@ export class StorageExpoSQLite extends StorageProvider {
   }
 
   async transaction<T>(scope: (trx: TrxToken) => Promise<T>, trx?: TrxToken): Promise<T> {
+    // If already inside a transaction, reuse it — no nested BEGIN.
     if (trx) return await scope(trx)
+
     const db = this.getDB()
     const token: TrxToken = { _inTrx: true } as any
-    let result: T
-    await db.withTransactionAsync(async () => {
-      result = await scope(token)
-    })
-    return result!
+
+    // Serialize all top-level transactions through a promise queue so that
+    // concurrent callers (e.g. CheckForProofs monitor firing twice) never
+    // attempt to BEGIN a new transaction while one is still active on this
+    // single-writer SQLite connection.
+    let resolve!: () => void
+    const acquired = new Promise<void>(r => { resolve = r })
+    const queued = this._txQueue.then(() => acquired)
+    this._txQueue = queued
+
+    try {
+      let result!: T
+      await db.withTransactionAsync(async () => {
+        result = await scope(token)
+      })
+      return result
+    } finally {
+      resolve()
+    }
   }
 
   async dropAllData(): Promise<void> {

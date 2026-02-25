@@ -92,10 +92,14 @@ const Sheet: React.FC<SheetProps> = ({
 
   const isVisible = visible || rendered
 
+  // Don't mount while hidden — RNGH registers native gesture recognizers
+  // at the OS level regardless of pointerEvents, which would silently block
+  // touches on the content underneath (especially at the top of the screen).
+  if (!isVisible) return null
+
   return (
     <GestureHandlerRootView
       style={[StyleSheet.absoluteFill, { zIndex: 50 }]}
-      pointerEvents={isVisible ? 'auto' : 'none'}
     >
       {isVisible && (
         <Pressable style={styles.backdrop} onPress={onClose} />

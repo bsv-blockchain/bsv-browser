@@ -48,8 +48,8 @@ export const typography = {
 
 export const lightColors = {
   // Accent
-  accent: '#007AFF',
-  accentSecondary: '#5856D6',
+  accent: 'black',
+  accentSecondary: '#222222',
 
   // Backgrounds
   background: '#FFFFFF',
@@ -93,8 +93,8 @@ export const lightColors = {
 
 export const darkColors = {
   // Accent
-  accent: '#0A84FF',
-  accentSecondary: '#5E5CE6',
+  accent: 'white',
+  accentSecondary: '#e8e8e8',
 
   // Backgrounds
   background: '#000000',

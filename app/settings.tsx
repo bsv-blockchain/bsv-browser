@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { View, Text, SafeAreaView, TouchableOpacity, ScrollView, Alert, TextInput, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
-import { useTheme, ThemeMode } from '@/context/theme/ThemeContext'
+import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { Ionicons } from '@expo/vector-icons'
 import { useWallet } from '@/context/WalletContext'
@@ -9,11 +9,10 @@ import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
-import SegmentedControl from '@react-native-segmented-control/segmented-control'
 
 export default function SettingsScreen() {
   const { t } = useTranslation()
-  const { colors, mode, setThemeMode } = useTheme()
+  const { colors } = useTheme()
   const { updateSettings, settings, logout, selectedNetwork } = useWallet()
   const { getMnemonic, getItem, setItem } = useLocalStorage()
   const [showMnemonic, setShowMnemonic] = useState(false)
@@ -36,22 +35,6 @@ export default function SettingsScreen() {
       await setItem('homepageUrl', trimmed)
     }
     setEditingHomepage(false)
-  }
-
-  // Handle theme mode change
-  const handleThemeChange = async (newMode: ThemeMode) => {
-    setThemeMode(newMode)
-
-    // Also update in wallet settings if available
-    if (updateSettings && settings) {
-      await updateSettings({
-        ...settings,
-        theme: {
-          ...settings.theme,
-          mode: newMode
-        }
-      })
-    }
   }
 
   // Handle showing mnemonic with confirmation
@@ -91,11 +74,6 @@ export default function SettingsScreen() {
     setShowMnemonic(false)
     setMnemonic(null)
   }
-
-  // Segmented control values and mapping
-  const themeModes: ThemeMode[] = ['light', 'dark', 'system']
-  const themeLabels = [t('light'), t('dark'), t('system_default')]
-  const selectedThemeIndex = themeModes.indexOf(mode)
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
@@ -174,24 +152,6 @@ export default function SettingsScreen() {
               isLast
             />
           )}
-        </GroupedSection>
-
-        {/* ── Appearance ── */}
-        <GroupedSection header="Appearance">
-          <View style={localStyles.segmentedContainer}>
-            <Text style={[localStyles.segmentedLabel, { color: colors.textPrimary }]}>
-              Theme
-            </Text>
-            <SegmentedControl
-              values={themeLabels}
-              selectedIndex={selectedThemeIndex >= 0 ? selectedThemeIndex : 2}
-              onChange={(event) => {
-                const index = event.nativeEvent.selectedSegmentIndex
-                handleThemeChange(themeModes[index])
-              }}
-              style={localStyles.segmentedControl}
-            />
-          </View>
         </GroupedSection>
 
         {/* ── Wallet ── */}
@@ -324,19 +284,6 @@ const localStyles = StyleSheet.create({
   },
   editButtonText: {
     ...typography.headline,
-  },
-
-  /* ── Segmented control ── */
-  segmentedContainer: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  segmentedLabel: {
-    ...typography.body,
-    marginBottom: spacing.md,
-  },
-  segmentedControl: {
-    height: 32,
   },
 
   /* ── Mnemonic reveal ── */
