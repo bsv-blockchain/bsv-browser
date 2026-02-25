@@ -11,12 +11,14 @@ import {
   KeyboardAvoidingView,
   BackHandler,
   InteractionManager,
-  ActivityIndicator
+  ActivityIndicator,
+  Dimensions
 } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
-import { GestureHandlerRootView } from 'react-native-gesture-handler'
+import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler'
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
@@ -203,6 +205,83 @@ function Browser() {
   const addressEditing = useRef(false)
   const [addressText, setAddressText] = useState(kNEW_TAB_URL)
   const [addressFocused, setAddressFocused] = useState(false)
+  
+  // AddressBar position animation
+  const addressBarAtTop = useSharedValue(false)
+  const addressBarTranslateY = useSharedValue(0)
+  // Travel distance as shared value for worklet access
+  const addressBarTravelDistance = useSharedValue(0)
+  
+  // Update travel distance and position when insets change
+  useEffect(() => {
+    const screenHeight = Dimensions.get('window').height
+    // Container is at top: insets.top, so travel distance is from there to bottom
+    // Travel distance: screen height - (2 * insets.top) - insets.bottom - 12
+    const travelDistance = screenHeight - (2 * insets.top) - 12
+    addressBarTravelDistance.value = travelDistance
+    // Always update translateY to maintain position relative to new insets
+    if (addressBarAtTop.value) {
+      // Bar should be at top
+      addressBarTranslateY.value = 0
+    } else {
+      // Bar should be at bottom
+      addressBarTranslateY.value = travelDistance
+    }
+  }, [insets.bottom, insets.top])
+
+  // Pan gesture for AddressBar
+  const addressBarPanGesture = Gesture.Pan()
+    .activeOffsetY([-10, 10])
+    .failOffsetX([-25, 25])
+    .onUpdate((e) => {
+      const travelDistance = addressBarTravelDistance.value
+      if (addressBarAtTop.value) {
+        // Currently at top, allow swipe down (positive translation)
+        addressBarTranslateY.value = Math.max(0, Math.min(travelDistance, e.translationY))
+      } else {
+        // Currently at bottom, allow swipe up (negative translation)
+        addressBarTranslateY.value = Math.max(0, Math.min(travelDistance, travelDistance + e.translationY))
+      }
+    })
+    .onEnd((e) => {
+      const travelDistance = addressBarTravelDistance.value
+      const threshold = travelDistance / 3
+      const shouldMoveToTop = !addressBarAtTop.value && (Math.abs(e.translationY) > threshold || e.velocityY < -800)
+      const shouldMoveToBottom = addressBarAtTop.value && (e.translationY > threshold || e.velocityY > 800)
+
+      if (shouldMoveToTop) {
+        // Move to top
+        addressBarTranslateY.value = withSpring(0, {
+          mass: 1,
+          stiffness: 400,
+          damping: 38,
+          velocity: e.velocityY,
+        })
+        addressBarAtTop.value = true
+      } else if (shouldMoveToBottom) {
+        // Move to bottom
+        addressBarTranslateY.value = withSpring(travelDistance, {
+          mass: 1,
+          stiffness: 400,
+          damping: 38,
+          velocity: e.velocityY,
+        })
+        addressBarAtTop.value = false
+      } else if (addressBarAtTop.value) {
+        // Return to top position
+        addressBarTranslateY.value = withSpring(0, { mass: 1, stiffness: 400, damping: 38 })
+      } else {
+        // Return to bottom position
+        addressBarTranslateY.value = withSpring(travelDistance, { mass: 1, stiffness: 400, damping: 38 })
+      }
+    })
+
+  // Animated style for AddressBar wrapper
+  const animatedAddressBarStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateY: addressBarTranslateY.value }],
+    }
+  })
 
   const [keyboardVisible, setKeyboardVisible] = useState(false)
   const iosSoftKeyboardShown = useRef(false)
@@ -882,54 +961,63 @@ const shareCurrent = useCallback(async () => {
 
           {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
           {!isFullscreen && showAddressBar && (
-            <View style={[styles.chromeWrapper, { bottom: insets.bottom - 12 }]} pointerEvents="box-none">
-              <AddressBar
-                addressText={addressText}
-                addressFocused={addressFocused}
-                isLoading={activeTab?.isLoading || false}
-                canGoBack={activeTab?.canGoBack || false}
-                canGoForward={activeTab?.canGoForward || false}
-                isNewTab={isNewTab}
-                isHttps={activeTab?.url?.startsWith('https') || false}
-                suggestions={addressSuggestions}
-                menuOpen={menuPopoverOpen}
-                onMorePress={() => setMenuPopoverOpen(true)}
-                onChangeText={onChangeAddressText}
-                onSubmit={onAddressSubmit}
-                onFocus={() => {
-                  setMenuPopoverOpen(false)
-                  addressEditing.current = true
-                  setAddressFocused(true)
-                  if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
-                  setTimeout(() => {
-                    const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
-                    addressInputRef.current?.setNativeProps({
-                      selection: { start: 0, end: textToSelect.length }
-                    })
-                  }, 0)
-                }}
-                onBlur={() => {
-                  addressEditing.current = false
-                  setAddressFocused(false)
-                  setAddressSuggestions([])
-                  setAddressText(activeTab?.url || kNEW_TAB_URL)
-                }}
-                onBack={navBack}
-                onForward={navFwd}
-                onReloadOrStop={navReloadOrStop}
-                onClearText={() => setAddressText('')}
-                onSuggestionPress={(url) => {
-                  addressInputRef.current?.blur()
-                  Keyboard.dismiss()
-                  setAddressFocused(false)
-                  setAddressSuggestions([])
-                  setAddressText(url)
-                  updateActiveTab({ url })
-                  addressEditing.current = false
-                }}
-                inputRef={addressInputRef}
-              />
-            </View>
+            <GestureDetector gesture={addressBarPanGesture}>
+              <Animated.View 
+                style={[
+                  styles.chromeWrapper, 
+                  { top: insets.top },
+                  animatedAddressBarStyle
+                ]} 
+                pointerEvents="box-none"
+              >
+                <AddressBar
+                  addressText={addressText}
+                  addressFocused={addressFocused}
+                  isLoading={activeTab?.isLoading || false}
+                  canGoBack={activeTab?.canGoBack || false}
+                  canGoForward={activeTab?.canGoForward || false}
+                  isNewTab={isNewTab}
+                  isHttps={activeTab?.url?.startsWith('https') || false}
+                  suggestions={addressSuggestions}
+                  menuOpen={menuPopoverOpen}
+                  onMorePress={() => setMenuPopoverOpen(true)}
+                  onChangeText={onChangeAddressText}
+                  onSubmit={onAddressSubmit}
+                  onFocus={() => {
+                    setMenuPopoverOpen(false)
+                    addressEditing.current = true
+                    setAddressFocused(true)
+                    if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
+                    setTimeout(() => {
+                      const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
+                      addressInputRef.current?.setNativeProps({
+                        selection: { start: 0, end: textToSelect.length }
+                      })
+                    }, 0)
+                  }}
+                  onBlur={() => {
+                    addressEditing.current = false
+                    setAddressFocused(false)
+                    setAddressSuggestions([])
+                    setAddressText(activeTab?.url || kNEW_TAB_URL)
+                  }}
+                  onBack={navBack}
+                  onForward={navFwd}
+                  onReloadOrStop={navReloadOrStop}
+                  onClearText={() => setAddressText('')}
+                  onSuggestionPress={(url) => {
+                    addressInputRef.current?.blur()
+                    Keyboard.dismiss()
+                    setAddressFocused(false)
+                    setAddressSuggestions([])
+                    setAddressText(url)
+                    updateActiveTab({ url })
+                    addressEditing.current = false
+                  }}
+                  inputRef={addressInputRef}
+                />
+              </Animated.View>
+            </GestureDetector>
           )}
 
           {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
