@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { View, Text, TouchableOpacity, ScrollView, Alert, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { spacing, radii, typography } from '@/context/theme/tokens'
+import { spacing, typography } from '@/context/theme/tokens'
 import { Ionicons } from '@expo/vector-icons'
 import { useWallet } from '@/context/WalletContext'
 import { useBrowserMode } from '@/context/BrowserModeContext'
@@ -12,6 +12,7 @@ import { ListRow } from '@/components/ui/ListRow'
 import AmountDisplay from '@/components/AmountDisplay'
 import { sdk } from '@bsv/wallet-toolbox-mobile'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import Clipboard from '@react-native-clipboard/clipboard'
 
 const BALANCE_CACHE_KEY = 'cached_wallet_balance'
 const BALANCE_CACHE_TIMESTAMP_KEY = 'cached_wallet_balance_timestamp'
@@ -20,15 +21,41 @@ const CACHE_DURATION = 30000
 export default function SettingsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  const { managers, adminOriginator, updateSettings, settings, logout, selectedNetwork, switchNetwork } = useWallet()
+  const { managers, adminOriginator, logout, selectedNetwork, switchNetwork } = useWallet()
   const { isWeb2Mode } = useBrowserMode()
   const { getMnemonic } = useLocalStorage()
-  const [showMnemonic, setShowMnemonic] = useState(false)
-  const [mnemonic, setMnemonic] = useState<string | null>(null)
+  const [identityKey, setIdentityKey] = useState('')
+  const [copiedKey, setCopiedKey] = useState(false)
+  const [copiedMnemonic, setCopiedMnemonic] = useState(false)
   const [accountBalance, setAccountBalance] = useState<number | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
   const [switchingNetwork, setSwitchingNetwork] = useState(false)
   const [networkExpanded, setNetworkExpanded] = useState(false)
+
+  // Fetch identity key
+  useEffect(() => {
+    managers?.permissionsManager?.getPublicKey({ identityKey: true }, adminOriginator)
+      .then(r => r && setIdentityKey(r.publicKey))
+  }, [managers, adminOriginator])
+
+  const handleCopyKey = () => {
+    if (!identityKey) return
+    Clipboard.setString(identityKey)
+    setCopiedKey(true)
+    setTimeout(() => setCopiedKey(false), 2000)
+  }
+
+  const handleCopyMnemonic = async () => {
+    try {
+      const value = await getMnemonic()
+      if (!value) return
+      Clipboard.setString(value)
+      setCopiedMnemonic(true)
+      setTimeout(() => setCopiedMnemonic(false), 2000)
+    } catch (error) {
+      console.error('Error retrieving mnemonic:', error)
+    }
+  }
 
   // Fetch wallet balance — keep last known value visible during network switch
   const refreshBalance = useCallback(async () => {
@@ -110,44 +137,6 @@ export default function SettingsScreen() {
     )
   }
 
-  // Handle showing mnemonic with confirmation
-  const handleShowMnemonic = async () => {
-    Alert.alert(
-      t('show_recovery_phrase'),
-      t('recovery_phrase_warning'),
-      [
-        {
-          text: t('cancel'),
-          style: 'cancel'
-        },
-        {
-          text: t('show'),
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const mnemonicValue = await getMnemonic()
-              if (mnemonicValue) {
-                setMnemonic(mnemonicValue)
-                setShowMnemonic(true)
-              } else {
-                Alert.alert(t('error'), t('no_recovery_phrase_found'))
-              }
-            } catch (error) {
-              console.error('Error retrieving mnemonic:', error)
-              Alert.alert(t('error'), t('failed_to_retrieve_recovery_phrase'))
-            }
-          }
-        }
-      ]
-    )
-  }
-
-  // Handle hiding mnemonic
-  const handleHideMnemonic = () => {
-    setShowMnemonic(false)
-    setMnemonic(null)
-  }
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
       <ScrollView
@@ -175,7 +164,30 @@ export default function SettingsScreen() {
         )}
 
         {/* ── Wallet ── */}
-        <GroupedSection header="Wallet" footer="Each network uses its own separate on-device database.">
+        <GroupedSection header="Wallet">
+          {identityKey ? (
+            <ListRow
+              label="Identity Key"
+              icon="finger-print-outline"
+              iconColor={colors.identityApproval}
+              value={`${identityKey.slice(0, 8)}...${identityKey.slice(-4)}`}
+              showChevron={false}
+              trailing={
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={[localStyles.keyValue, { color: colors.textSecondary }]}>
+                    {`${identityKey.slice(0, 8)}...${identityKey.slice(-4)}`}
+                  </Text>
+                  <TouchableOpacity onPress={handleCopyKey} style={{ padding: spacing.xs, marginLeft: spacing.xs }}>
+                    <Ionicons
+                      name={copiedKey ? 'checkmark' : 'copy-outline'}
+                      size={18}
+                      color={copiedKey ? colors.success : colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+              }
+            />
+          ) : null}
           <ListRow
             label={t('bsv_network')}
             value={switchingNetwork ? 'Switching...' : (NETWORKS.find(n => n.id === selectedNetwork)?.label ?? selectedNetwork)}
@@ -207,75 +219,23 @@ export default function SettingsScreen() {
               })}
             </View>
           )}
-          {!showMnemonic ? (
-            <ListRow
-              label={t('recovery_phrase')}
-              icon="key-outline"
-              iconColor={colors.accentSecondary}
-              onPress={handleShowMnemonic}
-              isLast
-            />
-          ) : (
-            <View style={localStyles.mnemonicSection}>
-              {/* Mnemonic Display */}
-              <View
-                style={[
-                  localStyles.mnemonicBox,
-                  {
-                    backgroundColor: colors.fillTertiary,
-                    borderColor: colors.accentSecondary,
-                  }
-                ]}
-              >
-                <Text
-                  style={[
-                    localStyles.mnemonicText,
-                    { color: colors.textPrimary }
-                  ]}
-                  selectable
-                >
-                  {mnemonic}
-                </Text>
-              </View>
-
-              {/* Warning Message */}
-              <View
-                style={[
-                  localStyles.warningBox,
-                  { backgroundColor: colors.error + '10' }
-                ]}
-              >
+          <ListRow
+            label={t('recovery_phrase')}
+            icon="key-outline"
+            iconColor={colors.fill}
+            onPress={handleCopyMnemonic}
+            showChevron={false}
+            trailing={
+              <TouchableOpacity onPress={handleCopyMnemonic} style={{ padding: spacing.xs }}>
                 <Ionicons
-                  name="warning-outline"
+                  name={copiedMnemonic ? 'checkmark' : 'copy-outline'}
                   size={18}
-                  color={colors.error}
-                  style={{ marginRight: spacing.sm }}
+                  color={copiedMnemonic ? colors.success : colors.textSecondary}
                 />
-                <Text style={[localStyles.warningText, { color: colors.textSecondary }]}>
-                  {t('recovery_phrase_security_warning')}
-                </Text>
-              </View>
-
-              {/* Hide Button */}
-              <TouchableOpacity
-                style={[
-                  localStyles.hideButton,
-                  { backgroundColor: colors.fillTertiary }
-                ]}
-                onPress={handleHideMnemonic}
-              >
-                <Ionicons
-                  name="eye-off-outline"
-                  size={18}
-                  color={colors.textPrimary}
-                  style={{ marginRight: spacing.sm }}
-                />
-                <Text style={[localStyles.hideButtonText, { color: colors.textPrimary }]}>
-                  {t('hide_recovery_phrase')}
-                </Text>
               </TouchableOpacity>
-            </View>
-          )}
+            }
+            isLast
+          />
         </GroupedSection>
 
         {/* ── Account ── */}
@@ -336,43 +296,9 @@ const localStyles = StyleSheet.create({
     ...typography.body,
   },
 
-  /* ── Mnemonic reveal ── */
-  mnemonicSection: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
-  },
-  mnemonicBox: {
-    padding: spacing.lg,
-    borderRadius: radii.sm,
-    borderWidth: 1.5,
-    marginBottom: spacing.md,
-  },
-  mnemonicText: {
-    ...typography.callout,
+  keyValue: {
+    ...typography.body,
     fontFamily: 'monospace',
-    lineHeight: 22,
-    textAlign: 'center',
-  },
-  warningBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    padding: spacing.md,
-    borderRadius: radii.sm,
-    marginBottom: spacing.md,
-  },
-  warningText: {
-    ...typography.footnote,
-    flex: 1,
-  },
-  hideButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radii.sm,
-  },
-  hideButtonText: {
-    ...typography.subhead,
-    fontWeight: '500',
+    maxWidth: 200,
   },
 })

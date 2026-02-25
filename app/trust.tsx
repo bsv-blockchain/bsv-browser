@@ -12,29 +12,21 @@ import {
   ActivityIndicator,
   Platform
 } from 'react-native'
-import CustomSafeArea from '@/components/CustomSafeArea'
-import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'
 import Clipboard from '@react-native-clipboard/clipboard'
-import { useNavigation } from '@react-navigation/native'
 import { useTranslation } from 'react-i18next'
 
-// THEME (existing in your project)
 import { useTheme } from '@/context/theme/ThemeContext'
-
-// SETTINGS CONTEXT (same semantics as web app)
-// NOTE: adjust the import path if your WalletContext lives elsewhere
+import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-
-// VALIDATION util (mirrors your web validateTrust utility)
-// NOTE: adjust path if different in mobile project
+import { GroupedSection } from '@/components/ui/GroupedList'
 import validateTrust from '@/utils/validateTrust'
 
 // -------------------- Types --------------------
 export type Certifier = {
   name: string
   description: string
-  icon?: string  // Made optional to match wallet library
+  icon?: string
   identityKey: string
   trust: number // 1..10
 }
@@ -87,8 +79,7 @@ const fetchWithTimeout = async (url: string, ms: number) => {
 // -------------------- Main Screen --------------------
 export default function TrustScreen() {
   const { t } = useTranslation()
-  const { colors, isDark } = useTheme()
-  const navigation = useNavigation()
+  const { colors } = useTheme()
 
   const { settings, updateSettings } = useWallet()
 
@@ -109,19 +100,19 @@ export default function TrustScreen() {
     [trustedEntities]
   )
 
-  // Clamp threshold to available points (parity with web)
+  // Clamp threshold to available points
   useEffect(() => {
     if (trustLevel > totalTrustPoints && totalTrustPoints > 0) {
       setTrustLevel(totalTrustPoints)
     }
   }, [totalTrustPoints, trustLevel])
 
-  // Detect unsaved changes (parity with web)
+  // Detect unsaved changes
   const settingsNeedsUpdate =
     (settings?.trustSettings?.trustLevel ?? 0) !== trustLevel ||
     !deepEqualCertifierArrays(settings?.trustSettings?.trustedCertifiers || [], trustedEntities)
 
-  // Save to settings (parity with web)
+  // Save to settings
   const handleSave = useCallback(async (): Promise<boolean> => {
     try {
       setSaving(true)
@@ -145,30 +136,6 @@ export default function TrustScreen() {
       setSaving(false)
     }
   }, [updateSettings, settings, trustLevel, trustedEntities, t])
-
-  // Block leaving the screen if there are unsaved changes
-  useEffect(() => {
-    const sub = navigation.addListener('beforeRemove', (e: any) => {
-      if (!settingsNeedsUpdate) return
-      e.preventDefault()
-      Alert.alert(
-        t('unsaved_changes') || 'Unsaved Changes',
-        t('save_before_leaving') || 'You have unsaved changes. Do you want to save them before leaving?',
-        [
-          { text: t('dont_save') || "Don't Save", style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
-          { text: t('cancel') || 'Cancel', style: 'cancel' },
-          {
-            text: t('save') || 'Save',
-            onPress: async () => {
-              const ok = await handleSave()
-              if (ok) navigation.dispatch(e.data.action)
-            }
-          }
-        ]
-      )
-    })
-    return sub
-  }, [navigation, settingsNeedsUpdate, trustLevel, trustedEntities, handleSave, t])
 
   // Search
   const filtered = useMemo(() => {
@@ -204,174 +171,172 @@ export default function TrustScreen() {
   }
 
   return (
-    <CustomSafeArea style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
-
+    <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
-          paddingBottom: settingsNeedsUpdate ? 80 : 96 // Padding for save bar
+          paddingTop: spacing.lg,
+          paddingBottom: settingsNeedsUpdate ? 80 : spacing.xxxl
         }}
-        scrollEnabled={true}
-        showsVerticalScrollIndicator={true}
-        bounces={true}
         keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled={true}
-        removeClippedSubviews={false}
-        scrollEventThrottle={16}
-        contentInsetAdjustmentBehavior="automatic"
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>Trust</Text>
-          <Text style={[styles.desc, { color: colors.textSecondary }]}>
-            Give points to show which certifiers you trust the most to confirm the identity of counterparties. More points mean a higher priority.
-          </Text>
+        {/* Description */}
+        <Text style={[styles.description, { color: colors.textSecondary }]}>
+          Give points to show which certifiers you trust the most to confirm the identity of counterparties. More points mean a higher priority.
+        </Text>
 
-          {/* Search + Add */}
-          <View style={styles.row}>
-            <View style={[styles.searchWrap, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>
-              <Ionicons name="search" size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
-              <TextInput
-                style={[styles.searchInput, { color: colors.textPrimary }]}
-                placeholder={'Search'}
-                placeholderTextColor={colors.textSecondary}
-                value={query}
-                onChangeText={setQuery}
-              />
-            </View>
-            <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => setShowAdd(true)}>
-              <Ionicons name="add" size={16} color={colors.background} />
-              <Text style={[styles.addBtnText, { color: colors.background }]}>Add Provider</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Threshold */}
-        <View style={[styles.thresholdCard, { borderColor: colors.inputBorder }]}>
-          <Text style={[styles.thresholdTitle, { color: colors.textPrimary }]}>Trust Threshold</Text>
-          <Text style={[styles.thresholdDesc, { color: colors.textSecondary }]}>
-            You&apos;ve given out a total of <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{totalTrustPoints} {totalTrustPoints === 1 ? 'point' : 'points'}</Text>.
-            Set the minimum points any counterparty must have across your trust network to be shown.
-          </Text>
-
+        {/* ── Threshold ── */}
+        <GroupedSection header="Threshold">
           <View style={styles.thresholdRow}>
-            <Text style={[styles.thresholdValue, { color: colors.textPrimary }]}>
-              <Text style={{ fontWeight: '700' }}>{trustLevel}</Text> / {Math.max(totalTrustPoints, 1)}
-            </Text>
-
-            {/* Simple stepper to avoid extra slider deps */}
-            <View style={styles.stepper}>
-              <TouchableOpacity
-                onPress={() => setTrustLevel(v => Math.max(1, Math.min(v - 1, Math.max(totalTrustPoints, 1))))}
-                style={[styles.stepBtn, { borderColor: colors.inputBorder }]}
-              >
-                <Ionicons name="remove" size={18} color={colors.textPrimary} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setTrustLevel(v => Math.max(1, Math.min(v + 1, Math.max(totalTrustPoints, 1))))}
-                style={[styles.stepBtn, { borderColor: colors.inputBorder }]}
-              >
-                <Ionicons name="add" size={18} color={colors.textPrimary} />
-              </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.thresholdLabel, { color: colors.textPrimary }]}>
+                Trust Level
+              </Text>
+              <Text style={[styles.thresholdDesc, { color: colors.textSecondary }]}>
+                {totalTrustPoints} {totalTrustPoints === 1 ? 'point' : 'points'} given out. Set the minimum any counterparty must have.
+              </Text>
+            </View>
+            <View style={styles.thresholdControls}>
+              <Text style={[styles.thresholdValue, { color: colors.textPrimary }]}>
+                <Text style={{ fontWeight: '700' }}>{trustLevel}</Text> / {Math.max(totalTrustPoints, 1)}
+              </Text>
+              <View style={styles.stepper}>
+                <TouchableOpacity
+                  onPress={() => setTrustLevel(v => Math.max(1, Math.min(v - 1, Math.max(totalTrustPoints, 1))))}
+                  style={[styles.stepBtn, { borderColor: colors.fillTertiary }]}
+                >
+                  <Ionicons name="remove" size={18} color={colors.textPrimary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setTrustLevel(v => Math.max(1, Math.min(v + 1, Math.max(totalTrustPoints, 1))))}
+                  style={[styles.stepBtn, { borderColor: colors.fillTertiary }]}
+                >
+                  <Ionicons name="add" size={18} color={colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        </GroupedSection>
 
-        {/* Certifier List */}
-        <View style={{ paddingHorizontal: 8 }}>
+        {/* ── Certifiers ── */}
+        <GroupedSection header="Certifiers">
+          {/* Search bar */}
+          <View style={[styles.searchRow, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }]}>
+            <Ionicons name="search" size={16} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.textPrimary }]}
+              placeholder="Search"
+              placeholderTextColor={colors.textSecondary}
+              value={query}
+              onChangeText={setQuery}
+            />
+          </View>
+
           {filtered.length === 0 ? (
             <View style={styles.emptyBox}>
-              <Text style={{ color: colors.textSecondary }}>No certifiers yet.</Text>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No certifiers yet.</Text>
             </View>
           ) : (
-            filtered.map((item) => (
-              <View key={item.identityKey} style={[styles.card, { borderColor: colors.inputBorder, backgroundColor: colors.paperBackground }]}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.rowLeft}>
-                    {item.icon ? (
-                      <Image source={{ uri: item.icon }} style={styles.icon} />
-                    ) : (
-                      <View style={[styles.placeholderIcon, { backgroundColor: colors.primary }]}>
-                        <Text style={{ color: colors.background, fontWeight: '700' }}>{item.name?.[0] || '?'}</Text>
-                      </View>
-                    )}
-                    <View style={{ flex: 1 }}>
-                      <View style={[styles.row, { justifyContent: 'space-between' }]}>
-                        <Text style={[styles.itemName, { color: colors.textPrimary }]} numberOfLines={1}>
-                          {item.name}
-                        </Text>
-                        <TouchableOpacity onPress={() => onRemove(item.identityKey)}>
-                          <Ionicons name="close" size={18} color={colors.error} />
-                        </TouchableOpacity>
-                      </View>
-                      <Text style={[styles.itemDesc, { color: colors.textSecondary }]} numberOfLines={2}>
-                        {item.description}
-                      </Text>
-
-                      {/* Key row */}
-                      <View style={[styles.keyRow, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>
-                        <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} style={{ marginRight: 6 }} />
-                        <Text style={[styles.keyText, { color: colors.textPrimary }]}>{maskKey(item.identityKey)}</Text>
-                        <TouchableOpacity onPress={() => copyKey(item.identityKey)} style={{ padding: 4, marginLeft: 'auto' }}>
-                          <Ionicons name="copy-outline" size={14} color={colors.textSecondary} />
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Trust row */}
-                      <View style={[styles.row, { marginTop: 8, alignItems: 'center' }]}>
-                        <View style={[styles.chip, { backgroundColor: colors.inputBackground }]}>
-                          <Text style={{ fontSize: 12, color: colors.textSecondary }}>Trust Level: </Text>
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textPrimary }}>{item.trust}/10</Text>
-                        </View>
-                        <View style={styles.stepperSmall}>
-                          <TouchableOpacity
-                            onPress={() => onChangeTrust(item.identityKey, Math.max(1, Math.min((item.trust || 1) - 1, 10)))}
-                            style={[styles.stepBtnSmall, { borderColor: colors.inputBorder }]}
-                          >
-                            <Ionicons name="remove" size={14} color={colors.textPrimary} />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={() => onChangeTrust(item.identityKey, Math.max(1, Math.min((item.trust || 1) + 1, 10)))}
-                            style={[styles.stepBtnSmall, { borderColor: colors.inputBorder }]}
-                          >
-                            <Ionicons name="add" size={14} color={colors.textPrimary} />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
+            filtered.map((item, idx) => (
+              <View
+                key={item.identityKey}
+                style={[
+                  styles.certifierCard,
+                  idx < filtered.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
+                ]}
+              >
+                <View style={styles.certifierHeader}>
+                  {item.icon ? (
+                    <Image source={{ uri: item.icon }} style={styles.certifierIcon} />
+                  ) : (
+                    <View style={[styles.certifierIconPlaceholder, { backgroundColor: colors.accent }]}>
+                      <Text style={{ color: colors.background, fontWeight: '700' }}>{item.name?.[0] || '?'}</Text>
                     </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.certifierNameRow}>
+                      <Text style={[styles.certifierName, { color: colors.textPrimary }]} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      <TouchableOpacity onPress={() => onRemove(item.identityKey)}>
+                        <Ionicons name="close" size={18} color={colors.error} />
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={[styles.certifierDesc, { color: colors.textSecondary }]} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Key row */}
+                <View style={[styles.keyRow, { backgroundColor: colors.fillTertiary }]}>
+                  <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} style={{ marginRight: spacing.xs }} />
+                  <Text style={[styles.keyText, { color: colors.textPrimary }]}>{maskKey(item.identityKey)}</Text>
+                  <TouchableOpacity onPress={() => copyKey(item.identityKey)} style={{ padding: spacing.xs, marginLeft: 'auto' }}>
+                    <Ionicons name="copy-outline" size={14} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Trust row */}
+                <View style={styles.trustRow}>
+                  <View style={[styles.chip, { backgroundColor: colors.fillTertiary }]}>
+                    <Text style={[styles.chipText, { color: colors.textSecondary }]}>Trust Level: </Text>
+                    <Text style={[styles.chipText, { fontWeight: '700', color: colors.textPrimary }]}>{item.trust}/10</Text>
+                  </View>
+                  <View style={styles.stepperSmall}>
+                    <TouchableOpacity
+                      onPress={() => onChangeTrust(item.identityKey, Math.max(1, Math.min((item.trust || 1) - 1, 10)))}
+                      style={[styles.stepBtnSmall, { borderColor: colors.fillTertiary }]}
+                    >
+                      <Ionicons name="remove" size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => onChangeTrust(item.identityKey, Math.max(1, Math.min((item.trust || 1) + 1, 10)))}
+                      style={[styles.stepBtnSmall, { borderColor: colors.fillTertiary }]}
+                    >
+                      <Ionicons name="add" size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
                   </View>
                 </View>
               </View>
             ))
           )}
-        </View>
+
+          {/* Add Provider button */}
+          <TouchableOpacity
+            style={[styles.addProviderBtn, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator }]}
+            onPress={() => setShowAdd(true)}
+          >
+            <Ionicons name="add" size={18} color={colors.accent} style={{ marginRight: spacing.sm }} />
+            <Text style={[styles.addProviderText, { color: colors.accent }]}>Add Provider</Text>
+          </TouchableOpacity>
+        </GroupedSection>
       </ScrollView>
 
-      {/* Non-Absolute Save Bar */}
+      {/* Save bar */}
       {settingsNeedsUpdate && (
-        <View style={[styles.saveBarFixed, { backgroundColor: colors.paperBackground, borderTopColor: colors.inputBorder }]}>
-          <Text style={{ color: colors.textSecondary }}>You have unsaved changes</Text>
+        <View style={[styles.saveBar, { backgroundColor: colors.backgroundElevated, borderTopColor: colors.separator }]}>
+          <Text style={[styles.saveBarText, { color: colors.textSecondary }]}>You have unsaved changes</Text>
           <TouchableOpacity
             onPress={handleSave}
             disabled={saving}
-            style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}
+            style={[styles.saveBtn, { backgroundColor: colors.accent, opacity: saving ? 0.6 : 1 }]}
           >
             {saving ? (
               <ActivityIndicator size="small" color={colors.background} />
             ) : (
-              <Text style={{ color: colors.background, fontWeight: '700' }}>Save</Text>
+              <Text style={[styles.saveBtnText, { color: colors.background }]}>Save</Text>
             )}
           </TouchableOpacity>
         </View>
       )}
 
-      {/* Simple snack */}
+      {/* Snackbar */}
       {snack && (
         <TouchableOpacity
           activeOpacity={0.9}
           onPress={() => setSnack(null)}
-          style={[styles.snack, { backgroundColor: colors.paperBackground, borderColor: colors.inputBorder }]}
+          style={[styles.snack, { backgroundColor: colors.backgroundElevated, borderColor: colors.separator }]}
         >
           <Text style={{ color: colors.textPrimary }}>{snack}</Text>
         </TouchableOpacity>
@@ -382,7 +347,6 @@ export default function TrustScreen() {
         visible={showAdd}
         onClose={() => setShowAdd(false)}
         onAdd={(c) => {
-          // prevent dupes by identityKey
           if (trustedEntities.some(x => x.identityKey === c.identityKey)) {
             setSnack('An entity with this public key is already in the list!')
             return
@@ -392,7 +356,7 @@ export default function TrustScreen() {
         }}
         colors={colors}
       />
-    </CustomSafeArea>
+    </View>
   )
 }
 
@@ -424,7 +388,6 @@ function AddProviderModal({
 
   useEffect(() => {
     if (!visible) {
-      // reset
       setAdvanced(false)
       setDomain('')
       setName('')
@@ -483,7 +446,6 @@ function AddProviderModal({
       setFieldsValid(true)
     } catch (e: any) {
       setFieldsValid(false)
-      // mimic web error shape: e.field can be 'name' | 'icon' | 'publicKey'
       if (e?.field === 'name') setNameError(e.message)
       else if (e?.field === 'icon') setIconError(e.message)
       else setKeyError(e?.message || 'Invalid public key')
@@ -499,8 +461,8 @@ function AddProviderModal({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
-        <View style={[styles.modalCard, { backgroundColor: colors.paperBackground, borderColor: colors.inputBorder }]}>
-          <View style={[styles.row, { justifyContent: 'space-between', marginBottom: 12 }]}>
+        <View style={[styles.modalCard, { backgroundColor: colors.backgroundElevated, borderColor: colors.separator }]}>
+          <View style={[styles.modalHeader]}>
             <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Add Provider</Text>
             <TouchableOpacity onPress={onClose}>
               <Ionicons name="close" size={20} color={colors.textSecondary} />
@@ -509,9 +471,9 @@ function AddProviderModal({
 
           {!advanced ? (
             <>
-              <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>Enter the domain name for the provider you&apos;d like to add.</Text>
-              <View style={[styles.inputRow, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>
-                <Ionicons name="globe-outline" size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
+              <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>Enter the domain name for the provider you&apos;d like to add.</Text>
+              <View style={[styles.inputRow, { borderColor: colors.separator, backgroundColor: colors.fillTertiary }]}>
+                <Ionicons name="globe-outline" size={16} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
                 <TextInput
                   placeholder="trustedentity.com"
                   placeholderTextColor={colors.textSecondary}
@@ -528,9 +490,9 @@ function AddProviderModal({
               </View>
               {!!domainError && <Text style={[styles.err, { color: colors.error }]}>{domainError}</Text>}
               {loading ? (
-                <ActivityIndicator style={{ marginTop: 12 }} />
+                <ActivityIndicator style={{ marginTop: spacing.md }} />
               ) : (
-                <TouchableOpacity onPress={handleDomainSubmit} style={[styles.primaryBtn, { backgroundColor: colors.primary }]}>
+                <TouchableOpacity onPress={handleDomainSubmit} style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
                   <Ionicons name="document-text-outline" size={16} color={colors.background} />
                   <Text style={[styles.primaryBtnText, { color: colors.background }]}>Get Provider Details</Text>
                 </TouchableOpacity>
@@ -538,11 +500,11 @@ function AddProviderModal({
             </>
           ) : (
             <>
-              <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>Directly enter the details for the provider you&apos;d like to add.</Text>
+              <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>Directly enter the details for the provider you&apos;d like to add.</Text>
 
               {/* Name */}
-              <View style={[styles.inputRow, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>
-                <Ionicons name="person-outline" size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
+              <View style={[styles.inputRow, { borderColor: colors.separator, backgroundColor: colors.fillTertiary }]}>
+                <Ionicons name="person-outline" size={16} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
                 <TextInput
                   placeholder="Entity Name"
                   placeholderTextColor={colors.textSecondary}
@@ -558,8 +520,8 @@ function AddProviderModal({
               {!!nameError && <Text style={[styles.err, { color: colors.error }]}>{nameError}</Text>}
 
               {/* Icon */}
-              <View style={[styles.inputRow, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>
-                <Ionicons name="image-outline" size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
+              <View style={[styles.inputRow, { borderColor: colors.separator, backgroundColor: colors.fillTertiary }]}>
+                <Ionicons name="image-outline" size={16} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
                 <TextInput
                   placeholder="https://trustedentity.com/icon.png"
                   placeholderTextColor={colors.textSecondary}
@@ -577,8 +539,8 @@ function AddProviderModal({
               {!!iconError && <Text style={[styles.err, { color: colors.error }]}>{iconError}</Text>}
 
               {/* Public key */}
-              <View style={[styles.inputRow, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>
-                <Ionicons name="key-outline" size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
+              <View style={[styles.inputRow, { borderColor: colors.separator, backgroundColor: colors.fillTertiary }]}>
+                <Ionicons name="key-outline" size={16} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
                 <TextInput
                   placeholder="0295bf1c7842d14b..."
                   placeholderTextColor={colors.textSecondary}
@@ -596,9 +558,9 @@ function AddProviderModal({
               {!!keyError && <Text style={[styles.err, { color: colors.error }]}>{keyError}</Text>}
 
               {loading ? (
-                <ActivityIndicator style={{ marginTop: 12 }} />
+                <ActivityIndicator style={{ marginTop: spacing.md }} />
               ) : (
-                <TouchableOpacity onPress={handleDirectValidate} style={[styles.primaryBtn, { backgroundColor: colors.primary }]}>
+                <TouchableOpacity onPress={handleDirectValidate} style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
                   <Ionicons name="shield-checkmark-outline" size={16} color={colors.background} />
                   <Text style={[styles.primaryBtnText, { color: colors.background }]}>Validate Details</Text>
                 </TouchableOpacity>
@@ -609,28 +571,28 @@ function AddProviderModal({
           {/* Toggle advanced */}
           <TouchableOpacity onPress={() => setAdvanced(v => !v)} style={styles.advancedBtn}>
             <Ionicons name={advanced ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color={colors.textPrimary} />
-            <Text style={{ marginLeft: 6, color: colors.textPrimary }}>{advanced ? 'Hide' : 'Show'} Advanced</Text>
+            <Text style={{ marginLeft: spacing.xs, color: colors.textPrimary }}>{advanced ? 'Hide' : 'Show'} Advanced</Text>
           </TouchableOpacity>
 
           {/* Preview + description edit */}
           {fieldsValid && (
-            <View style={[styles.previewBox, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>
+            <View style={[styles.previewBox, { borderColor: colors.separator, backgroundColor: colors.fillTertiary }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 {icon ? (
                   <Image source={{ uri: icon }} style={styles.previewIcon} />
                 ) : (
-                  <View style={[styles.previewIcon, { backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' }]}>
+                  <View style={[styles.previewIcon, { backgroundColor: colors.accent, justifyContent: 'center', alignItems: 'center' }]}>
                     <Text style={{ color: colors.background, fontWeight: '700' }}>{name?.[0] || '?'}</Text>
                   </View>
                 )}
-                <View style={{ marginLeft: 12, flex: 1 }}>
+                <View style={{ marginLeft: spacing.md, flex: 1 }}>
                   <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{name}</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{maskKey(identityKey)}</Text>
+                  <Text style={[styles.previewKey, { color: colors.textSecondary }]}>{maskKey(identityKey)}</Text>
                 </View>
               </View>
 
-              <View style={[styles.inputRow, { marginTop: 12, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}>
-                <Ionicons name="pricetag-outline" size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
+              <View style={[styles.inputRow, { marginTop: spacing.md, borderColor: colors.separator, backgroundColor: colors.fillTertiary }]}>
+                <Ionicons name="pricetag-outline" size={16} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
                 <TextInput
                   placeholder="Description"
                   placeholderTextColor={colors.textSecondary}
@@ -646,17 +608,17 @@ function AddProviderModal({
           )}
 
           {/* Footer Actions */}
-          <View style={[styles.modalActions]}>
-            <TouchableOpacity onPress={onClose} style={[styles.secondaryBtn, { borderColor: colors.inputBorder }]}>
+          <View style={styles.modalActions}>
+            <TouchableOpacity onPress={onClose} style={[styles.secondaryBtn, { borderColor: colors.separator }]}>
               <Text style={{ color: colors.textPrimary }}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
               disabled={!ready}
               onPress={() => onAdd({ name, description, icon, identityKey })}
-              style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: ready ? 1 : 0.5 }]}
+              style={[styles.saveBtn, { backgroundColor: colors.accent, opacity: ready ? 1 : 0.5, flex: 0 }]}
             >
               <Ionicons name="shield-checkmark-outline" size={16} color={colors.background} />
-              <Text style={[styles.primaryBtnText, { color: colors.background }]}>Add Identity Certifier</Text>
+              <Text style={[styles.saveBtnText, { color: colors.background }]}>Add</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -667,79 +629,277 @@ function AddProviderModal({
 
 // -------------------- Styles --------------------
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { padding: 16 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 4 },
-  desc: { fontSize: 12, marginBottom: 12 },
+  description: {
+    ...typography.footnote,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.lg,
+  },
 
-  row: { flexDirection: 'row', alignItems: 'center' },
-  rowLeft: { flexDirection: 'row', alignItems: 'flex-start' },
+  // Threshold
+  thresholdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  thresholdLabel: {
+    ...typography.body,
+    fontWeight: '600',
+  },
+  thresholdDesc: {
+    ...typography.footnote,
+    marginTop: spacing.xs,
+  },
+  thresholdControls: {
+    alignItems: 'flex-end',
+    marginLeft: spacing.md,
+  },
+  thresholdValue: {
+    ...typography.body,
+    marginBottom: spacing.xs,
+  },
+  stepper: {
+    flexDirection: 'row',
+  },
+  stepBtn: {
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    marginLeft: spacing.sm,
+  },
 
-  searchWrap: {
+  // Search
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  searchInput: {
     flex: 1,
+    ...typography.body,
+    padding: 0,
+  },
+
+  // Certifier cards
+  certifierCard: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  certifierHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  certifierIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.md,
+    marginRight: spacing.md,
+  },
+  certifierIconPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.md,
+    marginRight: spacing.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  certifierNameRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  certifierName: {
+    ...typography.body,
+    fontWeight: '700',
+    flex: 1,
+  },
+  certifierDesc: {
+    ...typography.footnote,
+    marginTop: spacing.xs,
+  },
+  keyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  keyText: {
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+    ...typography.caption1,
+  },
+  trustRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+  },
+  chip: {
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  chipText: {
+    ...typography.caption1,
+  },
+  stepperSmall: {
+    flexDirection: 'row',
+    marginLeft: spacing.sm,
+  },
+  stepBtnSmall: {
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    marginLeft: spacing.xs,
+  },
+  emptyBox: {
+    alignItems: 'center',
+    paddingVertical: spacing.xxl,
+  },
+  emptyText: {
+    ...typography.subhead,
+  },
+
+  // Add provider button
+  addProviderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+  },
+  addProviderText: {
+    ...typography.body,
+    fontWeight: '600',
+  },
+
+  // Save bar
+  saveBar: {
+    borderTopWidth: 1,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  saveBarText: {
+    ...typography.subhead,
+  },
+  saveBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radii.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  saveBtnText: {
+    ...typography.subhead,
+    fontWeight: '700',
+  },
+
+  // Snackbar
+  snack: {
+    margin: spacing.lg,
+    marginTop: spacing.sm,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  modalCard: {
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    ...typography.headline,
+    fontWeight: '700',
+  },
+  modalDesc: {
+    ...typography.subhead,
+    marginBottom: spacing.sm,
+  },
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    height: 40
-  },
-  searchInput: { flex: 1, fontSize: 14 },
-  addBtn: {
-    paddingHorizontal: 12,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
     height: 40,
-    borderRadius: 8,
-    marginLeft: 8,
+    marginTop: spacing.sm,
+  },
+  textInput: {
+    flex: 1,
+    ...typography.subhead,
+    padding: 0,
+  },
+  primaryBtn: {
+    marginTop: spacing.md,
+    height: 44,
+    borderRadius: radii.sm,
     flexDirection: 'row',
-    alignItems: 'center'
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  addBtnText: { marginLeft: 6, fontWeight: '700' },
-
-  thresholdCard: {
-    marginHorizontal: 16,
-    marginBottom: 8,
+  primaryBtnText: {
+    marginLeft: spacing.xs,
+    ...typography.subhead,
+    fontWeight: '700',
+  },
+  secondaryBtn: {
+    height: 44,
+    borderRadius: radii.sm,
     borderWidth: 1,
-    borderRadius: 10,
-    padding: 12
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
   },
-  thresholdTitle: { fontWeight: '700', marginBottom: 6 },
-  thresholdDesc: { fontSize: 12 },
-  thresholdRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, justifyContent: 'space-between' },
-  thresholdValue: { fontSize: 16 },
-  stepper: { flexDirection: 'row' },
-  stepBtn: { borderWidth: 1, borderRadius: 8, padding: 8, marginLeft: 8 },
-
-  card: { borderWidth: 1, borderRadius: 12, marginHorizontal: 16, marginBottom: 12, padding: 12 },
-  cardHeader: {},
-  icon: { width: 48, height: 48, borderRadius: 24, marginRight: 12 },
-  placeholderIcon: { width: 48, height: 48, borderRadius: 24, marginRight: 12, justifyContent: 'center', alignItems: 'center' },
-  itemName: { fontSize: 16, fontWeight: '700' },
-  itemDesc: { fontSize: 12, marginTop: 2 },
-  chip: { borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
-  stepperSmall: { flexDirection: 'row', marginLeft: 8 },
-  stepBtnSmall: { borderWidth: 1, borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8, marginLeft: 6 },
-
-  keyRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, marginTop: 8 },
-  keyText: { fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }), fontSize: 12 },
-
-  emptyBox: { alignItems: 'center', padding: 24 },
-
-  saveBar: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopWidth: 1, padding: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  saveBarFixed: { borderTopWidth: 1, padding: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  saveBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 },
-
-  snack: { margin: 16, marginTop: 8, borderRadius: 8, borderWidth: 1, padding: 12, alignItems: 'center' },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 16 },
-  modalCard: { borderWidth: 1, borderRadius: 12, padding: 16 },
-  modalTitle: { fontSize: 18, fontWeight: '700' },
-  inputRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, height: 40, marginTop: 8 },
-  textInput: { flex: 1, fontSize: 14 },
-  primaryBtn: { marginTop: 12, height: 44, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  primaryBtnText: { marginLeft: 6, fontWeight: '700' },
-  secondaryBtn: { height: 44, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-  modalActions: { marginTop: 16, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8 },
-  advancedBtn: { marginTop: 8, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center' },
-  previewBox: { marginTop: 12, borderWidth: 1, borderRadius: 8, padding: 12 },
-  previewIcon: { width: 48, height: 48, borderRadius: 8 }
+  modalActions: {
+    marginTop: spacing.lg,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  advancedBtn: {
+    marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  previewBox: {
+    marginTop: spacing.md,
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+  },
+  previewIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.sm,
+  },
+  previewKey: {
+    ...typography.caption1,
+  },
+  err: {
+    ...typography.footnote,
+    marginTop: spacing.xs,
+  },
 })

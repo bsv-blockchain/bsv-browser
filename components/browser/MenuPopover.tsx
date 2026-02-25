@@ -110,7 +110,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       ) : (
         <>
           <Divider />
-          <Row icon="person-circle-outline" label="Identity" onPress={dismiss(onSettings)} />
+          <Row icon="wallet-outline" label="Wallet" onPress={dismiss(onSettings)} />
           <Row icon="shield-checkmark-outline" label="Trust Network" onPress={dismiss(onTrust)} />
         </>
       )}

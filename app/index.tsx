@@ -961,7 +961,7 @@ const shareCurrent = useCallback(async () => {
               sheet.route === 'bookmarks' ? t('bookmarks') :
               sheet.route === 'history' ? t('history') :
               sheet.route === 'menu' ? undefined :
-              sheet.route === 'settings' ? t('settings') :
+              sheet.route === 'settings' ? 'Wallet' :
               sheet.route === 'identity' ? t('identity') :
               sheet.route === 'trust' ? t('trust_network') :
               sheet.route === 'permissions' ? t('permissions') :
@@ -1011,7 +1011,7 @@ const shareCurrent = useCallback(async () => {
               </View>
             )}
             {sheet.route === 'trust' && (
-              <View style={{ flex: 1, padding: spacing.lg }}>
+              <View style={{ flex: 1 }}>
                 <TrustScreen />
               </View>
             )}
