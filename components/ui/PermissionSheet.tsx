@@ -235,8 +235,27 @@ const PermissionSheet: React.FC = () => {
 
   // Derive what (if anything) we should show.
   const active = useMemo(
-    () => DEBUG_ACTIVE,
-    [] // eslint-disable-line react-hooks/exhaustive-deps
+    () =>
+      deriveActive({
+        protocolRequests,
+        basketRequests,
+        certificateRequests,
+        spendingRequests,
+        protocolAccessModalOpen,
+        basketAccessModalOpen,
+        certificateAccessModalOpen,
+        spendingAuthorizationModalOpen
+      }),
+    [
+      protocolRequests,
+      basketRequests,
+      certificateRequests,
+      spendingRequests,
+      protocolAccessModalOpen,
+      basketAccessModalOpen,
+      certificateAccessModalOpen,
+      spendingAuthorizationModalOpen
+    ]
   )
 
   const visible = active !== null
@@ -336,7 +355,7 @@ const PermissionSheet: React.FC = () => {
     >
       {active && (
         <View style={styles.sheetInner}>
-          <View style={styles.content}>
+          <View style={[styles.content, active.kind === 'group' && { flex: 1 }]}>
             {/* -------- Originator / domain -------- */}
             <View style={styles.originatorRow}>
               <View style={[styles.faviconPlaceholder, { backgroundColor: colors.buttonBackgroundDisabled }]}>
@@ -636,7 +655,7 @@ const styles = StyleSheet.create({
 
   // Group permissions
   groupScroll: {
-    maxHeight: 240
+    flex: 1
   },
   groupSection: {
     borderTopWidth: StyleSheet.hairlineWidth,
