@@ -2,7 +2,7 @@ import React from 'react'
 import { ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
-import { useTheme } from '@/context/theme/ThemeContext'
+
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { useSheet } from '@/context/SheetContext'
 import { ListRow } from '@/components/ui/ListRow'
@@ -23,7 +23,6 @@ export const MenuSheet: React.FC<MenuSheetProps> = ({
   onAddBookmark,
   onGoToLogin,
 }) => {
-  const { colors } = useTheme()
   const { t } = useTranslation()
   const { isWeb2Mode } = useBrowserMode()
   const { push, close } = useSheet()

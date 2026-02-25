@@ -3,7 +3,7 @@ const getLocaleDefault = (): string => {
   try {
     // Try to get locale using Intl API if available
     return Intl.NumberFormat().resolvedOptions().locale?.split('-u-')[0] || 'en-US'
-  } catch (error) {
+  } catch {
     // Fallback to en-US if Intl is not fully supported
     return 'en-US'
   }
@@ -16,7 +16,7 @@ const getSeparator = (type: 'group' | 'decimal'): string => {
     const parts = Intl.NumberFormat(locale).formatToParts(1234.56)
     const part = parts.find(p => p.type === type)
     return part ? part.value : type === 'group' ? ',' : '.'
-  } catch (error) {
+  } catch {
     // Fallback values if Intl is not supported
     return type === 'group' ? ',' : '.'
   }
@@ -132,7 +132,7 @@ const formatCurrency = (
 
     const formatter = new Intl.NumberFormat(locale, options)
     return formatter.format(value)
-  } catch (error) {
+  } catch {
     // Fallback formatting if Intl is not supported
     const fixed = value.toFixed(minDigits)
     let symbol = '$'

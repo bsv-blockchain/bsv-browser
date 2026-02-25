@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useState, useRef } from 'react'
+import React, { createContext, useCallback, useContext, useState } from 'react'
 
 /**
  * Sheet routes for the unified bottom sheet system.

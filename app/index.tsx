@@ -195,10 +195,6 @@ function Browser() {
     }
   }, [])
 
-  const removeBookmark = useCallback((url: string) => {
-    bookmarkStore.removeBookmark(url)
-  }, [])
-
   /* ---------------------------------- tabs --------------------------------- */
   const activeTab = tabStore.activeTab
 
@@ -351,7 +347,6 @@ function Browser() {
   const addressInputRef = useRef<TextInput>(null)
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [pageThemeColor, setPageThemeColor] = useState<string | null>(null)
   const activeCameraStreams = useRef<Set<string>>(new Set())
 
   // Permission state
@@ -766,10 +761,6 @@ const shareCurrent = useCallback(async () => {
         return
       }
 
-      if (msg.type === 'THEME_COLOR') {
-        setPageThemeColor(msg.color || null)
-        return
-      }
 
       if (await routeWebViewMessage(msg)) return
 
@@ -845,7 +836,6 @@ const shareCurrent = useCallback(async () => {
       `)
     }
 
-    if (navState.loading) setPageThemeColor(null)
 
     tabStore.handleNavigationStateChange(activeTab.id, navState)
     if (!addressEditing.current) setAddressText(navState.url)

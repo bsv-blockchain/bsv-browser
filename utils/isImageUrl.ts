@@ -4,7 +4,7 @@ export default async (url: string): Promise<boolean> => {
   try {
     await Image.prefetch(url)
     return true
-  } catch (error) {
+  } catch {
     return false
   }
 }

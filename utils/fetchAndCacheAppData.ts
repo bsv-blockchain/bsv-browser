@@ -22,9 +22,6 @@ async function fetchAndCacheAppData(
   setAppName: SetStateString,
   DEFAULT_APP_ICON: string
 ): Promise<void> {
-  const faviconKey = `favicon_${appDomain}`
-  const manifestKey = `manifest_${appDomain}`
-
   // Try to load data from cache first
   // const cachedFavicon = window.localStorage.getItem(faviconKey);
   // const cachedManifest = window.localStorage.getItem(manifestKey);

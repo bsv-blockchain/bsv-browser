@@ -24,13 +24,12 @@ export default async function fetchManifest({ domain }: FetchManifestParams): Pr
         }
         const json = await response.json()
         r(json)
-      } catch (e) {
+      } catch {
         r({})
         return
       }
     })
-  } catch (error) {
-    // console.error(error)
+  } catch {
     // Ignore the error as it's not our problem
     return {}
   }

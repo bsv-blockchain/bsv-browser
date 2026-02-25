@@ -11,7 +11,7 @@ import React from 'react'
 import { Stack } from 'expo-router'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'
 import packageJson from '../package.json'
-import { WalletContextProvider , useWallet } from '@/context/WalletContext'
+import { WalletContextProvider } from '@/context/WalletContext'
 import { ExchangeRateContextProvider } from '@/context/ExchangeRateContext'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
 // TODO: Re-add RecoveryKeySaver when WAB support returns
@@ -20,9 +20,9 @@ import PermissionSheet from '@/components/ui/PermissionSheet'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
 import DefaultBrowserPrompt from '@/components/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/utils/translations'
-import { BrowserModeProvider, useBrowserMode } from '@/context/BrowserModeContext'
+import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/Web3BenefitsModalHandler'
-import { Text } from 'react-native'
+
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 const nativeHandlers: NativeHandlers = {

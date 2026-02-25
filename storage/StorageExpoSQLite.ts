@@ -668,7 +668,6 @@ export class StorageExpoSQLite extends StorageProvider {
     if ((args.partial as any).lockingScript) {
       throw new Error('Outputs may not be found by lockingScript value.')
     }
-    const db = this.getDB()
     const partial = { ...args.partial } as any
 
     // Build base query

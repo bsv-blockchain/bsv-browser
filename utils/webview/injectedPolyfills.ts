@@ -229,7 +229,7 @@ function injectedPolyfills(acceptLanguage: string) {
               if (callback) callback(permission)
               resolve(permission)
             }
-          } catch (e) {}
+          } catch {}
         }
         window.addEventListener('message', handler)
       })
@@ -258,7 +258,7 @@ function injectedPolyfills(acceptLanguage: string) {
                         window.removeEventListener('message', handler)
                         resolve(data.subscription)
                       }
-                    } catch (e) {}
+                    } catch {}
                   }
                   window.addEventListener('message', handler)
                 })
@@ -278,7 +278,7 @@ function injectedPolyfills(acceptLanguage: string) {
                         window.removeEventListener('message', handler)
                         resolve(data.subscription)
                       }
-                    } catch (e) {}
+                    } catch {}
                   }
                   window.addEventListener('message', handler)
                 })
@@ -310,7 +310,7 @@ function injectedPolyfills(acceptLanguage: string) {
                   reject(new Error('Fullscreen request denied'))
                 }
               }
-            } catch (e) {}
+            } catch {}
           }
           window.addEventListener('message', handler)
         })
@@ -333,7 +333,7 @@ function injectedPolyfills(acceptLanguage: string) {
                 window.removeEventListener('message', handler)
                 resolve(undefined)
               }
-            } catch (e) {}
+            } catch {}
           }
           window.addEventListener('message', handler)
         })
@@ -361,14 +361,11 @@ function injectedPolyfills(acceptLanguage: string) {
           ;(window as any).__fullscreenElement = data.isFullscreen ? document.documentElement : null
           document.dispatchEvent(new Event('fullscreenchange'))
         }
-      } catch (e) {}
+      } catch {}
     })
 
     // Completely replace getUserMedia to prevent WKWebView camera access
     if (navigator.mediaDevices) {
-      // Store original for potential fallback, but never use it for video
-      const originalGetUserMedia = navigator.mediaDevices.getUserMedia?.bind(navigator.mediaDevices)
-
       // Completely override getUserMedia - never call original for video constraints
       navigator.mediaDevices.getUserMedia = function (constraints: any) {
         console.log('[WebView] getUserMedia intercepted:', constraints)
@@ -640,8 +637,6 @@ function injectedPolyfills(acceptLanguage: string) {
       return originalXHRSend.call(this, data)
     }
   })()
-
-  true
 }
 
 export function buildInjectedJavaScript(acceptLanguage: string) {

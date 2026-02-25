@@ -167,7 +167,7 @@ interface WalletContextProps {
 export const WalletContextProvider: React.FC<WalletContextProps> = ({ children = <></> }) => {
   const [managers, setManagers] = useState<ManagerState>({})
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
-  const [adminOriginator, setAdminOriginator] = useState(ADMIN_ORIGINATOR)
+  const adminOriginator = ADMIN_ORIGINATOR
   const [recentApps, setRecentApps] = useState<any[]>([])
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
 
@@ -549,7 +549,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           if (mnemonic) {
             logWithTimestamp(F, 'Mnemonic found, will auto-build wallet')
           }
-        } catch (e) {
+        } catch {
           logWithTimestamp(F, 'Failed to parse stored config, using defaults')
           finalizeConfig({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' })
           await setItem('finalConfig', JSON.stringify({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' }))
@@ -824,7 +824,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           const userSettings = await managers.settingsManager.get()
           setSettings(userSettings)
           logWithTimestamp(F, 'Settings loaded successfully')
-        } catch (e) {
+        } catch {
           logWithTimestamp(F, 'Failed to load settings')
           // Unable to load settings, defaults are already loaded.
         }

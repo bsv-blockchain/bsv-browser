@@ -160,20 +160,6 @@ function truncate(str: string, max: number): string {
 }
 
 /** Map permission kind to the themed accent color key. */
-function accentForKind(kind: PermissionKind, colors: any): string {
-  switch (kind) {
-    case 'protocol':
-      return colors.permissionProtocol
-    case 'basket':
-      return colors.permissionBasket
-    case 'certificate':
-      return colors.permissionIdentity
-    case 'spending':
-      return colors.permissionSpending
-    default:
-      return colors.accent
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -206,32 +192,6 @@ const PermissionSheet: React.FC = () => {
   } = useContext(UserContext)
 
   const [detailsExpanded, setDetailsExpanded] = useState(false)
-
-  // DEBUG: Fake spending request for UI design.
-  // Real shape from WalletContext SpendingRequest type:
-  //   requestID, originator, description?, transactionAmount, totalPastSpending,
-  //   amountPreviouslyAuthorized, authorizationAmount, renewal?, lineItems: {description, satoshis}[]
-  const DEBUG_ACTIVE: ActivePermission = {
-    kind: 'group',
-    requestID: 'group:fast.brc.dev:1',
-    originator: 'fast.brc.dev',
-    title: 'App Permissions',
-    description: 'is requesting access to your wallet',
-    details: [],
-    groupPermissions: {
-      spendingAuthorization: { amount: 10000, description: 'Pay for in-app purchases' },
-      protocolPermissions: [
-        { protocolID: [0, 'hello world'], description: 'Send and receive messages' },
-        { protocolID: [1, 'todo list'], description: 'Manage your to-do items' }
-      ],
-      basketAccess: [
-        { basket: 'todo-items', description: 'Store your to-do list tokens' }
-      ],
-      certificateAccess: [
-        { type: 'age-verification', verifierPublicKey: '03ac9e...', fields: ['over18'], description: 'Verify you are over 18' }
-      ]
-    }
-  }
 
   // Derive what (if anything) we should show.
   const active = useMemo(
@@ -343,9 +303,6 @@ const PermissionSheet: React.FC = () => {
     setCertificateAccessModalOpen,
     setSpendingAuthorizationModalOpen
   ])
-
-  // Accent tint for the current permission kind
-  const accent = active ? accentForKind(active.kind, colors) : colors.accent
 
   return (
     <Sheet

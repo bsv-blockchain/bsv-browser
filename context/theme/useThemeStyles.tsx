@@ -4,7 +4,7 @@ import { spacing, radii, typography } from './tokens'
 
 // This hook creates commonly used styles based on the current theme
 export const useThemeStyles = () => {
-  const { colors, isDark } = useTheme()
+  const { colors } = useTheme()
 
   return StyleSheet.create({
     // Container styles

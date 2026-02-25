@@ -23,7 +23,7 @@ export interface MnemonicWalletResult {
  * Generate a new mnemonic-based wallet
  */
 export function generateMnemonicWallet(config: MnemonicWalletConfig = {}): MnemonicWalletResult {
-  const { passphrase = '', language = 'en' } = config
+  const { passphrase = '' } = config
 
   // Generate new mnemonic or use provided one
   let mnemonicInstance: Mnemonic
@@ -80,7 +80,7 @@ export function validateMnemonic(mnemonic: string): boolean {
   try {
     Mnemonic.fromString(mnemonic)
     return true
-  } catch (error) {
+  } catch {
     return false
   }
 }

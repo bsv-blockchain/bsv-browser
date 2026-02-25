@@ -34,7 +34,7 @@ export default function MnemonicScreen() {
   const [mode, setMode] = useState<MnemonicMode>('choose')
   const [mnemonic, setMnemonic] = useState<string>('')
   const [importedMnemonic, setImportedMnemonic] = useState<string>('')
-  const [hasShared, setHasShared] = useState(false)
+
   const [hasAcknowledged, setHasAcknowledged] = useState(false)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -59,7 +59,6 @@ export default function MnemonicScreen() {
         title: `Save Your Recovery Phrase`
       })
       if (result.action === Share.sharedAction) {
-        setHasShared(true)
         setHasAcknowledged(true)
       }
     } catch (error) {
@@ -298,7 +297,6 @@ export default function MnemonicScreen() {
             style={s.textButton}
             onPress={() => {
               setMode('choose')
-              setHasShared(false)
               setHasAcknowledged(false)
             }}
             activeOpacity={0.6}

@@ -94,7 +94,7 @@ export const useWebAppManifest = () => {
         const manifestData = await response.json()
         return manifestData
       }
-    } catch (error) {
+    } catch {
       // Manifest.json not found, try HTML fallback
     }
 
@@ -131,7 +131,7 @@ export const useWebAppManifest = () => {
           }
         }
       }
-    } catch (error) {
+    } catch {
       // HTML parsing failed
     }
 
