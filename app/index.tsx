@@ -207,11 +207,18 @@ function Browser() {
   const [addressText, setAddressText] = useState(kNEW_TAB_URL)
   const [addressFocused, setAddressFocused] = useState(false)
   
+  // Keyboard state
+  const [keyboardVisible, setKeyboardVisible] = useState(false)
+  const iosSoftKeyboardShown = useRef(false)
+  const keyboardHeight = useSharedValue(0)
+  
   // AddressBar position animation
   const addressBarAtTop = useSharedValue(false)
   const addressBarTranslateY = useSharedValue(0)
   // Travel distance as shared value for worklet access
   const addressBarTravelDistance = useSharedValue(0)
+  // Track position before focus to restore it later
+  const addressBarWasAtTopBeforeFocus = useRef(false)
   
   // Update travel distance and position when insets change
   useEffect(() => {
@@ -229,6 +236,39 @@ function Browser() {
       addressBarTranslateY.value = travelDistance
     }
   }, [insets.bottom, insets.top])
+
+  // Move address bar to bottom when focused, restore position when unfocused
+  useEffect(() => {
+    const travelDistance = addressBarTravelDistance.value
+    if (addressFocused) {
+      // Save current position before moving
+      addressBarWasAtTopBeforeFocus.current = addressBarAtTop.value
+      // Move to bottom position when focused
+      addressBarTranslateY.value = withSpring(travelDistance, {
+        mass: 1,
+        stiffness: 400,
+        damping: 38,
+      })
+      addressBarAtTop.value = false
+    } else {
+      // Restore previous position when unfocused
+      if (addressBarWasAtTopBeforeFocus.current) {
+        addressBarTranslateY.value = withSpring(0, {
+          mass: 1,
+          stiffness: 400,
+          damping: 38,
+        })
+        addressBarAtTop.value = true
+      } else {
+        addressBarTranslateY.value = withSpring(travelDistance, {
+          mass: 1,
+          stiffness: 400,
+          damping: 38,
+        })
+        addressBarAtTop.value = false
+      }
+    }
+  }, [addressFocused])
 
   // Pan gesture for AddressBar
   const addressBarPanGesture = Gesture.Pan()
@@ -279,8 +319,11 @@ function Browser() {
 
   // Animated style for AddressBar wrapper
   const animatedAddressBarStyle = useAnimatedStyle(() => {
+    // When at bottom (addressBarAtTop = false), subtract keyboard height to move up
+    // When at top (addressBarAtTop = true), ignore keyboard
+    const keyboardOffset = addressBarAtTop.value ? 0 : -keyboardHeight.value
     return {
-      transform: [{ translateY: addressBarTranslateY.value }],
+      transform: [{ translateY: addressBarTranslateY.value + keyboardOffset }],
     }
   })
 
@@ -300,8 +343,6 @@ function Browser() {
     }
   })
 
-  const [keyboardVisible, setKeyboardVisible] = useState(false)
-  const iosSoftKeyboardShown = useRef(false)
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
@@ -371,12 +412,22 @@ function Browser() {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
 
-    const showSub = Keyboard.addListener(showEvent, () => {
+    const showSub = Keyboard.addListener(showEvent, (e) => {
       setKeyboardVisible(true)
       if (Platform.OS === 'ios') iosSoftKeyboardShown.current = true
+      keyboardHeight.value = withSpring(e.endCoordinates.height, {
+        mass: 1,
+        stiffness: 400,
+        damping: 38,
+      })
     })
     const hideSub = Keyboard.addListener(hideEvent, () => {
       setKeyboardVisible(false)
+      keyboardHeight.value = withSpring(0, {
+        mass: 1,
+        stiffness: 400,
+        damping: 38,
+      })
       const shouldHandleHide = Platform.OS === 'ios' ? iosSoftKeyboardShown.current : true
       setTimeout(() => {
         if (shouldHandleHide && (addressEditing.current || addressInputRef.current?.isFocused())) {
@@ -1027,7 +1078,7 @@ const shareCurrent = useCallback(async () => {
                 </Animated.View>
               </GestureDetector>
 
-              {/* ---- Suggestions (fixed position between top and bottom) ---- */}
+              {/* ---- Suggestions (fixed position above address bar when focused) ---- */}
               {addressFocused && addressSuggestions.length > 0 && (
                 <View 
                   style={[
@@ -1242,6 +1293,10 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 19,
     paddingHorizontal: spacing.md,
+  },
+  suggestionsContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
   },
   suggestions: {
     borderRadius: radii.lg,
