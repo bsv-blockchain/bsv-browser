@@ -804,7 +804,7 @@ const shareCurrent = useCallback(async () => {
           top: isFullscreen ? 0 : insets.top,
           left: 0,
           right: 0,
-          bottom: isFullscreen ? 0 : insets.bottom,
+          bottom: 0,
         }}>
           {isFullscreen && (
             <TouchableOpacity

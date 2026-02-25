@@ -1,6 +1,7 @@
 import React from 'react'
 import {
   Keyboard,
+  PlatformColor,
   StyleSheet,
   Text,
   TextInput,
@@ -118,6 +119,18 @@ export const AddressBar: React.FC<AddressBarProps> = ({
 }) => {
   const { colors } = useTheme()
 
+  // Inside LiquidGlassView, iOS semantic colors get vibrant treatment —
+  // the system auto-adjusts them for contrast against whatever is behind the glass.
+  // Hardcoded hex colors do NOT get this treatment, so we swap them out.
+  const gc = isLiquidGlassSupported ? {
+    accent: PlatformColor('labelColor'),
+    primary: PlatformColor('labelColor'),
+    secondary: PlatformColor('secondaryLabelColor'),
+    tertiary: PlatformColor('tertiaryLabelColor'),
+    quaternary: PlatformColor('quaternaryLabelColor'),
+    separator: PlatformColor('separatorColor'),
+  } : null
+
   const displayText = addressFocused ? addressText : domainFromUrl(addressText)
   const isBackDisabled = !canGoBack || isNewTab
   const isForwardDisabled = !canGoForward || isNewTab
@@ -137,10 +150,10 @@ export const AddressBar: React.FC<AddressBarProps> = ({
               <Ionicons
                 name="chevron-back"
                 size={22}
-                color={isBackDisabled ? colors.textQuaternary : colors.accent}
+                color={isBackDisabled ? (gc?.quaternary ?? colors.textQuaternary) : (gc?.accent ?? colors.accent)}
               />
             </TouchableOpacity>
-            <View style={[styles.navDivider, { backgroundColor: colors.separator }]} />
+            <View style={[styles.navDivider, { backgroundColor: gc?.separator ?? colors.separator }]} />
             <TouchableOpacity
               onPress={onForward}
               disabled={isForwardDisabled}
@@ -150,7 +163,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
               <Ionicons
                 name="chevron-forward"
                 size={22}
-                color={isForwardDisabled ? colors.textQuaternary : colors.accent}
+                color={isForwardDisabled ? (gc?.quaternary ?? colors.textQuaternary) : (gc?.accent ?? colors.accent)}
               />
             </TouchableOpacity>
           </GlassPill>
@@ -162,7 +175,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
             <Ionicons
               name="lock-closed"
               size={12}
-              color={colors.textSecondary}
+              color={gc?.secondary ?? colors.textSecondary}
               style={styles.lockIcon}
             />
           )}
@@ -180,25 +193,25 @@ export const AddressBar: React.FC<AddressBarProps> = ({
             style={[
               styles.urlInput,
               {
-                color: colors.textPrimary,
+                color: gc?.primary ?? colors.textPrimary,
                 textAlign: addressFocused ? 'left' : 'center',
               },
             ]}
             placeholder="Search or enter website"
-            placeholderTextColor={colors.textTertiary}
+            placeholderTextColor={gc?.tertiary ?? colors.textTertiary}
             selectTextOnFocus
           />
           {addressFocused ? (
             <TouchableOpacity onPress={onClearText} style={styles.inputAction}>
-              <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+              <Ionicons name="close-circle" size={18} color={gc?.tertiary ?? colors.textTertiary} />
             </TouchableOpacity>
           ) : isLoading ? (
             <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
-              <Ionicons name="close" size={18} color={colors.textSecondary} />
+              <Ionicons name="close" size={18} color={gc?.secondary ?? colors.textSecondary} />
             </TouchableOpacity>
           ) : !isNewTab ? (
             <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
-              <Ionicons name="refresh" size={16} color={colors.textSecondary} />
+              <Ionicons name="refresh" size={16} color={gc?.secondary ?? colors.textSecondary} />
             </TouchableOpacity>
           ) : null}
         </GlassPill>
@@ -210,13 +223,13 @@ export const AddressBar: React.FC<AddressBarProps> = ({
               inputRef.current?.blur()
               Keyboard.dismiss()
             }} style={styles.moreButton} activeOpacity={0.6}>
-              <Ionicons name="close" size={20} color={colors.accent} />
+              <Ionicons name="close" size={20} color={gc?.accent ?? colors.accent} />
             </TouchableOpacity>
           </GlassPill>
         ) : !menuOpen ? (
           <GlassPill style={styles.morePill}>
             <TouchableOpacity onPress={onMorePress} style={styles.moreButton} activeOpacity={0.6}>
-              <Ionicons name="ellipsis-horizontal" size={20} color={colors.accent} />
+              <Ionicons name="ellipsis-horizontal" size={20} color={gc?.accent ?? colors.accent} />
             </TouchableOpacity>
           </GlassPill>
         ) : (
