@@ -37,7 +37,6 @@ const Sheet: React.FC<SheetProps> = ({
   const { colors } = useTheme()
   const { height: windowHeight } = Dimensions.get('window')
   const sheetHeight = Math.max(0, Math.min(1, heightPercent)) * windowHeight
-  const topOffset = windowHeight - sheetHeight
 
   // 0 = fully open, sheetHeight = fully hidden (below screen)
   const translateY = useSharedValue(sheetHeight)
@@ -109,8 +108,7 @@ const Sheet: React.FC<SheetProps> = ({
           styles.sheet,
           {
             backgroundColor: colors.backgroundElevated,
-            height: sheetHeight,
-            top: topOffset,
+            maxHeight: sheetHeight,
           },
           animatedStyle,
         ]}
@@ -139,6 +137,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
+    bottom: 0,
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
     overflow: 'hidden',

@@ -43,17 +43,24 @@ const SpendingAuthorizationModal = () => {
     setSpendingAuthorizationModalOpen(false)
   }
 
-  // Use debug data for testing, otherwise check if we should display modal
-  if (!spendingAuthorizationModalOpen || spendingRequests.length === 0) return null
+  // DEBUG: Force modal visible with placeholder data
+  const debugMode = true
+  const debugRequest = {
+    originator: 'demo.app',
+    description: 'wants to make a payment',
+    authorizationAmount: 1000
+  }
+
+  if (!debugMode && (!spendingAuthorizationModalOpen || spendingRequests.length === 0)) return null
 
   const {
     originator,
     description,
     authorizationAmount
-  } = spendingRequests[0]
+  } = debugMode ? debugRequest : spendingRequests[0]
 
   return (
-    <Modal visible={spendingAuthorizationModalOpen} transparent={true} animationType="fade">
+    <Modal visible={debugMode || spendingAuthorizationModalOpen} transparent={true} animationType="fade">
       <View style={styles.modalContainer}>
         <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
           <ScrollView>

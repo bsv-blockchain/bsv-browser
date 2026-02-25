@@ -52,6 +52,12 @@ function deriveActive(ctx: {
 
   if (ctx.spendingAuthorizationModalOpen && ctx.spendingRequests.length > 0) {
     const r = ctx.spendingRequests[0]
+    // Map lineItems [{type, satoshis, description}] to detail rows
+    const lineItemDetails: { label: string; value: string }[] =
+      (r.lineItems ?? []).map((item: { description?: string; satoshis: number }) => ({
+        label: item.description || 'Payment',
+        value: `${item.satoshis} sats`
+      }))
     return {
       kind: 'spending',
       requestID: r.requestID,
@@ -60,11 +66,7 @@ function deriveActive(ctx: {
       description: r.description || 'wants to spend from your wallet',
       amount: r.authorizationAmount,
       renewal: r.renewal,
-      details: [
-        { label: 'Transaction amount', value: `${r.transactionAmount} satoshis` },
-        { label: 'Previously authorized', value: `${r.amountPreviouslyAuthorized} satoshis` },
-        { label: 'Total past spending', value: `${r.totalPastSpending} satoshis` }
-      ]
+      details: lineItemDetails
     }
   }
 
@@ -176,6 +178,24 @@ const PermissionSheet: React.FC = () => {
   } = useContext(UserContext)
 
   const [detailsExpanded, setDetailsExpanded] = useState(false)
+
+  // DEBUG: Fake spending request for UI design.
+  // Real shape from WalletContext SpendingRequest type:
+  //   requestID, originator, description?, transactionAmount, totalPastSpending,
+  //   amountPreviouslyAuthorized, authorizationAmount, renewal?, lineItems: {description, satoshis}[]
+  const DEBUG_ACTIVE: ActivePermission = {
+    kind: 'spending',
+    requestID: 'spend:fast.brc.dev:209',
+    originator: 'fast.brc.dev',
+    title: 'Spending Authorization',
+    description: 'create an event ticket',
+    amount: 209,
+    renewal: false,
+    details: [
+      { label: 'Event ticket', value: '1 sat' },
+      { label: 'Network fee', value: '208 sats' }
+    ]
+  }
 
   // Derive what (if anything) we should show.
   const active = useMemo(
@@ -295,126 +315,127 @@ const PermissionSheet: React.FC = () => {
     <Sheet
       visible={visible}
       onClose={handleDeny}
-      heightPercent={active?.kind === 'spending' ? 0.45 : 0.55}
+      heightPercent={0.92}
     >
       {active && (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          bounces={false}
-        >
-          {/* -------- Originator / domain -------- */}
-          <View style={styles.originatorRow}>
-            <View style={[styles.faviconPlaceholder, { backgroundColor: accent + '22' }]}>
-              <Text style={[styles.faviconLetter, { color: accent }]}>
-                {(active.originator[0] ?? '?').toUpperCase()}
+        <View style={styles.sheetInner}>
+          <View style={styles.content}>
+            {/* -------- Originator / domain -------- */}
+            <View style={styles.originatorRow}>
+              <View style={[styles.faviconPlaceholder, { backgroundColor: colors.buttonBackgroundDisabled }]}>
+                <Text style={[styles.faviconLetter, { color: colors.protocolApproval }]}>
+                  {(active.originator[0] ?? '?').toUpperCase()}
+                </Text>
+              </View>
+              <Text
+                style={[styles.originator, { color: colors.textPrimary }]}
+                numberOfLines={1}
+              >
+                {active.originator}
               </Text>
             </View>
-            <Text
-              style={[styles.originator, { color: colors.textPrimary }]}
-              numberOfLines={1}
-            >
-              {active.originator}
+
+            {/* -------- Renewal badge -------- */}
+            {active.renewal && (
+              <View style={[styles.renewalBadge, { backgroundColor: colors.accentSecondary + '1A' }]}>
+                <Text style={[styles.renewalText, { color: colors.accentSecondary }]}>
+                  Renewal
+                </Text>
+              </View>
+            )}
+
+            {/* -------- Expandable details (scrollable if tall) -------- */}
+            {(active.details.length > 0 || (active.fields && active.fields.length > 0)) && (
+              <View style={styles.detailsSection}>
+                <TouchableOpacity
+                  onPress={() => setDetailsExpanded(prev => !prev)}
+                  style={styles.detailsToggle}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.detailsToggleText, { color: colors.textSecondary }]}>
+                    {detailsExpanded ? 'Hide details' : 'Details'}
+                  </Text>
+                  <Text style={[styles.chevron, { color: colors.textTertiary }]}>
+                    {detailsExpanded ? '\u25B2' : '\u25BC'}
+                  </Text>
+                </TouchableOpacity>
+
+                {detailsExpanded && (
+                  <ScrollView
+                    style={[styles.detailsCard, { backgroundColor: colors.fillTertiary }]}
+                    bounces={false}
+                  >
+                    {active.details.map((d, i) => (
+                      <View key={i} style={styles.detailRow}>
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                          {d.label}
+                        </Text>
+                        <Text
+                          style={[styles.detailValue, { color: colors.textPrimary }]}
+                          numberOfLines={1}
+                        >
+                          {d.value}
+                        </Text>
+                      </View>
+                    ))}
+                    {active.fields && active.fields.length > 0 && (
+                      <>
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>
+                          Requested fields
+                        </Text>
+                        {active.fields.map((f, i) => (
+                          <Text
+                            key={i}
+                            style={[styles.fieldItem, { color: colors.textPrimary }]}
+                          >
+                            {'\u2022'} {f}
+                          </Text>
+                        ))}
+                      </>
+                    )}
+                  </ScrollView>
+                )}
+              </View>
+            )}
+
+            {/* -------- Plain-English description -------- */}
+            <Text style={[styles.description, { color: colors.primary }]}>
+              {active.description}
             </Text>
+
+            {/* -------- Spending: prominent amount -------- */}
+            {active.kind === 'spending' && active.amount != null && (
+              <View style={styles.amountBlock}>
+                <Text style={[styles.amountValue, { color: colors.textPrimary }]}>
+                  <AmountDisplay>{active.amount}</AmountDisplay>
+                </Text>
+              </View>
+            )}
           </View>
 
-          {/* -------- Renewal badge -------- */}
-          {active.renewal && (
-            <View style={[styles.renewalBadge, { backgroundColor: colors.accentSecondary + '1A' }]}>
-              <Text style={[styles.renewalText, { color: colors.accentSecondary }]}>
-                Renewal
-              </Text>
-            </View>
-          )}
-
-          {/* -------- Plain-English description -------- */}
-          <Text style={[styles.description, { color: colors.textSecondary }]}>
-            {active.description}
-          </Text>
-
-          {/* -------- Spending: prominent amount -------- */}
-          {active.kind === 'spending' && active.amount != null && (
-            <View style={styles.amountBlock}>
-              <Text style={[styles.amountValue, { color: colors.textPrimary }]}>
-                <AmountDisplay>{active.amount}</AmountDisplay>
-              </Text>
-            </View>
-          )}
-
-          {/* -------- Expandable details -------- */}
-          {(active.details.length > 0 || (active.fields && active.fields.length > 0)) && (
-            <View style={styles.detailsSection}>
-              <TouchableOpacity
-                onPress={() => setDetailsExpanded(prev => !prev)}
-                style={styles.detailsToggle}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.detailsToggleText, { color: colors.textSecondary }]}>
-                  {detailsExpanded ? 'Hide details' : 'Details'}
-                </Text>
-                <Text style={[styles.chevron, { color: colors.textTertiary }]}>
-                  {detailsExpanded ? '\u25B2' : '\u25BC'}
-                </Text>
-              </TouchableOpacity>
-
-              {detailsExpanded && (
-                <View style={[styles.detailsCard, { backgroundColor: colors.fillTertiary }]}>
-                  {active.details.map((d, i) => (
-                    <View key={i} style={styles.detailRow}>
-                      <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                        {d.label}
-                      </Text>
-                      <Text
-                        style={[styles.detailValue, { color: colors.textPrimary }]}
-                        numberOfLines={1}
-                      >
-                        {d.value}
-                      </Text>
-                    </View>
-                  ))}
-                  {active.fields && active.fields.length > 0 && (
-                    <>
-                      <Text style={[styles.detailLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>
-                        Requested fields
-                      </Text>
-                      {active.fields.map((f, i) => (
-                        <Text
-                          key={i}
-                          style={[styles.fieldItem, { color: colors.textPrimary }]}
-                        >
-                          {'\u2022'} {f}
-                        </Text>
-                      ))}
-                    </>
-                  )}
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* -------- Action buttons -------- */}
-          <View style={styles.buttonRow}>
+          {/* -------- Action buttons — pinned at bottom, never move -------- */}
+          <View style={[styles.buttonRow, { borderTopColor: colors.separator }]}>
             <TouchableOpacity
               style={[styles.buttonDeny, { borderColor: colors.separator }]}
               onPress={handleDeny}
               activeOpacity={0.7}
             >
-              <Text style={[styles.buttonDenyText, { color: colors.textPrimary }]}>
-                Don't Allow
+              <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>
+                Reject
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.buttonAllow, { backgroundColor: accent }]}
+              style={[styles.buttonAllow, { backgroundColor: colors.protocolApproval }]}
               onPress={handleGrant}
               activeOpacity={0.7}
             >
               <Text style={[styles.buttonAllowText, { color: '#FFFFFF' }]}>
-                Allow
+                Authorize
               </Text>
             </TouchableOpacity>
           </View>
-        </ScrollView>
+        </View>
       )}
     </Sheet>
   )
@@ -425,12 +446,13 @@ const PermissionSheet: React.FC = () => {
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  scroll: {
-    flex: 1
+  sheetInner: {
+    flex: 1,
+    justifyContent: 'flex-end'
   },
-  scrollContent: {
+  content: {
     paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xxxl
+    paddingBottom: spacing.lg
   },
 
   // Originator
@@ -472,6 +494,7 @@ const styles = StyleSheet.create({
   // Description
   description: {
     ...typography.body,
+    textAlign: 'center',
     marginBottom: spacing.lg
   },
 
@@ -504,7 +527,8 @@ const styles = StyleSheet.create({
   detailsCard: {
     borderRadius: radii.md,
     padding: spacing.md,
-    marginTop: spacing.sm
+    marginTop: spacing.sm,
+    maxHeight: 180
   },
   detailRow: {
     flexDirection: 'row',
@@ -528,11 +552,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs
   },
 
-  // Buttons
+  // Buttons — pinned outside ScrollView so they never move
   buttonRow: {
     flexDirection: 'row',
     gap: spacing.md,
-    marginTop: spacing.sm
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xxxl,
+    borderTopWidth: StyleSheet.hairlineWidth
   },
   buttonDeny: {
     flex: 1,

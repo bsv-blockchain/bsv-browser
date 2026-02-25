@@ -464,6 +464,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         lineItems
       }
 
+      // DEBUG: log the full spending request object so we can capture a real example
+      console.log('[SpendingRequest] full object:', JSON.stringify(newItem, null, 2))
+
       // Enqueue the new request
       return new Promise<void>(resolve => {
         setSpendingRequests(prev => {
