@@ -27,9 +27,10 @@ const kNEW_TAB_URL = 'about:blank'
 
 interface NewTabPageProps {
   onNavigate: (url: string) => void
+  inSheet?: boolean
 }
 
-const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate }) => {
+const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate, inSheet = false }) => {
   const { colors } = useTheme()
   const { t } = useTranslation()
   const { isWeb2Mode } = useBrowserMode()
@@ -98,7 +99,13 @@ const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate }) => {
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.backgroundSecondary }]}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.xxl }]}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: inSheet ? spacing.sm : insets.top + spacing.xxl,
+          paddingBottom: inSheet ? spacing.xxxl : insets.bottom + 80,
+        }
+      ]}
     >
       {/* Favorites (from bookmarks) */}
       {bookmarks.length > 0 && (
@@ -217,9 +224,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  content: {
-    paddingBottom: spacing.xxxl,
-  },
+  content: {},
   section: {
     marginBottom: spacing.xxl,
     paddingHorizontal: spacing.lg,

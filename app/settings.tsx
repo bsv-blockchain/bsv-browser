@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { View, Text, TouchableOpacity, ScrollView, Alert, StyleSheet } from 'react-native'
-import CustomSafeArea from '@/components/CustomSafeArea'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
@@ -150,7 +149,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <CustomSafeArea style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
+    <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: spacing.xl, paddingBottom: spacing.xxxl }}
@@ -292,7 +291,7 @@ export default function SettingsScreen() {
           />
         </GroupedSection>
       </ScrollView>
-    </CustomSafeArea>
+    </View>
   )
 }
 
