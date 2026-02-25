@@ -20,7 +20,6 @@ import { useWallet } from '@/context/WalletContext'
 import {
   generateMnemonicWallet,
   validateMnemonic,
-  formatMnemonicForDisplay
 } from '@/utils/mnemonicWallet'
 import * as Clipboard from 'expo-clipboard'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
@@ -112,44 +111,6 @@ export default function MnemonicScreen() {
     } finally {
       setLoading(false)
     }
-  }
-
-  // Render word chips in a clean grid
-  const renderMnemonicWords = (mnemonicPhrase: string) => {
-    const words = formatMnemonicForDisplay(mnemonicPhrase)
-    const columns = 3
-    const rows: string[][] = []
-    for (let i = 0; i < words.length; i += columns) {
-      rows.push(words.slice(i, i + columns))
-    }
-
-    return (
-      <View style={s.wordGrid}>
-        {rows.map((row, rowIndex) => (
-          <View key={rowIndex} style={s.wordRow}>
-            {row.map((word, colIndex) => {
-              const wordIndex = rowIndex * columns + colIndex
-              return (
-                <View
-                  key={wordIndex}
-                  style={[s.wordChip, {
-                    backgroundColor: colors.fillTertiary,
-                    borderColor: colors.separator,
-                  }]}
-                >
-                  <Text style={[s.wordNumber, { color: colors.textTertiary }]}>
-                    {wordIndex + 1}
-                  </Text>
-                  <Text style={[s.wordText, { color: colors.textPrimary }]}>
-                    {word}
-                  </Text>
-                </View>
-              )
-            })}
-          </View>
-        ))}
-      </View>
-    )
   }
 
   // ─── Choose mode ──────────────────────────────────────────────────────
@@ -254,8 +215,15 @@ export default function MnemonicScreen() {
             </Text>
           </View>
 
-          {/* Mnemonic word grid */}
-          {renderMnemonicWords(mnemonic)}
+          {/* Mnemonic display */}
+          <View style={[s.mnemonicDisplay, {
+            backgroundColor: colors.fillTertiary,
+            borderColor: colors.separator,
+          }]}>
+            <Text style={[s.mnemonicDisplayText, { color: colors.textPrimary }]} selectable>
+              {mnemonic}
+            </Text>
+          </View>
 
           {/* Action buttons */}
           <View style={s.generateActions}>
@@ -383,7 +351,7 @@ export default function MnemonicScreen() {
 
         <TouchableOpacity
           style={[s.primaryButton, {
-            backgroundColor: importedMnemonic.trim() ? colors.accent : colors.fillSecondary,
+            backgroundColor: importedMnemonic.trim() ? colors.identityApproval : colors.fillSecondary,
             opacity: loading ? 0.6 : 1,
             marginTop: spacing.xxl,
           }]}
@@ -481,33 +449,18 @@ const s = StyleSheet.create({
     lineHeight: 21,
   },
 
-  // ─── Mnemonic word grid ─────────────────────────────────────────────
-  wordGrid: {
+  // ─── Mnemonic display ──────────────────────────────────────────────
+  mnemonicDisplay: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.md,
+    padding: spacing.lg,
     marginBottom: spacing.xxl,
   },
-  wordRow: {
-    flexDirection: 'row',
-    marginBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  wordChip: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radii.sm,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    minHeight: 44,
-  },
-  wordNumber: {
-    ...typography.caption1,
-    width: 22,
-    fontVariant: ['tabular-nums'],
-  },
-  wordText: {
-    ...typography.headline,
-    flex: 1,
+  mnemonicDisplayText: {
+    ...typography.callout,
+    fontFamily: 'monospace',
+    lineHeight: 24,
+    textAlign: 'center',
   },
 
   // ─── Buttons ────────────────────────────────────────────────────────
