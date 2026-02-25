@@ -40,7 +40,7 @@ import { useTranslation } from 'react-i18next'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 
 import { useWebAppManifest } from '@/hooks/useWebAppManifest'
-import { buildInjectedJavaScript, buildSafeAreaScript } from '@/utils/webview/injectedPolyfills'
+import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
 import PermissionModal from '@/components/PermissionModal'
 import PermissionsScreen from '@/components/PermissionsScreen'
 import Sheet from '@/components/ui/Sheet'
@@ -87,7 +87,7 @@ function getInjectableJSMessage(message: any = {}) {
 
 function Browser() {
   /* --------------------------- theme / basic hooks -------------------------- */
-  const { colors, isDark } = useTheme()
+  const { isDark } = useTheme()
   const insets = useSafeAreaInsets()
   const { t, i18n } = useTranslation()
   const { isWeb2Mode } = useBrowserMode()
@@ -568,10 +568,6 @@ const shareCurrent = useCallback(async () => {
     [getAcceptLanguageHeader]
   )
 
-  // 48 = address-bar height above safe-area boundary (60px container − 12px overlap)
-  // env(safe-area-inset-bottom) in the CSS handles the device-chrome portion automatically
-  const safeAreaScript = useMemo(() => buildSafeAreaScript(48), [])
-
   const routeWebViewMessage = useMemo(
     () =>
       createWebViewMessageRouter({
@@ -797,6 +793,79 @@ const shareCurrent = useCallback(async () => {
   const uri = typeof activeTab?.url === 'string' && activeTab.url.length > 0 ? activeTab.url : 'about:blank'
   const isNewTab = activeTab?.url === kNEW_TAB_URL
 
+  const renderMainContent = () => {
+    if (isNewTab) {
+      return <NewTabPage onNavigate={url => updateActiveTab({ url })} />
+    }
+    if (activeTab) {
+      return (
+        <View style={{
+          position: 'absolute',
+          top: isFullscreen ? 0 : insets.top,
+          left: 0,
+          right: 0,
+          bottom: isFullscreen ? 0 : insets.bottom,
+        }}>
+          {isFullscreen && (
+            <TouchableOpacity
+              style={styles.exitFullscreen}
+              onPress={() => {
+                setIsFullscreen(false)
+                activeTab?.webviewRef.current?.injectJavaScript(`
+                  window.dispatchEvent(new MessageEvent('message', {
+                    data: JSON.stringify({ type: 'FULLSCREEN_CHANGE', isFullscreen: false })
+                  }));
+                `)
+              }}
+            >
+              <Ionicons name="contract-outline" size={20} color="white" />
+            </TouchableOpacity>
+          )}
+          <WebView
+            ref={activeTab?.webviewRef}
+            source={{
+              uri: uri,
+              headers: { 'Accept-Language': getAcceptLanguageHeader() }
+            }}
+            originWhitelist={['https://*', 'http://*']}
+            onMessage={handleMessage}
+            injectedJavaScript={injectedJavaScript}
+            injectedJavaScriptBeforeContentLoaded={
+              getPermissionScript(
+                permissionsDeniedForCurrentDomain,
+                pendingPermission
+              )
+            }
+            onNavigationStateChange={handleNavStateChange}
+
+            allowsFullscreenVideo={true}
+            mediaPlaybackRequiresUserAction={false}
+            allowsInlineMediaPlayback={true}
+            geolocationEnabled
+            onPermissionRequest={() => false}
+            androidLayerType={Platform.OS === 'android' ? 'software' : 'hardware'}
+            androidHardwareAccelerationDisabled={Platform.OS === 'android'}
+            onError={(e: any) => {
+              if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
+            }}
+            onHttpError={(e: any) => {
+              if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
+            }}
+            onLoadEnd={(navState: any) =>
+              tabStore.handleNavigationStateChange(activeTab.id, { ...navState, loading: false })
+            }
+            javaScriptEnabled
+            domStorageEnabled
+            allowsBackForwardNavigationGestures
+            containerStyle={{ backgroundColor: isDark ? '#000' : '#fff' }}
+            style={{ flex: 1 }}
+          />
+        </View>
+      )
+    }
+    return null
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardAvoidingView
@@ -805,70 +874,11 @@ const shareCurrent = useCallback(async () => {
         behavior="padding"
         keyboardVerticalOffset={0}
       >
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
           <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
 
-          {/* ---- Main content (fills entire screen, address bar floats over it) ---- */}
-          {isNewTab ? (
-            <NewTabPage onNavigate={url => updateActiveTab({ url })} />
-          ) : activeTab ? (
-            <View style={StyleSheet.absoluteFill}>
-              {isFullscreen && (
-                <TouchableOpacity
-                  style={styles.exitFullscreen}
-                  onPress={() => {
-                    setIsFullscreen(false)
-                    activeTab?.webviewRef.current?.injectJavaScript(`
-                      window.dispatchEvent(new MessageEvent('message', {
-                        data: JSON.stringify({ type: 'FULLSCREEN_CHANGE', isFullscreen: false })
-                      }));
-                    `)
-                  }}
-                >
-                  <Ionicons name="contract-outline" size={20} color="white" />
-                </TouchableOpacity>
-              )}
-              <WebView
-                ref={activeTab?.webviewRef}
-                source={{
-                  uri: uri,
-                  headers: { 'Accept-Language': getAcceptLanguageHeader() }
-                }}
-                originWhitelist={['https://*', 'http://*']}
-                onMessage={handleMessage}
-                injectedJavaScript={injectedJavaScript}
-                injectedJavaScriptBeforeContentLoaded={
-                  safeAreaScript + getPermissionScript(
-                    permissionsDeniedForCurrentDomain,
-                    pendingPermission
-                  )
-                }
-                onNavigationStateChange={handleNavStateChange}
-
-                allowsFullscreenVideo={true}
-                mediaPlaybackRequiresUserAction={false}
-                allowsInlineMediaPlayback={true}
-                geolocationEnabled
-                onPermissionRequest={() => false}
-                androidLayerType={Platform.OS === 'android' ? 'software' : 'hardware'}
-                androidHardwareAccelerationDisabled={Platform.OS === 'android'}
-                onError={(e: any) => {
-                  if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
-                }}
-                onHttpError={(e: any) => {
-                  if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
-                }}
-                onLoadEnd={(navState: any) =>
-                  tabStore.handleNavigationStateChange(activeTab.id, { ...navState, loading: false })
-                }
-                javaScriptEnabled
-                domStorageEnabled
-                allowsBackForwardNavigationGestures
-                containerStyle={{ backgroundColor: pageThemeColor || colors.background }}
-                style={{ flex: 1 }}
-              />
-            </View>
-          ) : null}
+          {/* ---- Main content: WebView lives between the safe-area bars ---- */}
+          {renderMainContent()}
 
           {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
           {!isFullscreen && showAddressBar && (
@@ -1000,7 +1010,7 @@ const shareCurrent = useCallback(async () => {
               />
             )}
             {sheet.route === 'settings' && (
-              <View style={{ flex: 1, padding: spacing.lg }}>
+              <View style={{ flex: 1 }}>
                 <SettingsScreen />
               </View>
             )}

@@ -649,32 +649,3 @@ export function buildInjectedJavaScript(acceptLanguage: string) {
   return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)});`
 }
 
-/**
- * Script injected BEFORE content loads (document-start).
- *
- * We intentionally do NOT inject `viewport-fit=cover`. Leaving the default
- * `viewport-fit=auto` means the CSS layout viewport is automatically constrained
- * to the device safe area by WKWebView. All elements — including
- * `position: fixed; top: 0` — stay below the notch / Dynamic Island without any
- * JS workaround, just like Safari.
- *
- * The area behind the notch is coloured by the WebView's `containerStyle`
- * backgroundColor, which is set to the page's detected theme-color.
- *
- * We only inject padding-bottom on <body> so content can scroll clear of our
- * floating address bar. `env(safe-area-inset-bottom)` is used so the value
- * self-adjusts if a page opts into `viewport-fit=cover` itself (env() returns 0
- * under the default `auto`, and the real inset under `cover`).
- *
- * @param toolbarHeight  height of the floating address bar above the device
- *   safe-area boundary (48 px = 60 px container − 12 px overlap into safe area)
- */
-export function buildSafeAreaScript(toolbarHeight: number) {
-  if (toolbarHeight <= 0) return ''
-  return `(function(){
-  var s=document.createElement('style');
-  s.id='__bsv-sa';
-  s.textContent='body{padding-bottom:calc(env(safe-area-inset-bottom,0px) + ${toolbarHeight}px)!important}';
-  document.documentElement.appendChild(s);
-})();`
-}
