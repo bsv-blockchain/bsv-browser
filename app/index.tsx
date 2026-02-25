@@ -853,21 +853,6 @@ const shareCurrent = useCallback(async () => {
                 containerStyle={{ backgroundColor: colors.background }}
                 style={{ flex: 1 }}
               />
-              {/* Status bar tint — sits over the WebView in the safe area zone,
-                  colored by the page's theme-color meta tag or sampled background */}
-              {!isFullscreen && insets.top > 0 && (
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: insets.top,
-                    backgroundColor: pageThemeColor || colors.background,
-                  }}
-                  pointerEvents="none"
-                />
-              )}
             </View>
           ) : null}
 
