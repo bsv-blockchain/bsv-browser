@@ -283,6 +283,22 @@ function Browser() {
     }
   })
 
+  // Animated style for MenuPopover - shifts down by its own height when bar moves up
+  const animatedMenuPopoverStyle = useAnimatedStyle(() => {
+    const travelDistance = addressBarTravelDistance.value
+    const menuPopoverHeight = 300 // Approximate MenuPopover height (varies by items shown)
+    
+    // When addressBarTranslateY = 0 (bar at top), menu should shift down by menuPopoverHeight and up by travelDistance
+    // When addressBarTranslateY = travelDistance (bar at bottom), menu should be at 0
+    // Formula: -(travelDistance - addressBarTranslateY) + menuPopoverHeight offset based on position
+    const progress = 1 - (addressBarTranslateY.value / travelDistance) // 0 at bottom, 1 at top
+    const menuTranslateY = -(travelDistance - addressBarTranslateY.value) + (menuPopoverHeight * progress)
+    
+    return {
+      transform: [{ translateY: menuTranslateY }],
+    }
+  })
+
   const [keyboardVisible, setKeyboardVisible] = useState(false)
   const iosSoftKeyboardShown = useRef(false)
 
@@ -1022,25 +1038,25 @@ const shareCurrent = useCallback(async () => {
 
           {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
           {menuPopoverOpen && (
-            <MenuPopover
-              isNewTab={isNewTab}
-              canShare={!isNewTab}
-              bottomOffset={insets.bottom}
-              addressBarAtTop={isAddressBarAtTop}
-              topOffset={insets.top + 60}
-              onDismiss={() => setMenuPopoverOpen(false)}
-              onShare={shareCurrent}
-              onAddBookmark={() => {
-                if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
-                  addBookmark(activeTab.title || t('untitled'), activeTab.url)
-                }
-              }}
-              onBookmarks={() => sheet.push('bookmarks')}
-              onTabs={() => setShowTabsView(true)}
-              onSettings={() => sheet.push('settings')}
-              onTrust={() => sheet.push('trust')}
-              onEnableWeb3={() => router.push('/auth/mnemonic')}
-            />
+            <Animated.View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, animatedMenuPopoverStyle]}>
+              <MenuPopover
+                isNewTab={isNewTab}
+                canShare={!isNewTab}
+                bottomOffset={insets.bottom}
+                onDismiss={() => setMenuPopoverOpen(false)}
+                onShare={shareCurrent}
+                onAddBookmark={() => {
+                  if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
+                    addBookmark(activeTab.title || t('untitled'), activeTab.url)
+                  }
+                }}
+                onBookmarks={() => sheet.push('bookmarks')}
+                onTabs={() => setShowTabsView(true)}
+                onSettings={() => sheet.push('settings')}
+                onTrust={() => sheet.push('trust')}
+                onEnableWeb3={() => router.push('/auth/mnemonic')}
+              />
+            </Animated.View>
           )}
 
           {/* ---- Tabs Overview ---- */}
