@@ -1026,6 +1026,8 @@ const shareCurrent = useCallback(async () => {
               isNewTab={isNewTab}
               canShare={!isNewTab}
               bottomOffset={insets.bottom}
+              addressBarAtTop={isAddressBarAtTop}
+              topOffset={insets.top + 60}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {

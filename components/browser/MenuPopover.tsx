@@ -24,6 +24,8 @@ interface MenuPopoverProps {
   isNewTab: boolean
   canShare: boolean
   bottomOffset: number
+  addressBarAtTop?: boolean
+  topOffset?: number
   onDismiss: () => void
   onShare: () => void
   onAddBookmark: () => void
@@ -71,6 +73,8 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   isNewTab,
   canShare,
   bottomOffset,
+  addressBarAtTop = false,
+  topOffset = 0,
   onDismiss,
   onShare,
   onAddBookmark,
@@ -122,8 +126,11 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       {/* Invisible backdrop to dismiss on outside tap */}
       <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} />
 
-      {/* Popover card anchored bottom-right, above the address bar */}
-      <View style={[styles.anchor, { bottom: bottomOffset }]} pointerEvents="box-none">
+      {/* Popover card anchored bottom-right or top-right based on AddressBar position */}
+      <View style={[
+        styles.anchor,
+        addressBarAtTop ? { top: topOffset } : { bottom: bottomOffset }
+      ]} pointerEvents="box-none">
         {isLiquidGlassSupported && LiquidGlassView ? (
           <LiquidGlassView
             effect="regular"
