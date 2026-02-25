@@ -11,18 +11,14 @@ import Balance from '@/components/Balance'
 import { spacing } from '@/context/theme/tokens'
 
 interface MenuSheetProps {
-  isDesktopView: boolean
   isNewTab: boolean
-  onToggleDesktopView: () => void
   onBackToHomepage: () => void
   onAddBookmark: () => void
   onGoToLogin: () => void
 }
 
 export const MenuSheet: React.FC<MenuSheetProps> = ({
-  isDesktopView,
   isNewTab,
-  onToggleDesktopView,
   onBackToHomepage,
   onAddBookmark,
   onGoToLogin,
@@ -84,14 +80,6 @@ export const MenuSheet: React.FC<MenuSheetProps> = ({
 
       {/* Browsing actions */}
       <GroupedSection>
-        {!isNewTab && (
-          <ListRow
-            label={isDesktopView ? t('switch_to_mobile_view') : t('switch_to_desktop_view')}
-            icon={isDesktopView ? 'phone-portrait-outline' : 'desktop-outline'}
-            onPress={() => { onToggleDesktopView(); close() }}
-            showChevron={false}
-          />
-        )}
         {!isNewTab && (
           <ListRow
             label={t('add_bookmark')}

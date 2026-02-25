@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -28,6 +29,7 @@ const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate }) => {
   const { t } = useTranslation()
   const { isWeb2Mode } = useBrowserMode()
   const { apps, loading } = useAppDirectory()
+  const insets = useSafeAreaInsets()
 
   const bookmarks = useMemo(() => {
     return bookmarkStore.bookmarks
@@ -70,7 +72,7 @@ const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate }) => {
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.backgroundSecondary }]}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.xxl }]}
     >
       {/* Favorites (from bookmarks) */}
       {bookmarks.length > 0 && (
@@ -123,7 +125,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingTop: spacing.xxl,
     paddingBottom: spacing.xxxl,
   },
   section: {

@@ -1,6 +1,10 @@
 import React, { memo, useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { Animated, Dimensions, Pressable, StyleSheet, Text, View } from 'react-native'
-import { PanGestureHandler, State as GestureState } from 'react-native-gesture-handler'
+import {
+  GestureHandlerRootView,
+  PanGestureHandler,
+  State as GestureState
+} from 'react-native-gesture-handler'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 
@@ -142,8 +146,8 @@ const Sheet: React.FC<SheetProps> = ({
   )
 
   return (
-    <View
-      style={StyleSheet.absoluteFill}
+    <GestureHandlerRootView
+      style={[StyleSheet.absoluteFill, { zIndex: 50 }]}
       pointerEvents={visible || isAnimating ? 'auto' : 'none'}
     >
       {(visible || isAnimating) && (
@@ -170,7 +174,7 @@ const Sheet: React.FC<SheetProps> = ({
         )}
         <View style={{ flex: 1 }}>{visible || isAnimating ? children : null}</View>
       </Animated.View>
-    </View>
+    </GestureHandlerRootView>
   )
 }
 

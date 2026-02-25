@@ -18,7 +18,7 @@ import {
   ActivityIndicator
 } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import Fuse from 'fuse.js'
@@ -212,8 +212,7 @@ function Browser() {
   const iosSoftKeyboardShown = useRef(false)
 
   const [showTabsView, setShowTabsView] = useState(false)
-  const [isDesktopView, setIsDesktopView] = useState(false)
-  const [isToggleDesktopCooldown, setIsToggleDesktopCooldown] = useState(false)
+
 
   const addressInputRef = useRef<TextInput>(null)
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
@@ -474,23 +473,7 @@ function Browser() {
     }
   }, [])
 
-  const toggleDesktopView = useCallback(() => {
-    if (isToggleDesktopCooldown) return
-    setIsToggleDesktopCooldown(true)
-    setIsDesktopView(prev => !prev)
-    const currentTab = tabStore.activeTab
-    if (currentTab && currentTab.url !== kNEW_TAB_URL) {
-      currentTab.webviewRef?.current?.reload()
-    }
-    setTimeout(() => setIsToggleDesktopCooldown(false), 1500)
-  }, [isToggleDesktopCooldown])
-
-  const mobileUserAgent =
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
-  const desktopUserAgent =
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-
-  const shareCurrent = useCallback(async () => {
+const shareCurrent = useCallback(async () => {
     const currentTab = tabStore.activeTab
     if (!currentTab) return
     try {
@@ -813,11 +796,8 @@ function Browser() {
         behavior="padding"
         keyboardVerticalOffset={0}
       >
-        <SafeAreaView
-          edges={['top', 'left', 'right']}
-          style={[styles.container, { backgroundColor: colors.background }]}
-        >
-          <StatusBar style={isDark ? 'light' : 'dark'} hidden={isFullscreen} />
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
+          <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
 
           {/* ---- Main content area ---- */}
           {isNewTab ? (
@@ -853,7 +833,7 @@ function Browser() {
                   pendingPermission
                 )}
                 onNavigationStateChange={handleNavStateChange}
-                userAgent={isDesktopView ? desktopUserAgent : mobileUserAgent}
+
                 allowsFullscreenVideo={true}
                 mediaPlaybackRequiresUserAction={false}
                 allowsInlineMediaPlayback={true}
@@ -965,9 +945,7 @@ function Browser() {
           >
             {sheet.route === 'menu' && (
               <MenuSheet
-                isDesktopView={isDesktopView}
                 isNewTab={isNewTab}
-                onToggleDesktopView={toggleDesktopView}
                 onBackToHomepage={() => {
                   updateActiveTab({ url: homepageUrl })
                   setAddressText(homepageUrl)
@@ -1031,7 +1009,7 @@ function Browser() {
               onDecision={onDecision}
             />
           )}
-        </SafeAreaView>
+        </View>
       </KeyboardAvoidingView>
     </GestureHandlerRootView>
   )
