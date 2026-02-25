@@ -38,6 +38,7 @@ export default function MnemonicScreen() {
   const [hasShared, setHasShared] = useState(false)
   const [hasAcknowledged, setHasAcknowledged] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   // Generate a new mnemonic
   const handleGenerateNew = () => {
@@ -54,13 +55,13 @@ export default function MnemonicScreen() {
   // Share mnemonic as text file via system share dialog
   const handleShareMnemonic = async () => {
     try {
-      const timestamp = new Date().toISOString().slice(0, 10)
       const result = await Share.share({
         message: mnemonic,
-        title: `bsv-recovery-phrase-${timestamp}`
+        title: `Save Your Recovery Phrase`
       })
       if (result.action === Share.sharedAction) {
         setHasShared(true)
+        setHasAcknowledged(true)
       }
     } catch (error) {
       console.error('Error sharing mnemonic:', error)
@@ -70,7 +71,11 @@ export default function MnemonicScreen() {
   // Copy mnemonic to clipboard
   const handleCopyMnemonic = async () => {
     await Clipboard.setStringAsync(mnemonic)
-    Alert.alert('Copied', 'Recovery phrase copied to clipboard')
+    setCopied(true)
+    setTimeout(() => {
+      setCopied(false)
+      setHasAcknowledged(true)
+    }, 3000)
   }
 
   // Continue with generated mnemonic after acknowledgment
@@ -159,16 +164,16 @@ export default function MnemonicScreen() {
           </View>
 
           <Text style={[s.largeTitle, { color: colors.textPrimary }]}>
-            Set Up Your Wallet
+            Wallet Data
           </Text>
           <Text style={[s.subtitle, { color: colors.textSecondary }]}>
-            Your keys, your coins.{'\n'}Your wallet is stored locally on this device.
+            Your keys and transactions are stored on this device <Text style={{ fontWeight: 'bold', fontStyle: 'italic' }}>only</Text>. Expect occasional loss.{'\n\n'}Designed for p2p electronic cash.{'\n'}<Text style={{ fontWeight: 'bold' }}>Not life savings</Text>.
           </Text>
 
           {/* Actions */}
           <View style={s.actionArea}>
             <TouchableOpacity
-              style={[s.primaryButton, { backgroundColor: colors.accent }]}
+              style={[s.primaryButton, { backgroundColor: colors.identityApproval }]}
               onPress={handleGenerateNew}
               activeOpacity={0.75}
             >
@@ -255,13 +260,13 @@ export default function MnemonicScreen() {
           {/* Action buttons */}
           <View style={s.generateActions}>
             <TouchableOpacity
-              style={[s.primaryButton, { backgroundColor: colors.accent }]}
+              style={[s.primaryButton, { backgroundColor: colors.protocolApproval }]}
               onPress={handleShareMnemonic}
               activeOpacity={0.75}
             >
               <Ionicons name="share-outline" size={20} color={colors.textOnAccent} style={s.btnIcon} />
               <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>
-                {hasShared ? 'Share Again' : 'Save Recovery Phrase'}
+                Save Recovery Phrase
               </Text>
             </TouchableOpacity>
 
@@ -272,9 +277,9 @@ export default function MnemonicScreen() {
               onPress={handleCopyMnemonic}
               activeOpacity={0.75}
             >
-              <Ionicons name="copy-outline" size={20} color={colors.accent} style={s.btnIcon} />
+              <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={20} color={colors.accent} style={s.btnIcon} />
               <Text style={[s.btnLabel, { color: colors.accent }]}>
-                Copy to Clipboard
+                {copied ? 'Copied' : 'Copy to Clipboard'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -295,14 +300,14 @@ export default function MnemonicScreen() {
               style={{ marginRight: spacing.md }}
             />
             <Text style={[s.acknowledgmentText, { color: colors.textPrimary }]}>
-              I have saved my recovery phrase and understand that losing it means permanently losing access to my wallet.
+              I have saved my recovery phrase and understand that losing it will result in total and permanent loss of all associated funds, tokens, and certificates.
             </Text>
           </TouchableOpacity>
 
           {/* Continue */}
           <TouchableOpacity
             style={[s.primaryButton, {
-              backgroundColor: hasAcknowledged ? colors.accent : colors.fillSecondary,
+              backgroundColor: hasAcknowledged ? colors.identityApproval : colors.fillSecondary,
               opacity: loading ? 0.6 : 1,
             }]}
             onPress={handleContinueWithGenerated}

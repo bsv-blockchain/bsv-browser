@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { View, Text, SafeAreaView, TouchableOpacity, ScrollView, Alert, TextInput, StyleSheet } from 'react-native'
+import { View, Text, TouchableOpacity, ScrollView, Alert, TextInput, StyleSheet } from 'react-native'
+import CustomSafeArea from '@/components/CustomSafeArea'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
@@ -76,7 +77,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
+    <CustomSafeArea style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: spacing.xxl, paddingBottom: spacing.xxxl }}
@@ -254,7 +255,7 @@ export default function SettingsScreen() {
           />
         </GroupedSection>
       </ScrollView>
-    </SafeAreaView>
+    </CustomSafeArea>
   )
 }
 
@@ -283,7 +284,7 @@ const localStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   editButtonText: {
-    ...typography.headline,
+    ...typography.headline
   },
 
   /* ── Mnemonic reveal ── */

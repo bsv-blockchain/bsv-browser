@@ -130,9 +130,9 @@ export const darkColors = {
   info: '#0A84FF',
 
   // Permission approval
-  permissionProtocol: '#30D158',
-  permissionBasket: '#30D158',
-  permissionIdentity: '#0A84FF',
+  permissionProtocol: '#1fae4378',
+  permissionBasket: '#1fae4378',
+  permissionIdentity: '#24588dff',
   permissionSpending: '#FF9F0A',
 } as const
 

@@ -921,6 +921,7 @@ const shareCurrent = useCallback(async () => {
                   onSettings={() => sheet.push('settings')}
                   onIdentity={() => sheet.push('identity')}
                   onTrust={() => sheet.push('trust')}
+                  onEnableWeb3={() => router.push('/auth/mnemonic')}
                 />
               )}
             </View>

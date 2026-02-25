@@ -31,6 +31,7 @@ interface MenuPopoverProps {
   onSettings: () => void
   onIdentity: () => void
   onTrust: () => void
+  onEnableWeb3: () => void
 }
 
 interface RowProps {
@@ -77,6 +78,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   onSettings,
   onIdentity,
   onTrust,
+  onEnableWeb3,
 }) => {
   const { colors, isDark } = useTheme()
   const { isWeb2Mode } = useBrowserMode()
@@ -101,7 +103,12 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       <Row icon="settings-outline" label="Settings" onPress={dismiss(onSettings)} />
 
       {/* Web3 group */}
-      {!isWeb2Mode && (
+      {isWeb2Mode ? (
+        <>
+          <Divider />
+          <Row icon="flash-outline" label="Enable Web3" onPress={dismiss(onEnableWeb3)} />
+        </>
+      ) : (
         <>
           <Divider />
           <Row icon="person-circle-outline" label="Identity" onPress={dismiss(onIdentity)} />
