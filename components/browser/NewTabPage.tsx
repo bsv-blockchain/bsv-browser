@@ -15,9 +15,7 @@ import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { useBrowserMode } from '@/context/BrowserModeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
-import { useAppDirectory, type AppEntry } from '@/hooks/useAppDirectory'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
 import bookmarkStore from '@/stores/BookmarkStore'
@@ -30,11 +28,15 @@ interface NewTabPageProps {
   inSheet?: boolean
 }
 
+interface BookmarkItem {
+  domain: string
+  appName: string
+  appIconImageUrl?: string
+}
+
 const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate, inSheet = false }) => {
   const { colors } = useTheme()
   const { t } = useTranslation()
-  const { isWeb2Mode } = useBrowserMode()
-  const { apps, loading } = useAppDirectory()
   const insets = useSafeAreaInsets()
   const { getItem, setItem } = useLocalStorage()
 
@@ -69,7 +71,7 @@ const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate, inSheet = false
       }))
   }, [])
 
-  const renderAppItem = ({ item }: { item: AppEntry }) => (
+  const renderAppItem = ({ item }: { item: BookmarkItem }) => (
     <TouchableOpacity
       style={styles.appItem}
       onPress={() => onNavigate(item.domain)}
@@ -123,31 +125,6 @@ const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate, inSheet = false
         </View>
       )}
 
-      {/* Apps from ls_apps overlay */}
-      {!isWeb2Mode && apps.length > 0 && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-            {t('apps') || 'Apps'}
-          </Text>
-          <FlatList
-            data={apps}
-            renderItem={renderAppItem}
-            keyExtractor={item => `app-${item.domain}`}
-            numColumns={4}
-            scrollEnabled={false}
-          />
-        </View>
-      )}
-
-      {/* Loading state */}
-      {!isWeb2Mode && loading && apps.length === 0 && (
-        <View style={styles.loadingContainer}>
-          <Text style={[styles.loadingText, { color: colors.textTertiary }]}>
-            Loading apps...
-          </Text>
-        </View>
-      )}
-
       {/* Homepage setting */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
@@ -177,7 +154,7 @@ const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate, inSheet = false
             />
             <View style={styles.homepageButtons}>
               <TouchableOpacity
-                style={[styles.homepageButton, { backgroundColor: colors.accent }]}
+                style={[styles.homepageButton, { backgroundColor: colors.identityApproval }]}
                 onPress={() => saveHomepageUrl(homepageUrl)}
               >
                 <Text style={[styles.homepageButtonText, { color: colors.textOnAccent }]}>Save</Text>
@@ -256,13 +233,6 @@ const styles = StyleSheet.create({
   appLabel: {
     ...typography.caption1,
     textAlign: 'center',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    paddingVertical: spacing.xxxl,
-  },
-  loadingText: {
-    ...typography.subhead,
   },
   homepageRow: {
     flexDirection: 'row',

@@ -853,12 +853,27 @@ const shareCurrent = useCallback(async () => {
                 containerStyle={{ backgroundColor: colors.background }}
                 style={{ flex: 1 }}
               />
+              {/* Status bar tint — sits over the WebView in the safe area zone,
+                  colored by the page's theme-color meta tag or sampled background */}
+              {!isFullscreen && insets.top > 0 && (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: insets.top,
+                    backgroundColor: pageThemeColor || colors.background,
+                  }}
+                  pointerEvents="none"
+                />
+              )}
             </View>
           ) : null}
 
           {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
           {!isFullscreen && showAddressBar && (
-            <View style={styles.chromeWrapper} pointerEvents="box-none">
+            <View style={[styles.chromeWrapper, { bottom: Math.max(insets.bottom, 12) }]} pointerEvents="box-none">
               <AddressBar
                 addressText={addressText}
                 addressFocused={addressFocused}
@@ -968,7 +983,7 @@ const shareCurrent = useCallback(async () => {
             )}
             {sheet.route === 'bookmarks' && (
               <View style={{ flex: 1, padding: spacing.lg }}>
-                <NewTabPage onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} />
+                <NewTabPage inSheet onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} />
               </View>
             )}
             {sheet.route === 'history' && (
@@ -1062,7 +1077,6 @@ const styles = StyleSheet.create({
   },
   chromeWrapper: {
     position: 'absolute',
-    bottom: 25,
     left: 0,
     right: 0,
     zIndex: 20,
