@@ -2,7 +2,6 @@ import React from 'react'
 import { StyleSheet, View, Platform } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { radii } from '@/context/theme/tokens'
 
 interface BlurChromeProps {
   children: React.ReactNode
@@ -12,9 +11,8 @@ interface BlurChromeProps {
 }
 
 /**
- * Translucent toolbar/chrome wrapper using expo-blur.
- * Falls back to a solid semi-transparent background on Android
- * where BlurView performance can be inconsistent.
+ * Translucent wrapper using expo-blur on iOS, solid fallback on Android.
+ * Used for toolbar chrome and floating glass pill fallbacks.
  */
 export const BlurChrome: React.FC<BlurChromeProps> = ({
   children,
@@ -36,7 +34,6 @@ export const BlurChrome: React.FC<BlurChromeProps> = ({
     )
   }
 
-  // Android fallback: solid semi-transparent background
   return (
     <View
       style={[

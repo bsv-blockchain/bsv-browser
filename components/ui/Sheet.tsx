@@ -1,9 +1,15 @@
-import React, { memo, useCallback, useEffect, useRef, useState, useMemo } from 'react'
-import { Animated, Dimensions, Pressable, StyleSheet, Text, View } from 'react-native'
+import React, { memo, useEffect } from 'react'
+import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native'
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  runOnJS,
+} from 'react-native-reanimated'
 import {
+  Gesture,
+  GestureDetector,
   GestureHandlerRootView,
-  PanGestureHandler,
-  State as GestureState
 } from 'react-native-gesture-handler'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
@@ -16,163 +22,109 @@ interface SheetProps {
   children?: React.ReactNode
 }
 
-const CLOSE_TIMEOUT_MS = 300
-const BACKDROP_LINGER_MS = 60
-
 /**
- * Unified bottom sheet with Safari-style appearance.
- * Uses theme colors for background, handle bar, and optional title.
+ * Unified bottom sheet.
+ * Uses Reanimated 4 + Gesture v2 so the swipe-to-close spring
+ * is never interrupted by a stale Animated.event reset.
  */
 const Sheet: React.FC<SheetProps> = ({
   visible,
   onClose,
   title,
   heightPercent = 0.75,
-  children
+  children,
 }) => {
-  const { colors, isDark } = useTheme()
-  const windowHeight = Dimensions.get('window').height
+  const { colors } = useTheme()
+  const { height: windowHeight } = Dimensions.get('window')
   const sheetHeight = Math.max(0, Math.min(1, heightPercent)) * windowHeight
   const topOffset = windowHeight - sheetHeight
 
-  const translateY = useRef(new Animated.Value(sheetHeight)).current
-  const [isAnimating, setIsAnimating] = useState(false)
-  const closingRef = useRef(false)
-  const skipEffectCloseRef = useRef(false)
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const wasVisibleRef = useRef(false)
+  // 0 = fully open, sheetHeight = fully hidden (below screen)
+  const translateY = useSharedValue(sheetHeight)
+  // Track whether the sheet is visible for rendering children
+  const [rendered, setRendered] = React.useState(false)
 
-  const containerStyle = useMemo(
-    () => [
-      styles.sheet,
-      {
-        backgroundColor: colors.backgroundElevated,
-        height: sheetHeight,
-        top: topOffset,
-        transform: [{ translateY }]
-      }
-    ],
-    [colors.backgroundElevated, sheetHeight, topOffset, translateY]
-  )
-
+  // Open / close driven by `visible` prop
   useEffect(() => {
     if (visible) {
-      setIsAnimating(true)
-      translateY.setValue(sheetHeight)
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 40,
-        friction: 8
-      }).start(() => setIsAnimating(false))
-    } else if (wasVisibleRef.current) {
-      if (!skipEffectCloseRef.current) {
-        setIsAnimating(true)
-        Animated.spring(translateY, {
-          toValue: sheetHeight,
-          useNativeDriver: true,
-          tension: 100,
-          friction: 8
-        }).start()
-        if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
-        closeTimerRef.current = setTimeout(() => {
-          setIsAnimating(false)
-        }, CLOSE_TIMEOUT_MS + BACKDROP_LINGER_MS)
-      } else {
-        skipEffectCloseRef.current = false
-        translateY.setValue(sheetHeight)
-      }
+      setRendered(true)
+      translateY.value = sheetHeight
+      translateY.value = withSpring(0, { mass: 1, stiffness: 280, damping: 32 })
     } else {
-      translateY.setValue(sheetHeight)
-      setIsAnimating(false)
-    }
-    wasVisibleRef.current = visible
-  }, [visible, sheetHeight, translateY])
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
-    }
-  }, [])
-
-  const onPanGestureEvent = useRef(
-    Animated.event([{ nativeEvent: { translationY: translateY } }], {
-      useNativeDriver: true
-    })
-  ).current
-
-  const requestClose = useCallback(
-    (velocityY?: number) => {
-      if (closingRef.current) return
-      closingRef.current = true
-      skipEffectCloseRef.current = true
-      setIsAnimating(true)
-      Animated.spring(translateY, {
-        toValue: sheetHeight,
-        useNativeDriver: true,
-        tension: 100,
-        friction: 8,
-        velocity: (velocityY || 0) / 500
-      }).start()
-      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
-      closeTimerRef.current = setTimeout(() => {
-        onClose()
-        setIsAnimating(false)
-        closingRef.current = false
-      }, CLOSE_TIMEOUT_MS + BACKDROP_LINGER_MS)
-    },
-    [onClose, sheetHeight, translateY]
-  )
-
-  const onPanHandlerStateChange = useCallback(
-    (event: any) => {
-      if (event.nativeEvent.oldState === GestureState.ACTIVE) {
-        const { translationY, velocityY } = event.nativeEvent
-        const shouldClose = translationY > sheetHeight / 3 || velocityY > 800
-        if (shouldClose) {
-          requestClose(velocityY)
-        } else {
-          setIsAnimating(true)
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            tension: 100,
-            friction: 8
-          }).start(() => setIsAnimating(false))
+      translateY.value = withSpring(
+        sheetHeight,
+        { mass: 1, stiffness: 400, damping: 38 },
+        (finished) => {
+          if (finished) runOnJS(setRendered)(false)
         }
+      )
+    }
+  }, [visible]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }))
+
+  const panGesture = Gesture.Pan()
+    .activeOffsetY(10)
+    .failOffsetX([-25, 25])
+    .onUpdate((e) => {
+      translateY.value = Math.max(0, e.translationY)
+    })
+    .onEnd((e) => {
+      const shouldClose =
+        e.translationY > sheetHeight / 3 || e.velocityY > 800
+      if (shouldClose) {
+        translateY.value = withSpring(
+          sheetHeight,
+          {
+            mass: 1,
+            stiffness: 400,
+            damping: 38,
+            velocity: e.velocityY,
+          },
+          () => runOnJS(onClose)()
+        )
+      } else {
+        translateY.value = withSpring(0, { mass: 1, stiffness: 400, damping: 38 })
       }
-    },
-    [requestClose, sheetHeight, translateY]
-  )
+    })
+
+  const isVisible = visible || rendered
 
   return (
     <GestureHandlerRootView
       style={[StyleSheet.absoluteFill, { zIndex: 50 }]}
-      pointerEvents={visible || isAnimating ? 'auto' : 'none'}
+      pointerEvents={isVisible ? 'auto' : 'none'}
     >
-      {(visible || isAnimating) && (
-        <Pressable
-          style={styles.backdrop}
-          onPress={() => requestClose()}
-        />
+      {isVisible && (
+        <Pressable style={styles.backdrop} onPress={onClose} />
       )}
-      <Animated.View style={containerStyle}>
-        <PanGestureHandler
-          onGestureEvent={onPanGestureEvent}
-          onHandlerStateChange={onPanHandlerStateChange}
-          activeOffsetY={10}
-          failOffsetX={[-20, 20]}
-        >
-          <Animated.View style={styles.handleArea}>
+      <Animated.View
+        style={[
+          styles.sheet,
+          {
+            backgroundColor: colors.backgroundElevated,
+            height: sheetHeight,
+            top: topOffset,
+          },
+          animatedStyle,
+        ]}
+      >
+        {/* Draggable handle area */}
+        <GestureDetector gesture={panGesture}>
+          <View style={styles.handleArea}>
             <View style={[styles.handleBar, { backgroundColor: colors.fillSecondary }]} />
-          </Animated.View>
-        </PanGestureHandler>
+          </View>
+        </GestureDetector>
+
         {title && (
           <View style={[styles.titleRow, { borderBottomColor: colors.separator }]}>
             <Text style={[styles.titleText, { color: colors.textPrimary }]}>{title}</Text>
           </View>
         )}
-        <View style={{ flex: 1 }}>{visible || isAnimating ? children : null}</View>
+
+        <View style={{ flex: 1 }}>{rendered ? children : null}</View>
       </Animated.View>
     </GestureHandlerRootView>
   )

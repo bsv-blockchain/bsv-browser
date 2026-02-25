@@ -60,12 +60,11 @@ import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 
 import { AddressBar } from '@/components/browser/AddressBar'
-import { BottomToolbar } from '@/components/browser/BottomToolbar'
 import { TabsOverview } from '@/components/browser/TabsOverview'
 import { NewTabPage } from '@/components/browser/NewTabPage'
 import { MenuSheet } from '@/components/browser/MenuSheet'
 import { spacing } from '@/context/theme/tokens'
-import Balance from '@/components/Balance'
+
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
@@ -769,7 +768,7 @@ const shareCurrent = useCallback(async () => {
   /* -------------------------------------------------------------------------- */
 
   const showAddressBar = Platform.OS === 'android' ? !keyboardVisible || addressFocused : true
-  const showBottomBar = Platform.OS === 'android' ? !(keyboardVisible || addressFocused) : !(keyboardVisible && addressFocused)
+
 
   const [ready, setReady] = useState(false)
   useEffect(() => {
@@ -859,7 +858,7 @@ const shareCurrent = useCallback(async () => {
             </View>
           ) : null}
 
-          {/* ---- Address Bar (bottom, Safari-style) ---- */}
+          {/* ---- Address Bar ---- */}
           {!isFullscreen && showAddressBar && (
             <AddressBar
               addressText={addressText}
@@ -870,6 +869,7 @@ const shareCurrent = useCallback(async () => {
               isNewTab={isNewTab}
               isHttps={activeTab?.url?.startsWith('https') || false}
               suggestions={addressSuggestions}
+              tabCount={tabStore.tabs.length}
               onChangeText={onChangeAddressText}
               onSubmit={onAddressSubmit}
               onFocus={() => {
@@ -902,19 +902,11 @@ const shareCurrent = useCallback(async () => {
                 updateActiveTab({ url })
                 addressEditing.current = false
               }}
-              onMorePress={() => sheet.push('menu')}
-              inputRef={addressInputRef}
-            />
-          )}
-
-          {/* ---- Bottom Toolbar ---- */}
-          {!isFullscreen && showBottomBar && activeTab && (
-            <BottomToolbar
               onShare={shareCurrent}
               onBookmarks={() => sheet.push('bookmarks')}
               onTabs={() => setShowTabsView(true)}
-              tabCount={tabStore.tabs.length}
-              shareDisabled={isNewTab}
+              onSettings={() => sheet.push('settings')}
+              inputRef={addressInputRef}
             />
           )}
 
