@@ -568,10 +568,9 @@ const shareCurrent = useCallback(async () => {
     [getAcceptLanguageHeader]
   )
 
-  const safeAreaScript = useMemo(
-    () => buildSafeAreaScript(insets.top),
-    [insets.top]
-  )
+  // 48 = address-bar height above safe-area boundary (60px container − 12px overlap)
+  // env(safe-area-inset-bottom) in the CSS handles the device-chrome portion automatically
+  const safeAreaScript = useMemo(() => buildSafeAreaScript(48), [])
 
   const routeWebViewMessage = useMemo(
     () =>
