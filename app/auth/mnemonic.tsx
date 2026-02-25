@@ -5,12 +5,12 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
-  SafeAreaView,
   TextInput,
   ActivityIndicator,
   Share,
   StyleSheet
 } from 'react-native'
+import CustomSafeArea from '@/components/CustomSafeArea'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'
@@ -155,7 +155,7 @@ export default function MnemonicScreen() {
   // ─── Choose mode ──────────────────────────────────────────────────────
   if (mode === 'choose') {
     return (
-      <SafeAreaView style={[s.screen, { backgroundColor: colors.background }]}>
+      <CustomSafeArea style={[s.screen, { backgroundColor: colors.background }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
         <View style={s.centeredContent}>
           {/* Hero icon */}
@@ -219,14 +219,14 @@ export default function MnemonicScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </CustomSafeArea>
     )
   }
 
   // ─── Generate mode ────────────────────────────────────────────────────
   if (mode === 'generate') {
     return (
-      <SafeAreaView style={[s.screen, { backgroundColor: colors.background }]}>
+      <CustomSafeArea style={[s.screen, { backgroundColor: colors.background }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
         <ScrollView
           contentContainerStyle={s.scrollContent}
@@ -340,13 +340,13 @@ export default function MnemonicScreen() {
             </Text>
           </TouchableOpacity>
         </ScrollView>
-      </SafeAreaView>
+      </CustomSafeArea>
     )
   }
 
   // ─── Import mode ──────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={[s.screen, { backgroundColor: colors.background }]}>
+    <CustomSafeArea style={[s.screen, { backgroundColor: colors.background }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <ScrollView
         contentContainerStyle={s.scrollContent}
@@ -412,7 +412,7 @@ export default function MnemonicScreen() {
           </Text>
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+    </CustomSafeArea>
   )
 }
 

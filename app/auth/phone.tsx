@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
   Platform,
   KeyboardAvoidingView,
@@ -12,6 +11,7 @@ import {
   FlatList,
   Pressable
 } from 'react-native'
+import CustomSafeArea from '@/components/CustomSafeArea'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useTranslation } from 'react-i18next'
@@ -93,7 +93,7 @@ export default function PhoneScreen() {
   }, [showWeb3Benefits])
 
   return (
-    <SafeAreaView style={styles.container}>
+    <CustomSafeArea style={styles.container}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <View style={styles.contentContainer}>
@@ -225,6 +225,6 @@ export default function PhoneScreen() {
           </Text>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </CustomSafeArea>
   )
 }

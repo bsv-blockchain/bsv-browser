@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TextInput,
   TouchableOpacity,
@@ -13,6 +12,7 @@ import {
   ActivityIndicator,
   Platform
 } from 'react-native'
+import CustomSafeArea from '@/components/CustomSafeArea'
 import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'
 import Clipboard from '@react-native-clipboard/clipboard'
@@ -204,7 +204,7 @@ export default function TrustScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <CustomSafeArea style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
       <ScrollView
@@ -392,7 +392,7 @@ export default function TrustScreen() {
         }}
         colors={colors}
       />
-    </SafeAreaView>
+    </CustomSafeArea>
   )
 }
 

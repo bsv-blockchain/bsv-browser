@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { View, Text, StyleSheet, SafeAreaView, TextInput, TouchableOpacity, Alert } from 'react-native'
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native'
+import CustomSafeArea from '@/components/CustomSafeArea'
 import { StatusBar } from 'expo-status-bar'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -32,7 +33,7 @@ export default function SecurityScreen() {
   const onViewKey = () => Alert.alert(t('recovery_key'), t('recovery_key_mock'))
 
   return (
-    <SafeAreaView style={[themeStyles.container, { backgroundColor: colors.background }]}>
+    <CustomSafeArea style={[themeStyles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <View style={{ padding: 16, flex: 1 }}>
         <Text style={[themeStyles.title, { color: colors.textPrimary, textAlign: 'left', alignSelf: 'flex-start' }]}>
@@ -93,7 +94,7 @@ export default function SecurityScreen() {
           </TouchableOpacity>
         </View>
       </View>
-    </SafeAreaView>
+    </CustomSafeArea>
   )
 }
 

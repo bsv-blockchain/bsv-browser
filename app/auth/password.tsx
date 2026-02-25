@@ -3,12 +3,12 @@ import {
   View,
   Text,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
   KeyboardAvoidingView,
   TextInput,
   Alert
 } from 'react-native'
+import CustomSafeArea from '@/components/CustomSafeArea'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'
@@ -70,7 +70,7 @@ export default function PasswordScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <CustomSafeArea style={styles.container}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <View style={styles.contentContainer}>
@@ -123,6 +123,6 @@ export default function PasswordScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </CustomSafeArea>
   )
 }

@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
   KeyboardAvoidingView,
   Alert,
   TextInput
 } from 'react-native'
+import CustomSafeArea from '@/components/CustomSafeArea'
 import { router, useLocalSearchParams } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useTranslation } from 'react-i18next'
@@ -101,7 +101,7 @@ export default function OtpScreen() {
   }, [canResend, managers, phoneNumber, t])
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <CustomSafeArea style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <KeyboardAvoidingView behavior="padding" style={styles.keyboardAvoidingView}>
         <View style={[styles.contentContainer, { backgroundColor: colors.background }]}>
@@ -191,7 +191,7 @@ export default function OtpScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </CustomSafeArea>
   )
 }
 

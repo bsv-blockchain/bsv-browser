@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Alert } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native'
+import CustomSafeArea from '@/components/CustomSafeArea'
 import { MaterialIcons } from '@expo/vector-icons'
 import { StatusBar } from 'expo-status-bar'
 import * as Clipboard from 'expo-clipboard'
@@ -64,7 +65,7 @@ export default function IdentityScreen() {
   }, [managers, adminOriginator])
 
   return (
-    <SafeAreaView style={themeStyles.container}>
+    <CustomSafeArea style={themeStyles.container}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <View style={themeStyles.contentContainer}>
         <Text style={[themeStyles.title, { color: colors.textPrimary, textAlign: 'left', alignSelf: 'flex-start' }]}>
@@ -124,7 +125,7 @@ export default function IdentityScreen() {
           )}
         </View>
       </View>
-    </SafeAreaView>
+    </CustomSafeArea>
   )
 }
 
