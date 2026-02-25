@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { View, Text, TouchableOpacity, ScrollView, Alert, StyleSheet } from 'react-native'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
@@ -78,15 +78,28 @@ export default function SettingsScreen() {
     }
   }, [managers, adminOriginator])
 
-  // Load cached balance on mount, refresh when managers change (e.g. after network switch)
+  // Ref set to true when a network switch is in progress so the effect below
+  // skips the cache and fetches fresh once the rebuilt wallet is available.
+  const pendingNetworkRefreshRef = useRef(false)
+
   useEffect(() => {
-    let mounted = true
+    if (!managers.permissionsManager) return
+
+    if (pendingNetworkRefreshRef.current) {
+      pendingNetworkRefreshRef.current = false
+      setBalanceLoading(true)
+      const t = setTimeout(refreshBalance, 300)
+      return () => clearTimeout(t)
+    }
+
+    // Normal mount/manager-change path: consult cache first
+    let cancelled = false
     ;(async () => {
       const [cached, ts] = await Promise.all([
         AsyncStorage.getItem(BALANCE_CACHE_KEY),
         AsyncStorage.getItem(BALANCE_CACHE_TIMESTAMP_KEY)
       ])
-      if (!mounted) return
+      if (cancelled) return
       if (cached !== null) {
         setAccountBalance(Number(cached))
         if (!ts || Date.now() - Number(ts) > CACHE_DURATION) {
@@ -98,8 +111,8 @@ export default function SettingsScreen() {
         refreshBalance()
       }
     })()
-    return () => { mounted = false }
-  }, [managers.permissionsManager]) // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { cancelled = true }
+  }, [managers.permissionsManager, refreshBalance])
 
   const NETWORKS: { id: 'main' | 'test'; label: string; color: string }[] = [
     { id: 'main', label: 'Mainnet', color: colors.success },
@@ -107,41 +120,28 @@ export default function SettingsScreen() {
     // Future: { id: 'teratest', label: 'Teratest', color: colors.info },
   ]
 
-  const handleSelectNetwork = (target: 'main' | 'test') => {
+  const handleSelectNetwork = async (target: 'main' | 'test') => {
     if (target === selectedNetwork) {
       setNetworkExpanded(false)
       return
     }
-    const label = NETWORKS.find(n => n.id === target)?.label ?? target
-    Alert.alert(
-      'Switch Network',
-      `Switch to ${label}? Your wallet will be rebuilt with a separate database.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: `Switch to ${label}`,
-          onPress: async () => {
-            setNetworkExpanded(false)
-            setSwitchingNetwork(true)
-            // Clear stale balance so the new network's data is fetched fresh
-            setAccountBalance(null)
-            setBalanceLoading(true)
-            await Promise.all([
-              AsyncStorage.removeItem(BALANCE_CACHE_KEY),
-              AsyncStorage.removeItem(BALANCE_CACHE_TIMESTAMP_KEY),
-            ])
-            try {
-              await switchNetwork(target)
-            } catch (e) {
-              console.error('Network switch failed:', e)
-              Alert.alert('Error', 'Failed to switch network. Please try again.')
-            } finally {
-              setSwitchingNetwork(false)
-            }
-          }
-        }
-      ]
-    )
+    setNetworkExpanded(false)
+    setSwitchingNetwork(true)
+    setAccountBalance(null)
+    setBalanceLoading(true)
+    pendingNetworkRefreshRef.current = true
+    await Promise.all([
+      AsyncStorage.removeItem(BALANCE_CACHE_KEY),
+      AsyncStorage.removeItem(BALANCE_CACHE_TIMESTAMP_KEY),
+    ])
+    try {
+      await switchNetwork(target)
+    } catch (e) {
+      pendingNetworkRefreshRef.current = false
+      console.error('Network switch failed:', e)
+    } finally {
+      setSwitchingNetwork(false)
+    }
   }
 
   return (
