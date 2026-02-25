@@ -10,7 +10,8 @@ import {
   Services,
   PermissionRequest,
   SimpleWalletManager,
-  Monitor
+  Monitor,
+  ChaintracksServiceClient
 } from '@bsv/wallet-toolbox-mobile'
 import { KeyDeriver, PrivateKey } from '@bsv/sdk'
 import {
@@ -32,6 +33,7 @@ import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from '@/storage'
 import { createBtmsModule } from '@bsv/btms-permission-module'
+import { BsvExchangeRate, WalletServicesOptions } from '@bsv/wallet-toolbox-mobile/out/src/sdk'
 
 
 // -----
@@ -563,6 +565,25 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })()
   }, [configStatus]) // Re-run whenever configStatus resets to 'initial' (e.g. after logout)
 
+  const getExchangeRate = async (): Promise<BsvExchangeRate> => {
+    try {
+      const rate = await fetch('https://api.whatsonchain.com/v1/bsv/main/exchangerate')
+      const data = await rate.json()
+      return {
+        timestamp: new Date(),
+        rate: data.rate,
+        base: 'USD'
+      }
+    } catch (error) {
+      console.error('Error fetching exchange rate:', error)
+      return { 
+        rate: 16.75,
+        timestamp: new Date(),
+        base: 'USD'
+      }
+    }
+  }
+
   // Build wallet function
   const buildWallet = useCallback(
     async (primaryKey: number[], privilegedKeyManager: PrivilegedKeyManager): Promise<any> => {
@@ -573,7 +594,53 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const keyDeriver = new KeyDeriver(new PrivateKey(primaryKey))
         const storageManager = new WalletStorageManager(keyDeriver.identityKey)
         const signer = new WalletSigner(chain, keyDeriver, storageManager)
-        const services = new Services(chain)
+
+        const bsvExchangeRate = await getExchangeRate()
+
+        const mainnetServices: WalletServicesOptions = {
+          chain: selectedNetwork,
+          arcUrl: process.env?.EXPO_PUBLIC_ARC_URL ?? '',
+          arcConfig: {
+            apiKey: process.env?.EXPO_PUBLIC_ARC_API_KEY ?? ''
+          },
+          bsvUpdateMsecs: 60 * 60 * 1000,
+          fiatExchangeRates: {
+            timestamp: new Date(),
+            base: 'USD',
+            rates: {
+              USD: 1
+            }
+          },
+          fiatUpdateMsecs: 60 * 60 * 1000,
+          whatsOnChainApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
+          taalApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
+          chaintracks: new ChaintracksServiceClient(selectedNetwork, process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://chaintracks-us-1.bsvb.tech'),
+          bsvExchangeRate
+        }
+
+        const testnetServices: WalletServicesOptions = {
+          chain: selectedNetwork,
+          chaintracks: new ChaintracksServiceClient(selectedNetwork, process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ?? 'https://chaintracks-testnet-us-1.bsvb.tech'),
+          bsvExchangeRate,
+          arcUrl: process.env?.EXPO_PUBLIC_TEST_ARC_URL ?? '',
+          arcConfig: {
+            apiKey: process.env?.EXPO_PUBLIC_TEST_ARC_API_KEY ?? ''
+          },
+          bsvUpdateMsecs: 60 * 60 * 1000000,
+          fiatExchangeRates: {
+            timestamp: new Date(),
+            base: 'USD',
+            rates: {
+              USD: 1
+            }
+          },
+          fiatUpdateMsecs: 60 * 60 * 1000000,
+          whatsOnChainApiKey: process.env?.EXPO_PUBLIC_TEST_WOC_API_KEY ?? '',
+          taalApiKey: process.env?.EXPO_PUBLIC_TEST_TAAL_API_KEY ?? ''
+        }
+
+        const serviceOptions = selectedNetwork === 'main' ? mainnetServices : testnetServices
+        const services = new Services(serviceOptions)
         const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)
         newManagers.settingsManager = wallet.settingsManager
 

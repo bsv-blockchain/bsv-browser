@@ -123,6 +123,13 @@ export default function SettingsScreen() {
           onPress: async () => {
             setNetworkExpanded(false)
             setSwitchingNetwork(true)
+            // Clear stale balance so the new network's data is fetched fresh
+            setAccountBalance(null)
+            setBalanceLoading(true)
+            await Promise.all([
+              AsyncStorage.removeItem(BALANCE_CACHE_KEY),
+              AsyncStorage.removeItem(BALANCE_CACHE_TIMESTAMP_KEY),
+            ])
             try {
               await switchNetwork(target)
             } catch (e) {
