@@ -80,7 +80,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   onTrust,
   onEnableWeb3,
 }) => {
-  const { colors, isDark } = useTheme()
+  const { isDark } = useTheme()
   const { isWeb2Mode } = useBrowserMode()
 
   const dismiss = (fn: () => void) => () => { onDismiss(); fn() }

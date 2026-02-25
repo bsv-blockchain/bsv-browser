@@ -873,7 +873,7 @@ const shareCurrent = useCallback(async () => {
 
           {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
           {!isFullscreen && showAddressBar && (
-            <View style={[styles.chromeWrapper, { bottom: Math.max(insets.bottom, 12) }]} pointerEvents="box-none">
+            <View style={[styles.chromeWrapper, { bottom: insets.bottom - 12 }]} pointerEvents="box-none">
               <AddressBar
                 addressText={addressText}
                 addressFocused={addressFocused}
@@ -928,7 +928,7 @@ const shareCurrent = useCallback(async () => {
             <MenuPopover
               isNewTab={isNewTab}
               canShare={!isNewTab}
-              bottomOffset={Math.max(insets.bottom, 12) + 44 + 8}
+              bottomOffset={insets.bottom}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {
