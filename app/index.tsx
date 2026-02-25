@@ -919,7 +919,6 @@ const shareCurrent = useCallback(async () => {
                   onBookmarks={() => sheet.push('bookmarks')}
                   onTabs={() => setShowTabsView(true)}
                   onSettings={() => sheet.push('settings')}
-                  onIdentity={() => sheet.push('identity')}
                   onTrust={() => sheet.push('trust')}
                   onEnableWeb3={() => router.push('/auth/mnemonic')}
                 />

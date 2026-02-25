@@ -29,7 +29,6 @@ interface MenuPopoverProps {
   onBookmarks: () => void
   onTabs: () => void
   onSettings: () => void
-  onIdentity: () => void
   onTrust: () => void
   onEnableWeb3: () => void
 }
@@ -76,7 +75,6 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   onBookmarks,
   onTabs,
   onSettings,
-  onIdentity,
   onTrust,
   onEnableWeb3,
 }) => {
@@ -100,9 +98,8 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
 
       {/* Navigation group */}
       <Row icon="copy-outline" label="All Tabs" onPress={dismiss(onTabs)} />
-      <Row icon="settings-outline" label="Settings" onPress={dismiss(onSettings)} />
 
-      {/* Web3 group */}
+      {/* Web3 / Settings group */}
       {isWeb2Mode ? (
         <>
           <Divider />
@@ -111,7 +108,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       ) : (
         <>
           <Divider />
-          <Row icon="person-circle-outline" label="Identity" onPress={dismiss(onIdentity)} />
+          <Row icon="person-circle-outline" label="Identity" onPress={dismiss(onSettings)} />
           <Row icon="shield-checkmark-outline" label="Trust Network" onPress={dismiss(onTrust)} />
         </>
       )}

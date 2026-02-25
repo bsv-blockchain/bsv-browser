@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { View, Text, TouchableOpacity, ScrollView, Alert, TextInput, StyleSheet } from 'react-native'
 import CustomSafeArea from '@/components/CustomSafeArea'
 import { useTranslation } from 'react-i18next'
@@ -6,20 +6,113 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { Ionicons } from '@expo/vector-icons'
 import { useWallet } from '@/context/WalletContext'
+import { useBrowserMode } from '@/context/BrowserModeContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
+import AmountDisplay from '@/components/AmountDisplay'
+import { sdk } from '@bsv/wallet-toolbox-mobile'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+
+const BALANCE_CACHE_KEY = 'cached_wallet_balance'
+const BALANCE_CACHE_TIMESTAMP_KEY = 'cached_wallet_balance_timestamp'
+const CACHE_DURATION = 30000
 
 export default function SettingsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  const { updateSettings, settings, logout, selectedNetwork } = useWallet()
+  const { managers, adminOriginator, updateSettings, settings, logout, selectedNetwork, switchNetwork } = useWallet()
+  const { isWeb2Mode } = useBrowserMode()
   const { getMnemonic, getItem, setItem } = useLocalStorage()
   const [showMnemonic, setShowMnemonic] = useState(false)
   const [mnemonic, setMnemonic] = useState<string | null>(null)
   const [homepageUrl, setHomepageUrl] = useState(DEFAULT_HOMEPAGE_URL)
   const [editingHomepage, setEditingHomepage] = useState(false)
+  const [accountBalance, setAccountBalance] = useState<number | null>(null)
+  const [balanceLoading, setBalanceLoading] = useState(false)
+  const [switchingNetwork, setSwitchingNetwork] = useState(false)
+  const [networkExpanded, setNetworkExpanded] = useState(false)
+
+  // Fetch wallet balance — keep last known value visible during network switch
+  const refreshBalance = useCallback(async () => {
+    if (!managers.permissionsManager) return
+    try {
+      const { totalOutputs } = await managers.permissionsManager.listOutputs(
+        { basket: sdk.specOpWalletBalance },
+        adminOriginator
+      )
+      const total = totalOutputs ?? 0
+      setAccountBalance(total)
+      setBalanceLoading(false)
+      await Promise.all([
+        AsyncStorage.setItem(BALANCE_CACHE_KEY, String(total)),
+        AsyncStorage.setItem(BALANCE_CACHE_TIMESTAMP_KEY, String(Date.now()))
+      ])
+    } catch (e) {
+      console.error('Error refreshing balance:', e)
+      setBalanceLoading(false)
+    }
+  }, [managers, adminOriginator])
+
+  // Load cached balance on mount, refresh when managers change (e.g. after network switch)
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const [cached, ts] = await Promise.all([
+        AsyncStorage.getItem(BALANCE_CACHE_KEY),
+        AsyncStorage.getItem(BALANCE_CACHE_TIMESTAMP_KEY)
+      ])
+      if (!mounted) return
+      if (cached !== null) {
+        setAccountBalance(Number(cached))
+        if (!ts || Date.now() - Number(ts) > CACHE_DURATION) {
+          setBalanceLoading(true)
+          refreshBalance()
+        }
+      } else {
+        setBalanceLoading(true)
+        refreshBalance()
+      }
+    })()
+    return () => { mounted = false }
+  }, [managers.permissionsManager]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const NETWORKS: { id: 'main' | 'test'; label: string; color: string }[] = [
+    { id: 'main', label: 'Mainnet', color: colors.success },
+    { id: 'test', label: 'Testnet', color: colors.warning },
+    // Future: { id: 'teratest', label: 'Teratest', color: colors.info },
+  ]
+
+  const handleSelectNetwork = (target: 'main' | 'test') => {
+    if (target === selectedNetwork) {
+      setNetworkExpanded(false)
+      return
+    }
+    const label = NETWORKS.find(n => n.id === target)?.label ?? target
+    Alert.alert(
+      'Switch Network',
+      `Switch to ${label}? Your wallet will be rebuilt with a separate database.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Switch to ${label}`,
+          onPress: async () => {
+            setNetworkExpanded(false)
+            setSwitchingNetwork(true)
+            try {
+              await switchNetwork(target)
+            } catch (e) {
+              console.error('Network switch failed:', e)
+              Alert.alert('Error', 'Failed to switch network. Please try again.')
+            } finally {
+              setSwitchingNetwork(false)
+            }
+          }
+        }
+      ]
+    )
+  }
 
   // Load homepage URL from storage
   useEffect(() => {
@@ -80,8 +173,28 @@ export default function SettingsScreen() {
     <CustomSafeArea style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: spacing.xxl, paddingBottom: spacing.xxxl }}
+        contentContainerStyle={{ paddingTop: spacing.xl, paddingBottom: spacing.xxxl }}
       >
+        {/* ── Balance ── */}
+        {!isWeb2Mode && (
+          <View style={localStyles.balanceContainer}>
+            <Text style={[localStyles.balanceLabel, { color: colors.textSecondary }]}>
+              you have
+            </Text>
+            <Text
+              onPress={refreshBalance}
+              style={[
+                localStyles.balanceAmount,
+                { color: colors.textPrimary, opacity: balanceLoading ? 0.4 : 1 }
+              ]}
+            >
+              {accountBalance !== null ? (
+                <AmountDisplay abbreviate>{accountBalance}</AmountDisplay>
+              ) : '...'}
+            </Text>
+          </View>
+        )}
+
         {/* ── General ── */}
         <GroupedSection
           header="General"
@@ -156,21 +269,38 @@ export default function SettingsScreen() {
         </GroupedSection>
 
         {/* ── Wallet ── */}
-        <GroupedSection header="Wallet">
+        <GroupedSection header="Wallet" footer="Each network uses its own separate on-device database.">
           <ListRow
             label={t('bsv_network')}
-            value={selectedNetwork || 'main'}
+            value={switchingNetwork ? 'Switching...' : (NETWORKS.find(n => n.id === selectedNetwork)?.label ?? selectedNetwork)}
             icon="server-outline"
-            iconColor={colors.success}
-            showChevron={false}
+            iconColor={NETWORKS.find(n => n.id === selectedNetwork)?.color ?? colors.success}
+            onPress={isWeb2Mode ? undefined : () => setNetworkExpanded(e => !e)}
+            showChevron={!isWeb2Mode}
           />
-          <ListRow
-            label="Storage"
-            value="Local (on-device)"
-            icon="hardware-chip-outline"
-            iconColor={colors.warning}
-            showChevron={false}
-          />
+          {networkExpanded && !isWeb2Mode && (
+            <View style={localStyles.networkList}>
+              {NETWORKS.map(net => {
+                const isActive = net.id === selectedNetwork
+                return (
+                  <TouchableOpacity
+                    key={net.id}
+                    style={localStyles.networkOption}
+                    onPress={() => handleSelectNetwork(net.id)}
+                    activeOpacity={0.6}
+                  >
+                    <View style={[localStyles.networkDot, { backgroundColor: net.color }]} />
+                    <Text style={[localStyles.networkLabel, { color: colors.textPrimary }]}>
+                      {net.label}
+                    </Text>
+                    {isActive && (
+                      <Ionicons name="checkmark" size={20} color={colors.accent} style={{ marginLeft: 'auto' }} />
+                    )}
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+          )}
           {!showMnemonic ? (
             <ListRow
               label={t('recovery_phrase')}
@@ -260,6 +390,46 @@ export default function SettingsScreen() {
 }
 
 const localStyles = StyleSheet.create({
+  /* ── Balance ── */
+  balanceContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 100,
+    paddingHorizontal: spacing.lg,
+  },
+  balanceLabel: {
+    ...typography.subhead,
+    marginBottom: spacing.xs,
+  },
+  balanceAmount: {
+    fontSize: 34,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    minHeight: 42,
+    lineHeight: 42,
+  },
+
+  /* ── Network picker ── */
+  networkList: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  networkOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+  },
+  networkDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: spacing.md,
+  },
+  networkLabel: {
+    ...typography.body,
+  },
+
   /* ── Homepage editing ── */
   editContainer: {
     padding: spacing.lg,

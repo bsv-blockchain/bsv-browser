@@ -75,6 +75,7 @@ export interface WalletContextValue {
   selectedNetwork: 'main' | 'test'
   setWalletBuilt: (current: boolean) => void
   buildWalletFromMnemonic: () => Promise<void>
+  switchNetwork: (network: 'main' | 'test') => Promise<void>
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -102,7 +103,8 @@ export const WalletContext = createContext<WalletContextValue>({
   selectedMethod: '',
   selectedNetwork: 'main',
   setWalletBuilt: (current: boolean) => {},
-  buildWalletFromMnemonic: async () => {}
+  buildWalletFromMnemonic: async () => {},
+  switchNetwork: async () => {}
 })
 
 type PermissionType = 'identity' | 'protocol' | 'renewal' | 'basket'
@@ -773,6 +775,36 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     buildWallet
   ]);
 
+  // Switch network: tear down wallet, update config, and rebuild on new chain
+  const switchNetwork = useCallback(async (network: 'main' | 'test') => {
+    if (network === selectedNetwork) return
+    logWithTimestamp(F, `Switching network from ${selectedNetwork} to ${network}`)
+
+    // Stop any running monitor
+    try {
+      const monitor = (window as any).walletMonitor as Monitor | undefined
+      if (monitor) {
+        await monitor.stopTasks()
+        ;(window as any).walletMonitor = undefined
+      }
+    } catch (e) {
+      console.warn('[WalletContext] Failed to stop monitor during network switch:', e)
+    }
+
+    // Tear down current wallet state (but keep mnemonic)
+    setManagers({})
+    setWalletBuilt(false)
+    setSnapshotLoaded(false)
+
+    // Persist new config
+    const newConfig = { wabUrl: 'noWAB', method: 'mnemonic', network, storageUrl: 'local' }
+    await setItem('finalConfig', JSON.stringify(newConfig))
+
+    // Re-finalize with new network — this triggers the auto-build effect
+    finalizeConfig(newConfig)
+    logWithTimestamp(F, `Network switched to ${network}`)
+  }, [selectedNetwork, setItem])
+
   // Auto-build wallet from mnemonic for returning users
   useEffect(() => {
     if (configStatus === 'configured' && !walletBuilt) {
@@ -917,7 +949,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedMethod,
       selectedNetwork,
       setWalletBuilt,
-      buildWalletFromMnemonic
+      buildWalletFromMnemonic,
+      switchNetwork
     }),
     [
       managers,
@@ -943,7 +976,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedMethod,
       selectedNetwork,
       setWalletBuilt,
-      buildWalletFromMnemonic
+      buildWalletFromMnemonic,
+      switchNetwork
     ]
   )
 
