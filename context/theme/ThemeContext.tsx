@@ -1,45 +1,73 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import { useColorScheme } from 'react-native'
 import { WalletContext } from '../WalletContext'
+import {
+  lightColors as tokenLightColors,
+  darkColors as tokenDarkColors
+} from './tokens'
 
 // Theme type definitions
 export type ThemeMode = 'light' | 'dark' | 'system'
 
 export interface ThemeColors {
-  // Primary colors
-  primary: string
-  secondary: string
+  // Accent
+  accent: string
+  accentSecondary: string
 
   // Backgrounds
   background: string
-  paperBackground: string
+  backgroundSecondary: string
+  backgroundTertiary: string
+  backgroundElevated: string
 
-  // Text colors
+  // Translucent chrome
+  chromeBackground: string
+  chromeBackgroundBlur: string
+  sheetBackground: string
+
+  // Text
   textPrimary: string
   textSecondary: string
+  textTertiary: string
+  textQuaternary: string
+  textOnAccent: string
 
-  // Button colors
-  buttonBackground: string
-  buttonText: string
-  buttonBackgroundDisabled: string
-  buttonTextDisabled: string
+  // Separators
+  separator: string
+  separatorOpaque: string
 
-  // Input colors
-  inputBackground: string
-  inputBorder: string
-  inputText: string
+  // Fills
+  fill: string
+  fillSecondary: string
+  fillTertiary: string
 
-  // Approval colors
-  protocolApproval: string
-  basketApproval: string
-  identityApproval: string
-  renewalApproval: string
-
-  // Status colors
+  // Status
   success: string
   error: string
   warning: string
   info: string
+
+  // Permission approval
+  permissionProtocol: string
+  permissionBasket: string
+  permissionIdentity: string
+  permissionSpending: string
+
+  // --- Legacy aliases (for gradual migration) ---
+  primary: string
+  secondary: string
+  paperBackground: string
+  buttonBackground: string
+  buttonText: string
+  buttonBackgroundDisabled: string
+  buttonTextDisabled: string
+  inputBackground: string
+  inputBorder: string
+  inputText: string
+  protocolApproval: string
+  basketApproval: string
+  identityApproval: string
+  renewalApproval: string
 }
 
 export interface ThemeContextType {
@@ -49,65 +77,47 @@ export interface ThemeContextType {
   isDark: boolean
 }
 
-// Default theme values
+// Build full color objects that include both new tokens and legacy aliases
 const lightColors: ThemeColors = {
-  primary: '#1B365D', // Navy
-  secondary: '#2C5282', // Teal
+  // New tokens
+  ...tokenLightColors,
 
-  background: '#FFFFFF',
-  paperBackground: '#F6F6F6',
-
-  textPrimary: '#4A4A4A', // Dark Gray
-  textSecondary: '#4A5568', // Gray
-
-  buttonBackground: '#1B365D',
-  buttonText: '#FFFFFF',
+  // Legacy aliases → mapped to new tokens
+  primary: tokenLightColors.accent,
+  secondary: tokenLightColors.accentSecondary,
+  paperBackground: tokenLightColors.backgroundSecondary,
+  buttonBackground: tokenLightColors.accent,
+  buttonText: tokenLightColors.textOnAccent,
   buttonBackgroundDisabled: 'rgba(0, 0, 0, 0.12)',
   buttonTextDisabled: 'rgba(0, 0, 0, 0.26)',
-
-  inputBackground: '#FFFFFF',
-  inputBorder: '#DDDDDD',
-  inputText: '#4A4A4A',
-
-  protocolApproval: '#86c489',
-  basketApproval: '#96c486',
-  identityApproval: '#86a7c4',
-  renewalApproval: '#ad86c4',
-
-  success: '#4CAF50',
-  error: '#F44336',
-  warning: '#FF9800',
-  info: '#2196F3'
+  inputBackground: tokenLightColors.background,
+  inputBorder: tokenLightColors.separatorOpaque,
+  inputText: tokenLightColors.textPrimary,
+  protocolApproval: tokenLightColors.permissionProtocol,
+  basketApproval: tokenLightColors.permissionBasket,
+  identityApproval: tokenLightColors.permissionIdentity,
+  renewalApproval: tokenLightColors.accentSecondary,
 }
 
 const darkColors: ThemeColors = {
-  primary: '#FFFFFF',
-  secondary: '#487dbf',
+  // New tokens
+  ...tokenDarkColors,
 
-  background: '#1D2125',
-  paperBackground: '#1D2125',
-
-  textPrimary: '#FFFFFF',
-  textSecondary: '#888888',
-
-  buttonBackground: '#FFFFFF',
-  buttonText: '#1B365D',
+  // Legacy aliases → mapped to new tokens
+  primary: tokenDarkColors.accent,
+  secondary: tokenDarkColors.accentSecondary,
+  paperBackground: tokenDarkColors.backgroundSecondary,
+  buttonBackground: tokenDarkColors.accent,
+  buttonText: tokenDarkColors.textOnAccent,
   buttonBackgroundDisabled: 'rgba(255, 255, 255, 0.12)',
   buttonTextDisabled: 'rgba(255, 255, 255, 0.3)',
-
-  inputBackground: '#2A2E32',
-  inputBorder: '#444444',
-  inputText: '#FFFFFF',
-
-  protocolApproval: '#86c489',
-  basketApproval: '#96c486',
-  identityApproval: '#86a7c4',
-  renewalApproval: '#ad86c4',
-
-  success: '#66BB6A',
-  error: '#EF5350',
-  warning: '#FFA726',
-  info: '#42A5F5'
+  inputBackground: tokenDarkColors.backgroundTertiary,
+  inputBorder: tokenDarkColors.separatorOpaque,
+  inputText: tokenDarkColors.textPrimary,
+  protocolApproval: tokenDarkColors.permissionProtocol,
+  basketApproval: tokenDarkColors.permissionBasket,
+  identityApproval: tokenDarkColors.permissionIdentity,
+  renewalApproval: tokenDarkColors.accentSecondary,
 }
 
 // Create the context with default values

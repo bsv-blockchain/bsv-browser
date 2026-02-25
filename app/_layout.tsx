@@ -16,10 +16,7 @@ import { ExchangeRateContextProvider } from '@/context/ExchangeRateContext'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
 // TODO: Re-add RecoveryKeySaver when WAB support returns
 import LocalStorageProvider from '@/context/LocalStorageProvider'
-import ProtocolAccessModal from '@/components/ProtocolAccessModal'
-import BasketAccessModal from '@/components/BasketAccessModal'
-import CertificateAccessModal from '@/components/CertificateAccessModal'
-import SpendingAuthorizationModal from '@/components/SpendingAuthorizationModal'
+import PermissionSheet from '@/components/ui/PermissionSheet'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
 import DefaultBrowserPrompt from '@/components/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/utils/translations'
@@ -88,10 +85,7 @@ export default function RootLayout() {
                     <Web3BenefitsModalHandler />
                     {/* <TranslationTester /> */}
                     <DefaultBrowserPrompt />
-                    <ProtocolAccessModal />
-                    <BasketAccessModal />
-                    <CertificateAccessModal />
-                    <SpendingAuthorizationModal />
+                    <PermissionSheet />
                     <Stack
                       screenOptions={{
                         animation: 'slide_from_right',

@@ -8,13 +8,14 @@ import {
   SafeAreaView,
   TextInput,
   ActivityIndicator,
-  Share
+  Share,
+  StyleSheet
 } from 'react-native'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { useThemeStyles } from '@/context/theme/useThemeStyles'
+import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import {
   generateMnemonicWallet,
@@ -28,7 +29,6 @@ type MnemonicMode = 'choose' | 'generate' | 'import'
 
 export default function MnemonicScreen() {
   const { colors, isDark } = useTheme()
-  const styles = useThemeStyles()
   const { buildWalletFromMnemonic } = useWallet()
   const { setMnemonic: storeMnemonic } = useLocalStorage()
 
@@ -109,105 +109,107 @@ export default function MnemonicScreen() {
     }
   }
 
-  // Render word chips for display
+  // Render word chips in a clean grid
   const renderMnemonicWords = (mnemonicPhrase: string) => {
     const words = formatMnemonicForDisplay(mnemonicPhrase)
+    const columns = 3
+    const rows: string[][] = []
+    for (let i = 0; i < words.length; i += columns) {
+      rows.push(words.slice(i, i + columns))
+    }
+
     return (
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 20 }}>
-        {words.map((word, index) => (
-          <View
-            key={index}
-            style={{
-              backgroundColor: colors.inputBackground,
-              borderColor: colors.inputBorder,
-              borderWidth: 1,
-              borderRadius: 8,
-              paddingVertical: 8,
-              paddingHorizontal: 12,
-              minWidth: 100
-            }}
-          >
-            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-              {index + 1}
-            </Text>
-            <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '600' }}>
-              {word}
-            </Text>
+      <View style={s.wordGrid}>
+        {rows.map((row, rowIndex) => (
+          <View key={rowIndex} style={s.wordRow}>
+            {row.map((word, colIndex) => {
+              const wordIndex = rowIndex * columns + colIndex
+              return (
+                <View
+                  key={wordIndex}
+                  style={[s.wordChip, {
+                    backgroundColor: colors.fillTertiary,
+                    borderColor: colors.separator,
+                  }]}
+                >
+                  <Text style={[s.wordNumber, { color: colors.textTertiary }]}>
+                    {wordIndex + 1}
+                  </Text>
+                  <Text style={[s.wordText, { color: colors.textPrimary }]}>
+                    {word}
+                  </Text>
+                </View>
+              )
+            })}
           </View>
         ))}
       </View>
     )
   }
 
-  // Choose mode screen
+  // ─── Choose mode ──────────────────────────────────────────────────────
   if (mode === 'choose') {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <SafeAreaView style={[s.screen, { backgroundColor: colors.background }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
-        <View style={{ padding: 20, flex: 1 }}>
-          <Text style={[styles.title, { fontSize: 24, marginBottom: 10 }]}>
+        <View style={s.centeredContent}>
+          {/* Hero icon */}
+          <View style={[s.heroIcon, { backgroundColor: colors.fillTertiary }]}>
+            <Ionicons name="key-outline" size={40} color={colors.accent} />
+          </View>
+
+          <Text style={[s.largeTitle, { color: colors.textPrimary }]}>
             Set Up Your Wallet
           </Text>
-          <Text style={[styles.textSecondary, { marginBottom: 30 }]}>
-            Your keys, your coins. Your wallet is stored locally on this device.
+          <Text style={[s.subtitle, { color: colors.textSecondary }]}>
+            Your keys, your coins.{'\n'}Your wallet is stored locally on this device.
           </Text>
 
-          <TouchableOpacity
-            style={[
-              styles.button,
-              {
-                backgroundColor: colors.primary,
-                padding: 20,
-                borderRadius: 12,
-                marginBottom: 15
-              }
-            ]}
-            onPress={handleGenerateNew}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="add-circle-outline" size={24} color={colors.buttonText} style={{ marginRight: 10 }} />
-              <View>
-                <Text style={[styles.buttonText, { fontSize: 18, fontWeight: 'bold' }]}>
+          {/* Actions */}
+          <View style={s.actionArea}>
+            <TouchableOpacity
+              style={[s.primaryButton, { backgroundColor: colors.accent }]}
+              onPress={handleGenerateNew}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="add-circle-outline" size={22} color={colors.textOnAccent} style={s.btnIcon} />
+              <View style={s.btnTextGroup}>
+                <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>
                   Create New Wallet
                 </Text>
-                <Text style={[{ color: colors.buttonText, opacity: 0.8, fontSize: 14 }]}>
+                <Text style={[s.btnCaption, { color: colors.textOnAccent, opacity: 0.75 }]}>
                   Generate a new recovery phrase
                 </Text>
               </View>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[
-              styles.button,
-              {
-                backgroundColor: colors.inputBackground,
-                borderWidth: 1,
-                borderColor: colors.inputBorder,
-                padding: 20,
-                borderRadius: 12
-              }
-            ]}
-            onPress={() => setMode('import')}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="download-outline" size={24} color={colors.primary} style={{ marginRight: 10 }} />
-              <View>
-                <Text style={[styles.text, { fontSize: 18, fontWeight: 'bold', color: colors.textPrimary }]}>
+            <TouchableOpacity
+              style={[s.secondaryButton, {
+                backgroundColor: colors.fillTertiary,
+                borderColor: colors.separator,
+              }]}
+              onPress={() => setMode('import')}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="download-outline" size={22} color={colors.accent} style={s.btnIcon} />
+              <View style={s.btnTextGroup}>
+                <Text style={[s.btnLabel, { color: colors.textPrimary }]}>
                   Import Existing Wallet
                 </Text>
-                <Text style={[styles.textSecondary, { fontSize: 14 }]}>
+                <Text style={[s.btnCaption, { color: colors.textSecondary }]}>
                   Paste your recovery phrase
                 </Text>
               </View>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </View>
 
+          {/* Cancel */}
           <TouchableOpacity
-            style={{ marginTop: 30, alignSelf: 'center' }}
+            style={s.textButton}
             onPress={() => router.back()}
+            activeOpacity={0.6}
           >
-            <Text style={[styles.text, { color: colors.secondary }]}>
+            <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>
               Cancel
             </Text>
           </TouchableOpacity>
@@ -216,133 +218,119 @@ export default function MnemonicScreen() {
     )
   }
 
-  // Generate mode - show generated mnemonic with share + acknowledge
+  // ─── Generate mode ────────────────────────────────────────────────────
   if (mode === 'generate') {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <SafeAreaView style={[s.screen, { backgroundColor: colors.background }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
-        <ScrollView style={{ flex: 1, padding: 20 }}>
-          <Text style={[styles.title, { fontSize: 24, marginBottom: 10 }]}>
-            Save Your Recovery Phrase
+        <ScrollView
+          contentContainerStyle={s.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={[s.largeTitle, { color: colors.textPrimary, textAlign: 'left' }]}>
+            Save Your{'\n'}Recovery Phrase
           </Text>
 
-          <View style={{
-            backgroundColor: colors.error + '20',
-            borderColor: colors.error,
-            borderWidth: 1,
-            borderRadius: 8,
-            padding: 15,
-            marginBottom: 20
-          }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-              <Ionicons name="warning" size={24} color={colors.error} style={{ marginRight: 8 }} />
-              <Text style={[styles.text, { fontWeight: 'bold', color: colors.error }]}>
-                Important
-              </Text>
-            </View>
-            <Text style={[styles.textSecondary]}>
-              Save these 12 words somewhere safe. This is the ONLY way to recover your wallet.
-              If you lose this phrase, your funds and digital identity are permanently lost.
+          {/* Warning banner */}
+          <View style={[s.warningBanner, {
+            backgroundColor: isDark ? 'rgba(255, 69, 58, 0.12)' : 'rgba(255, 59, 48, 0.08)',
+            borderColor: isDark ? 'rgba(255, 69, 58, 0.25)' : 'rgba(255, 59, 48, 0.2)',
+          }]}>
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={22}
+              color={colors.error}
+              style={{ marginRight: spacing.md }}
+            />
+            <Text style={[s.warningText, { color: colors.textPrimary }]}>
+              Write down these 12 words. This is the{' '}
+              <Text style={{ fontWeight: '700' }}>only way</Text>
+              {' '}to recover your wallet.
             </Text>
           </View>
 
+          {/* Mnemonic word grid */}
           {renderMnemonicWords(mnemonic)}
 
-          {/* Share button (primary action) */}
-          <TouchableOpacity
-            style={[
-              styles.button,
-              {
-                backgroundColor: colors.primary,
-                marginBottom: 10
-              }
-            ]}
-            onPress={handleShareMnemonic}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="share-outline" size={20} color={colors.buttonText} style={{ marginRight: 8 }} />
-              <Text style={[styles.buttonText]}>
+          {/* Action buttons */}
+          <View style={s.generateActions}>
+            <TouchableOpacity
+              style={[s.primaryButton, { backgroundColor: colors.accent }]}
+              onPress={handleShareMnemonic}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="share-outline" size={20} color={colors.textOnAccent} style={s.btnIcon} />
+              <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>
                 {hasShared ? 'Share Again' : 'Save Recovery Phrase'}
               </Text>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
 
-          {/* Copy to clipboard (secondary action) */}
-          <TouchableOpacity
-            style={[
-              styles.button,
-              {
-                backgroundColor: colors.inputBackground,
-                borderWidth: 1,
-                borderColor: colors.inputBorder,
-                marginBottom: 20
-              }
-            ]}
-            onPress={handleCopyMnemonic}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="copy-outline" size={20} color={colors.primary} style={{ marginRight: 8 }} />
-              <Text style={[styles.text, { color: colors.primary }]}>
+            <TouchableOpacity
+              style={[s.tertiaryButton, {
+                backgroundColor: colors.fillTertiary,
+              }]}
+              onPress={handleCopyMnemonic}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="copy-outline" size={20} color={colors.accent} style={s.btnIcon} />
+              <Text style={[s.btnLabel, { color: colors.accent }]}>
                 Copy to Clipboard
               </Text>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </View>
 
-          {/* Acknowledgment checkbox */}
+          {/* Acknowledgment */}
           <TouchableOpacity
-            style={{
-              flexDirection: 'row',
-              alignItems: 'flex-start',
-              marginBottom: 20,
-              padding: 15,
-              borderRadius: 8,
-              backgroundColor: hasAcknowledged ? colors.primary + '10' : colors.inputBackground,
-              borderWidth: 1,
-              borderColor: hasAcknowledged ? colors.primary : colors.inputBorder
-            }}
+            style={[s.acknowledgment, {
+              backgroundColor: hasAcknowledged ? (isDark ? 'rgba(10, 132, 255, 0.1)' : 'rgba(0, 122, 255, 0.06)') : colors.fillTertiary,
+              borderColor: hasAcknowledged ? colors.accent : colors.separator,
+            }]}
             onPress={() => setHasAcknowledged(!hasAcknowledged)}
+            activeOpacity={0.7}
           >
             <Ionicons
-              name={hasAcknowledged ? 'checkbox' : 'square-outline'}
+              name={hasAcknowledged ? 'checkmark-circle' : 'ellipse-outline'}
               size={24}
-              color={hasAcknowledged ? colors.primary : colors.textSecondary}
-              style={{ marginRight: 12, marginTop: 2 }}
+              color={hasAcknowledged ? colors.accent : colors.textTertiary}
+              style={{ marginRight: spacing.md }}
             />
-            <Text style={[styles.text, { flex: 1, fontSize: 14, lineHeight: 20 }]}>
-              I have saved my recovery phrase. I understand that if I lose it, my funds and digital identity are permanently lost and I will have to start from scratch.
+            <Text style={[s.acknowledgmentText, { color: colors.textPrimary }]}>
+              I have saved my recovery phrase and understand that losing it means permanently losing access to my wallet.
             </Text>
           </TouchableOpacity>
 
-          {/* Continue button */}
+          {/* Continue */}
           <TouchableOpacity
-            style={[
-              styles.button,
-              {
-                backgroundColor: hasAcknowledged ? colors.primary : colors.inputBackground,
-                opacity: loading ? 0.5 : 1
-              }
-            ]}
+            style={[s.primaryButton, {
+              backgroundColor: hasAcknowledged ? colors.accent : colors.fillSecondary,
+              opacity: loading ? 0.6 : 1,
+            }]}
             onPress={handleContinueWithGenerated}
             disabled={!hasAcknowledged || loading}
+            activeOpacity={0.75}
           >
             {loading ? (
-              <ActivityIndicator color={colors.buttonText} />
+              <ActivityIndicator color={colors.textOnAccent} />
             ) : (
-              <Text style={[styles.buttonText, { color: hasAcknowledged ? colors.buttonText : colors.textSecondary }]}>
+              <Text style={[s.btnLabel, {
+                color: hasAcknowledged ? colors.textOnAccent : colors.textTertiary,
+              }]}>
                 Continue
               </Text>
             )}
           </TouchableOpacity>
 
+          {/* Back link */}
           <TouchableOpacity
-            style={{ marginTop: 20, alignSelf: 'center', marginBottom: 40 }}
+            style={s.textButton}
             onPress={() => {
               setMode('choose')
               setHasShared(false)
               setHasAcknowledged(false)
             }}
+            activeOpacity={0.6}
           >
-            <Text style={[styles.text, { color: colors.secondary }]}>
+            <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>
               Go Back
             </Text>
           </TouchableOpacity>
@@ -351,62 +339,70 @@ export default function MnemonicScreen() {
     )
   }
 
-  // Import mode - paste existing mnemonic
+  // ─── Import mode ──────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[s.screen, { backgroundColor: colors.background }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <ScrollView style={{ flex: 1, padding: 20 }}>
-        <Text style={[styles.title, { fontSize: 24, marginBottom: 10 }]}>
+      <ScrollView
+        contentContainerStyle={s.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Hero icon */}
+        <View style={[s.heroIcon, { backgroundColor: colors.fillTertiary, alignSelf: 'flex-start' }]}>
+          <Ionicons name="download-outline" size={36} color={colors.accent} />
+        </View>
+
+        <Text style={[s.largeTitle, { color: colors.textPrimary, textAlign: 'left' }]}>
           Import Wallet
         </Text>
-        <Text style={[styles.textSecondary, { marginBottom: 20 }]}>
-          Paste your recovery phrase to restore your wallet.
+        <Text style={[s.bodyText, { color: colors.textSecondary, marginBottom: spacing.xxl }]}>
+          Enter your recovery phrase to restore an existing wallet.
         </Text>
 
         <TextInput
-          style={[
-            styles.input,
-            {
-              minHeight: 120,
-              textAlignVertical: 'top',
-              paddingTop: 12
-            }
-          ]}
+          style={[s.mnemonicInput, {
+            backgroundColor: colors.fillTertiary,
+            borderColor: colors.separator,
+            color: colors.textPrimary,
+          }]}
           value={importedMnemonic}
           onChangeText={setImportedMnemonic}
-          placeholder="Enter your mnemonic words separated by spaces"
-          placeholderTextColor={colors.textSecondary}
+          placeholder="Enter your recovery words separated by spaces..."
+          placeholderTextColor={colors.textTertiary}
           multiline
           autoCapitalize="none"
           autoCorrect={false}
+          textAlignVertical="top"
         />
 
         <TouchableOpacity
-          style={[
-            styles.button,
-            {
-              backgroundColor: importedMnemonic.trim() ? colors.primary : colors.inputBackground,
-              marginTop: 20,
-              opacity: loading ? 0.5 : 1
-            }
-          ]}
+          style={[s.primaryButton, {
+            backgroundColor: importedMnemonic.trim() ? colors.accent : colors.fillSecondary,
+            opacity: loading ? 0.6 : 1,
+            marginTop: spacing.xxl,
+          }]}
           onPress={handleContinueWithImported}
           disabled={!importedMnemonic.trim() || loading}
+          activeOpacity={0.75}
         >
           {loading ? (
-            <ActivityIndicator color={colors.buttonText} />
+            <ActivityIndicator color={colors.textOnAccent} />
           ) : (
-            <Text style={[styles.buttonText, { color: importedMnemonic.trim() ? colors.buttonText : colors.textPrimary }]}>
+            <Text style={[s.btnLabel, {
+              color: importedMnemonic.trim() ? colors.textOnAccent : colors.textTertiary,
+            }]}>
               Import Wallet
             </Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={{ marginTop: 20, alignSelf: 'center' }}
+          style={s.textButton}
           onPress={() => setMode('choose')}
+          activeOpacity={0.6}
         >
-          <Text style={[styles.text, { color: colors.secondary }]}>
+          <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>
             Go Back
           </Text>
         </TouchableOpacity>
@@ -414,3 +410,186 @@ export default function MnemonicScreen() {
     </SafeAreaView>
   )
 }
+
+// ─── Static Styles ────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
+
+  // Centered layout for the choose screen
+  centeredContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xxxl,
+  },
+
+  // Scrollable layout for generate / import
+  scrollContent: {
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.xxxl,
+    paddingBottom: 60,
+  },
+
+  // ─── Hero icon ──────────────────────────────────────────────────────
+  heroIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: radii.xl,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.xxl,
+  },
+
+  // ─── Typography ─────────────────────────────────────────────────────
+  largeTitle: {
+    ...typography.largeTitle,
+    marginBottom: spacing.md,
+    textAlign: 'center',
+  },
+  subtitle: {
+    ...typography.callout,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: spacing.xxxl + spacing.sm,
+  },
+  bodyText: {
+    ...typography.body,
+    lineHeight: 24,
+  },
+
+  // ─── Warning banner ────────────────────────────────────────────────
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.md,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xxl,
+  },
+  warningText: {
+    ...typography.subhead,
+    flex: 1,
+    lineHeight: 21,
+  },
+
+  // ─── Mnemonic word grid ─────────────────────────────────────────────
+  wordGrid: {
+    marginBottom: spacing.xxl,
+  },
+  wordRow: {
+    flexDirection: 'row',
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  wordChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    minHeight: 44,
+  },
+  wordNumber: {
+    ...typography.caption1,
+    width: 22,
+    fontVariant: ['tabular-nums'],
+  },
+  wordText: {
+    ...typography.headline,
+    flex: 1,
+  },
+
+  // ─── Buttons ────────────────────────────────────────────────────────
+  actionArea: {
+    width: '100%',
+    gap: spacing.md,
+    marginBottom: spacing.xxl,
+  },
+  primaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radii.md,
+    minHeight: 50,
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 50,
+  },
+  tertiaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radii.md,
+    minHeight: 50,
+  },
+  generateActions: {
+    gap: spacing.sm,
+    marginBottom: spacing.xxl,
+  },
+  btnIcon: {
+    marginRight: spacing.sm,
+  },
+  btnTextGroup: {
+    flex: 1,
+  },
+  btnLabel: {
+    ...typography.headline,
+  },
+  btnCaption: {
+    ...typography.footnote,
+    marginTop: 2,
+  },
+  textButton: {
+    alignSelf: 'center',
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
+  },
+  textButtonLabel: {
+    ...typography.subhead,
+  },
+
+  // ─── Acknowledgment ────────────────────────────────────────────────
+  acknowledgment: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  acknowledgmentText: {
+    ...typography.subhead,
+    flex: 1,
+    lineHeight: 21,
+  },
+
+  // ─── Import text input ─────────────────────────────────────────────
+  mnemonicInput: {
+    ...typography.body,
+    minHeight: 140,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    paddingTop: spacing.lg,
+    lineHeight: 26,
+  },
+})

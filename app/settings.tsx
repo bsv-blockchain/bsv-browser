@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react'
-import { View, Text, SafeAreaView, TouchableOpacity, ScrollView, Alert, TextInput } from 'react-native'
+import { View, Text, SafeAreaView, TouchableOpacity, ScrollView, Alert, TextInput, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme, ThemeMode } from '@/context/theme/ThemeContext'
-import { useThemeStyles } from '@/context/theme/useThemeStyles'
+import { spacing, radii, typography } from '@/context/theme/tokens'
 import { Ionicons } from '@expo/vector-icons'
 import { useWallet } from '@/context/WalletContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
+import { GroupedSection } from '@/components/ui/GroupedList'
+import { ListRow } from '@/components/ui/ListRow'
+import SegmentedControl from '@react-native-segmented-control/segmented-control'
 
 export default function SettingsScreen() {
   const { t } = useTranslation()
   const { colors, mode, setThemeMode } = useTheme()
-  const styles = useThemeStyles()
   const { updateSettings, settings, logout, selectedNetwork } = useWallet()
   const { getMnemonic, getItem, setItem } = useLocalStorage()
   const [showMnemonic, setShowMnemonic] = useState(false)
@@ -90,312 +92,290 @@ export default function SettingsScreen() {
     setMnemonic(null)
   }
 
+  // Segmented control values and mapping
+  const themeModes: ThemeMode[] = ['light', 'dark', 'system']
+  const themeLabels = [t('light'), t('dark'), t('system_default')]
+  const selectedThemeIndex = themeModes.indexOf(mode)
+
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView style={{ flex: 1 }}>
-          {/* Homepage Section */}
-          <View style={[styles.card, { marginTop: 20 }]}>
-            <Text style={[styles.text, { fontWeight: 'bold', fontSize: 18, marginBottom: 15 }]}>Homepage</Text>
-
-            <Text style={[styles.textSecondary, { fontSize: 13, marginBottom: 10 }]}>
-              The page that loads when you open the app.
-            </Text>
-
-            {editingHomepage ? (
-              <View>
-                <TextInput
-                  style={[
-                    styles.input,
-                    {
-                      fontSize: 14,
-                      marginBottom: 10,
-                      padding: 12,
-                      borderRadius: 8,
-                      backgroundColor: colors.paperBackground,
-                      borderWidth: 1,
-                      borderColor: colors.inputBorder,
-                      color: colors.textPrimary
-                    }
-                  ]}
-                  value={homepageUrl}
-                  onChangeText={setHomepageUrl}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  returnKeyType="done"
-                  onSubmitEditing={() => saveHomepageUrl(homepageUrl)}
-                  placeholder={DEFAULT_HOMEPAGE_URL}
-                  placeholderTextColor={colors.textSecondary}
-                />
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity
-                    style={[styles.row, { flex: 1, padding: 12, borderRadius: 8, backgroundColor: colors.primary, justifyContent: 'center' }]}
-                    onPress={() => saveHomepageUrl(homepageUrl)}
-                  >
-                    <Text style={[styles.text, { color: colors.buttonText }]}>Save</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.row, { flex: 1, padding: 12, borderRadius: 8, backgroundColor: colors.paperBackground, borderWidth: 1, borderColor: colors.inputBorder, justifyContent: 'center' }]}
-                    onPress={() => {
-                      setEditingHomepage(false)
-                      ;(async () => {
-                        const stored = await getItem('homepageUrl')
-                        setHomepageUrl(stored || DEFAULT_HOMEPAGE_URL)
-                      })()
-                    }}
-                  >
-                    <Text style={styles.text}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <TouchableOpacity
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingTop: spacing.xxl, paddingBottom: spacing.xxxl }}
+      >
+        {/* ── General ── */}
+        <GroupedSection
+          header="General"
+          footer="The page that loads when you open a new tab."
+        >
+          {editingHomepage ? (
+            <View style={localStyles.editContainer}>
+              <TextInput
                 style={[
-                  styles.row,
+                  localStyles.urlInput,
                   {
-                    paddingHorizontal: 12,
-                    paddingVertical: 10,
-                    borderRadius: 8,
-                    backgroundColor: colors.paperBackground,
-                    borderWidth: 1,
-                    borderColor: colors.inputBorder,
+                    backgroundColor: colors.fillTertiary,
+                    borderColor: colors.separator,
+                    color: colors.textPrimary,
                   }
                 ]}
-                onPress={() => setEditingHomepage(true)}
-              >
-                <Text style={[styles.textSecondary, { fontSize: 14, flex: 1 }]} numberOfLines={1}>
-                  {homepageUrl}
-                </Text>
-                <Ionicons name="pencil-outline" size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Account Section */}
-          <View style={styles.card}>
-            <Text style={[styles.text, { fontWeight: 'bold', fontSize: 18, marginBottom: 15 }]}>{t('wallet_configuration')}</Text>
-
-            {/* Network */}
-            <View style={{ marginBottom: 12 }}>
-              <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 4 }]}>
-                {t('bsv_network')}
-              </Text>
-              <View style={[
-                styles.row,
-                {
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 8,
-                  backgroundColor: colors.paperBackground,
-                  borderWidth: 1,
-                  borderColor: colors.inputBorder
-                }
-              ]}>
-                <Text style={[styles.textSecondary, { fontSize: 14, flex: 1, textAlign: 'center' }]} numberOfLines={1}>
-                  {selectedNetwork || 'main'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={{ marginBottom: 12 }}>
-              <Text style={[styles.textSecondary, { fontSize: 14, marginBottom: 4 }]}>
-                Storage
-              </Text>
-              <View style={[
-                styles.row,
-                {
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 8,
-                  backgroundColor: colors.paperBackground,
-                  borderWidth: 1,
-                  borderColor: colors.inputBorder
-                }
-              ]}>
-                <Text style={[styles.textSecondary, { fontSize: 14, flex: 1, textAlign: 'center' }]} numberOfLines={1}>
-                  Local (on-device)
-                </Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.row, { padding: 15, borderRadius: 8, backgroundColor: colors.error + '20', marginTop: 10 }]}
-              onPress={logout}
-            >
-              <View style={[styles.row, { flex: 1 }]}>
-                <Ionicons name="log-out-outline" size={24} color={colors.error} style={{ marginRight: 10 }} />
-                <Text style={[styles.text, { color: colors.error }]}>{t('logout')}</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          {/* Recovery Phrase Section */}
-          <View style={styles.card}>
-              <Text style={[styles.text, { fontWeight: 'bold', fontSize: 18, marginBottom: 15 }]}>
-                {t('recovery_phrase')}
-              </Text>
-
-              <Text style={[styles.textSecondary, { fontSize: 13, marginBottom: 15 }]}>
-                {t('recovery_phrase_description')}
-              </Text>
-
-              {!showMnemonic ? (
+                value={homepageUrl}
+                onChangeText={setHomepageUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                returnKeyType="done"
+                onSubmitEditing={() => saveHomepageUrl(homepageUrl)}
+                placeholder={DEFAULT_HOMEPAGE_URL}
+                placeholderTextColor={colors.textTertiary}
+              />
+              <View style={localStyles.editButtons}>
                 <TouchableOpacity
                   style={[
-                    styles.row,
+                    localStyles.editButton,
+                    { backgroundColor: colors.accent }
+                  ]}
+                  onPress={() => saveHomepageUrl(homepageUrl)}
+                >
+                  <Text style={[localStyles.editButtonText, { color: colors.textOnAccent }]}>
+                    Save
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    localStyles.editButton,
                     {
-                      padding: 15,
-                      borderRadius: 8,
-                      backgroundColor: colors.secondary + '20',
-                      justifyContent: 'center'
+                      backgroundColor: colors.fillTertiary,
+                      borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: colors.separator,
                     }
                   ]}
-                  onPress={handleShowMnemonic}
+                  onPress={() => {
+                    setEditingHomepage(false)
+                    ;(async () => {
+                      const stored = await getItem('homepageUrl')
+                      setHomepageUrl(stored || DEFAULT_HOMEPAGE_URL)
+                    })()
+                  }}
                 >
-                  <Ionicons name="eye-outline" size={24} color={colors.secondary} style={{ marginRight: 10 }} />
-                  <Text style={[styles.text, { color: colors.secondary }]}>{t('show_recovery_phrase')}</Text>
+                  <Text style={[localStyles.editButtonText, { color: colors.textPrimary }]}>
+                    Cancel
+                  </Text>
                 </TouchableOpacity>
-              ) : (
-                <View>
-                  {/* Mnemonic Display */}
-                  <View
-                    style={{
-                      padding: 15,
-                      borderRadius: 8,
-                      backgroundColor: colors.paperBackground,
-                      borderWidth: 2,
-                      borderColor: colors.secondary,
-                      marginBottom: 15
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.text,
-                        {
-                          fontSize: 16,
-                          lineHeight: 24,
-                          fontFamily: 'monospace',
-                          textAlign: 'center'
-                        }
-                      ]}
-                      selectable
-                    >
-                      {mnemonic}
-                    </Text>
-                  </View>
-
-                  {/* Warning Message */}
-                  <View
-                    style={{
-                      padding: 12,
-                      borderRadius: 8,
-                      backgroundColor: colors.error + '10',
-                      marginBottom: 15,
-                      flexDirection: 'row',
-                      alignItems: 'flex-start'
-                    }}
-                  >
-                    <Ionicons name="warning-outline" size={20} color={colors.error} style={{ marginRight: 8, marginTop: 2 }} />
-                    <Text style={[styles.textSecondary, { fontSize: 13, flex: 1 }]}>
-                      {t('recovery_phrase_security_warning')}
-                    </Text>
-                  </View>
-
-                  {/* Hide Button */}
-                  <TouchableOpacity
-                    style={[
-                      styles.row,
-                      {
-                        padding: 15,
-                        borderRadius: 8,
-                        backgroundColor: colors.paperBackground,
-                        borderWidth: 1,
-                        borderColor: colors.inputBorder,
-                        justifyContent: 'center'
-                      }
-                    ]}
-                    onPress={handleHideMnemonic}
-                  >
-                    <Ionicons name="eye-off-outline" size={24} color={colors.textPrimary} style={{ marginRight: 10 }} />
-                    <Text style={styles.text}>{t('hide_recovery_phrase')}</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+              </View>
             </View>
+          ) : (
+            <ListRow
+              label="Homepage"
+              value={homepageUrl}
+              icon="globe-outline"
+              iconColor={colors.accent}
+              onPress={() => setEditingHomepage(true)}
+              isLast
+            />
+          )}
+        </GroupedSection>
 
-          {/* Theme Section */}
-          <View style={styles.card}>
-            <Text style={[styles.text, { fontWeight: 'bold', fontSize: 18, marginBottom: 15 }]}>{t('appearance')}</Text>
-
-            <Text style={[styles.textSecondary, { marginBottom: 10 }]}>{t('choose_theme_mode')}</Text>
-
-            {/* Light Mode Option */}
-            <TouchableOpacity
-              style={[
-                styles.row,
-                {
-                  padding: 15,
-                  borderRadius: 8,
-                  backgroundColor: mode === 'light' ? colors.secondary + '20' : 'transparent'
-                }
-              ]}
-              onPress={() => handleThemeChange('light')}
-            >
-              <View style={[styles.row, { flex: 1 }]}>
-                <Ionicons name="sunny-outline" size={24} color={colors.textPrimary} style={{ marginRight: 10 }} />
-                <Text style={styles.text}>{t('light')}</Text>
-              </View>
-              {mode === 'light' && <Ionicons name="checkmark-circle" size={24} color={colors.secondary} />}
-            </TouchableOpacity>
-
-            {/* Dark Mode Option */}
-            <TouchableOpacity
-              style={[
-                styles.row,
-                {
-                  padding: 15,
-                  borderRadius: 8,
-                  backgroundColor: mode === 'dark' ? colors.secondary + '20' : 'transparent'
-                }
-              ]}
-              onPress={() => handleThemeChange('dark')}
-            >
-              <View style={[styles.row, { flex: 1 }]}>
-                <Ionicons name="moon-outline" size={24} color={colors.textPrimary} style={{ marginRight: 10 }} />
-                <Text style={styles.text}>{t('dark')}</Text>
-              </View>
-              {mode === 'dark' && <Ionicons name="checkmark-circle" size={24} color={colors.secondary} />}
-            </TouchableOpacity>
-
-            {/* System Mode Option */}
-            <TouchableOpacity
-              style={[
-                styles.row,
-                {
-                  padding: 15,
-                  borderRadius: 8,
-                  backgroundColor: mode === 'system' ? colors.secondary + '20' : 'transparent'
-                }
-              ]}
-              onPress={() => handleThemeChange('system')}
-            >
-              <View style={[styles.row, { flex: 1 }]}>
-                <Ionicons
-                  name="phone-portrait-outline"
-                  size={24}
-                  color={colors.textPrimary}
-                  style={{ marginRight: 10 }}
-                />
-                <Text style={styles.text}>{t('system_default')}</Text>
-              </View>
-              {mode === 'system' && <Ionicons name="checkmark-circle" size={24} color={colors.secondary} />}
-            </TouchableOpacity>
+        {/* ── Appearance ── */}
+        <GroupedSection header="Appearance">
+          <View style={localStyles.segmentedContainer}>
+            <Text style={[localStyles.segmentedLabel, { color: colors.textPrimary }]}>
+              Theme
+            </Text>
+            <SegmentedControl
+              values={themeLabels}
+              selectedIndex={selectedThemeIndex >= 0 ? selectedThemeIndex : 2}
+              onChange={(event) => {
+                const index = event.nativeEvent.selectedSegmentIndex
+                handleThemeChange(themeModes[index])
+              }}
+              style={localStyles.segmentedControl}
+            />
           </View>
+        </GroupedSection>
 
-          {/* Other Settings Sections can be added here */}
+        {/* ── Wallet ── */}
+        <GroupedSection header="Wallet">
+          <ListRow
+            label={t('bsv_network')}
+            value={selectedNetwork || 'main'}
+            icon="server-outline"
+            iconColor={colors.success}
+            showChevron={false}
+          />
+          <ListRow
+            label="Storage"
+            value="Local (on-device)"
+            icon="hardware-chip-outline"
+            iconColor={colors.warning}
+            showChevron={false}
+          />
+          {!showMnemonic ? (
+            <ListRow
+              label={t('recovery_phrase')}
+              icon="key-outline"
+              iconColor={colors.accentSecondary}
+              onPress={handleShowMnemonic}
+              isLast
+            />
+          ) : (
+            <View style={localStyles.mnemonicSection}>
+              {/* Mnemonic Display */}
+              <View
+                style={[
+                  localStyles.mnemonicBox,
+                  {
+                    backgroundColor: colors.fillTertiary,
+                    borderColor: colors.accentSecondary,
+                  }
+                ]}
+              >
+                <Text
+                  style={[
+                    localStyles.mnemonicText,
+                    { color: colors.textPrimary }
+                  ]}
+                  selectable
+                >
+                  {mnemonic}
+                </Text>
+              </View>
+
+              {/* Warning Message */}
+              <View
+                style={[
+                  localStyles.warningBox,
+                  { backgroundColor: colors.error + '10' }
+                ]}
+              >
+                <Ionicons
+                  name="warning-outline"
+                  size={18}
+                  color={colors.error}
+                  style={{ marginRight: spacing.sm }}
+                />
+                <Text style={[localStyles.warningText, { color: colors.textSecondary }]}>
+                  {t('recovery_phrase_security_warning')}
+                </Text>
+              </View>
+
+              {/* Hide Button */}
+              <TouchableOpacity
+                style={[
+                  localStyles.hideButton,
+                  { backgroundColor: colors.fillTertiary }
+                ]}
+                onPress={handleHideMnemonic}
+              >
+                <Ionicons
+                  name="eye-off-outline"
+                  size={18}
+                  color={colors.textPrimary}
+                  style={{ marginRight: spacing.sm }}
+                />
+                <Text style={[localStyles.hideButtonText, { color: colors.textPrimary }]}>
+                  {t('hide_recovery_phrase')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </GroupedSection>
+
+        {/* ── Account ── */}
+        <GroupedSection>
+          <ListRow
+            label={t('logout')}
+            icon="log-out-outline"
+            iconColor={colors.error}
+            onPress={logout}
+            destructive
+            showChevron={false}
+            isLast
+          />
+        </GroupedSection>
       </ScrollView>
     </SafeAreaView>
   )
 }
 
-// Styles are provided by useThemeStyles hook
+const localStyles = StyleSheet.create({
+  /* ── Homepage editing ── */
+  editContainer: {
+    padding: spacing.lg,
+  },
+  urlInput: {
+    ...typography.body,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.md,
+  },
+  editButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  editButton: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editButtonText: {
+    ...typography.headline,
+  },
+
+  /* ── Segmented control ── */
+  segmentedContainer: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  segmentedLabel: {
+    ...typography.body,
+    marginBottom: spacing.md,
+  },
+  segmentedControl: {
+    height: 32,
+  },
+
+  /* ── Mnemonic reveal ── */
+  mnemonicSection: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+  },
+  mnemonicBox: {
+    padding: spacing.lg,
+    borderRadius: radii.sm,
+    borderWidth: 1.5,
+    marginBottom: spacing.md,
+  },
+  mnemonicText: {
+    ...typography.callout,
+    fontFamily: 'monospace',
+    lineHeight: 22,
+    textAlign: 'center',
+  },
+  warningBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: spacing.md,
+    borderRadius: radii.sm,
+    marginBottom: spacing.md,
+  },
+  warningText: {
+    ...typography.footnote,
+    flex: 1,
+  },
+  hideButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: radii.sm,
+  },
+  hideButtonText: {
+    ...typography.subhead,
+    fontWeight: '500',
+  },
+})

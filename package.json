@@ -82,7 +82,6 @@
     "react-native-modal": "^14.0.0-rc.1",
     "react-native-otp-inputs": "^7.4.0",
     "react-native-pager-view": "6.9.1",
-    "react-native-paper": "^5.14.5",
     "react-native-permissions": "^5.4.2",
     "react-native-qrcode-svg": "^6.3.15",
     "react-native-quick-crypto": "^0.7.17",
