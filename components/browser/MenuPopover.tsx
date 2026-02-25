@@ -118,11 +118,11 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   )
 
   return (
-    <>
+    <View style={styles.overlay} pointerEvents="box-none">
       {/* Invisible backdrop to dismiss on outside tap */}
       <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} />
 
-      {/* Popover card anchored bottom-right, above the ... button position */}
+      {/* Popover card anchored bottom-right, above the address bar */}
       <View style={[styles.anchor, { bottom: bottomOffset }]} pointerEvents="box-none">
         {isLiquidGlassSupported && LiquidGlassView ? (
           <LiquidGlassView
@@ -154,11 +154,15 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
           </BlurChrome>
         )}
       </View>
-    </>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 50,
+  },
   anchor: {
     position: 'absolute',
     right: spacing.md,
