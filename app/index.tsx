@@ -40,7 +40,7 @@ import { useTranslation } from 'react-i18next'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 
 import { useWebAppManifest } from '@/hooks/useWebAppManifest'
-import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
+import { buildInjectedJavaScript, buildSafeAreaScript } from '@/utils/webview/injectedPolyfills'
 import PermissionModal from '@/components/PermissionModal'
 import PermissionsScreen from '@/components/PermissionsScreen'
 import Sheet from '@/components/ui/Sheet'
@@ -214,6 +214,7 @@ function Browser() {
   const addressInputRef = useRef<TextInput>(null)
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [pageThemeColor, setPageThemeColor] = useState<string | null>(null)
   const activeCameraStreams = useRef<Set<string>>(new Set())
 
   // Permission state
@@ -567,6 +568,11 @@ const shareCurrent = useCallback(async () => {
     [getAcceptLanguageHeader]
   )
 
+  const safeAreaScript = useMemo(
+    () => buildSafeAreaScript(insets.top),
+    [insets.top]
+  )
+
   const routeWebViewMessage = useMemo(
     () =>
       createWebViewMessageRouter({
@@ -615,6 +621,11 @@ const shareCurrent = useCallback(async () => {
           case 'info': console.info(logPrefix, ...msg.args); break
           case 'debug': console.debug(logPrefix, ...msg.args); break
         }
+        return
+      }
+
+      if (msg.type === 'THEME_COLOR') {
+        setPageThemeColor(msg.color || null)
         return
       }
 
@@ -691,6 +702,8 @@ const shareCurrent = useCallback(async () => {
         })();
       `)
     }
+
+    if (navState.loading) setPageThemeColor(null)
 
     tabStore.handleNavigationStateChange(activeTab.id, navState)
     if (!addressEditing.current) setAddressText(navState.url)
@@ -825,10 +838,12 @@ const shareCurrent = useCallback(async () => {
                 originWhitelist={['https://*', 'http://*']}
                 onMessage={handleMessage}
                 injectedJavaScript={injectedJavaScript}
-                injectedJavaScriptBeforeContentLoaded={getPermissionScript(
-                  permissionsDeniedForCurrentDomain,
-                  pendingPermission
-                )}
+                injectedJavaScriptBeforeContentLoaded={
+                  safeAreaScript + getPermissionScript(
+                    permissionsDeniedForCurrentDomain,
+                    pendingPermission
+                  )
+                }
                 onNavigationStateChange={handleNavStateChange}
 
                 allowsFullscreenVideo={true}
@@ -850,7 +865,7 @@ const shareCurrent = useCallback(async () => {
                 javaScriptEnabled
                 domStorageEnabled
                 allowsBackForwardNavigationGestures
-                containerStyle={{ backgroundColor: colors.background }}
+                containerStyle={{ backgroundColor: pageThemeColor || colors.background }}
                 style={{ flex: 1 }}
               />
             </View>
@@ -905,25 +920,28 @@ const shareCurrent = useCallback(async () => {
                 }}
                 inputRef={addressInputRef}
               />
-              {menuPopoverOpen && (
-                <MenuPopover
-                  isNewTab={isNewTab}
-                  canShare={!isNewTab}
-                  onDismiss={() => setMenuPopoverOpen(false)}
-                  onShare={shareCurrent}
-                  onAddBookmark={() => {
-                    if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
-                      addBookmark(activeTab.title || t('untitled'), activeTab.url)
-                    }
-                  }}
-                  onBookmarks={() => sheet.push('bookmarks')}
-                  onTabs={() => setShowTabsView(true)}
-                  onSettings={() => sheet.push('settings')}
-                  onTrust={() => sheet.push('trust')}
-                  onEnableWeb3={() => router.push('/auth/mnemonic')}
-                />
-              )}
             </View>
+          )}
+
+          {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
+          {menuPopoverOpen && (
+            <MenuPopover
+              isNewTab={isNewTab}
+              canShare={!isNewTab}
+              bottomOffset={Math.max(insets.bottom, 12) + 44 + 8}
+              onDismiss={() => setMenuPopoverOpen(false)}
+              onShare={shareCurrent}
+              onAddBookmark={() => {
+                if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
+                  addBookmark(activeTab.title || t('untitled'), activeTab.url)
+                }
+              }}
+              onBookmarks={() => sheet.push('bookmarks')}
+              onTabs={() => setShowTabsView(true)}
+              onSettings={() => sheet.push('settings')}
+              onTrust={() => sheet.push('trust')}
+              onEnableWeb3={() => router.push('/auth/mnemonic')}
+            />
           )}
 
           {/* ---- Tabs Overview ---- */}

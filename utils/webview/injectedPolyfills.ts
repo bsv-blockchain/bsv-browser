@@ -47,6 +47,38 @@ function injectedPolyfills(acceptLanguage: string) {
     console.log('[Injected] Console bridge installed')
   }
 
+
+  // Theme-color extraction — sample meta tag or page background and post to React Native
+  ;(function () {
+    function getThemeColor(): string | null {
+      const meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
+      if (meta?.content) return meta.content.trim()
+      const body = document.body
+      const html = document.documentElement
+      for (const el of [body, html]) {
+        if (!el) continue
+        const bg = getComputedStyle(el).backgroundColor
+        if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg
+      }
+      return null
+    }
+    function sendThemeColor() {
+      const color = getThemeColor()
+      ;(window as any).ReactNativeWebView?.postMessage(
+        JSON.stringify({ type: 'THEME_COLOR', color })
+      )
+    }
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(sendThemeColor, 50)
+    } else {
+      window.addEventListener('DOMContentLoaded', () => setTimeout(sendThemeColor, 50))
+    }
+    const observer = new MutationObserver(() => sendThemeColor())
+    observer.observe(document.head || document.documentElement, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['content']
+    })
+  })()
+
   // Global active media streams tracker for cleanup on navigation
   ;(function () {
     try {
@@ -613,6 +645,39 @@ function injectedPolyfills(acceptLanguage: string) {
 }
 
 export function buildInjectedJavaScript(acceptLanguage: string) {
-  // Serialize the function and immediately invoke it with the provided header
+  // Serialize the function and immediately invoke it with the provided argument
   return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)});`
+}
+
+/**
+ * Script injected BEFORE content loads (document-start).
+ * At this point only `document.documentElement` exists — no <head> or <body> yet.
+ * We write a <style> directly into documentElement; the browser moves it into <head>
+ * once parsed. We also patch the viewport meta once <head> appears via MutationObserver.
+ */
+export function buildSafeAreaScript(safeAreaTop: number) {
+  if (safeAreaTop <= 0) return ''
+  return `(function(){
+  var h=${safeAreaTop};
+  var style=document.createElement('style');
+  style.textContent='body{padding-top:'+h+'px!important}';
+  document.documentElement.appendChild(style);
+  var obs=new MutationObserver(function(){
+    var vp=document.querySelector('meta[name="viewport"]');
+    if(vp){
+      var c=vp.getAttribute('content')||'';
+      if(c.indexOf('viewport-fit')===-1){
+        vp.setAttribute('content',c+', viewport-fit=cover');
+      }
+      obs.disconnect();
+    }else if(document.head){
+      var m=document.createElement('meta');
+      m.name='viewport';
+      m.content='width=device-width, initial-scale=1, viewport-fit=cover';
+      document.head.appendChild(m);
+      obs.disconnect();
+    }
+  });
+  obs.observe(document.documentElement,{childList:true,subtree:true});
+})();`
 }

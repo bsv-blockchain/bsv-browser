@@ -23,6 +23,7 @@ try {
 interface MenuPopoverProps {
   isNewTab: boolean
   canShare: boolean
+  bottomOffset: number
   onDismiss: () => void
   onShare: () => void
   onAddBookmark: () => void
@@ -69,6 +70,7 @@ const Divider: React.FC = () => {
 export const MenuPopover: React.FC<MenuPopoverProps> = ({
   isNewTab,
   canShare,
+  bottomOffset,
   onDismiss,
   onShare,
   onAddBookmark,
@@ -121,7 +123,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} />
 
       {/* Popover card anchored bottom-right, above the ... button position */}
-      <View style={styles.anchor} pointerEvents="box-none">
+      <View style={[styles.anchor, { bottom: bottomOffset }]} pointerEvents="box-none">
         {isLiquidGlassSupported && LiquidGlassView ? (
           <LiquidGlassView
             effect="regular"
@@ -159,7 +161,6 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
 const styles = StyleSheet.create({
   anchor: {
     position: 'absolute',
-    bottom: 12,
     right: spacing.md,
     width: 280,
     alignItems: 'flex-end',
