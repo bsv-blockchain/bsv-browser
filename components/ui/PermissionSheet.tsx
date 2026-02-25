@@ -11,7 +11,33 @@ import AmountDisplay from '@/components/AmountDisplay'
 // Types
 // ---------------------------------------------------------------------------
 
-type PermissionKind = 'protocol' | 'basket' | 'certificate' | 'spending'
+type PermissionKind = 'protocol' | 'basket' | 'certificate' | 'spending' | 'group'
+
+interface GroupProtocol {
+  protocolID: [number, string]
+  counterparty?: string
+  description?: string
+}
+interface GroupBasket {
+  basket: string
+  description?: string
+}
+interface GroupCertificate {
+  type: string
+  verifierPublicKey?: string
+  fields?: string[]
+  description?: string
+}
+interface GroupSpending {
+  amount: number
+  description?: string
+}
+interface GroupPermissions {
+  protocolPermissions?: GroupProtocol[]
+  basketAccess?: GroupBasket[]
+  certificateAccess?: GroupCertificate[]
+  spendingAuthorization?: GroupSpending
+}
 
 /** Common shape derived from the four existing modals. */
 interface ActivePermission {
@@ -27,6 +53,8 @@ interface ActivePermission {
   amount?: number
   /** Whether this is a renewal rather than a first-time request. */
   renewal?: boolean
+  /** Group-specific sub-permissions. */
+  groupPermissions?: GroupPermissions
 }
 
 // ---------------------------------------------------------------------------
@@ -184,42 +212,31 @@ const PermissionSheet: React.FC = () => {
   //   requestID, originator, description?, transactionAmount, totalPastSpending,
   //   amountPreviouslyAuthorized, authorizationAmount, renewal?, lineItems: {description, satoshis}[]
   const DEBUG_ACTIVE: ActivePermission = {
-    kind: 'spending',
-    requestID: 'spend:fast.brc.dev:209',
+    kind: 'group',
+    requestID: 'group:fast.brc.dev:1',
     originator: 'fast.brc.dev',
-    title: 'Spending Authorization',
-    description: 'create an event ticket',
-    amount: 209,
-    renewal: false,
-    details: [
-      { label: 'Event ticket', value: '1 sat' },
-      { label: 'Network fee', value: '208 sats' }
-    ]
+    title: 'App Permissions',
+    description: 'is requesting access to your wallet',
+    details: [],
+    groupPermissions: {
+      spendingAuthorization: { amount: 10000, description: 'Pay for in-app purchases' },
+      protocolPermissions: [
+        { protocolID: [0, 'hello world'], description: 'Send and receive messages' },
+        { protocolID: [1, 'todo list'], description: 'Manage your to-do items' }
+      ],
+      basketAccess: [
+        { basket: 'todo-items', description: 'Store your to-do list tokens' }
+      ],
+      certificateAccess: [
+        { type: 'age-verification', verifierPublicKey: '03ac9e...', fields: ['over18'], description: 'Verify you are over 18' }
+      ]
+    }
   }
 
   // Derive what (if anything) we should show.
   const active = useMemo(
-    () =>
-      deriveActive({
-        protocolRequests,
-        basketRequests,
-        certificateRequests,
-        spendingRequests,
-        protocolAccessModalOpen,
-        basketAccessModalOpen,
-        certificateAccessModalOpen,
-        spendingAuthorizationModalOpen
-      }),
-    [
-      protocolRequests,
-      basketRequests,
-      certificateRequests,
-      spendingRequests,
-      protocolAccessModalOpen,
-      basketAccessModalOpen,
-      certificateAccessModalOpen,
-      spendingAuthorizationModalOpen
-    ]
+    () => DEBUG_ACTIVE,
+    [] // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   const visible = active !== null
@@ -344,8 +361,73 @@ const PermissionSheet: React.FC = () => {
               </View>
             )}
 
+            {/* -------- Group permissions list -------- */}
+            {active.kind === 'group' && active.groupPermissions && (
+              <ScrollView style={styles.groupScroll} bounces={false}>
+                {active.groupPermissions.spendingAuthorization && (
+                  <View style={[styles.groupSection, { borderColor: colors.separator }]}>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>Spending</Text>
+                    <View style={styles.groupRow}>
+                      <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>
+                        <AmountDisplay>{active.groupPermissions.spendingAuthorization.amount}</AmountDisplay>
+                      </Text>
+                      {active.groupPermissions.spendingAuthorization.description && (
+                        <Text style={[styles.groupRowDesc, { color: colors.textSecondary }]}>
+                          {active.groupPermissions.spendingAuthorization.description}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                )}
+                {active.groupPermissions.protocolPermissions && active.groupPermissions.protocolPermissions.length > 0 && (
+                  <View style={[styles.groupSection, { borderColor: colors.separator }]}>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>Protocols</Text>
+                    {active.groupPermissions.protocolPermissions.map((p, i) => (
+                      <View key={i} style={styles.groupRow}>
+                        <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{p.protocolID[1]}</Text>
+                        {p.description && (
+                          <Text style={[styles.groupRowDesc, { color: colors.textSecondary }]}>{p.description}</Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {active.groupPermissions.basketAccess && active.groupPermissions.basketAccess.length > 0 && (
+                  <View style={[styles.groupSection, { borderColor: colors.separator }]}>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>Baskets</Text>
+                    {active.groupPermissions.basketAccess.map((b, i) => (
+                      <View key={i} style={styles.groupRow}>
+                        <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{b.basket}</Text>
+                        {b.description && (
+                          <Text style={[styles.groupRowDesc, { color: colors.textSecondary }]}>{b.description}</Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {active.groupPermissions.certificateAccess && active.groupPermissions.certificateAccess.length > 0 && (
+                  <View style={[styles.groupSection, { borderColor: colors.separator }]}>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>Certificates</Text>
+                    {active.groupPermissions.certificateAccess.map((c, i) => (
+                      <View key={i} style={styles.groupRow}>
+                        <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{c.type}</Text>
+                        {c.description && (
+                          <Text style={[styles.groupRowDesc, { color: colors.textSecondary }]}>{c.description}</Text>
+                        )}
+                        {c.fields && c.fields.length > 0 && (
+                          <Text style={[styles.groupRowDesc, { color: colors.textTertiary }]}>
+                            Fields: {c.fields.join(', ')}
+                          </Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+            )}
+
             {/* -------- Expandable details (scrollable if tall) -------- */}
-            {(active.details.length > 0 || (active.fields && active.fields.length > 0)) && (
+            {active.kind !== 'group' && (active.details.length > 0 || (active.fields && active.fields.length > 0)) && (
               <View style={styles.detailsSection}>
                 <TouchableOpacity
                   onPress={() => setDetailsExpanded(prev => !prev)}
@@ -550,6 +632,34 @@ const styles = StyleSheet.create({
     ...typography.footnote,
     marginLeft: spacing.md,
     marginTop: spacing.xs
+  },
+
+  // Group permissions
+  groupScroll: {
+    maxHeight: 240
+  },
+  groupSection: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.sm,
+    marginBottom: spacing.sm
+  },
+  groupSectionTitle: {
+    ...typography.caption1,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs
+  },
+  groupRow: {
+    paddingVertical: spacing.xs
+  },
+  groupRowLabel: {
+    ...typography.subhead,
+    fontWeight: '500'
+  },
+  groupRowDesc: {
+    ...typography.footnote,
+    marginTop: 1
   },
 
   // Buttons — pinned outside ScrollView so they never move
