@@ -1,14 +1,10 @@
 
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import {
-  Animated,
-  Dimensions,
   Keyboard,
   Platform,
-  Pressable,
   Share,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -60,6 +56,7 @@ import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 
 import { AddressBar } from '@/components/browser/AddressBar'
+import { MenuPopover } from '@/components/browser/MenuPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
 import { NewTabPage } from '@/components/browser/NewTabPage'
 import { MenuSheet } from '@/components/browser/MenuSheet'
@@ -211,6 +208,7 @@ function Browser() {
   const iosSoftKeyboardShown = useRef(false)
 
   const [showTabsView, setShowTabsView] = useState(false)
+  const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
 
 
   const addressInputRef = useRef<TextInput>(null)
@@ -798,11 +796,11 @@ const shareCurrent = useCallback(async () => {
         <View style={[styles.container, { backgroundColor: colors.background }]}>
           <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
 
-          {/* ---- Main content area ---- */}
+          {/* ---- Main content (fills entire screen, address bar floats over it) ---- */}
           {isNewTab ? (
             <NewTabPage onNavigate={url => updateActiveTab({ url })} />
           ) : activeTab ? (
-            <View style={{ flex: 1 }}>
+            <View style={StyleSheet.absoluteFill}>
               {isFullscreen && (
                 <TouchableOpacity
                   style={styles.exitFullscreen}
@@ -858,56 +856,74 @@ const shareCurrent = useCallback(async () => {
             </View>
           ) : null}
 
-          {/* ---- Address Bar ---- */}
+          {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
           {!isFullscreen && showAddressBar && (
-            <AddressBar
-              addressText={addressText}
-              addressFocused={addressFocused}
-              isLoading={activeTab?.isLoading || false}
-              canGoBack={activeTab?.canGoBack || false}
-              canGoForward={activeTab?.canGoForward || false}
-              isNewTab={isNewTab}
-              isHttps={activeTab?.url?.startsWith('https') || false}
-              suggestions={addressSuggestions}
-              tabCount={tabStore.tabs.length}
-              onChangeText={onChangeAddressText}
-              onSubmit={onAddressSubmit}
-              onFocus={() => {
-                addressEditing.current = true
-                setAddressFocused(true)
-                if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
-                setTimeout(() => {
-                  const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
-                  addressInputRef.current?.setNativeProps({
-                    selection: { start: 0, end: textToSelect.length }
-                  })
-                }, 0)
-              }}
-              onBlur={() => {
-                addressEditing.current = false
-                setAddressFocused(false)
-                setAddressSuggestions([])
-                setAddressText(activeTab?.url || kNEW_TAB_URL)
-              }}
-              onBack={navBack}
-              onForward={navFwd}
-              onReloadOrStop={navReloadOrStop}
-              onClearText={() => setAddressText('')}
-              onSuggestionPress={(url) => {
-                addressInputRef.current?.blur()
-                Keyboard.dismiss()
-                setAddressFocused(false)
-                setAddressSuggestions([])
-                setAddressText(url)
-                updateActiveTab({ url })
-                addressEditing.current = false
-              }}
-              onShare={shareCurrent}
-              onBookmarks={() => sheet.push('bookmarks')}
-              onTabs={() => setShowTabsView(true)}
-              onSettings={() => sheet.push('settings')}
-              inputRef={addressInputRef}
-            />
+            <View style={styles.chromeWrapper} pointerEvents="box-none">
+              <AddressBar
+                addressText={addressText}
+                addressFocused={addressFocused}
+                isLoading={activeTab?.isLoading || false}
+                canGoBack={activeTab?.canGoBack || false}
+                canGoForward={activeTab?.canGoForward || false}
+                isNewTab={isNewTab}
+                isHttps={activeTab?.url?.startsWith('https') || false}
+                suggestions={addressSuggestions}
+                menuOpen={menuPopoverOpen}
+                onMorePress={() => setMenuPopoverOpen(true)}
+                onChangeText={onChangeAddressText}
+                onSubmit={onAddressSubmit}
+                onFocus={() => {
+                  setMenuPopoverOpen(false)
+                  addressEditing.current = true
+                  setAddressFocused(true)
+                  if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
+                  setTimeout(() => {
+                    const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
+                    addressInputRef.current?.setNativeProps({
+                      selection: { start: 0, end: textToSelect.length }
+                    })
+                  }, 0)
+                }}
+                onBlur={() => {
+                  addressEditing.current = false
+                  setAddressFocused(false)
+                  setAddressSuggestions([])
+                  setAddressText(activeTab?.url || kNEW_TAB_URL)
+                }}
+                onBack={navBack}
+                onForward={navFwd}
+                onReloadOrStop={navReloadOrStop}
+                onClearText={() => setAddressText('')}
+                onSuggestionPress={(url) => {
+                  addressInputRef.current?.blur()
+                  Keyboard.dismiss()
+                  setAddressFocused(false)
+                  setAddressSuggestions([])
+                  setAddressText(url)
+                  updateActiveTab({ url })
+                  addressEditing.current = false
+                }}
+                inputRef={addressInputRef}
+              />
+              {menuPopoverOpen && (
+                <MenuPopover
+                  isNewTab={isNewTab}
+                  canShare={!isNewTab}
+                  onDismiss={() => setMenuPopoverOpen(false)}
+                  onShare={shareCurrent}
+                  onAddBookmark={() => {
+                    if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
+                      addBookmark(activeTab.title || t('untitled'), activeTab.url)
+                    }
+                  }}
+                  onBookmarks={() => sheet.push('bookmarks')}
+                  onTabs={() => setShowTabsView(true)}
+                  onSettings={() => sheet.push('settings')}
+                  onIdentity={() => sheet.push('identity')}
+                  onTrust={() => sheet.push('trust')}
+                />
+              )}
+            </View>
           )}
 
           {/* ---- Tabs Overview ---- */}
@@ -1043,5 +1059,12 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  chromeWrapper: {
+    position: 'absolute',
+    bottom: 25,
+    left: 0,
+    right: 0,
+    zIndex: 20,
   },
 })

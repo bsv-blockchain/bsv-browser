@@ -1,0 +1,188 @@
+import React from 'react'
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
+import { BlurChrome } from '@/components/ui/BlurChrome'
+import { useTheme } from '@/context/theme/ThemeContext'
+import { useBrowserMode } from '@/context/BrowserModeContext'
+import { spacing, radii, typography } from '@/context/theme/tokens'
+
+let LiquidGlassView: React.ComponentType<any> | null = null
+let isLiquidGlassSupported = false
+try {
+  const lg = require('@callstack/liquid-glass')
+  LiquidGlassView = lg.LiquidGlassView
+  isLiquidGlassSupported = lg.isLiquidGlassSupported ?? false
+} catch {}
+
+interface MenuPopoverProps {
+  isNewTab: boolean
+  canShare: boolean
+  onDismiss: () => void
+  onShare: () => void
+  onAddBookmark: () => void
+  onBookmarks: () => void
+  onTabs: () => void
+  onSettings: () => void
+  onIdentity: () => void
+  onTrust: () => void
+}
+
+interface RowProps {
+  icon: string
+  label: string
+  onPress: () => void
+  destructive?: boolean
+}
+
+const Row: React.FC<RowProps> = ({ icon, label, onPress, destructive }) => {
+  const { colors } = useTheme()
+  return (
+    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.6}>
+      <Ionicons
+        name={icon as any}
+        size={22}
+        color={destructive ? colors.error : colors.textPrimary}
+        style={styles.rowIcon}
+      />
+      <Text style={[styles.rowLabel, { color: destructive ? colors.error : colors.textPrimary }]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  )
+}
+
+const Divider: React.FC = () => {
+  const { colors } = useTheme()
+  return <View style={[styles.divider, { backgroundColor: colors.separator }]} />
+}
+
+/**
+ * Floating glass popover anchored to the bottom-right of the screen,
+ * replacing the ... button while open.
+ */
+export const MenuPopover: React.FC<MenuPopoverProps> = ({
+  isNewTab,
+  canShare,
+  onDismiss,
+  onShare,
+  onAddBookmark,
+  onBookmarks,
+  onTabs,
+  onSettings,
+  onIdentity,
+  onTrust,
+}) => {
+  const { colors, isDark } = useTheme()
+  const { isWeb2Mode } = useBrowserMode()
+
+  const dismiss = (fn: () => void) => () => { onDismiss(); fn() }
+
+  const cardContent = (
+    <View style={styles.card}>
+      {/* Actions group */}
+      {!isNewTab && canShare && (
+        <Row icon="share-outline" label="Share" onPress={dismiss(onShare)} />
+      )}
+      {!isNewTab && (
+        <Row icon="bookmark-outline" label="Add Bookmark" onPress={dismiss(onAddBookmark)} />
+      )}
+      <Row icon="book-outline" label="Bookmarks" onPress={dismiss(onBookmarks)} />
+
+      <Divider />
+
+      {/* Navigation group */}
+      <Row icon="copy-outline" label="All Tabs" onPress={dismiss(onTabs)} />
+      <Row icon="settings-outline" label="Settings" onPress={dismiss(onSettings)} />
+
+      {/* Web3 group */}
+      {!isWeb2Mode && (
+        <>
+          <Divider />
+          <Row icon="person-circle-outline" label="Identity" onPress={dismiss(onIdentity)} />
+          <Row icon="shield-checkmark-outline" label="Trust Network" onPress={dismiss(onTrust)} />
+        </>
+      )}
+    </View>
+  )
+
+  return (
+    <>
+      {/* Invisible backdrop to dismiss on outside tap */}
+      <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} />
+
+      {/* Popover card anchored bottom-right, above the ... button position */}
+      <View style={styles.anchor} pointerEvents="box-none">
+        {isLiquidGlassSupported && LiquidGlassView ? (
+          <LiquidGlassView
+            effect="regular"
+            colorScheme={isDark ? 'dark' : 'light'}
+            style={[styles.glassCard, { borderRadius: radii.xl }]}
+          >
+            {cardContent}
+          </LiquidGlassView>
+        ) : (
+          <BlurChrome
+            intensity={66}
+            borderRadius={radii.xl}
+            style={[
+              styles.glassCard,
+              {
+                borderRadius: radii.xl,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: isDark ? 0.5 : 0.18,
+                shadowRadius: 24,
+                elevation: 16,
+              },
+            ]}
+          >
+            {cardContent}
+          </BlurChrome>
+        )}
+      </View>
+    </>
+  )
+}
+
+const styles = StyleSheet.create({
+  anchor: {
+    position: 'absolute',
+    bottom: 12,
+    right: spacing.md,
+    width: 280,
+    alignItems: 'flex-end',
+  },
+  glassCard: {
+    width: 222,
+    overflow: 'hidden',
+  },
+  card: {
+    paddingVertical: spacing.xs,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md + 2,
+  },
+  rowIcon: {
+    width: 28,
+    marginRight: spacing.md,
+  },
+  rowLabel: {
+    ...typography.body,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: spacing.lg,
+    marginVertical: spacing.xs,
+  },
+})

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React from 'react'
 import {
   Keyboard,
   StyleSheet,
@@ -32,7 +32,8 @@ interface AddressBarProps {
   isNewTab: boolean
   isHttps: boolean
   suggestions: (HistoryEntry | Bookmark)[]
-  tabCount: number
+  menuOpen: boolean
+  onMorePress: () => void
   onChangeText: (text: string) => void
   onSubmit: () => void
   onFocus: () => void
@@ -42,10 +43,6 @@ interface AddressBarProps {
   onReloadOrStop: () => void
   onClearText: () => void
   onSuggestionPress: (url: string) => void
-  onShare: () => void
-  onBookmarks: () => void
-  onTabs: () => void
-  onSettings: () => void
   inputRef: React.RefObject<TextInput | null>
 }
 
@@ -61,7 +58,7 @@ function domainFromUrl(url: string): string {
   }
 }
 
-/** Floating glass capsule — LiquidGlassView on iOS 26+, BlurChrome pill elsewhere */
+/** Floating glass capsule */
 const GlassPill: React.FC<{ style?: any; children: React.ReactNode; flex?: number }> = ({
   style,
   children,
@@ -106,7 +103,8 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   isNewTab,
   isHttps,
   suggestions,
-  tabCount,
+  menuOpen,
+  onMorePress,
   onChangeText,
   onSubmit,
   onFocus,
@@ -116,171 +114,116 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   onReloadOrStop,
   onClearText,
   onSuggestionPress,
-  onShare,
-  onBookmarks,
-  onTabs,
-  onSettings,
   inputRef,
 }) => {
   const { colors } = useTheme()
-  const [actionsExpanded, setActionsExpanded] = useState(false)
-
-  const collapseActions = useCallback(() => setActionsExpanded(false), [])
-
-  const handleShare = useCallback(() => { collapseActions(); onShare() }, [collapseActions, onShare])
-  const handleBookmarks = useCallback(() => { collapseActions(); onBookmarks() }, [collapseActions, onBookmarks])
-  const handleTabs = useCallback(() => { collapseActions(); onTabs() }, [collapseActions, onTabs])
-  const handleSettings = useCallback(() => { collapseActions(); onSettings() }, [collapseActions, onSettings])
 
   const displayText = addressFocused ? addressText : domainFromUrl(addressText)
   const isBackDisabled = !canGoBack || isNewTab
   const isForwardDisabled = !canGoForward || isNewTab
 
-  // --- Expanded action row replaces nav + URL pill ---
-  const actionRow = (
-    <View style={styles.row}>
-      <GlassPill flex={1} style={styles.urlPill}>
-        <View style={styles.actionButtons}>
-          <TouchableOpacity onPress={handleShare} style={styles.actionBtn} activeOpacity={0.6}>
-            <Ionicons name="share-outline" size={22} color={colors.accent} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleBookmarks} style={styles.actionBtn} activeOpacity={0.6}>
-            <Ionicons name="book-outline" size={22} color={colors.accent} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleTabs} style={styles.actionBtn} activeOpacity={0.6}>
-            <View>
-              <Ionicons name="copy-outline" size={22} color={colors.accent} />
-              {tabCount > 1 && (
-                <View style={[styles.badge, { backgroundColor: colors.accent }]}>
-                  <Text style={styles.badgeText}>{tabCount}</Text>
-                </View>
-              )}
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleSettings} style={styles.actionBtn} activeOpacity={0.6}>
-            <Ionicons name="settings-outline" size={22} color={colors.accent} />
-          </TouchableOpacity>
-        </View>
-      </GlassPill>
-
-      {/* Toggle button — collapses back to URL view */}
-      <GlassPill style={styles.morePill}>
-        <TouchableOpacity onPress={collapseActions} style={styles.moreButton} activeOpacity={0.6}>
-          <Ionicons name="ellipsis-horizontal" size={20} color={colors.accent} />
-        </TouchableOpacity>
-      </GlassPill>
-    </View>
-  )
-
-  // --- Normal URL row ---
-  const urlRow = (
-    <View style={styles.row}>
-      {/* Back / Forward — hidden while editing */}
-      {!addressFocused && (
-        <GlassPill style={styles.navPill}>
-          <TouchableOpacity
-            onPress={onBack}
-            disabled={isBackDisabled}
-            style={styles.navButton}
-            activeOpacity={0.6}
-          >
-            <Ionicons
-              name="chevron-back"
-              size={22}
-              color={isBackDisabled ? colors.textQuaternary : colors.accent}
-            />
-          </TouchableOpacity>
-          <View style={[styles.navDivider, { backgroundColor: colors.separator }]} />
-          <TouchableOpacity
-            onPress={onForward}
-            disabled={isForwardDisabled}
-            style={styles.navButton}
-            activeOpacity={0.6}
-          >
-            <Ionicons
-              name="chevron-forward"
-              size={22}
-              color={isForwardDisabled ? colors.textQuaternary : colors.accent}
-            />
-          </TouchableOpacity>
-        </GlassPill>
-      )}
-
-      {/* URL pill */}
-      <GlassPill flex={1} style={styles.urlPill}>
-        {!addressFocused && isHttps && !isNewTab && (
-          <Ionicons
-            name="lock-closed"
-            size={12}
-            color={colors.textSecondary}
-            style={styles.lockIcon}
-          />
-        )}
-        <TextInput
-          ref={inputRef}
-          editable
-          value={displayText === 'new-tab-page' ? '' : displayText}
-          onChangeText={onChangeText}
-          onFocus={onFocus}
-          onBlur={onBlur}
-          onSubmitEditing={onSubmit}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="go"
-          style={[
-            styles.urlInput,
-            {
-              color: colors.textPrimary,
-              textAlign: addressFocused ? 'left' : 'center',
-            },
-          ]}
-          placeholder="Search or enter website"
-          placeholderTextColor={colors.textTertiary}
-          selectTextOnFocus
-        />
-        {addressFocused ? (
-          <TouchableOpacity onPress={onClearText} style={styles.inputAction}>
-            <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
-          </TouchableOpacity>
-        ) : isLoading ? (
-          <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
-            <Ionicons name="close" size={18} color={colors.textSecondary} />
-          </TouchableOpacity>
-        ) : !isNewTab ? (
-          <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
-            <Ionicons name="refresh" size={16} color={colors.textSecondary} />
-          </TouchableOpacity>
-        ) : null}
-      </GlassPill>
-
-      {/* More toggle / Cancel */}
-      {addressFocused ? (
-        <TouchableOpacity
-          onPress={() => {
-            inputRef.current?.blur()
-            Keyboard.dismiss()
-          }}
-          style={styles.cancelButton}
-        >
-          <Text style={[styles.cancelText, { color: colors.accent }]}>Cancel</Text>
-        </TouchableOpacity>
-      ) : (
-        <GlassPill style={styles.morePill}>
-          <TouchableOpacity
-            onPress={() => setActionsExpanded(true)}
-            style={styles.moreButton}
-            activeOpacity={0.6}
-          >
-            <Ionicons name="ellipsis-horizontal" size={20} color={colors.accent} />
-          </TouchableOpacity>
-        </GlassPill>
-      )}
-    </View>
-  )
-
   return (
     <View style={styles.container}>
-      {actionsExpanded && !addressFocused ? actionRow : urlRow}
+      <View style={styles.row}>
+        {/* Back / Forward — hidden while editing */}
+        {!addressFocused && (
+          <GlassPill style={styles.navPill}>
+            <TouchableOpacity
+              onPress={onBack}
+              disabled={isBackDisabled}
+              style={styles.navButton}
+              activeOpacity={0.6}
+            >
+              <Ionicons
+                name="chevron-back"
+                size={22}
+                color={isBackDisabled ? colors.textQuaternary : colors.accent}
+              />
+            </TouchableOpacity>
+            <View style={[styles.navDivider, { backgroundColor: colors.separator }]} />
+            <TouchableOpacity
+              onPress={onForward}
+              disabled={isForwardDisabled}
+              style={styles.navButton}
+              activeOpacity={0.6}
+            >
+              <Ionicons
+                name="chevron-forward"
+                size={22}
+                color={isForwardDisabled ? colors.textQuaternary : colors.accent}
+              />
+            </TouchableOpacity>
+          </GlassPill>
+        )}
+
+        {/* URL pill */}
+        <GlassPill flex={1} style={styles.urlPill}>
+          {!addressFocused && isHttps && !isNewTab && (
+            <Ionicons
+              name="lock-closed"
+              size={12}
+              color={colors.textSecondary}
+              style={styles.lockIcon}
+            />
+          )}
+          <TextInput
+            ref={inputRef}
+            editable
+            value={displayText === 'new-tab-page' ? '' : displayText}
+            onChangeText={onChangeText}
+            onFocus={onFocus}
+            onBlur={onBlur}
+            onSubmitEditing={onSubmit}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="go"
+            style={[
+              styles.urlInput,
+              {
+                color: colors.textPrimary,
+                textAlign: addressFocused ? 'left' : 'center',
+              },
+            ]}
+            placeholder="Search or enter website"
+            placeholderTextColor={colors.textTertiary}
+            selectTextOnFocus
+          />
+          {addressFocused ? (
+            <TouchableOpacity onPress={onClearText} style={styles.inputAction}>
+              <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+            </TouchableOpacity>
+          ) : isLoading ? (
+            <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
+              <Ionicons name="close" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          ) : !isNewTab ? (
+            <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
+              <Ionicons name="refresh" size={16} color={colors.textSecondary} />
+            </TouchableOpacity>
+          ) : null}
+        </GlassPill>
+
+        {/* More button — hidden when popover is open (popover renders in its place) or when editing */}
+        {addressFocused ? (
+          <GlassPill style={styles.morePill}>
+            <TouchableOpacity onPress={() => {
+              inputRef.current?.blur()
+              Keyboard.dismiss()
+            }} style={styles.moreButton} activeOpacity={0.6}>
+              <Ionicons name="close" size={20} color={colors.accent} />
+            </TouchableOpacity>
+          </GlassPill>
+        ) : !menuOpen ? (
+          <GlassPill style={styles.morePill}>
+            <TouchableOpacity onPress={onMorePress} style={styles.moreButton} activeOpacity={0.6}>
+              <Ionicons name="ellipsis-horizontal" size={20} color={colors.accent} />
+            </TouchableOpacity>
+          </GlassPill>
+        ) : (
+          /* Placeholder so the URL pill doesn't reflow when popover opens */
+          <View style={styles.morePlaceholder} />
+        )}
+      </View>
 
       {/* Suggestions dropdown */}
       {addressFocused && suggestions.length > 0 && (
@@ -313,7 +256,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    zIndex: 10,
+    // No background — fully transparent, pills float over content
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xs,
     paddingBottom: spacing.md,
@@ -374,6 +317,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  morePlaceholder: {
+    width: 44,
+  },
   cancelButton: {
     paddingHorizontal: spacing.md,
     height: 44,
@@ -381,34 +327,6 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     ...typography.body,
-  },
-  actionButtons: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-  },
-  actionBtn: {
-    flex: 1,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badge: {
-    position: 'absolute',
-    top: -4,
-    right: -6,
-    minWidth: 14,
-    height: 14,
-    borderRadius: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-  },
-  badgeText: {
-    color: '#fff',
-    fontSize: 9,
-    fontWeight: '700',
   },
   suggestions: {
     marginTop: spacing.xs,
