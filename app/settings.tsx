@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { View, Text, TouchableOpacity, ScrollView, Alert, TextInput, StyleSheet } from 'react-native'
+import { View, Text, TouchableOpacity, ScrollView, Alert, StyleSheet } from 'react-native'
 import CustomSafeArea from '@/components/CustomSafeArea'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -8,7 +8,6 @@ import { Ionicons } from '@expo/vector-icons'
 import { useWallet } from '@/context/WalletContext'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
-import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
 import AmountDisplay from '@/components/AmountDisplay'
@@ -24,11 +23,9 @@ export default function SettingsScreen() {
   const { colors } = useTheme()
   const { managers, adminOriginator, updateSettings, settings, logout, selectedNetwork, switchNetwork } = useWallet()
   const { isWeb2Mode } = useBrowserMode()
-  const { getMnemonic, getItem, setItem } = useLocalStorage()
+  const { getMnemonic } = useLocalStorage()
   const [showMnemonic, setShowMnemonic] = useState(false)
   const [mnemonic, setMnemonic] = useState<string | null>(null)
-  const [homepageUrl, setHomepageUrl] = useState(DEFAULT_HOMEPAGE_URL)
-  const [editingHomepage, setEditingHomepage] = useState(false)
   const [accountBalance, setAccountBalance] = useState<number | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
   const [switchingNetwork, setSwitchingNetwork] = useState(false)
@@ -114,23 +111,6 @@ export default function SettingsScreen() {
     )
   }
 
-  // Load homepage URL from storage
-  useEffect(() => {
-    ;(async () => {
-      const stored = await getItem('homepageUrl')
-      if (stored) setHomepageUrl(stored)
-    })()
-  }, [getItem])
-
-  const saveHomepageUrl = async (url: string) => {
-    const trimmed = url.trim()
-    if (trimmed) {
-      setHomepageUrl(trimmed)
-      await setItem('homepageUrl', trimmed)
-    }
-    setEditingHomepage(false)
-  }
-
   // Handle showing mnemonic with confirmation
   const handleShowMnemonic = async () => {
     Alert.alert(
@@ -194,79 +174,6 @@ export default function SettingsScreen() {
             </Text>
           </View>
         )}
-
-        {/* ── General ── */}
-        <GroupedSection
-          header="General"
-          footer="The page that loads when you open a new tab."
-        >
-          {editingHomepage ? (
-            <View style={localStyles.editContainer}>
-              <TextInput
-                style={[
-                  localStyles.urlInput,
-                  {
-                    backgroundColor: colors.fillTertiary,
-                    borderColor: colors.separator,
-                    color: colors.textPrimary,
-                  }
-                ]}
-                value={homepageUrl}
-                onChangeText={setHomepageUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                returnKeyType="done"
-                onSubmitEditing={() => saveHomepageUrl(homepageUrl)}
-                placeholder={DEFAULT_HOMEPAGE_URL}
-                placeholderTextColor={colors.textTertiary}
-              />
-              <View style={localStyles.editButtons}>
-                <TouchableOpacity
-                  style={[
-                    localStyles.editButton,
-                    { backgroundColor: colors.accent }
-                  ]}
-                  onPress={() => saveHomepageUrl(homepageUrl)}
-                >
-                  <Text style={[localStyles.editButtonText, { color: colors.textOnAccent }]}>
-                    Save
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    localStyles.editButton,
-                    {
-                      backgroundColor: colors.fillTertiary,
-                      borderWidth: StyleSheet.hairlineWidth,
-                      borderColor: colors.separator,
-                    }
-                  ]}
-                  onPress={() => {
-                    setEditingHomepage(false)
-                    ;(async () => {
-                      const stored = await getItem('homepageUrl')
-                      setHomepageUrl(stored || DEFAULT_HOMEPAGE_URL)
-                    })()
-                  }}
-                >
-                  <Text style={[localStyles.editButtonText, { color: colors.textPrimary }]}>
-                    Cancel
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            <ListRow
-              label="Homepage"
-              value={homepageUrl}
-              icon="globe-outline"
-              iconColor={colors.accent}
-              onPress={() => setEditingHomepage(true)}
-              isLast
-            />
-          )}
-        </GroupedSection>
 
         {/* ── Wallet ── */}
         <GroupedSection header="Wallet" footer="Each network uses its own separate on-device database.">
@@ -428,33 +335,6 @@ const localStyles = StyleSheet.create({
   },
   networkLabel: {
     ...typography.body,
-  },
-
-  /* ── Homepage editing ── */
-  editContainer: {
-    padding: spacing.lg,
-  },
-  urlInput: {
-    ...typography.body,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    marginBottom: spacing.md,
-  },
-  editButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  editButton: {
-    flex: 1,
-    paddingVertical: spacing.md,
-    borderRadius: radii.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  editButtonText: {
-    ...typography.headline
   },
 
   /* ── Mnemonic reveal ── */

@@ -1,20 +1,25 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import {
   FlatList,
   Image,
+  Keyboard,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
+import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useAppDirectory, type AppEntry } from '@/hooks/useAppDirectory'
+import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
 import bookmarkStore from '@/stores/BookmarkStore'
 import { isValidUrl } from '@/utils/generalHelpers'
 
@@ -30,6 +35,27 @@ const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate }) => {
   const { isWeb2Mode } = useBrowserMode()
   const { apps, loading } = useAppDirectory()
   const insets = useSafeAreaInsets()
+  const { getItem, setItem } = useLocalStorage()
+
+  const [homepageUrl, setHomepageUrl] = useState(DEFAULT_HOMEPAGE_URL)
+  const [editingHomepage, setEditingHomepage] = useState(false)
+
+  useEffect(() => {
+    ;(async () => {
+      const stored = await getItem('homepageUrl')
+      if (stored) setHomepageUrl(stored)
+    })()
+  }, [getItem])
+
+  const saveHomepageUrl = async (url: string) => {
+    const trimmed = url.trim()
+    if (trimmed) {
+      setHomepageUrl(trimmed)
+      await setItem('homepageUrl', trimmed)
+    }
+    setEditingHomepage(false)
+    Keyboard.dismiss()
+  }
 
   const bookmarks = useMemo(() => {
     return bookmarkStore.bookmarks
@@ -114,6 +140,73 @@ const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate }) => {
           </Text>
         </View>
       )}
+
+      {/* Homepage setting */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+          Homepage
+        </Text>
+        {editingHomepage ? (
+          <View style={styles.homepageEdit}>
+            <TextInput
+              style={[
+                styles.homepageInput,
+                {
+                  backgroundColor: colors.fillTertiary,
+                  borderColor: colors.separator,
+                  color: colors.textPrimary,
+                }
+              ]}
+              value={homepageUrl}
+              onChangeText={setHomepageUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              returnKeyType="done"
+              onSubmitEditing={() => saveHomepageUrl(homepageUrl)}
+              placeholder={DEFAULT_HOMEPAGE_URL}
+              placeholderTextColor={colors.textTertiary}
+              autoFocus
+            />
+            <View style={styles.homepageButtons}>
+              <TouchableOpacity
+                style={[styles.homepageButton, { backgroundColor: colors.accent }]}
+                onPress={() => saveHomepageUrl(homepageUrl)}
+              >
+                <Text style={[styles.homepageButtonText, { color: colors.textOnAccent }]}>Save</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.homepageButton, {
+                  backgroundColor: colors.fillTertiary,
+                  borderWidth: StyleSheet.hairlineWidth,
+                  borderColor: colors.separator,
+                }]}
+                onPress={() => {
+                  setEditingHomepage(false)
+                  ;(async () => {
+                    const stored = await getItem('homepageUrl')
+                    setHomepageUrl(stored || DEFAULT_HOMEPAGE_URL)
+                  })()
+                }}
+              >
+                <Text style={[styles.homepageButtonText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.homepageRow}
+            onPress={() => setEditingHomepage(true)}
+            activeOpacity={0.6}
+          >
+            <Ionicons name="globe-outline" size={18} color={colors.textTertiary} style={{ marginRight: spacing.sm }} />
+            <Text style={[styles.homepageUrl, { color: colors.textSecondary }]} numberOfLines={1}>
+              {homepageUrl}
+            </Text>
+            <Ionicons name="pencil-outline" size={14} color={colors.textQuaternary} style={{ marginLeft: spacing.sm }} />
+          </TouchableOpacity>
+        )}
+      </View>
     </ScrollView>
   )
 }
@@ -165,5 +258,40 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     ...typography.subhead,
+  },
+  homepageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  homepageUrl: {
+    ...typography.footnote,
+    flex: 1,
+  },
+  homepageEdit: {
+    paddingHorizontal: spacing.xs,
+  },
+  homepageInput: {
+    ...typography.body,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  homepageButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  homepageButton: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homepageButtonText: {
+    ...typography.headline,
   },
 })
