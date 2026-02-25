@@ -3,7 +3,6 @@ import {
   Keyboard,
   PlatformColor,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -11,8 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { BlurChrome } from '@/components/ui/BlurChrome'
-import { spacing, radii, typography } from '@/context/theme/tokens'
-import type { HistoryEntry, Bookmark } from '@/shared/types/browser'
+import { spacing, typography } from '@/context/theme/tokens'
 
 let LiquidGlassView: React.ComponentType<any> | null = null
 let isLiquidGlassSupported = false
@@ -32,7 +30,6 @@ interface AddressBarProps {
   canGoForward: boolean
   isNewTab: boolean
   isHttps: boolean
-  suggestions: (HistoryEntry | Bookmark)[]
   menuOpen: boolean
   onMorePress: () => void
   onChangeText: (text: string) => void
@@ -43,7 +40,6 @@ interface AddressBarProps {
   onForward: () => void
   onReloadOrStop: () => void
   onClearText: () => void
-  onSuggestionPress: (url: string) => void
   inputRef: React.RefObject<TextInput | null>
 }
 
@@ -103,7 +99,6 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   canGoForward,
   isNewTab,
   isHttps,
-  suggestions,
   menuOpen,
   onMorePress,
   onChangeText,
@@ -114,7 +109,6 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   onForward,
   onReloadOrStop,
   onClearText,
-  onSuggestionPress,
   inputRef,
 }) => {
   const { colors } = useTheme()
@@ -237,32 +231,6 @@ export const AddressBar: React.FC<AddressBarProps> = ({
           <View style={styles.morePlaceholder} />
         )}
       </View>
-
-      {/* Suggestions dropdown */}
-      {addressFocused && suggestions.length > 0 && (
-        <View style={[styles.suggestions, { backgroundColor: colors.backgroundElevated }]}>
-          {suggestions.map((entry, i) => (
-            <TouchableOpacity
-              key={`suggestion-${i}-${entry.url}`}
-              onPress={() => onSuggestionPress(entry.url)}
-              style={[
-                styles.suggestionItem,
-                i < suggestions.length - 1 && {
-                  borderBottomWidth: StyleSheet.hairlineWidth,
-                  borderBottomColor: colors.separator,
-                },
-              ]}
-            >
-              <Text numberOfLines={1} style={[styles.suggestionTitle, { color: colors.textPrimary }]}>
-                {entry.title}
-              </Text>
-              <Text numberOfLines={1} style={[styles.suggestionUrl, { color: colors.textSecondary }]}>
-                {entry.url}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
     </View>
   )
 }
@@ -340,21 +308,5 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     ...typography.body,
-  },
-  suggestions: {
-    marginTop: spacing.xs,
-    borderRadius: radii.lg,
-    overflow: 'hidden',
-  },
-  suggestionItem: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  suggestionTitle: {
-    ...typography.subhead,
-  },
-  suggestionUrl: {
-    ...typography.footnote,
-    marginTop: 2,
   },
 })

@@ -5,6 +5,7 @@ import {
   Platform,
   Share,
   StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -62,7 +63,7 @@ import { MenuPopover } from '@/components/browser/MenuPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
 import { NewTabPage } from '@/components/browser/NewTabPage'
 import { MenuSheet } from '@/components/browser/MenuSheet'
-import { spacing } from '@/context/theme/tokens'
+import { spacing, radii, typography } from '@/context/theme/tokens'
 
 
 /* -------------------------------------------------------------------------- */
@@ -89,7 +90,7 @@ function getInjectableJSMessage(message: any = {}) {
 
 function Browser() {
   /* --------------------------- theme / basic hooks -------------------------- */
-  const { isDark } = useTheme()
+  const { isDark, colors } = useTheme()
   const insets = useSafeAreaInsets()
   const { t, i18n } = useTranslation()
   const { isWeb2Mode } = useBrowserMode()
@@ -977,63 +978,99 @@ const shareCurrent = useCallback(async () => {
 
           {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
           {!isFullscreen && showAddressBar && (
-            <GestureDetector gesture={addressBarPanGesture}>
-              <Animated.View 
-                style={[
-                  styles.chromeWrapper, 
-                  { top: insets.top },
-                  animatedAddressBarStyle
-                ]} 
-                pointerEvents="box-none"
-              >
-                <AddressBar
-                  addressText={addressText}
-                  addressFocused={addressFocused}
-                  isLoading={activeTab?.isLoading || false}
-                  canGoBack={activeTab?.canGoBack || false}
-                  canGoForward={activeTab?.canGoForward || false}
-                  isNewTab={isNewTab}
-                  isHttps={activeTab?.url?.startsWith('https') || false}
-                  suggestions={addressSuggestions}
-                  menuOpen={menuPopoverOpen}
-                  onMorePress={() => setMenuPopoverOpen(true)}
-                  onChangeText={onChangeAddressText}
-                  onSubmit={onAddressSubmit}
-                  onFocus={() => {
-                    setMenuPopoverOpen(false)
-                    addressEditing.current = true
-                    setAddressFocused(true)
-                    if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
-                    setTimeout(() => {
-                      const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
-                      addressInputRef.current?.setNativeProps({
-                        selection: { start: 0, end: textToSelect.length }
-                      })
-                    }, 0)
-                  }}
-                  onBlur={() => {
-                    addressEditing.current = false
-                    setAddressFocused(false)
-                    setAddressSuggestions([])
-                    setAddressText(activeTab?.url || kNEW_TAB_URL)
-                  }}
-                  onBack={navBack}
-                  onForward={navFwd}
-                  onReloadOrStop={navReloadOrStop}
-                  onClearText={() => setAddressText('')}
-                  onSuggestionPress={(url) => {
-                    addressInputRef.current?.blur()
-                    Keyboard.dismiss()
-                    setAddressFocused(false)
-                    setAddressSuggestions([])
-                    setAddressText(url)
-                    updateActiveTab({ url })
-                    addressEditing.current = false
-                  }}
-                  inputRef={addressInputRef}
-                />
-              </Animated.View>
-            </GestureDetector>
+            <>
+              <GestureDetector gesture={addressBarPanGesture}>
+                <Animated.View 
+                  style={[
+                    styles.chromeWrapper, 
+                    { top: insets.top },
+                    animatedAddressBarStyle
+                  ]} 
+                  pointerEvents="box-none"
+                >
+                  <AddressBar
+                    addressText={addressText}
+                    addressFocused={addressFocused}
+                    isLoading={activeTab?.isLoading || false}
+                    canGoBack={activeTab?.canGoBack || false}
+                    canGoForward={activeTab?.canGoForward || false}
+                    isNewTab={isNewTab}
+                    isHttps={activeTab?.url?.startsWith('https') || false}
+                    menuOpen={menuPopoverOpen}
+                    onMorePress={() => setMenuPopoverOpen(true)}
+                    onChangeText={onChangeAddressText}
+                    onSubmit={onAddressSubmit}
+                    onFocus={() => {
+                      setMenuPopoverOpen(false)
+                      addressEditing.current = true
+                      setAddressFocused(true)
+                      if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
+                      setTimeout(() => {
+                        const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
+                        addressInputRef.current?.setNativeProps({
+                          selection: { start: 0, end: textToSelect.length }
+                        })
+                      }, 0)
+                    }}
+                    onBlur={() => {
+                      addressEditing.current = false
+                      setAddressFocused(false)
+                      setAddressSuggestions([])
+                      setAddressText(activeTab?.url || kNEW_TAB_URL)
+                    }}
+                    onBack={navBack}
+                    onForward={navFwd}
+                    onReloadOrStop={navReloadOrStop}
+                    onClearText={() => setAddressText('')}
+                    inputRef={addressInputRef}
+                  />
+                </Animated.View>
+              </GestureDetector>
+
+              {/* ---- Suggestions (fixed position between top and bottom) ---- */}
+              {addressFocused && addressSuggestions.length > 0 && (
+                <View 
+                  style={[
+                    styles.suggestionsWrapper,
+                    { 
+                      bottom: insets.bottom + 60,
+                    }
+                  ]}
+                  pointerEvents="box-none"
+                >
+                  <View style={[styles.suggestions, { backgroundColor: colors.backgroundElevated }]}>
+                    {addressSuggestions.map((entry, i) => (
+                      <TouchableOpacity
+                        key={`suggestion-${i}-${entry.url}`}
+                        onPress={() => {
+                          addressInputRef.current?.blur()
+                          Keyboard.dismiss()
+                          setAddressFocused(false)
+                          setAddressSuggestions([])
+                          setAddressText(entry.url)
+                          updateActiveTab({ url: entry.url })
+                          addressEditing.current = false
+                        }}
+                        style={[
+                          styles.suggestionItem,
+                          i < addressSuggestions.length - 1 && {
+                            borderBottomWidth: StyleSheet.hairlineWidth,
+                            borderBottomColor: colors.separator,
+                          },
+                        ]}
+                      >
+                        <Text numberOfLines={1} style={[styles.suggestionTitle, { color: colors.textPrimary }]}>
+                          {entry.title}
+                        </Text>
+                        <Text numberOfLines={1} style={[styles.suggestionUrl, { color: colors.textSecondary }]}>
+                          {entry.url}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </>
           )}
 
           {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
@@ -1198,5 +1235,27 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20,
+  },
+  suggestionsWrapper: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 19,
+    paddingHorizontal: spacing.md,
+  },
+  suggestions: {
+    borderRadius: radii.lg,
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  suggestionTitle: {
+    ...typography.subhead,
+  },
+  suggestionUrl: {
+    ...typography.footnote,
+    marginTop: 2,
   },
 })
