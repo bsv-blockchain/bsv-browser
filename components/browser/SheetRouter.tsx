@@ -10,7 +10,6 @@ import { PermissionType, PermissionState } from '@/utils/permissionsManager'
 import { spacing } from '@/context/theme/tokens'
 import type { SheetContextType } from '@/context/SheetContext'
 
-import { HistoryList } from '@/components/browser/HistoryList'
 import { BrowserPage } from '@/components/browser/BrowserPage'
 import { MenuSheet } from '@/components/browser/MenuSheet'
 import PermissionsScreen from '@/components/browser/PermissionsScreen'
@@ -48,20 +47,24 @@ export function SheetRouter({
   const { t } = useTranslation()
   const isNewTab = activeTab?.url === kNEW_TAB_URL
 
+  const getSheetTitle = (): string | undefined => {
+    switch (sheet.route) {
+      case 'bookmarks':
+        return 'Browser'
+      case 'settings':
+        return 'Wallet'
+      case 'trust':
+        return t('trust_network')
+      default:
+        return undefined
+    }
+  }
+
   return (
     <Sheet
       visible={sheet.isOpen && sheet.route !== 'tabs'}
       onClose={sheet.close}
-      title={
-        sheet.route === 'bookmarks' ? 'Browser' :
-        sheet.route === 'history' ? t('history') :
-        sheet.route === 'menu' ? undefined :
-        sheet.route === 'settings' ? 'Wallet' :
-        sheet.route === 'identity' ? t('identity') :
-        sheet.route === 'trust' ? t('trust_network') :
-        sheet.route === 'permissions' ? t('permissions') :
-        undefined
-      }
+      title={getSheetTitle()}
       heightPercent={sheet.route === 'menu' ? 0.65 : 0.85}
     >
       {sheet.route === 'menu' && (
@@ -84,17 +87,7 @@ export function SheetRouter({
           <BrowserPage inSheet onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} clearHistory={clearHistory} history={history} removeHistoryItem={removeHistoryItem} />
         </View>
       )}
-      {sheet.route === 'history' && (
-        <HistoryList
-          history={history}
-          onSelect={u => {
-            updateActiveTab({ url: u })
-            sheet.close()
-          }}
-          onDelete={removeHistoryItem}
-          onClear={clearHistory}
-        />
-      )}
+      
       {sheet.route === 'settings' && (
         <View style={{ flex: 1 }}>
           <SettingsScreen />
@@ -103,14 +96,6 @@ export function SheetRouter({
       {sheet.route === 'trust' && (
         <View style={{ flex: 1 }}>
           <TrustScreen />
-        </View>
-      )}
-      {sheet.route === 'permissions' && (
-        <View style={{ flex: 1, padding: spacing.lg }}>
-          <PermissionsScreen
-            origin={activeTab?.url ? domainForUrl(activeTab.url) : ''}
-            onPermissionChange={handlePermissionChange}
-          />
         </View>
       )}
     </Sheet>
