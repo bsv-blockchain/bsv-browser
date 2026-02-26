@@ -208,11 +208,11 @@ function Browser() {
   const iosSoftKeyboardShown = useRef(false)
   const keyboardHeight = useSharedValue(0)
   
-  // AddressBar position animation
+  // AddressBar position animation — start at bottom (translateY = travelDistance)
   const addressBarAtTop = useSharedValue(false)
-  const addressBarTranslateY = useSharedValue(0)
-  // Travel distance as shared value for worklet access
-  const addressBarTravelDistance = useSharedValue(0)
+  const initialTravelDistance = Dimensions.get('window').height - (2 * insets.top) - 12
+  const addressBarTravelDistance = useSharedValue(initialTravelDistance)
+  const addressBarTranslateY = useSharedValue(initialTravelDistance)
   // Track position before focus to restore it later
   const addressBarWasAtTopBeforeFocus = useRef(false)
   

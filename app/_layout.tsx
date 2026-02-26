@@ -8,6 +8,7 @@ if (typeof AbortSignal !== 'undefined' && !AbortSignal.timeout) {
 }
 
 import React from 'react'
+import { View, useColorScheme } from 'react-native'
 import { Stack } from 'expo-router'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'
 import packageJson from '../package.json'
@@ -71,6 +72,9 @@ function DeepLinkHandler() {
 // }
 
 export default function RootLayout() {
+  const isDark = useColorScheme() === 'dark'
+  const backgroundColor = isDark ? '#000000' : '#FFFFFF'
+
   return (
     <ErrorBoundary>
       <LanguageProvider>
@@ -80,23 +84,26 @@ export default function RootLayout() {
               <WalletContextProvider>
                 <BrowserModeProvider>
                   <ThemeProvider>
-                    {/* <DebuggerDisplay /> */}
-                    <DeepLinkHandler />
-                    <Web3BenefitsModalHandler />
-                    {/* <TranslationTester /> */}
-                    <DefaultBrowserPrompt />
-                    <PermissionSheet />
-                    <Stack
-                      screenOptions={{
-                        animation: 'slide_from_right',
-                        headerShown: false,
-                      }}
-                    >
-                      <Stack.Screen name="index" />
-                      <Stack.Screen name="config" />
-                      <Stack.Screen name="auth/mnemonic" />
-                      <Stack.Screen name="not-found" />
-                    </Stack>
+                    <View style={{ flex: 1, backgroundColor }}>
+                      {/* <DebuggerDisplay /> */}
+                      <DeepLinkHandler />
+                      <Web3BenefitsModalHandler />
+                      {/* <TranslationTester /> */}
+                      <DefaultBrowserPrompt />
+                      <PermissionSheet />
+                      <Stack
+                        screenOptions={{
+                          animation: 'slide_from_right',
+                          headerShown: false,
+                          contentStyle: { backgroundColor },
+                        }}
+                      >
+                        <Stack.Screen name="index" />
+                        <Stack.Screen name="config" />
+                        <Stack.Screen name="auth/mnemonic" />
+                        <Stack.Screen name="not-found" />
+                      </Stack>
+                    </View>
                   </ThemeProvider>
                 </BrowserModeProvider>
               </WalletContextProvider>

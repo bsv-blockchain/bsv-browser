@@ -11,6 +11,7 @@ interface ListRowProps {
   iconColor?: string
   onPress?: () => void
   showChevron?: boolean
+  chevronDown?: boolean
   destructive?: boolean
   trailing?: React.ReactNode
   isLast?: boolean
@@ -27,6 +28,7 @@ export const ListRow: React.FC<ListRowProps> = ({
   iconColor,
   onPress,
   showChevron = true,
+  chevronDown = false,
   destructive = false,
   trailing,
   isLast = false
@@ -58,7 +60,7 @@ export const ListRow: React.FC<ListRowProps> = ({
         )}
         {showChevron && onPress && !destructive && (
           <Ionicons
-            name="chevron-forward"
+            name={chevronDown ? 'chevron-down' : 'chevron-forward'}
             size={18}
             color={colors.textQuaternary}
             style={styles.chevron}

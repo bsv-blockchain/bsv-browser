@@ -168,7 +168,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
         extraData={tabStore.activeTabId}
         contentContainerStyle={{
           padding: spacing.md,
-          paddingTop: spacing.xxxl,
+          paddingTop: insets.top + spacing.md,
           paddingBottom: 100,
         }}
       />

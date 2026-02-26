@@ -202,6 +202,7 @@ export default function SettingsScreen() {
             iconColor={NETWORKS.find(n => n.id === selectedNetwork)?.color ?? colors.success}
             onPress={isWeb2Mode ? undefined : () => setNetworkExpanded(e => !e)}
             showChevron={!isWeb2Mode}
+            chevronDown={networkExpanded}
           />
           {networkExpanded && !isWeb2Mode && (
             <View style={localStyles.networkList}>
