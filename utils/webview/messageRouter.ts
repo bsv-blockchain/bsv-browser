@@ -2,6 +2,7 @@ import type { MutableRefObject } from 'react'
 import type { PermissionType, PermissionState } from '@/utils/permissionsManager'
 import { Platform } from 'react-native'
 import { setDomainPermission } from '@/utils/permissionsManager'
+import { handleUrlDownload, handleBase64Download } from './downloadHandler'
 
 type ActiveTabLike = {
   id: string | number
@@ -332,6 +333,12 @@ export function createWebViewMessageRouter(ctx: MessageRouterCtx) {
         return handlePermissionRequest('MICROPHONE_REQUEST', 'RECORD_AUDIO', 'MICROPHONE_RESPONSE')
       case 'REQUEST_LOCATION':
         return handleLocationRequest()
+      case 'FILE_DOWNLOAD_URL':
+        handleUrlDownload(msg.url, msg.mimeType, msg.filename).catch(() => {})
+        return true
+      case 'FILE_DOWNLOAD_BLOB':
+        handleBase64Download(msg.base64, msg.mimeType, msg.filename).catch(() => {})
+        return true
       default:
         return false
     }

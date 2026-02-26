@@ -1,6 +1,8 @@
 // Build the injected JavaScript for the WebView from readable TS code instead of a giant string
 // The function below runs inside the WebView context. Do NOT reference any RN variables directly.
 function injectedPolyfills(acceptLanguage: string) {
+  console.log('[Polyfill] injectedPolyfills running, before=', !!(window as any).__downloadInterceptInstalled)
+
   // Console logging bridge: install as early as possible
   if (!(window as any).__consolePatched) {
     const originalLog = console.log
@@ -119,6 +121,166 @@ function injectedPolyfills(acceptLanguage: string) {
       ;(g as any).__registerMockStream = registerMockStream
       ;(g as any).__stopAllMockStreams = stopAllActiveStreams
     } catch {}
+  })()
+
+  // File download interception — capture <a download>, blob URLs, and data URLs
+  ;(function () {
+    if ((window as any).__downloadInterceptInstalled) return
+    ;(window as any).__downloadInterceptInstalled = true
+    try {
+      console.log('[DL] download intercept installing')
+
+      // Track blobs created via URL.createObjectURL so we can read them later
+      const blobRegistry = new Map<string, Blob>()
+      ;(window as any).__blobRegistry = blobRegistry
+      const origCreateObjectURL = URL.createObjectURL
+      const origRevokeObjectURL = URL.revokeObjectURL
+
+      URL.createObjectURL = function (obj: Blob | MediaSource) {
+        const url = origCreateObjectURL.call(URL, obj)
+        if (obj instanceof Blob) {
+          blobRegistry.set(url, obj)
+          console.log('[DL] createObjectURL registered blob, url=', url, 'size=', (obj as Blob).size)
+        }
+        return url
+      }
+
+      URL.revokeObjectURL = function (url: string) {
+        console.log('[DL] revokeObjectURL', url, 'inRegistry=', blobRegistry.has(url))
+        // Delay registry removal so async handlers (e.g. onShouldStartLoadWithRequest)
+        // can still read the Blob object after the URL is revoked
+        setTimeout(function () { blobRegistry.delete(url) }, 10000)
+        return origRevokeObjectURL.call(URL, url)
+      }
+
+      // Helper: read a Blob as base64 and post to React Native
+      function sendBlobAsBase64(blob: Blob, filename: string | null, mimeType: string) {
+        console.log('[DL] sendBlobAsBase64 filename=', filename, 'mimeType=', mimeType, 'size=', blob.size)
+        const reader = new FileReader()
+        reader.onloadend = function () {
+          if (typeof reader.result !== 'string') return
+          // reader.result is "data:<mime>;base64,<data>" — strip prefix
+          const base64 = reader.result.split(',')[1] || ''
+          ;(window as any).ReactNativeWebView?.postMessage(
+            JSON.stringify({
+              type: 'FILE_DOWNLOAD_BLOB',
+              base64: base64,
+              mimeType: mimeType || 'application/octet-stream',
+              filename: filename || null,
+            })
+          )
+        }
+        reader.readAsDataURL(blob)
+      }
+
+      // Override HTMLAnchorElement.prototype.click to catch detached-element programmatic clicks
+      // (e.g. `a.click()` called on an element never appended to the DOM)
+      const origAnchorClick = HTMLAnchorElement.prototype.click
+      HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+        const href = this.href
+        console.log('[DL] anchor.click() intercepted href=', href)
+        if (href && href.startsWith('blob:')) {
+          const blob = blobRegistry.get(href)
+          console.log('[DL] blob: url click, inRegistry=', !!blob)
+          if (blob) {
+            sendBlobAsBase64(blob, this.getAttribute('download'), blob.type || 'application/octet-stream')
+            return
+          }
+        }
+        if (href && href.startsWith('data:')) {
+          fetch(href)
+            .then(function (r) { return r.blob() })
+            .then(function (b) {
+              sendBlobAsBase64(b, (this as HTMLAnchorElement).getAttribute('download'), b.type || 'application/octet-stream')
+            }.bind(this))
+            .catch(function () {})
+          return
+        }
+        return origAnchorClick.call(this)
+      }
+
+      // Intercept anchor clicks in the capture phase (for attached elements)
+      document.addEventListener(
+        'click',
+        function (e: MouseEvent) {
+          const anchor = (e.target as HTMLElement)?.closest?.('a') as HTMLAnchorElement | null
+          if (!anchor) return
+          const href = anchor.href
+          if (!href) return
+
+          const hasDownload = anchor.hasAttribute('download')
+          const downloadAttr = anchor.getAttribute('download') || null
+
+          // blob: URL — intercept regardless of download attribute
+          if (href.startsWith('blob:')) {
+            e.preventDefault()
+            e.stopImmediatePropagation()
+            const blob = blobRegistry.get(href)
+            if (blob) {
+              sendBlobAsBase64(blob, downloadAttr, blob.type || 'application/octet-stream')
+            } else {
+              fetch(href)
+                .then(function (r) { return r.blob() })
+                .then(function (b) {
+                  sendBlobAsBase64(b, downloadAttr, b.type || 'application/octet-stream')
+                })
+                .catch(function () {})
+            }
+            return
+          }
+
+          // data: URL — intercept regardless of download attribute
+          if (href.startsWith('data:')) {
+            e.preventDefault()
+            e.stopImmediatePropagation()
+            fetch(href)
+              .then(function (r) { return r.blob() })
+              .then(function (b) {
+                sendBlobAsBase64(b, downloadAttr, b.type || 'application/octet-stream')
+              })
+              .catch(function () {})
+            return
+          }
+
+          // Regular URL with download attribute — let native side handle it
+          if (!hasDownload) return
+          e.preventDefault()
+          e.stopImmediatePropagation()
+          ;(window as any).ReactNativeWebView?.postMessage(
+            JSON.stringify({
+              type: 'FILE_DOWNLOAD_URL',
+              url: href,
+              filename: downloadAttr,
+            })
+          )
+        },
+        true // capture phase
+      )
+
+      // Override window.open for blob/data URL popups
+      const origOpen = window.open
+      ;(window as any).open = function (url?: string, target?: string, features?: string) {
+        if (url && url.startsWith('blob:')) {
+          const blob = blobRegistry.get(url)
+          if (blob) {
+            sendBlobAsBase64(blob, null, blob.type || 'application/octet-stream')
+            return null
+          }
+        }
+        if (url && url.startsWith('data:')) {
+          fetch(url)
+            .then(function (r) { return r.blob() })
+            .then(function (b) {
+              sendBlobAsBase64(b, null, b.type || 'application/octet-stream')
+            })
+            .catch(function () {})
+          return null
+        }
+        return origOpen?.call(window, url, target, features) || null
+      }
+    } catch (e) {
+      // Silently fail — download interception is non-critical
+    }
   })()
 
   // Camera access polyfill - provides mock streams to prevent WKWebView camera access

@@ -5,7 +5,6 @@ import {
   Platform,
   Share,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -13,13 +12,12 @@ import {
   BackHandler,
   InteractionManager,
   ActivityIndicator,
-  Dimensions
 } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
-import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
+import { GestureHandlerRootView, GestureDetector } from 'react-native-gesture-handler'
+import Animated from 'react-native-reanimated'
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
@@ -31,47 +29,36 @@ import { WalletInterface, LookupResolver, Transaction, Utils } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
 import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'
-import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
-import { HistoryList } from '@/components/browser/HistoryList'
+import { DEFAULT_HOMEPAGE_URL, kNEW_TAB_URL } from '@/shared/constants'
 import { isValidUrl } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
-import SettingsScreen from './settings'
-import IdentityScreen from './identity'
-import TrustScreen from './trust'
 import { useTranslation } from 'react-i18next'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 
 import { useWebAppManifest } from '@/hooks/useWebAppManifest'
 import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
 import PermissionModal from '@/components/browser/PermissionModal'
-import PermissionsScreen from '@/components/browser/PermissionsScreen'
-import Sheet from '@/components/ui/Sheet'
-import {
-  PermissionType,
-  PermissionState,
-  getDomainPermissions,
-  setDomainPermission,
-  getPermissionState,
-  checkPermissionForDomain
-} from '@/utils/permissionsManager'
+import { getPermissionState } from '@/utils/permissionsManager'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
+import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
 import { BrowserPage } from '@/components/browser/BrowserPage'
-import { MenuSheet } from '@/components/browser/MenuSheet'
-import { spacing, radii, typography } from '@/context/theme/tokens'
+import { SuggestionsDropdown } from '@/components/browser/SuggestionsDropdown'
+import { SheetRouter } from '@/components/browser/SheetRouter'
+
+import { useHistory } from '@/hooks/useHistory'
+import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
+import { usePermissions } from '@/hooks/usePermissions'
 
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
 /* -------------------------------------------------------------------------- */
-
-const kNEW_TAB_URL = 'about:blank'
-const HISTORY_KEY = 'history'
 
 function getInjectableJSMessage(message: any = {}) {
   const messageString = JSON.stringify(message)
@@ -98,6 +85,7 @@ function Browser() {
 
   useEffect(() => {
     tabStore.initializeTabs()
+    cleanupDownloadsCache()
   }, [])
 
   /* ----------------------------- language headers ----------------------------- */
@@ -133,48 +121,7 @@ function Browser() {
   const { getItem, setItem } = useLocalStorage()
 
   /* -------------------------------- history -------------------------------- */
-  const loadHistory = useCallback(async (): Promise<HistoryEntry[]> => {
-    const raw = await getItem(HISTORY_KEY)
-    const data = raw ? (JSON.parse(raw) as HistoryEntry[]) : []
-    return data.map(h => ({
-      ...h,
-      url: isValidUrl(h.url) ? h.url : kNEW_TAB_URL
-    }))
-  }, [getItem])
-
-  const [history, setHistory] = useState<HistoryEntry[]>([])
-  useEffect(() => {
-    loadHistory().then(setHistory)
-  }, [loadHistory])
-
-  const saveHistory = useCallback(
-    async (list: HistoryEntry[]) => {
-      setHistory(list)
-      await setItem(HISTORY_KEY, JSON.stringify(list))
-    },
-    [setItem]
-  )
-
-  const pushHistory = useCallback(
-    async (entry: HistoryEntry) => {
-      if (history.length && history[0].url.replace(/\/$/, '') === entry.url.replace(/\/$/, '')) return
-      const next = [entry, ...history].slice(0, 500)
-      await saveHistory(next)
-    },
-    [history, saveHistory]
-  )
-
-  const removeHistoryItem = useCallback(
-    async (url: string) => {
-      const next = history.filter(h => h.url !== url)
-      await saveHistory(next)
-    },
-    [history, saveHistory]
-  )
-
-  const clearHistory = useCallback(async () => {
-    await saveHistory([])
-  }, [saveHistory])
+  const { history, pushHistory, removeHistoryItem, clearHistory } = useHistory(getItem, setItem)
 
   /* -------------------------------- bookmarks ------------------------------- */
   const [homepageUrl, setHomepageUrlState] = useState(DEFAULT_HOMEPAGE_URL)
@@ -202,159 +149,44 @@ function Browser() {
   const addressEditing = useRef(false)
   const [addressText, setAddressText] = useState(kNEW_TAB_URL)
   const [addressFocused, setAddressFocused] = useState(false)
-  
-  // Keyboard state
-  const [keyboardVisible, setKeyboardVisible] = useState(false)
-  const iosSoftKeyboardShown = useRef(false)
-  const keyboardHeight = useSharedValue(0)
-  
-  // AddressBar position animation — start at bottom (translateY = travelDistance)
-  const addressBarAtTop = useSharedValue(false)
-  const initialTravelDistance = Dimensions.get('window').height - (2 * insets.top) - 12
-  const addressBarTravelDistance = useSharedValue(initialTravelDistance)
-  const addressBarTranslateY = useSharedValue(initialTravelDistance)
-  // Track position before focus to restore it later
-  const addressBarWasAtTopBeforeFocus = useRef(false)
-  
-  // Update travel distance and position when insets change
-  useEffect(() => {
-    const screenHeight = Dimensions.get('window').height
-    // Container is at top: insets.top, so travel distance is from there to bottom
-    // Travel distance: screen height - (2 * insets.top) - insets.bottom - 12
-    const travelDistance = screenHeight - (2 * insets.top) - 12
-    addressBarTravelDistance.value = travelDistance
-    // Always update translateY to maintain position relative to new insets
-    if (addressBarAtTop.value) {
-      // Bar should be at top
-      addressBarTranslateY.value = 0
-    } else {
-      // Bar should be at bottom
-      addressBarTranslateY.value = travelDistance
-    }
-  }, [insets.bottom, insets.top])
+  const [addressSuggestions, setAddressSuggestions] = useState<(HistoryEntry | Bookmark)[]>([])
 
-  // Move address bar to bottom when focused, restore position when unfocused
-  useEffect(() => {
-    const travelDistance = addressBarTravelDistance.value
-    if (addressFocused) {
-      // Save current position before moving
-      addressBarWasAtTopBeforeFocus.current = addressBarAtTop.value
-      // Move to bottom position when focused
-      addressBarTranslateY.value = withSpring(travelDistance, {
-        mass: 1,
-        stiffness: 400,
-        damping: 38,
-      })
-      addressBarAtTop.value = false
-    } else {
-      // Restore previous position when unfocused
-      if (addressBarWasAtTopBeforeFocus.current) {
-        addressBarTranslateY.value = withSpring(0, {
-          mass: 1,
-          stiffness: 400,
-          damping: 38,
-        })
-        addressBarAtTop.value = true
-      } else {
-        addressBarTranslateY.value = withSpring(travelDistance, {
-          mass: 1,
-          stiffness: 400,
-          damping: 38,
-        })
-        addressBarAtTop.value = false
-      }
-    }
-  }, [addressFocused])
+  const addressInputRef = useRef<TextInput>(null)
 
-  // Pan gesture for AddressBar
-  const addressBarPanGesture = Gesture.Pan()
-    .activeOffsetY([-10, 10])
-    .failOffsetX([-25, 25])
-    .onUpdate((e) => {
-      const travelDistance = addressBarTravelDistance.value
-      if (addressBarAtTop.value) {
-        // Currently at top, allow swipe down (positive translation)
-        addressBarTranslateY.value = Math.max(0, Math.min(travelDistance, e.translationY))
-      } else {
-        // Currently at bottom, allow swipe up (negative translation)
-        addressBarTranslateY.value = Math.max(0, Math.min(travelDistance, travelDistance + e.translationY))
-      }
-    })
-    .onEnd((e) => {
-      const travelDistance = addressBarTravelDistance.value
-      const threshold = travelDistance / 3
-      const shouldMoveToTop = !addressBarAtTop.value && (Math.abs(e.translationY) > threshold || e.velocityY < -800)
-      const shouldMoveToBottom = addressBarAtTop.value && (e.translationY > threshold || e.velocityY > 800)
-
-      if (shouldMoveToTop) {
-        // Move to top
-        addressBarTranslateY.value = withSpring(0, {
-          mass: 1,
-          stiffness: 400,
-          damping: 38,
-          velocity: e.velocityY,
-        })
-        addressBarAtTop.value = true
-      } else if (shouldMoveToBottom) {
-        // Move to bottom
-        addressBarTranslateY.value = withSpring(travelDistance, {
-          mass: 1,
-          stiffness: 400,
-          damping: 38,
-          velocity: e.velocityY,
-        })
-        addressBarAtTop.value = false
-      } else if (addressBarAtTop.value) {
-        // Return to top position
-        addressBarTranslateY.value = withSpring(0, { mass: 1, stiffness: 400, damping: 38 })
-      } else {
-        // Return to bottom position
-        addressBarTranslateY.value = withSpring(travelDistance, { mass: 1, stiffness: 400, damping: 38 })
-      }
-    })
-
-  // Animated style for AddressBar wrapper
-  const animatedAddressBarStyle = useAnimatedStyle(() => {
-    // When at bottom (addressBarAtTop = false), subtract keyboard height to move up
-    // When at top (addressBarAtTop = true), ignore keyboard
-    const keyboardOffset = addressBarAtTop.value ? 0 : -keyboardHeight.value
-    return {
-      transform: [{ translateY: addressBarTranslateY.value + keyboardOffset }],
-    }
-  })
-
-  // Animated style for MenuPopover - shifts down by its own height when bar moves up
-  const animatedMenuPopoverStyle = useAnimatedStyle(() => {
-    const travelDistance = addressBarTravelDistance.value
-    const menuPopoverHeight = 300 // Approximate MenuPopover height (varies by items shown)
-    
-    // When addressBarTranslateY = 0 (bar at top), menu should shift down by menuPopoverHeight and up by travelDistance
-    // When addressBarTranslateY = travelDistance (bar at bottom), menu should be at 0
-    // Formula: -(travelDistance - addressBarTranslateY) + menuPopoverHeight offset based on position
-    const progress = 1 - (addressBarTranslateY.value / travelDistance) // 0 at bottom, 1 at top
-    const menuTranslateY = -(travelDistance - addressBarTranslateY.value) + (menuPopoverHeight * progress)
-    
-    return {
-      transform: [{ translateY: menuTranslateY }],
-    }
-  })
-
+  const {
+    keyboardVisible,
+    addressBarPanGesture,
+    animatedAddressBarStyle,
+    animatedMenuPopoverStyle,
+  } = useAddressBarAnimation(insets, addressFocused, addressEditing, addressInputRef, setAddressFocused, setAddressSuggestions)
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
 
-
-  const addressInputRef = useRef<TextInput>(null)
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
   const activeCameraStreams = useRef<Set<string>>(new Set())
 
-  // Permission state
-  const [permissionModalVisible, setPermissionModalVisible] = useState(false)
-  const [pendingPermission, setPendingPermission] = useState<PermissionType | null>(null)
-  const [pendingDomain, setPendingDomain] = useState<string | null>(null)
-  const [pendingCallback, setPendingCallback] = useState<((granted: boolean) => void) | null>(null)
-  const [permissionsDeniedForCurrentDomain, setPermissionsDeniedForCurrentDomain] = useState<PermissionType[]>([])
+  /* -------------------------------- permissions ----------------------------- */
+  const domainForUrl = useCallback((u: string): string => {
+    try {
+      if (u === kNEW_TAB_URL) return ''
+      const { hostname } = new URL(u)
+      return hostname
+    } catch {
+      return u
+    }
+  }, [])
+
+  const {
+    permissionModalVisible,
+    pendingPermission,
+    pendingDomain,
+    permissionsDeniedForCurrentDomain,
+    onDecision,
+    handlePermissionChange,
+    permissionRouterConfig,
+  } = usePermissions(activeTab, domainForUrl)
 
   /* -------------------------------------------------------------------------- */
   /*                                INITIAL SETUP                               */
@@ -402,56 +234,9 @@ function Browser() {
     }
   }, [activeTab])
 
-  /* ------------------------------ keyboard hook ----------------------------- */
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
-
-    const showSub = Keyboard.addListener(showEvent, (e) => {
-      setKeyboardVisible(true)
-      if (Platform.OS === 'ios') iosSoftKeyboardShown.current = true
-      keyboardHeight.value = withSpring(e.endCoordinates.height, {
-        mass: 1,
-        stiffness: 400,
-        damping: 38,
-      })
-    })
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setKeyboardVisible(false)
-      keyboardHeight.value = withSpring(0, {
-        mass: 1,
-        stiffness: 400,
-        damping: 38,
-      })
-      const shouldHandleHide = Platform.OS === 'ios' ? iosSoftKeyboardShown.current : true
-      setTimeout(() => {
-        if (shouldHandleHide && (addressEditing.current || addressInputRef.current?.isFocused())) {
-          addressEditing.current = false
-          setAddressFocused(false)
-          setAddressSuggestions([])
-          addressInputRef.current?.blur()
-        }
-        if (Platform.OS === 'ios') iosSoftKeyboardShown.current = false
-      }, 50)
-    })
-    return () => {
-      showSub.remove()
-      hideSub.remove()
-    }
-  }, [])
-
   /* -------------------------------------------------------------------------- */
   /*                                 UTILITIES                                  */
   /* -------------------------------------------------------------------------- */
-  const domainForUrl = useCallback((u: string): string => {
-    try {
-      if (u === kNEW_TAB_URL) return ''
-      const { hostname } = new URL(u)
-      return hostname
-    } catch {
-      return u
-    }
-  }, [])
 
   const updateActiveTab = useCallback(
     (patch: Partial<Tab>) => {
@@ -471,32 +256,6 @@ function Browser() {
     },
     []
   )
-
-  const updateDeniedPermissionsForDomain = useCallback(
-    async (urlString: string) => {
-      try {
-        const domain = domainForUrl(urlString)
-        if (!domain) {
-          setPermissionsDeniedForCurrentDomain([])
-          return
-        }
-        const domainPerms = await getDomainPermissions(domain)
-        const denied = Object.entries(domainPerms)
-          .filter(([, state]) => state === 'deny')
-          .map(([perm]) => perm as PermissionType)
-        setPermissionsDeniedForCurrentDomain(denied)
-      } catch (e) {
-        console.warn('Failed updating denied permissions cache', e)
-      }
-    },
-    [domainForUrl]
-  )
-
-  useEffect(() => {
-    if (activeTab?.url) {
-      updateDeniedPermissionsForDomain(activeTab.url)
-    }
-  }, [activeTab, updateDeniedPermissionsForDomain])
 
   /* -------------------------------------------------------------------------- */
   /*                              ADDRESS HANDLING                              */
@@ -572,7 +331,6 @@ function Browser() {
   useEffect(() => {
     fuseRef.current.setCollection([...history, ...bookmarkStore.bookmarks])
   }, [history])
-  const [addressSuggestions, setAddressSuggestions] = useState<(HistoryEntry | Bookmark)[]>([])
 
   const onChangeAddressText = useCallback((txt: string) => {
     setAddressText(txt)
@@ -622,86 +380,6 @@ const shareCurrent = useCallback(async () => {
   }, [])
 
   /* -------------------------------------------------------------------------- */
-  /*                            PERMISSION HANDLERS                             */
-  /* -------------------------------------------------------------------------- */
-
-  const onDecision = useCallback(
-    async (granted: boolean) => {
-      setPermissionModalVisible(false)
-      if (!pendingDomain || !pendingPermission) return
-
-      try {
-        await setDomainPermission(pendingDomain, pendingPermission, granted ? 'allow' : 'deny')
-        try {
-          const osBacked: PermissionType[] = ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION'] as any
-          if (granted && osBacked.includes(pendingPermission)) {
-            await checkPermissionForDomain(pendingDomain, pendingPermission)
-          }
-        } catch {}
-
-        await updateDeniedPermissionsForDomain(activeTab?.url || '')
-
-        if (activeTab?.url && domainForUrl(activeTab.url) === pendingDomain && activeTab.webviewRef?.current) {
-          const updatedDenied = granted
-            ? permissionsDeniedForCurrentDomain.filter(p => p !== pendingPermission)
-            : [...new Set([...permissionsDeniedForCurrentDomain, pendingPermission])]
-
-          const js = `
-            (function () {
-              try {
-                if (!Array.isArray(window.__metanetDeniedPermissions)) window.__metanetDeniedPermissions = [];
-                if (!Array.isArray(window.__metanetPendingPermissions)) window.__metanetPendingPermissions = [];
-                window.__metanetDeniedPermissions = ${JSON.stringify(updatedDenied)};
-                window.__metanetPendingPermissions = window.__metanetPendingPermissions.filter(p => p !== '${pendingPermission}');
-                const evt = new CustomEvent('permissionchange', {
-                  detail: { permission: '${pendingPermission}', state: '${granted ? 'granted' : 'denied'}' }
-                });
-                document.dispatchEvent(evt);
-              } catch (e) {}
-            })();
-          `
-          activeTab.webviewRef.current.injectJavaScript(js)
-        }
-      } finally {
-        pendingCallback?.(granted)
-        setPendingDomain(null)
-        setPendingPermission(null)
-        setPendingCallback(null)
-      }
-    },
-    [pendingDomain, pendingPermission, activeTab, permissionsDeniedForCurrentDomain, pendingCallback, domainForUrl, updateDeniedPermissionsForDomain]
-  )
-
-  const handlePermissionChange = useCallback(
-    async (permission: PermissionType, state: PermissionState) => {
-      try {
-        const url = activeTab?.url
-        const domain = url ? domainForUrl(url) : ''
-        if (domain) await setDomainPermission(domain, permission, state)
-        try {
-          const osBacked: PermissionType[] = ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION'] as any
-          if (domain && state === 'allow' && osBacked.includes(permission)) {
-            await checkPermissionForDomain(domain, permission)
-          }
-        } catch {}
-        if (url) await updateDeniedPermissionsForDomain(url)
-        if (activeTab?.webviewRef?.current) {
-          const stateStr = state === 'allow' ? 'granted' : state === 'deny' ? 'denied' : 'prompt'
-          activeTab.webviewRef.current.injectJavaScript(`
-            (function () {
-              try {
-                const evt = new CustomEvent('permissionchange', { detail: { permission: '${permission}', state: '${stateStr}' } });
-                document.dispatchEvent(evt);
-              } catch (e) {}
-            })();
-          `)
-        }
-      } catch {}
-    },
-    [activeTab, domainForUrl, updateDeniedPermissionsForDomain]
-  )
-
-  /* -------------------------------------------------------------------------- */
   /*                           WEBVIEW MESSAGE HANDLER                          */
   /* -------------------------------------------------------------------------- */
 
@@ -710,20 +388,62 @@ const shareCurrent = useCallback(async () => {
     [getAcceptLanguageHeader]
   )
 
+  // Standalone blob download intercept — plain JS string injected before content loads.
+  // Must NOT rely on the polyfill (different WKWebView content world on iOS).
+  const downloadInterceptScript = `(function(){
+    if(window.__blobDL) return;
+    window.__blobDL=true;
+    var reg=new Map();
+    window.__blobReg=reg;
+    var oc=URL.createObjectURL;
+    URL.createObjectURL=function(o){
+      var u=oc.call(URL,o);
+      if(o instanceof Blob) reg.set(u,o);
+      return u;
+    };
+    var or=URL.revokeObjectURL;
+    URL.revokeObjectURL=function(u){
+      setTimeout(function(){reg.delete(u);},30000);
+      return or.call(URL,u);
+    };
+    var origClick=HTMLElement.prototype.click;
+    HTMLElement.prototype.click=function(){
+      var el=this;
+      if(el.tagName==='A'){
+        var href=el.href;
+        if(typeof href==='string'&&href.indexOf('blob:')===0){
+          var blob=reg.get(href);
+          if(blob){
+            var fn=el.getAttribute('download')||null;
+            var rd=new FileReader();
+            rd.onloadend=function(){
+              if(typeof rd.result!=='string')return;
+              var b64=rd.result.split(',')[1]||'';
+              window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+                type:'FILE_DOWNLOAD_BLOB',base64:b64,
+                mimeType:blob.type||'application/octet-stream',filename:fn
+              }));
+            };
+            rd.readAsDataURL(blob);
+            return;
+          }
+        }
+      }
+      return origClick.call(this);
+    };
+  })();true;`
+
   const routeWebViewMessage = useMemo(
     () =>
       createWebViewMessageRouter({
         getActiveTab: () => tabStore.activeTab,
         domainForUrl,
         getPermissionState,
-        setPendingDomain: (d: string) => setPendingDomain(d),
-        setPendingPermission: (p: PermissionType) => setPendingPermission(p),
-        setPendingCallback: (cb: (granted: boolean) => void) => setPendingCallback(() => cb),
-        setPermissionModalVisible: (v: boolean) => setPermissionModalVisible(v),
+        ...permissionRouterConfig,
         activeCameraStreams,
         setIsFullscreen: (v: boolean) => setIsFullscreen(v)
       }),
-    [domainForUrl, setPermissionModalVisible]
+    [domainForUrl, permissionRouterConfig]
   )
 
   const handleMessage = useCallback(
@@ -749,6 +469,11 @@ const shareCurrent = useCallback(async () => {
         return
       }
 
+      if (msg.type === 'DL_DEBUG') {
+        console.warn('[DL_DEBUG]', msg.info)
+        return
+      }
+
       if (msg.type === 'CONSOLE') {
         const logPrefix = '[WebView]'
         switch (msg.method) {
@@ -765,7 +490,7 @@ const shareCurrent = useCallback(async () => {
       if (await routeWebViewMessage(msg)) return
 
       if (msg.call && (!wallet || isWeb2Mode)) {
-        if (!wallet && !isWeb2Mode) router.push('/config')
+        if (!wallet && !isWeb2Mode) router.push('/auth/mnemonic')
         return
       }
 
@@ -964,10 +689,11 @@ const shareCurrent = useCallback(async () => {
               uri: uri,
               headers: { 'Accept-Language': getAcceptLanguageHeader() }
             }}
-            originWhitelist={['https://*', 'http://*']}
+            originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*']}
             onMessage={handleMessage}
             injectedJavaScript={injectedJavaScript}
             injectedJavaScriptBeforeContentLoaded={
+              downloadInterceptScript + '\n' +
               getPermissionScript(
                 permissionsDeniedForCurrentDomain,
                 pendingPermission
@@ -980,6 +706,55 @@ const shareCurrent = useCallback(async () => {
             allowsInlineMediaPlayback={true}
             geolocationEnabled
             onPermissionRequest={() => false}
+            onFileDownload={Platform.OS === 'ios' ? ({ nativeEvent }: any) => {
+              handleUrlDownload(nativeEvent.downloadUrl).catch(() => {})
+            } : undefined}
+            onShouldStartLoadWithRequest={(request: any) => {
+              const { url: reqUrl, navigationType } = request
+              // Intercept blob: and data: URLs — read from __blobReg (set by downloadInterceptScript)
+              if (reqUrl.startsWith('blob:') || reqUrl.startsWith('data:')) {
+                const escaped = reqUrl.replace(/'/g, "\\'")
+                setTimeout(() => {
+                  activeTab?.webviewRef?.current?.injectJavaScript(`(function(){
+                    try{
+                      var url='${escaped}';
+                      var reg=window.__blobReg;
+                      var blob=reg&&reg.get(url);
+                      window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+                        type:'DL_DEBUG',info:'reg='+!!reg+' blob='+!!blob+(blob?' sz='+blob.size:'')
+                      }));
+                      if(blob){
+                        var fn=null;
+                        var rd=new FileReader();
+                        rd.onloadend=function(){
+                          if(typeof rd.result!=='string')return;
+                          var b64=rd.result.split(',')[1]||'';
+                          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+                            type:'FILE_DOWNLOAD_BLOB',base64:b64,
+                            mimeType:blob.type||'application/octet-stream',filename:fn
+                          }));
+                        };
+                        rd.readAsDataURL(blob);
+                      }
+                    }catch(e){
+                      window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+                        type:'DL_DEBUG',info:'err:'+e
+                      }));
+                    }
+                  })();true;`)
+                }, 0)
+                return false
+              }
+              // Detect direct file links triggered by user click
+              if (navigationType === 'click') {
+                const fileExtPattern = /\.(pdf|zip|gz|tar|rar|7z|doc|docx|xls|xlsx|ppt|pptx|csv|mp3|mp4|avi|mov|dmg|exe|apk|ipa)(\?|$)/i
+                if (fileExtPattern.test(reqUrl)) {
+                  handleUrlDownload(reqUrl).catch(() => {})
+                  return false
+                }
+              }
+              return true
+            }}
             androidLayerType={Platform.OS === 'android' ? 'software' : 'hardware'}
             androidHardwareAccelerationDisabled={Platform.OS === 'android'}
             onError={(e: any) => {
@@ -1021,12 +796,12 @@ const shareCurrent = useCallback(async () => {
           {!isFullscreen && showAddressBar && (
             <>
               <GestureDetector gesture={addressBarPanGesture}>
-                <Animated.View 
+                <Animated.View
                   style={[
-                    styles.chromeWrapper, 
+                    styles.chromeWrapper,
                     { top: insets.top },
                     animatedAddressBarStyle
-                  ]} 
+                  ]}
                   pointerEvents="box-none"
                 >
                   <AddressBar
@@ -1068,48 +843,22 @@ const shareCurrent = useCallback(async () => {
                 </Animated.View>
               </GestureDetector>
 
-              {/* ---- Suggestions (fixed position above address bar when focused) ---- */}
-              {addressFocused && addressSuggestions.length > 0 && (
-                <View 
-                  style={[
-                    styles.suggestionsWrapper,
-                    { 
-                      bottom: insets.bottom + 60,
-                    }
-                  ]}
-                  pointerEvents="box-none"
-                >
-                  <View style={[styles.suggestions, { backgroundColor: colors.backgroundElevated }]}>
-                    {addressSuggestions.map((entry, i) => (
-                      <TouchableOpacity
-                        key={`suggestion-${i}-${entry.url}`}
-                        onPress={() => {
-                          addressInputRef.current?.blur()
-                          Keyboard.dismiss()
-                          setAddressFocused(false)
-                          setAddressSuggestions([])
-                          setAddressText(entry.url)
-                          updateActiveTab({ url: entry.url })
-                          addressEditing.current = false
-                        }}
-                        style={[
-                          styles.suggestionItem,
-                          i < addressSuggestions.length - 1 && {
-                            borderBottomWidth: StyleSheet.hairlineWidth,
-                            borderBottomColor: colors.separator,
-                          },
-                        ]}
-                      >
-                        <Text numberOfLines={1} style={[styles.suggestionTitle, { color: colors.textPrimary }]}>
-                          {entry.title}
-                        </Text>
-                        <Text numberOfLines={1} style={[styles.suggestionUrl, { color: colors.textSecondary }]}>
-                          {entry.url}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
+              {/* ---- Suggestions ---- */}
+              {addressFocused && (
+                <SuggestionsDropdown
+                  suggestions={addressSuggestions}
+                  colors={colors}
+                  bottomOffset={insets.bottom}
+                  onSelect={(url) => {
+                    addressInputRef.current?.blur()
+                    Keyboard.dismiss()
+                    setAddressFocused(false)
+                    setAddressSuggestions([])
+                    setAddressText(url)
+                    updateActiveTab({ url })
+                    addressEditing.current = false
+                  }}
+                />
               )}
             </>
           )}
@@ -1147,76 +896,19 @@ const shareCurrent = useCallback(async () => {
           )}
 
           {/* ---- Unified Sheet System ---- */}
-          <Sheet
-            visible={sheet.isOpen && sheet.route !== 'tabs'}
-            onClose={sheet.close}
-            title={
-              sheet.route === 'bookmarks' ? 'Browser' :
-              sheet.route === 'history' ? t('history') :
-              sheet.route === 'menu' ? undefined :
-              sheet.route === 'settings' ? 'Wallet' :
-              sheet.route === 'identity' ? t('identity') :
-              sheet.route === 'trust' ? t('trust_network') :
-              sheet.route === 'permissions' ? t('permissions') :
-              undefined
-            }
-            heightPercent={sheet.route === 'menu' ? 0.65 : 0.85}
-          >
-            {sheet.route === 'menu' && (
-              <MenuSheet
-                isNewTab={isNewTab}
-                onBackToHomepage={() => {
-                  updateActiveTab({ url: homepageUrl })
-                  setAddressText(homepageUrl)
-                }}
-                onAddBookmark={() => {
-                  if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
-                    addBookmark(activeTab.title || t('untitled'), activeTab.url)
-                  }
-                }}
-                onGoToLogin={() => router.push('/auth/mnemonic')}
-              />
-            )}
-            {sheet.route === 'bookmarks' && (
-              <View style={{ flex: 1, padding: spacing.lg }}>
-                <BrowserPage inSheet onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} onClearHistory={clearHistory} />
-              </View>
-            )}
-            {sheet.route === 'history' && (
-              <HistoryList
-                history={history}
-                onSelect={u => {
-                  updateActiveTab({ url: u })
-                  sheet.close()
-                }}
-                onDelete={removeHistoryItem}
-                onClear={clearHistory}
-              />
-            )}
-            {sheet.route === 'settings' && (
-              <View style={{ flex: 1 }}>
-                <SettingsScreen />
-              </View>
-            )}
-            {sheet.route === 'identity' && (
-              <View style={{ flex: 1, padding: spacing.lg }}>
-                <IdentityScreen />
-              </View>
-            )}
-            {sheet.route === 'trust' && (
-              <View style={{ flex: 1 }}>
-                <TrustScreen />
-              </View>
-            )}
-            {sheet.route === 'permissions' && (
-              <View style={{ flex: 1, padding: spacing.lg }}>
-                <PermissionsScreen
-                  origin={activeTab?.url ? domainForUrl(activeTab.url) : ''}
-                  onPermissionChange={handlePermissionChange}
-                />
-              </View>
-            )}
-          </Sheet>
+          <SheetRouter
+            sheet={sheet}
+            activeTab={activeTab}
+            domainForUrl={domainForUrl}
+            homepageUrl={homepageUrl}
+            updateActiveTab={updateActiveTab}
+            setAddressText={setAddressText}
+            clearHistory={clearHistory}
+            history={history}
+            removeHistoryItem={removeHistoryItem}
+            handlePermissionChange={handlePermissionChange}
+            addBookmark={addBookmark}
+          />
 
           {/* ---- Permission Modal ---- */}
           {pendingPermission && pendingDomain && (
@@ -1276,31 +968,5 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20,
-  },
-  suggestionsWrapper: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    zIndex: 19,
-    paddingHorizontal: spacing.md,
-  },
-  suggestionsContainer: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  suggestions: {
-    borderRadius: radii.lg,
-    overflow: 'hidden',
-  },
-  suggestionItem: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  suggestionTitle: {
-    ...typography.subhead,
-  },
-  suggestionUrl: {
-    ...typography.footnote,
-    marginTop: 2,
   },
 })

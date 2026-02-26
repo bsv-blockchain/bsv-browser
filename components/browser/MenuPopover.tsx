@@ -1,5 +1,6 @@
 import React from 'react'
 import {
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -103,6 +104,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       <Divider />
 
       {/* Web3 / Settings group */}
+      <Row icon="bug-outline" label="Bug Report" onPress={dismiss(() => Linking.openURL('https://github.com/bsv-blockchain/bsv-browser/issues'))} />
       {isWeb2Mode ? (
         <Row icon="flash-outline" label="Enable Web3" onPress={dismiss(onEnableWeb3)} />
       ) : (
