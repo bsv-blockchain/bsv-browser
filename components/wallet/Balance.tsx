@@ -4,7 +4,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { useWallet } from '@/context/WalletContext'
 import { sdk } from '@bsv/wallet-toolbox-mobile'
 import AmountDisplay from './AmountDisplay'
-import AppLogo from './AppLogo'
+import AppLogo from '../ui/AppLogo'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 
 const BALANCE_CACHE_KEY = 'cached_wallet_balance'

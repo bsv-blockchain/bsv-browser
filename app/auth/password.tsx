@@ -8,7 +8,7 @@ import {
   TextInput,
   Alert
 } from 'react-native'
-import CustomSafeArea from '@/components/CustomSafeArea'
+import CustomSafeArea from '@/components/ui/CustomSafeArea'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'

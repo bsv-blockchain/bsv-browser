@@ -11,7 +11,7 @@ import {
   StyleSheet,
   Linking
 } from 'react-native'
-import CustomSafeArea from '@/components/CustomSafeArea'
+import CustomSafeArea from '@/components/ui/CustomSafeArea'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'
@@ -545,6 +545,7 @@ const s = StyleSheet.create({
   },
   textButton: {
     alignSelf: 'center',
+    marginTop: spacing.md,
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.xl,
   },

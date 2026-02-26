@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native'
-import CustomSafeArea from '@/components/CustomSafeArea'
+import CustomSafeArea from '@/components/ui/CustomSafeArea'
 import { MaterialIcons } from '@expo/vector-icons'
 import { StatusBar } from 'expo-status-bar'
 import * as Clipboard from 'expo-clipboard'

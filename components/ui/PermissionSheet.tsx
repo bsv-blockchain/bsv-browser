@@ -5,7 +5,7 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { WalletContext } from '@/context/WalletContext'
 import { UserContext } from '@/context/UserContext'
-import AmountDisplay from '@/components/AmountDisplay'
+import AmountDisplay from '@/components/wallet/AmountDisplay'
 
 // ---------------------------------------------------------------------------
 // Types

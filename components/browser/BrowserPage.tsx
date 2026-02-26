@@ -20,12 +20,15 @@ import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
 import bookmarkStore from '@/stores/BookmarkStore'
 import { isValidUrl } from '@/utils/generalHelpers'
+import { GroupedSection } from '@/components/ui/GroupedList'
+import { ListRow } from '@/components/ui/ListRow'
 
 const kNEW_TAB_URL = 'about:blank'
 
-interface NewTabPageProps {
+interface BrowserPageProps {
   onNavigate: (url: string) => void
   inSheet?: boolean
+  onClearHistory?: () => void
 }
 
 interface BookmarkItem {
@@ -34,7 +37,7 @@ interface BookmarkItem {
   appIconImageUrl?: string
 }
 
-const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate, inSheet = false }) => {
+const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = false, onClearHistory }) => {
   const { colors } = useTheme()
   const { t } = useTranslation()
   const insets = useSafeAreaInsets()
@@ -191,11 +194,26 @@ const NewTabPageBase: React.FC<NewTabPageProps> = ({ onNavigate, inSheet = false
           </TouchableOpacity>
         )}
       </View>
+
+      {/* History */}
+      {onClearHistory && (
+        <GroupedSection header="History">
+          <ListRow
+            label="Clear History"
+            icon="trash-outline"
+            iconColor={colors.error}
+            onPress={onClearHistory}
+            destructive
+            showChevron={false}
+            isLast
+          />
+        </GroupedSection>
+      )}
     </ScrollView>
   )
 }
 
-export const NewTabPage = observer(NewTabPageBase)
+export const BrowserPage = observer(BrowserPageBase)
 
 const styles = StyleSheet.create({
   container: {
@@ -204,7 +222,6 @@ const styles = StyleSheet.create({
   content: {},
   section: {
     marginBottom: spacing.xxl,
-    paddingHorizontal: spacing.lg,
   },
   sectionTitle: {
     ...typography.footnote,

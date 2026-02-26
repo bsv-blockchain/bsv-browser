@@ -32,7 +32,7 @@ import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
 import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'
 import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
-import { HistoryList } from '@/components/HistoryList'
+import { HistoryList } from '@/components/browser/HistoryList'
 import { isValidUrl } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
@@ -44,8 +44,8 @@ import { useBrowserMode } from '@/context/BrowserModeContext'
 
 import { useWebAppManifest } from '@/hooks/useWebAppManifest'
 import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
-import PermissionModal from '@/components/PermissionModal'
-import PermissionsScreen from '@/components/PermissionsScreen'
+import PermissionModal from '@/components/browser/PermissionModal'
+import PermissionsScreen from '@/components/browser/PermissionsScreen'
 import Sheet from '@/components/ui/Sheet'
 import {
   PermissionType,
@@ -61,7 +61,7 @@ import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
-import { NewTabPage } from '@/components/browser/NewTabPage'
+import { BrowserPage } from '@/components/browser/BrowserPage'
 import { MenuSheet } from '@/components/browser/MenuSheet'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 
@@ -932,7 +932,7 @@ const shareCurrent = useCallback(async () => {
 
   const renderMainContent = () => {
     if (isNewTab) {
-      return <NewTabPage onNavigate={url => updateActiveTab({ url })} />
+      return <BrowserPage onNavigate={url => updateActiveTab({ url })} />
     }
     if (activeTab) {
       return (
@@ -1151,7 +1151,7 @@ const shareCurrent = useCallback(async () => {
             visible={sheet.isOpen && sheet.route !== 'tabs'}
             onClose={sheet.close}
             title={
-              sheet.route === 'bookmarks' ? t('bookmarks') :
+              sheet.route === 'bookmarks' ? 'Browser' :
               sheet.route === 'history' ? t('history') :
               sheet.route === 'menu' ? undefined :
               sheet.route === 'settings' ? 'Wallet' :
@@ -1179,7 +1179,7 @@ const shareCurrent = useCallback(async () => {
             )}
             {sheet.route === 'bookmarks' && (
               <View style={{ flex: 1, padding: spacing.lg }}>
-                <NewTabPage inSheet onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} />
+                <BrowserPage inSheet onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} onClearHistory={clearHistory} />
               </View>
             )}
             {sheet.route === 'history' && (

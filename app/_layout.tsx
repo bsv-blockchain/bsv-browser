@@ -19,12 +19,12 @@ import { ThemeProvider } from '@/context/theme/ThemeContext'
 import LocalStorageProvider from '@/context/LocalStorageProvider'
 import PermissionSheet from '@/components/ui/PermissionSheet'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
-import DefaultBrowserPrompt from '@/components/DefaultBrowserPrompt'
-import { LanguageProvider } from '@/utils/translations'
+import DefaultBrowserPrompt from '@/components/onboarding/DefaultBrowserPrompt'
+import { LanguageProvider } from '@/context/i18n/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
-import Web3BenefitsModalHandler from '@/components/Web3BenefitsModalHandler'
+import Web3BenefitsModalHandler from '@/components/onboarding/Web3BenefitsModalHandler'
 
-import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 
 const nativeHandlers: NativeHandlers = {
   isFocused: async () => false,

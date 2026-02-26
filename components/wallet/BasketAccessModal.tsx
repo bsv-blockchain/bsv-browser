@@ -1,9 +1,9 @@
 import React, { useContext } from 'react'
 import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native'
-import { WalletContext } from '../context/WalletContext'
-import { UserContext } from '../context/UserContext'
-import { useThemeStyles } from '../context/theme/useThemeStyles'
-import { deterministicColor } from '../utils/deterministicColor'
+import { WalletContext } from '../../context/WalletContext'
+import { UserContext } from '../../context/UserContext'
+import { useThemeStyles } from '../../context/theme/useThemeStyles'
+import { deterministicColor } from '../../utils/deterministicColor'
 
 const BasketAccessModal = () => {
   const { basketRequests, advanceBasketQueue, managers } = useContext(WalletContext)

@@ -7,7 +7,7 @@ import { useBrowserMode } from '@/context/BrowserModeContext'
 import { useSheet } from '@/context/SheetContext'
 import { ListRow } from '@/components/ui/ListRow'
 import { GroupedSection } from '@/components/ui/GroupedList'
-import Balance from '@/components/Balance'
+import Balance from '@/components/wallet/Balance'
 import { spacing } from '@/context/theme/tokens'
 
 interface MenuSheetProps {

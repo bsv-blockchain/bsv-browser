@@ -98,26 +98,24 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       {!isNewTab && (
         <Row icon="bookmark-outline" label="Add Bookmark" onPress={dismiss(onAddBookmark)} />
       )}
-      <Row icon="book-outline" label="Bookmarks" onPress={dismiss(onBookmarks)} />
+      <Row icon="globe-outline" label="Browser" onPress={dismiss(onBookmarks)} />
 
       <Divider />
 
-      {/* Navigation group */}
-      <Row icon="copy-outline" label="All Tabs" onPress={dismiss(onTabs)} />
-
       {/* Web3 / Settings group */}
       {isWeb2Mode ? (
-        <>
-          <Divider />
-          <Row icon="flash-outline" label="Enable Web3" onPress={dismiss(onEnableWeb3)} />
-        </>
+        <Row icon="flash-outline" label="Enable Web3" onPress={dismiss(onEnableWeb3)} />
       ) : (
         <>
-          <Divider />
           <Row icon="wallet-outline" label="Wallet" onPress={dismiss(onSettings)} />
           <Row icon="shield-checkmark-outline" label="Trust Network" onPress={dismiss(onTrust)} />
         </>
       )}
+
+      <Divider />
+
+      {/* Tabs */}
+      <Row icon="copy-outline" label="Tabs" onPress={dismiss(onTabs)} />
     </View>
   )
 
