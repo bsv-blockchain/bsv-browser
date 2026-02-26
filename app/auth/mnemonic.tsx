@@ -8,7 +8,8 @@ import {
   TextInput,
   ActivityIndicator,
   Share,
-  StyleSheet
+  StyleSheet,
+  Linking
 } from 'react-native'
 import CustomSafeArea from '@/components/CustomSafeArea'
 import { router } from 'expo-router'
@@ -167,6 +168,25 @@ export default function MnemonicScreen() {
               </View>
             </TouchableOpacity>
           </View>
+
+          {/* Legal disclaimer */}
+          <Text style={[s.legalText, { color: colors.textTertiary }]}>
+            By continuing, you agree to our{' '}
+            <Text
+              style={[s.legalLink, { color: colors.textTertiary }]}
+              onPress={() => Linking.openURL('https://mobile.bsvb.tech/privacy.html')}
+            >
+              privacy
+            </Text>
+            {' '}and{' '}
+            <Text
+              style={[s.legalLink, { color: colors.textTertiary }]}
+              onPress={() => Linking.openURL('https://mobile.bsvb.tech/usage.html')}
+            >
+              usage
+            </Text>
+            {' '}policies.
+          </Text>
 
           {/* Cancel */}
           <TouchableOpacity
@@ -513,6 +533,15 @@ const s = StyleSheet.create({
   btnCaption: {
     ...typography.footnote,
     marginTop: 2,
+  },
+  legalText: {
+    ...typography.caption2,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  legalLink: {
+    ...typography.caption2,
+    textDecorationLine: 'underline',
   },
   textButton: {
     alignSelf: 'center',
