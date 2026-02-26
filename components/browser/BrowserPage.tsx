@@ -98,126 +98,119 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
         numberOfLines={2}
         style={[styles.appLabel, { color: colors.textPrimary }]}
       >
-        {item.appName}
+        {item.appName.slice(0, 12)}
       </Text>
     </TouchableOpacity>
   )
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: colors.backgroundSecondary }]}
-      contentContainerStyle={[
-        styles.content,
-        {
+    <View style={[styles.container, { backgroundColor: colors.backgroundSecondary }]}>
+      {/* Homepage - scrollable section */}
+      <ScrollView
+        style={styles.homepageSection}
+        contentContainerStyle={{
           paddingTop: inSheet ? spacing.sm : insets.top + spacing.xxl,
-          paddingBottom: inSheet ? spacing.xxxl : insets.bottom + 80,
-        }
-      ]}
-    >
-      {/* Favorites (from bookmarks) */}
-      {bookmarks.length > 0 && (
+          paddingHorizontal: spacing.xs,
+        }}
+      >
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-            {t('bookmarks') || 'Favorites'}
+            Homepage
           </Text>
-          <FlatList
-            data={bookmarks}
-            renderItem={renderAppItem}
-            keyExtractor={item => `fav-${item.domain}`}
-            numColumns={4}
-            scrollEnabled={false}
-          />
-        </View>
-      )}
-
-      {/* Homepage setting */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-          Homepage
-        </Text>
-        {editingHomepage ? (
-          <View style={styles.homepageEdit}>
-            <TextInput
-              style={[
-                styles.homepageInput,
-                {
-                  backgroundColor: colors.fillTertiary,
-                  borderColor: colors.separator,
-                  color: colors.textPrimary,
-                }
-              ]}
-              value={homepageUrl}
-              onChangeText={setHomepageUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              returnKeyType="done"
-              onSubmitEditing={() => saveHomepageUrl(homepageUrl)}
-              placeholder={DEFAULT_HOMEPAGE_URL}
-              placeholderTextColor={colors.textTertiary}
-              autoFocus
-            />
-            <View style={styles.homepageButtons}>
-              <TouchableOpacity
-                style={[styles.homepageButton, { backgroundColor: colors.identityApproval }]}
-                onPress={() => saveHomepageUrl(homepageUrl)}
-              >
-                <Text style={[styles.homepageButtonText, { color: colors.textOnAccent }]}>Save</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.homepageButton, {
-                  backgroundColor: colors.fillTertiary,
-                  borderWidth: StyleSheet.hairlineWidth,
-                  borderColor: colors.separator,
-                }]}
-                onPress={() => {
-                  setEditingHomepage(false)
-                  ;(async () => {
-                    const stored = await getItem('homepageUrl')
-                    setHomepageUrl(stored || DEFAULT_HOMEPAGE_URL)
-                  })()
-                }}
-              >
-                <Text style={[styles.homepageButtonText, { color: colors.textPrimary }]}>Cancel</Text>
-              </TouchableOpacity>
+          {editingHomepage ? (
+            <View style={styles.homepageEdit}>
+              <TextInput
+                style={[
+                  styles.homepageInput,
+                  {
+                    backgroundColor: colors.fillTertiary,
+                    borderColor: colors.separator,
+                    color: colors.textPrimary,
+                  }
+                ]}
+                value={homepageUrl}
+                onChangeText={setHomepageUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                returnKeyType="done"
+                onSubmitEditing={() => saveHomepageUrl(homepageUrl)}
+                placeholder={DEFAULT_HOMEPAGE_URL}
+                placeholderTextColor={colors.textTertiary}
+                autoFocus
+              />
+              <View style={styles.homepageButtons}>
+                <TouchableOpacity
+                  style={[styles.homepageButton, { backgroundColor: colors.identityApproval }]}
+                  onPress={() => saveHomepageUrl(homepageUrl)}
+                >
+                  <Text style={[styles.homepageButtonText, { color: colors.textOnAccent }]}>Save</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.homepageButton, {
+                    backgroundColor: colors.fillTertiary,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: colors.separator,
+                  }]}
+                  onPress={() => {
+                    setEditingHomepage(false)
+                    ;(async () => {
+                      const stored = await getItem('homepageUrl')
+                      setHomepageUrl(stored || DEFAULT_HOMEPAGE_URL)
+                    })()
+                  }}
+                >
+                  <Text style={[styles.homepageButtonText, { color: colors.textPrimary }]}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.homepageRow}
-            onPress={() => setEditingHomepage(true)}
-            activeOpacity={0.6}
-          >
-            <Ionicons name="globe-outline" size={18} color={colors.textTertiary} style={{ marginRight: spacing.sm }} />
-            <Text style={[styles.homepageUrl, { color: colors.textSecondary }]} numberOfLines={1}>
-              {homepageUrl}
-            </Text>
-            <Ionicons name="pencil-outline" size={14} color={colors.textQuaternary} style={{ marginLeft: spacing.sm }} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* History */}
-      {history && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-            History
-          </Text>
-          {history.length > 0 ? (
-            <HistoryList
-              history={history}
-              onSelect={onNavigate}
-              onDelete={removeHistoryItem}
-              onClear={clearHistory}
-            />
           ) : (
-            <Text style={{ color: colors.textTertiary, textAlign: 'center', paddingVertical: spacing.md }}>
-              No history
-            </Text>
+            <TouchableOpacity
+              style={styles.homepageRow}
+              onPress={() => setEditingHomepage(true)}
+              activeOpacity={0.6}
+            >
+              <Ionicons name="globe-outline" size={18} color={colors.textTertiary} style={{ marginRight: spacing.sm }} />
+              <Text style={[styles.homepageUrl, { color: colors.textSecondary }]} numberOfLines={1}>
+                {homepageUrl}
+              </Text>
+              <Ionicons name="pencil-outline" size={14} color={colors.textQuaternary} style={{ marginLeft: spacing.sm }} />
+            </TouchableOpacity>
           )}
         </View>
-      )}
-    </ScrollView>
+      </ScrollView>
+
+      {/* Bookmarks and History - 50/50 split */}
+      <View style={styles.bottomHalf}>
+        {/* Bookmarks - 50% */}
+        {bookmarks.length > 0 && (
+          <View style={styles.halfSection}>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+              {t('bookmarks') || 'Favorites'}
+            </Text>
+            <FlatList
+              data={bookmarks}
+              renderItem={renderAppItem}
+              keyExtractor={item => `fav-${item.domain}`}
+              numColumns={1}
+              horizontal={true}
+              scrollEnabled={true}
+              contentContainerStyle={{ paddingHorizontal: spacing.xs }}
+            />
+          </View>
+        )}
+
+        {/* History - 50% */}
+        {history && history.length > 0 && (
+          <HistoryList
+            history={history}
+            onSelect={onNavigate}
+            onDelete={removeHistoryItem}
+            onClear={clearHistory}
+          />
+        )}
+      </View>
+    </View>
   )
 }
 
@@ -225,6 +218,16 @@ export const BrowserPage = observer(BrowserPageBase)
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  homepageSection: {
+    flex: 0,
+  },
+  bottomHalf: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  halfSection: {
     flex: 1,
   },
   content: {},
@@ -240,10 +243,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs,
   },
   appItem: {
-    width: '25%',
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    width: 95,
+    marginHorizontal: spacing.xs,
     paddingHorizontal: spacing.xs,
+    marginBottom: spacing.xxxl
   },
   appIcon: {
     width: 56,

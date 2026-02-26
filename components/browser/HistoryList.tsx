@@ -3,6 +3,7 @@ import { FlatList, Pressable, Text, TouchableOpacity, View, StyleSheet } from 'r
 import { Swipeable } from 'react-native-gesture-handler'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
+import { spacing, typography } from '@/context/theme/tokens'
 
 export interface HistoryEntry {
   title: string
@@ -43,16 +44,19 @@ export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => 
 
   return (
     <View style={styles.container}>
+      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+        History
+      </Text>
       <TouchableOpacity style={[styles.clearBtn, { backgroundColor: colors.error }]} onPress={onClear}>
         <Ionicons name="trash-outline" size={18} color="#fff" />
-        <Text style={styles.clearBtnText}>Clear History</Text>
+        <Text style={styles.clearBtnText}>Clear All</Text>
       </TouchableOpacity>
       <FlatList
+        style={styles.listContainer}
         data={history}
         keyExtractor={i => i.url + i.timestamp}
         renderItem={renderItem}
         ListFooterComponent={<View style={{ height: 80 }} />}
-        scrollEnabled={true}
       />
     </View>
   )
@@ -60,7 +64,19 @@ export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => 
 
 const styles = StyleSheet.create({
   container: {
-    height: '58%'
+    flex: 1,
+    flexDirection: 'column',
+  },
+  listContainer: {
+    flex: 1,
+  },
+  sectionTitle: {
+    ...typography.footnote,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.xs,
   },
   historyItem: { padding: 12 },
   clearBtn: {
@@ -70,7 +86,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 8,
-    marginBottom: 12,
+    marginBottom: spacing.md,
+    marginHorizontal: spacing.xs,
     gap: 8
   },
   clearBtnText: {
