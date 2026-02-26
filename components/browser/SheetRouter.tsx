@@ -81,7 +81,7 @@ export function SheetRouter({
       )}
       {sheet.route === 'bookmarks' && (
         <View style={{ flex: 1, padding: spacing.lg }}>
-          <BrowserPage inSheet onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} onClearHistory={clearHistory} />
+          <BrowserPage inSheet onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} clearHistory={clearHistory} history={history} removeHistoryItem={removeHistoryItem} />
         </View>
       )}
       {sheet.route === 'history' && (

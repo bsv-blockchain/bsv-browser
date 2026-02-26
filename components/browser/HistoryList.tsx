@@ -1,6 +1,7 @@
 import React from 'react'
 import { FlatList, Pressable, Text, TouchableOpacity, View, StyleSheet } from 'react-native'
 import { Swipeable } from 'react-native-gesture-handler'
+import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
 
 export interface HistoryEntry {
@@ -23,8 +24,8 @@ export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => 
     <Swipeable
       overshootRight={false}
       renderRightActions={() => (
-        <View style={[styles.swipeDelete, { backgroundColor: '#ff3b30' }]}>
-          <Text style={styles.swipeDeleteText}>✕</Text>
+        <View style={[styles.swipeDelete, { backgroundColor: colors.error }]}>
+          <Ionicons name="trash-outline" size={20} color="#fff" />
         </View>
       )}
       onSwipeableRightOpen={() => onDelete(item.url)}
@@ -41,35 +42,42 @@ export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => 
   )
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={styles.container}>
+      <TouchableOpacity style={[styles.clearBtn, { backgroundColor: colors.error }]} onPress={onClear}>
+        <Ionicons name="trash-outline" size={18} color="#fff" />
+        <Text style={styles.clearBtnText}>Clear History</Text>
+      </TouchableOpacity>
       <FlatList
         data={history}
         keyExtractor={i => i.url + i.timestamp}
         renderItem={renderItem}
         ListFooterComponent={<View style={{ height: 80 }} />}
+        scrollEnabled={true}
       />
-      <TouchableOpacity style={styles.clearBtn} onPress={onClear}>
-        <Text style={styles.clearBtnIcon}>🗑️</Text>
-      </TouchableOpacity>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
+  container: {
+    height: '58%'
+  },
   historyItem: { padding: 12 },
   clearBtn: {
-    position: 'absolute',
-    right: 20,
-    bottom: 20,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#ff3b30',
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
-    elevation: 6
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    gap: 8
   },
-  clearBtnIcon: { color: '#fff', fontSize: 22 },
+  clearBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600'
+  },
   swipeDelete: {
     justifyContent: 'center',
     alignItems: 'center',

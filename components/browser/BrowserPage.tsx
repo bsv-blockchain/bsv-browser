@@ -20,15 +20,17 @@ import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
 import bookmarkStore from '@/stores/BookmarkStore'
 import { isValidUrl } from '@/utils/generalHelpers'
-import { GroupedSection } from '@/components/ui/GroupedList'
-import { ListRow } from '@/components/ui/ListRow'
+import { HistoryList } from '@/components/browser/HistoryList'
+import { HistoryEntry } from '@/shared/types/browser'
 
 const kNEW_TAB_URL = 'about:blank'
 
 interface BrowserPageProps {
   onNavigate: (url: string) => void
+  history: HistoryEntry[]
+  removeHistoryItem: (url: string) => void
+  clearHistory: () => void
   inSheet?: boolean
-  onClearHistory?: () => void
 }
 
 interface BookmarkItem {
@@ -37,7 +39,7 @@ interface BookmarkItem {
   appIconImageUrl?: string
 }
 
-const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = false, onClearHistory }) => {
+const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = false, history, removeHistoryItem, clearHistory }) => {
   const { colors } = useTheme()
   const { t } = useTranslation()
   const insets = useSafeAreaInsets()
@@ -196,18 +198,24 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
       </View>
 
       {/* History */}
-      {onClearHistory && (
-        <GroupedSection header="History">
-          <ListRow
-            label="Clear History"
-            icon="trash-outline"
-            iconColor={colors.error}
-            onPress={onClearHistory}
-            destructive
-            showChevron={false}
-            isLast
-          />
-        </GroupedSection>
+      {history && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+            History
+          </Text>
+          {history.length > 0 ? (
+            <HistoryList
+              history={history}
+              onSelect={onNavigate}
+              onDelete={removeHistoryItem}
+              onClear={clearHistory}
+            />
+          ) : (
+            <Text style={{ color: colors.textTertiary, textAlign: 'center', paddingVertical: spacing.md }}>
+              No history
+            </Text>
+          )}
+        </View>
       )}
     </ScrollView>
   )

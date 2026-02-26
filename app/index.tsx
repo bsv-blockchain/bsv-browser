@@ -657,7 +657,7 @@ const shareCurrent = useCallback(async () => {
 
   const renderMainContent = () => {
     if (isNewTab) {
-      return <BrowserPage onNavigate={url => updateActiveTab({ url })} />
+      return <BrowserPage onNavigate={url => updateActiveTab({ url })} history={history} removeFromHistory={removeFromHistory} clearHistory={clearHistory} />
     }
     if (activeTab) {
       return (
