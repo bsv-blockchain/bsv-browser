@@ -9,11 +9,9 @@ import {
   Image,
   Alert,
   Modal,
-  ActivityIndicator,
-  Platform
+  ActivityIndicator
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import Clipboard from '@react-native-clipboard/clipboard'
 import { useTranslation } from 'react-i18next'
 
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -34,35 +32,15 @@ export type Certifier = {
 // -------------------- Helpers --------------------
 const maskKey = (k: string) => (k?.length > 16 ? `${k.slice(0, 8)}...${k.slice(-8)}` : k)
 
-const deepEqualCertifierArrays = (a: Certifier[], b: Certifier[]) => {
-  if (a === b) return true
-  if (!a || !b || a.length !== b.length) return false
-  const norm = (arr: Certifier[]) =>
-    [...arr]
-      .map(x => ({
-        name: x.name,
-        description: x.description,
-        icon: x.icon,
-        identityKey: x.identityKey,
-        trust: x.trust
-      }))
-      .sort((x, y) => (x.identityKey > y.identityKey ? 1 : -1))
-  const A = norm(a)
-  const B = norm(b)
-  for (let i = 0; i < A.length; i++) {
-    const x = A[i]
-    const y = B[i]
-    if (
-      x.name !== y.name ||
-      x.description !== y.description ||
-      x.icon !== y.icon ||
-      x.identityKey !== y.identityKey ||
-      x.trust !== y.trust
-    ) {
-      return false
-    }
+const assignTrust = (certifiers: Certifier[]): Certifier[] =>
+  certifiers.map((c, i) => ({ ...c, trust: i < 9 ? 10 - i : 1 }))
+
+const orderChanged = (a: Certifier[], b: Certifier[]): boolean => {
+  if (a.length !== b.length) return true
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].identityKey !== b[i].identityKey) return true
   }
-  return true
+  return false
 }
 
 const fetchWithTimeout = async (url: string, ms: number) => {
@@ -83,34 +61,21 @@ export default function TrustScreen() {
 
   const { settings, updateSettings } = useWallet()
 
-  // Source of truth from Settings
-  const initialTrusted: Certifier[] = settings?.trustSettings?.trustedCertifiers || []
-  const initialThreshold: number = settings?.trustSettings?.trustLevel || 2
+  // Source of truth from Settings — sort by trust descending so position matches priority
+  const initialTrusted: Certifier[] = useMemo(
+    () => [...(settings?.trustSettings?.trustedCertifiers || [])].sort((a, b) => b.trust - a.trust),
+    [settings?.trustSettings?.trustedCertifiers]
+  )
 
   // Local working state
   const [trustedEntities, setTrustedEntities] = useState<Certifier[]>(initialTrusted)
-  const [trustLevel, setTrustLevel] = useState<number>(initialThreshold)
   const [query, setQuery] = useState('')
   const [saving, setSaving] = useState(false)
   const [snack, setSnack] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
 
-  const totalTrustPoints = useMemo(
-    () => trustedEntities.reduce((sum, e) => sum + (Number(e.trust) || 0), 0),
-    [trustedEntities]
-  )
-
-  // Clamp threshold to available points
-  useEffect(() => {
-    if (trustLevel > totalTrustPoints && totalTrustPoints > 0) {
-      setTrustLevel(totalTrustPoints)
-    }
-  }, [totalTrustPoints, trustLevel])
-
-  // Detect unsaved changes
-  const settingsNeedsUpdate =
-    (settings?.trustSettings?.trustLevel ?? 0) !== trustLevel ||
-    !deepEqualCertifierArrays(settings?.trustSettings?.trustedCertifiers || [], trustedEntities)
+  // Detect unsaved changes — compare identity key arrays in order
+  const settingsNeedsUpdate = orderChanged(initialTrusted, trustedEntities)
 
   // Save to settings
   const handleSave = useCallback(async (): Promise<boolean> => {
@@ -121,8 +86,8 @@ export default function TrustScreen() {
           JSON.stringify({
             ...settings,
             trustSettings: {
-              trustLevel,
-              trustedCertifiers: trustedEntities
+              trustLevel: 1,
+              trustedCertifiers: assignTrust(trustedEntities)
             }
           })
         )
@@ -135,7 +100,7 @@ export default function TrustScreen() {
     } finally {
       setSaving(false)
     }
-  }, [updateSettings, settings, trustLevel, trustedEntities, t])
+  }, [updateSettings, settings, trustedEntities, t])
 
   // Search
   const filtered = useMemo(() => {
@@ -146,8 +111,26 @@ export default function TrustScreen() {
     )
   }, [trustedEntities, query])
 
-  const onChangeTrust = (identityKey: string, v: number) => {
-    setTrustedEntities(prev => prev.map(c => (c.identityKey === identityKey ? { ...c, trust: v } : c)))
+  const isSearching = query.trim().length > 0
+
+  const onMoveUp = (identityKey: string) => {
+    setTrustedEntities(prev => {
+      const idx = prev.findIndex(c => c.identityKey === identityKey)
+      if (idx <= 0) return prev
+      const next = [...prev]
+      ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
+      return next
+    })
+  }
+
+  const onMoveDown = (identityKey: string) => {
+    setTrustedEntities(prev => {
+      const idx = prev.findIndex(c => c.identityKey === identityKey)
+      if (idx < 0 || idx >= prev.length - 1) return prev
+      const next = [...prev]
+      ;[next[idx], next[idx + 1]] = [next[idx + 1], next[idx]]
+      return next
+    })
   }
 
   const onRemove = (identityKey: string) => {
@@ -165,11 +148,6 @@ export default function TrustScreen() {
     )
   }
 
-  const copyKey = (identityKey: string) => {
-    Clipboard.setString(identityKey)
-    setSnack(t('copied') || 'Copied!')
-  }
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
       <ScrollView
@@ -182,41 +160,8 @@ export default function TrustScreen() {
       >
         {/* Description */}
         <Text style={[styles.description, { color: colors.textSecondary }]}>
-          Give points to show which certifiers you trust the most to confirm the identity of counterparties. More points mean a higher priority.
+          Order certifiers by priority. Apps will display higher-ranked certifiers first.
         </Text>
-
-        {/* ── Threshold ── */}
-        <GroupedSection header="Threshold">
-          <View style={styles.thresholdRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.thresholdLabel, { color: colors.textPrimary }]}>
-                Trust Level
-              </Text>
-              <Text style={[styles.thresholdDesc, { color: colors.textSecondary }]}>
-                {totalTrustPoints} {totalTrustPoints === 1 ? 'point' : 'points'} given out. Set the minimum any counterparty must have.
-              </Text>
-            </View>
-            <View style={styles.thresholdControls}>
-              <Text style={[styles.thresholdValue, { color: colors.textPrimary }]}>
-                <Text style={{ fontWeight: '700' }}>{trustLevel}</Text> / {Math.max(totalTrustPoints, 1)}
-              </Text>
-              <View style={styles.stepper}>
-                <TouchableOpacity
-                  onPress={() => setTrustLevel(v => Math.max(1, Math.min(v - 1, Math.max(totalTrustPoints, 1))))}
-                  style={[styles.stepBtn, { borderColor: colors.fillTertiary }]}
-                >
-                  <Ionicons name="remove" size={18} color={colors.textPrimary} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setTrustLevel(v => Math.max(1, Math.min(v + 1, Math.max(totalTrustPoints, 1))))}
-                  style={[styles.stepBtn, { borderColor: colors.fillTertiary }]}
-                >
-                  <Ionicons name="add" size={18} color={colors.textPrimary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </GroupedSection>
 
         {/* ── Certifiers ── */}
         <GroupedSection header="Certifiers">
@@ -237,69 +182,55 @@ export default function TrustScreen() {
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No certifiers yet.</Text>
             </View>
           ) : (
-            filtered.map((item, idx) => (
-              <View
-                key={item.identityKey}
-                style={[
-                  styles.certifierCard,
-                  idx < filtered.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
-                ]}
-              >
-                <View style={styles.certifierHeader}>
-                  {item.icon ? (
-                    <Image source={{ uri: item.icon }} style={styles.certifierIcon} />
-                  ) : (
-                    <View style={[styles.certifierIconPlaceholder, { backgroundColor: colors.accent }]}>
-                      <Text style={{ color: colors.background, fontWeight: '700' }}>{item.name?.[0] || '?'}</Text>
-                    </View>
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.certifierNameRow}>
+            filtered.map((item, idx) => {
+              // Find real index in full list for proper up/down logic
+              const realIdx = trustedEntities.findIndex(c => c.identityKey === item.identityKey)
+              const isFirst = realIdx === 0
+              const isLast = realIdx === trustedEntities.length - 1
+
+              return (
+                <View
+                  key={item.identityKey}
+                  style={[
+                    styles.certifierCard,
+                    idx < filtered.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
+                  ]}
+                >
+                  <View style={styles.certifierHeader}>
+                    {item.icon ? (
+                      <Image source={{ uri: item.icon }} style={styles.certifierIcon} />
+                    ) : (
+                      <View style={[styles.certifierIconPlaceholder, { backgroundColor: colors.accent }]}>
+                        <Text style={{ color: colors.background, fontWeight: '700' }}>{item.name?.[0] || '?'}</Text>
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
                       <Text style={[styles.certifierName, { color: colors.textPrimary }]} numberOfLines={1}>
                         {item.name}
                       </Text>
-                      <TouchableOpacity onPress={() => onRemove(item.identityKey)}>
+                      <Text style={[styles.certifierDesc, { color: colors.textSecondary }]} numberOfLines={2}>
+                        {item.description}
+                      </Text>
+                    </View>
+                    <View style={styles.actions}>
+                      {!isFirst && !isSearching && (
+                        <TouchableOpacity onPress={() => onMoveUp(item.identityKey)} style={styles.actionBtn}>
+                          <Ionicons name="chevron-up" size={18} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                      {!isLast && !isSearching && (
+                        <TouchableOpacity onPress={() => onMoveDown(item.identityKey)} style={styles.actionBtn}>
+                          <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity onPress={() => onRemove(item.identityKey)} style={styles.actionBtn}>
                         <Ionicons name="close" size={18} color={colors.error} />
                       </TouchableOpacity>
                     </View>
-                    <Text style={[styles.certifierDesc, { color: colors.textSecondary }]} numberOfLines={2}>
-                      {item.description}
-                    </Text>
                   </View>
                 </View>
-
-                {/* Key row */}
-                <View style={[styles.keyRow, { backgroundColor: colors.fillTertiary }]}>
-                  <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} style={{ marginRight: spacing.xs }} />
-                  <Text style={[styles.keyText, { color: colors.textPrimary }]}>{maskKey(item.identityKey)}</Text>
-                  <TouchableOpacity onPress={() => copyKey(item.identityKey)} style={{ padding: spacing.xs, marginLeft: 'auto' }}>
-                    <Ionicons name="copy-outline" size={14} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                </View>
-
-                {/* Trust row */}
-                <View style={styles.trustRow}>
-                  <View style={[styles.chip, { backgroundColor: colors.fillTertiary }]}>
-                    <Text style={[styles.chipText, { color: colors.textSecondary }]}>Trust Level: </Text>
-                    <Text style={[styles.chipText, { fontWeight: '700', color: colors.textPrimary }]}>{item.trust}/10</Text>
-                  </View>
-                  <View style={styles.stepperSmall}>
-                    <TouchableOpacity
-                      onPress={() => onChangeTrust(item.identityKey, Math.max(1, Math.min((item.trust || 1) - 1, 10)))}
-                      style={[styles.stepBtnSmall, { borderColor: colors.fillTertiary }]}
-                    >
-                      <Ionicons name="remove" size={14} color={colors.textPrimary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => onChangeTrust(item.identityKey, Math.max(1, Math.min((item.trust || 1) + 1, 10)))}
-                      style={[styles.stepBtnSmall, { borderColor: colors.fillTertiary }]}
-                    >
-                      <Ionicons name="add" size={14} color={colors.textPrimary} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            ))
+              )
+            })
           )}
 
           {/* Add Provider button */}
@@ -351,7 +282,7 @@ export default function TrustScreen() {
             setSnack('An entity with this public key is already in the list!')
             return
           }
-          setTrustedEntities(prev => [{ ...c, trust: 5 }, ...prev])
+          setTrustedEntities(prev => [...prev, { ...c, trust: 1 }])
           setShowAdd(false)
         }}
         colors={colors}
@@ -635,39 +566,6 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
   },
 
-  // Threshold
-  thresholdRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  thresholdLabel: {
-    ...typography.body,
-    fontWeight: '600',
-  },
-  thresholdDesc: {
-    ...typography.footnote,
-    marginTop: spacing.xs,
-  },
-  thresholdControls: {
-    alignItems: 'flex-end',
-    marginLeft: spacing.md,
-  },
-  thresholdValue: {
-    ...typography.body,
-    marginBottom: spacing.xs,
-  },
-  stepper: {
-    flexDirection: 'row',
-  },
-  stepBtn: {
-    borderWidth: 1,
-    borderRadius: radii.sm,
-    padding: spacing.sm,
-    marginLeft: spacing.sm,
-  },
-
   // Search
   searchRow: {
     flexDirection: 'row',
@@ -688,7 +586,7 @@ const styles = StyleSheet.create({
   },
   certifierHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   certifierIcon: {
     width: 40,
@@ -704,55 +602,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  certifierNameRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
   certifierName: {
     ...typography.body,
     fontWeight: '700',
-    flex: 1,
   },
   certifierDesc: {
     ...typography.footnote,
     marginTop: spacing.xs,
   },
-  keyRow: {
+  actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    marginTop: spacing.sm,
-  },
-  keyText: {
-    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
-    ...typography.caption1,
-  },
-  trustRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.sm,
-  },
-  chip: {
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  chipText: {
-    ...typography.caption1,
-  },
-  stepperSmall: {
-    flexDirection: 'row',
     marginLeft: spacing.sm,
   },
-  stepBtnSmall: {
-    borderWidth: 1,
-    borderRadius: radii.sm,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    marginLeft: spacing.xs,
+  actionBtn: {
+    padding: spacing.xs,
   },
   emptyBox: {
     alignItems: 'center',
