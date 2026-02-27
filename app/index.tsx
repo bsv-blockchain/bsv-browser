@@ -49,7 +49,6 @@ import { mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
-import { BrowserPage } from '@/components/browser/BrowserPage'
 import { SuggestionsDropdown } from '@/components/browser/SuggestionsDropdown'
 import { SheetRouter } from '@/components/browser/SheetRouter'
 import { BlurChrome } from '@/components/ui/BlurChrome'
@@ -211,21 +210,37 @@ function Browser() {
     }
   }, [activeTab])
 
-  // On first launch, navigate to homepage
-  const hasSetHomepage = useRef(false)
-  useEffect(() => {
-    if (hasSetHomepage.current) return
-    if (activeTab && (activeTab.url === kNEW_TAB_URL || activeTab.url === 'about:blank') && homepageUrl) {
-      hasSetHomepage.current = true
-      tabStore.updateTab(tabStore.activeTabId, { url: homepageUrl })
-      setAddressText(homepageUrl)
-    }
-  }, [homepageUrl, activeTab, activeTab?.url])
+  // When true, the next blank tab will skip homepage navigation (e.g. user explicitly opened new tab)
+  const skipHomepageOnce = useRef(false)
 
-  // Auto-focus on new tab
+  // Navigate to homepage whenever a blank tab becomes active
+  useEffect(() => {
+    if (!activeTab || activeTab.url !== kNEW_TAB_URL) return
+    if (skipHomepageOnce.current) {
+      skipHomepageOnce.current = false
+      return
+    }
+    ;(async () => {
+      const stored = await getItem('homepageUrl')
+      const url = stored || DEFAULT_HOMEPAGE_URL
+      if (url && url !== kNEW_TAB_URL && url !== 'about:blank') {
+        tabStore.updateTab(tabStore.activeTabId, { url })
+        setAddressText(url)
+        setHomepageUrlState(url)
+      }
+    })()
+  }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-focus on new tab (only if still blank — homepage navigation may have kicked in)
   useEffect(() => {
     if (activeTab && activeTab.url === kNEW_TAB_URL && !addressFocused) {
-      setTimeout(() => addressInputRef.current?.focus(), 100)
+      const tabId = activeTab.id
+      const timer = setTimeout(() => {
+        if (tabStore.activeTab?.id === tabId && tabStore.activeTab?.url === kNEW_TAB_URL) {
+          addressInputRef.current?.focus()
+        }
+      }, 100)
+      return () => clearTimeout(timer)
     }
   }, [activeTab, activeTab?.id, activeTab?.url, addressFocused])
 
@@ -747,7 +762,7 @@ const shareCurrent = useCallback(async () => {
 
   const renderMainContent = () => {
     if (isNewTab) {
-      return <BrowserPage onNavigate={url => updateActiveTab({ url })} history={history} removeHistoryItem={removeHistoryItem} clearHistory={clearHistory} />
+      return <View style={{ flex: 1, backgroundColor: colors.background }} />
     }
     if (activeTab) {
       return (
@@ -989,6 +1004,11 @@ const shareCurrent = useCallback(async () => {
                 }}
                 onBookmarks={() => sheet.push('bookmarks')}
                 onTabs={() => setShowTabsView(true)}
+                onNewTab={() => {
+                  skipHomepageOnce.current = true
+                  tabStore.newTab()
+                  setShowTabsView(false)
+                }}
                 onSettings={() => sheet.push('settings')}
                 onTrust={() => sheet.push('trust')}
                 onEnableWeb3={() => router.push('/auth/mnemonic')}
@@ -1000,7 +1020,6 @@ const shareCurrent = useCallback(async () => {
           {!isFullscreen && showTabsView && (
             <TabsOverview
               onDismiss={() => setShowTabsView(false)}
-              setAddressText={setAddressText}
               setAddressFocused={setAddressFocused}
             />
           )}

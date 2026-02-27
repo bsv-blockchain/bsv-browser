@@ -33,6 +33,7 @@ interface MenuPopoverProps {
   onAddBookmark: () => void
   onBookmarks: () => void
   onTabs: () => void
+  onNewTab: () => void
   onSettings: () => void
   onTrust: () => void
   onEnableWeb3: () => void
@@ -82,11 +83,12 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   onAddBookmark,
   onBookmarks,
   onTabs,
+  onNewTab,
   onSettings,
   onTrust,
   onEnableWeb3,
 }) => {
-  const { isDark } = useTheme()
+  const { isDark, colors } = useTheme()
   const { isWeb2Mode } = useBrowserMode()
 
   const dismiss = (fn: () => void) => () => { onDismiss(); fn() }
@@ -117,8 +119,17 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
 
       <Divider />
       
-      {/* Tabs */}
-      <Row icon="copy-outline" label="Tabs" onPress={dismiss(onTabs)} />
+      {/* Tabs — split row */}
+      <View style={styles.splitRow}>
+        <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onTabs)} activeOpacity={0.6}>
+          <Ionicons name="copy-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
+          <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>Tabs</Text>
+        </TouchableOpacity>
+        <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
+        <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onNewTab)} activeOpacity={0.6}>
+          <Ionicons name="add" size={24} color={colors.textPrimary} />
+        </TouchableOpacity>
+      </View>
     </View>
   )
 
@@ -201,5 +212,27 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginHorizontal: spacing.lg,
     marginVertical: spacing.xs,
+  },
+  splitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  splitRowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md + 2,
+  },
+  splitDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    marginVertical: spacing.xs,
+  },
+  splitRowAction: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md + 2,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 })

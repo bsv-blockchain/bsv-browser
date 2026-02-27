@@ -56,7 +56,10 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
   }, [getItem])
 
   const saveHomepageUrl = async (url: string) => {
-    const trimmed = url.trim()
+    let trimmed = url.trim()
+    if (trimmed && !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      trimmed = 'https://' + trimmed
+    }
     if (trimmed) {
       setHomepageUrl(trimmed)
       await setItem('homepageUrl', trimmed)

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React from 'react'
 import {
   Animated,
   Dimensions,
@@ -31,13 +31,11 @@ const kNEW_TAB_URL = 'about:blank'
 
 interface TabsOverviewProps {
   onDismiss: () => void
-  setAddressText: (text: string) => void
   setAddressFocused: (focused: boolean) => void
 }
 
 const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
   onDismiss,
-  setAddressText,
   setAddressFocused
 }) => {
   const { colors } = useTheme()
@@ -46,20 +44,6 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
   const ITEM_W = screen.width * 0.42
   const ITEM_H = screen.height * 0.28
   const insets = useSafeAreaInsets()
-  const [isCreatingTab, setIsCreatingTab] = useState(false)
-
-  const handleNewTabPress = useCallback(() => {
-    if (isCreatingTab) return
-    setIsCreatingTab(true)
-    tabStore.newTab()
-    Keyboard.dismiss()
-    setAddressText(kNEW_TAB_URL)
-    setTimeout(() => {
-      setAddressFocused(false)
-      onDismiss()
-      setIsCreatingTab(false)
-    }, 300)
-  }, [onDismiss, setAddressText, isCreatingTab, setAddressFocused])
 
   const renderItem = ({ item }: { item: Tab }) => {
     const renderSwipeAction = (
@@ -183,16 +167,8 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
           }
         ]}
       >
-        <IconButton
-          name="add"
-          onPress={handleNewTabPress}
-          size={24}
-          color={colors.accent}
-          disabled={isCreatingTab}
-          accessibilityLabel="New tab"
-        />
-        <IconButton
-          name="trash-outline"
+        <TouchableOpacity
+          style={styles.clearAllButton}
           onPress={() => {
             if (Platform.OS === 'ios') {
               try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium) } catch {}
@@ -202,12 +178,13 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
             Keyboard.dismiss()
             tabStore.clearAllTabs()
           }}
-          size={22}
-          color={colors.accent}
           accessibilityLabel="Close all tabs"
-        />
+        >
+          <Ionicons name="trash-outline" size={20} color={colors.accent} />
+          <Text style={[styles.clearAllText, { color: colors.accent }]}>Clear All Tabs</Text>
+        </TouchableOpacity>
         <IconButton
-          name="checkmark"
+          name="close"
           onPress={onDismiss}
           size={24}
           color={colors.accent}
@@ -270,5 +247,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-around',
     paddingTop: spacing.lg,
+    paddingHorizontal: spacing.xl,
+  },
+  clearAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    alignSelf: 'center',
+  },
+  clearAllText: {
+    fontSize: 15,
   },
 })
