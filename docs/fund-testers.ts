@@ -1,6 +1,7 @@
 import { WalletClient, Script, Hash, Utils } from '@bsv/sdk'
 
-const hash = Utils.toHex(Hash.sha256(Utils.toArray('goose', 'utf8')))
+const secret = 'goose'
+const hash = Utils.toHex(Hash.sha256(Utils.toArray(secret, 'utf8')))
 export async function createToken() {
 
     // Connect to user's wallet
@@ -10,10 +11,11 @@ export async function createToken() {
     const response = await wallet.createAction({
       description: 'make a funding output for something',
       outputs: [{
-        satoshis: 1000,
+        satoshis: 10000,
         lockingScript: Script.fromASM('OP_SHA256 ' + hash + ' OP_EQUAL').toHex(),
         basket: 'hash tokens',
-        outputDescription: 'admin secrets'
+        outputDescription: 'admin secrets',
+        customInstructions: secret
       }]
     })
 

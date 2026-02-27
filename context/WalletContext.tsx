@@ -76,7 +76,7 @@ export interface WalletContextValue {
   selectedMethod: string
   selectedNetwork: 'main' | 'test'
   setWalletBuilt: (current: boolean) => void
-  buildWalletFromMnemonic: () => Promise<void>
+  buildWalletFromMnemonic: (mnemonic?: string) => Promise<void>
   switchNetwork: (network: 'main' | 'test') => Promise<void>
 }
 
@@ -773,7 +773,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   // TODO: Re-add WAB (WalletAuthenticationManager) support in future version
 
-  const buildWalletFromMnemonic = useCallback(async () => {
+  const buildWalletFromMnemonic = useCallback(async (providedMnemonic?: string) => {
     // Skip if wallet already built
     if (walletBuilt) {
       return
@@ -787,7 +787,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     logWithTimestamp(F, 'Checking for noWAB primary key')
 
     try {
-      const mnemonic = await getMnemonic()
+      // Use provided mnemonic directly (e.g. from mnemonic screen) or read from secure storage
+      const mnemonic = providedMnemonic || await getMnemonic()
       if (!mnemonic) {
         logWithTimestamp(F, 'No noWAB mnemonic found')
         return

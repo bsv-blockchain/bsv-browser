@@ -3,7 +3,7 @@ import { FlatList, Pressable, Text, TouchableOpacity, View, StyleSheet } from 'r
 import { Swipeable } from 'react-native-gesture-handler'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { spacing, typography } from '@/context/theme/tokens'
+import { spacing, typography, radii } from '@/context/theme/tokens'
 
 export interface HistoryEntry {
   title: string
@@ -21,26 +21,44 @@ interface Props {
 export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => {
   const { colors } = useTheme()
 
-  const renderItem = ({ item }: { item: HistoryEntry }) => (
-    <Swipeable
-      overshootRight={false}
-      renderRightActions={() => (
-        <View style={[styles.swipeDelete, { backgroundColor: colors.error }]}>
-          <Ionicons name="trash-outline" size={20} color="#fff" />
-        </View>
-      )}
-      onSwipeableRightOpen={() => onDelete(item.url)}
-    >
-      <Pressable style={styles.historyItem} onPress={() => onSelect(item.url)}>
-        <Text numberOfLines={1} style={{ color: colors.textPrimary, fontSize: 15 }}>
-          {item.title}
-        </Text>
-        <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 12 }}>
-          {item.url}
-        </Text>
-      </Pressable>
-    </Swipeable>
-  )
+  const renderItem = ({ item, index }: { item: HistoryEntry; index: number }) => {
+    const isFirst = index === 0
+    const isLast = index === history.length - 1
+
+    let itemStyle: any = { backgroundColor: colors.backgroundElevated }
+    let deleteStyle: any = {}
+    if (isFirst) {
+      itemStyle.borderTopLeftRadius = radii.md
+      itemStyle.borderTopRightRadius = radii.md
+      deleteStyle = { borderTopLeftRadius: 0, borderTopRightRadius: radii.md }
+    }
+    if (isLast) {
+      itemStyle.borderBottomLeftRadius = radii.md
+      itemStyle.borderBottomRightRadius = radii.md
+      deleteStyle = { borderBottomLeftRadius: 0, borderBottomRightRadius: radii.md }
+    }
+
+    return (
+      <Swipeable
+        overshootRight={false}
+        renderRightActions={() => (
+          <View style={[styles.swipeDelete, deleteStyle, { backgroundColor: colors.error }]}>
+            <Ionicons name="trash-outline" size={20} color="#fff" />
+          </View>
+        )}
+        onSwipeableRightOpen={() => onDelete(item.url)}
+      >
+        <Pressable style={[styles.historyItem, itemStyle]} onPress={() => onSelect(item.url)}>
+          <Text numberOfLines={1} style={{ color: colors.textPrimary, fontSize: 15 }}>
+            {item.title}
+          </Text>
+          <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 12 }}>
+            {item.url}
+          </Text>
+        </Pressable>
+      </Swipeable>
+    )
+  }
 
   return (
     <View style={styles.container}>
@@ -78,7 +96,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     paddingHorizontal: spacing.xs,
   },
-  historyItem: { padding: 12 },
+  historyItem: { 
+    padding: 12,
+  },
   clearBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -99,8 +119,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: 60,
-    marginVertical: 10,
-    borderRadius: 10
+    height: 60,
   },
   swipeDeleteText: { color: '#fff', fontSize: 24 }
 })

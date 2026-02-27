@@ -166,15 +166,15 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
             </View>
           ) : (
             <TouchableOpacity
-              style={styles.homepageRow}
+              style={[styles.homepageRow, { backgroundColor: colors.backgroundElevated }]}
               onPress={() => setEditingHomepage(true)}
               activeOpacity={0.6}
             >
-              <Ionicons name="globe-outline" size={18} color={colors.textTertiary} style={{ marginRight: spacing.sm }} />
-              <Text style={[styles.homepageUrl, { color: colors.textSecondary }]} numberOfLines={1}>
+              <Ionicons name="globe-outline" size={18} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
+              <Text style={[styles.homepageUrl, { color: colors.textPrimary }]} numberOfLines={1}>
                 {homepageUrl}
               </Text>
-              <Ionicons name="pencil-outline" size={14} color={colors.textQuaternary} style={{ marginLeft: spacing.sm }} />
+              <Ionicons name="pencil-outline" size={16} color={colors.textSecondary} style={{ marginLeft: spacing.sm }} />
             </TouchableOpacity>
           )}
         </View>
@@ -266,8 +266,9 @@ const styles = StyleSheet.create({
   homepageRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
   },
   homepageUrl: {
     ...typography.footnote,

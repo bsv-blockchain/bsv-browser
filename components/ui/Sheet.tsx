@@ -107,7 +107,7 @@ const Sheet: React.FC<SheetProps> = ({
         style={[
           styles.sheet,
           {
-            backgroundColor: colors.backgroundElevated,
+            backgroundColor: colors.backgroundSecondary,
             maxHeight: sheetHeight,
           },
           animatedStyle,

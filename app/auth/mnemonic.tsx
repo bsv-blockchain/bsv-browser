@@ -101,7 +101,7 @@ export default function MnemonicScreen() {
     try {
       console.log('[Mnemonic] Starting wallet initialization with mnemonic')
       await storeMnemonic(mnemonicPhrase)
-      await buildWalletFromMnemonic()
+      await buildWalletFromMnemonic(mnemonicPhrase)
       console.log('[Mnemonic] Wallet setup complete, navigating to browser')
       router.dismissAll()
       router.push('/')
