@@ -16,7 +16,10 @@ export async function createToken() {
         basket: 'hash tokens',
         outputDescription: 'admin secrets',
         customInstructions: secret
-      }]
+      }],
+      options: {
+        acceptDelayedBroadcast: false
+      }
     })
 
     return console.log(response)
