@@ -19,7 +19,16 @@ export function useAddressBarAnimation(
 
   // AddressBar position animation — start at bottom (translateY = travelDistance)
   const addressBarAtTop = useSharedValue(false)
-  const initialTravelDistance = Dimensions.get('window').height - (2 * insets.top) - 12
+  const ADDRESS_BAR_HEIGHT = 60 // paddingTop(4) + pill(44) + paddingBottom(12)
+  const ANDROID_TOP_OFFSET = ADDRESS_BAR_HEIGHT / 2
+  const computeTravelDistance = (top: number, bottom: number) => {
+    const screenHeight = Dimensions.get('window').height
+    if (Platform.OS === 'android') {
+      return screenHeight - top - bottom - ADDRESS_BAR_HEIGHT - ANDROID_TOP_OFFSET
+    }
+    return screenHeight - (2 * top) - 12
+  }
+  const initialTravelDistance = computeTravelDistance(insets.top, insets.bottom)
   const addressBarTravelDistance = useSharedValue(initialTravelDistance)
   const addressBarTranslateY = useSharedValue(initialTravelDistance)
   // Track position before focus to restore it later
@@ -27,8 +36,7 @@ export function useAddressBarAnimation(
 
   // Update travel distance and position when insets change
   useEffect(() => {
-    const screenHeight = Dimensions.get('window').height
-    const travelDistance = screenHeight - (2 * insets.top) - 12
+    const travelDistance = computeTravelDistance(insets.top, insets.bottom)
     addressBarTravelDistance.value = travelDistance
     if (addressBarAtTop.value) {
       addressBarTranslateY.value = 0
@@ -109,10 +117,11 @@ export function useAddressBarAnimation(
     })
 
   // Animated style for AddressBar wrapper
+  const androidTopOffset = Platform.OS === 'android' ? ANDROID_TOP_OFFSET : 0
   const animatedAddressBarStyle = useAnimatedStyle(() => {
     const keyboardOffset = addressBarAtTop.value ? 0 : -keyboardHeight.value
     return {
-      transform: [{ translateY: addressBarTranslateY.value + keyboardOffset }],
+      transform: [{ translateY: addressBarTranslateY.value + keyboardOffset + androidTopOffset }],
     }
   })
 
