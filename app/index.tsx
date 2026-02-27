@@ -5,6 +5,7 @@ import {
   Platform,
   Share,
   StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -50,6 +51,8 @@ import { TabsOverview } from '@/components/browser/TabsOverview'
 import { BrowserPage } from '@/components/browser/BrowserPage'
 import { SuggestionsDropdown } from '@/components/browser/SuggestionsDropdown'
 import { SheetRouter } from '@/components/browser/SheetRouter'
+import { BlurChrome } from '@/components/ui/BlurChrome'
+import { spacing, radii, typography } from '@/context/theme/tokens'
 
 import { useHistory } from '@/hooks/useHistory'
 import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
@@ -162,10 +165,16 @@ function Browser() {
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
+  const [isOverlaySearching, setIsOverlaySearching] = useState(false)
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
   const activeCameraStreams = useRef<Set<string>>(new Set())
+
+  /* --------------------------------- overlay lookup cache --------------------------------- */
+  const overlayLookupCache = useRef<Map<string, string[]>>(new Map())
+  const overlayLookupAbortController = useRef<AbortController | null>(null)
+  const isOverlayLookupCancelled = useRef(false)
 
   /* -------------------------------- permissions ----------------------------- */
   const domainForUrl = useCallback((u: string): string => {
@@ -261,13 +270,86 @@ function Browser() {
   /*                              ADDRESS HANDLING                              */
   /* -------------------------------------------------------------------------- */
 
+  const cancelOverlayLookup = useCallback(() => {
+    isOverlayLookupCancelled.current = true
+    overlayLookupAbortController.current?.abort()
+    setIsOverlaySearching(false)
+  }, [])
+
   const performOverlayLookup = useCallback(async (searchParam: string) => {
+    const cachedResults = overlayLookupCache.current.get(searchParam)
+
+    if (cachedResults) {
+      // Cache hit: apply results immediately
+      if (cachedResults.length === 1) {
+        const domain = cachedResults[0]
+        const url = domain.startsWith('http') ? domain : `https://${domain}`
+        updateActiveTab({ url })
+      } else if (cachedResults.length > 1) {
+        setAddressSuggestions(cachedResults.map(domain => ({
+          title: domain,
+          url: domain.startsWith('http') ? domain : `https://${domain}`,
+          timestamp: Date.now()
+        })))
+      }
+
+      // Update cache in background (no loading indicator)
+      ;(async () => {
+        try {
+          const overlay = new LookupResolver()
+          const response = await overlay.query({
+            service: 'ls_apps',
+            query: { name: searchParam }
+          }, 10000)
+          if (response?.outputs?.length) {
+            const searchResults = response.outputs.map((o: any) => {
+              try {
+                const data = JSON.parse(Utils.toUTF8(
+                  Transaction.fromBEEF(o.beef).outputs[0].lockingScript.chunks[2].data as number[]
+                ))
+                return data.domain
+              } catch {
+                return null
+              }
+            }).filter(Boolean) as string[]
+
+            overlayLookupCache.current.set(searchParam, searchResults)
+            // Update UI if results changed
+            if (JSON.stringify(searchResults) !== JSON.stringify(cachedResults)) {
+              if (searchResults.length === 1) {
+                const domain = searchResults[0]
+                const url = domain.startsWith('http') ? domain : `https://${domain}`
+                updateActiveTab({ url })
+              } else if (searchResults.length > 1) {
+                setAddressSuggestions(searchResults.map(domain => ({
+                  title: domain,
+                  url: domain.startsWith('http') ? domain : `https://${domain}`,
+                  timestamp: Date.now()
+                })))
+              }
+            }
+          }
+        } catch (error) {
+          console.warn('[OverlayLookup] Background cache update failed:', error)
+        }
+      })()
+      return
+    }
+
+    // Cache miss: show loading and fetch
+    isOverlayLookupCancelled.current = false
+    overlayLookupAbortController.current = new AbortController()
+    setIsOverlaySearching(true)
     try {
       const overlay = new LookupResolver()
       const response = await overlay.query({
         service: 'ls_apps',
         query: { name: searchParam }
       }, 10000)
+
+      // Ignore response if cancelled
+      if (isOverlayLookupCancelled.current) return
+
       if (response?.outputs?.length) {
         const searchResults = response.outputs.map((o: any) => {
           try {
@@ -279,6 +361,8 @@ function Browser() {
             return null
           }
         }).filter(Boolean) as string[]
+
+        overlayLookupCache.current.set(searchParam, searchResults)
 
         if (searchResults.length === 1) {
           const domain = searchResults[0]
@@ -293,7 +377,12 @@ function Browser() {
         }
       }
     } catch (error) {
-      console.warn('[OverlayLookup] Search failed:', error)
+      // Ignore errors from cancelled requests
+      if (!isOverlayLookupCancelled.current) {
+        console.warn('[OverlayLookup] Search failed:', error)
+      }
+    } finally {
+      setIsOverlaySearching(false)
     }
   }, [updateActiveTab])
 
@@ -860,6 +949,25 @@ const shareCurrent = useCallback(async () => {
                   }}
                 />
               )}
+
+              {/* ---- Overlay Search Loading Indicator ---- */}
+              {isOverlaySearching && (
+                <View style={styles.overlaySearchContainer}>
+                  <BlurChrome style={styles.overlaySearchCard} borderRadius={radii.xl}>
+                    <ActivityIndicator size="small" color={colors.textPrimary} />
+                    <Text style={[styles.overlaySearchText, { color: colors.textPrimary }]}>
+                      Searching for app on overlay
+                    </Text>
+                    <TouchableOpacity
+                      onPress={cancelOverlayLookup}
+                      hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                      style={styles.overlaySearchCloseButton}
+                    >
+                      <Ionicons name="close" size={18} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                  </BlurChrome>
+                </View>
+              )}
             </>
           )}
 
@@ -968,5 +1076,25 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20,
+  },
+  overlaySearchContainer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 90,
+  },
+  overlaySearchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+  },
+  overlaySearchText: {
+    ...typography.subhead,
+  },
+  overlaySearchCloseButton: {
+    marginLeft: spacing.md,
+    padding: spacing.xs,
   },
 })
