@@ -44,6 +44,7 @@ import { getPermissionState } from '@/utils/permissionsManager'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
+import { mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
@@ -782,6 +783,7 @@ const shareCurrent = useCallback(async () => {
             onMessage={handleMessage}
             injectedJavaScript={injectedJavaScript}
             injectedJavaScriptBeforeContentLoaded={
+              mediaSourcePolyfill + '\n' +
               downloadInterceptScript + '\n' +
               getPermissionScript(
                 permissionsDeniedForCurrentDomain,
