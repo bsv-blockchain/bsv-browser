@@ -26,9 +26,9 @@ type StatusInfo = { label: string; color: string }
 function getStatusInfo(status: string, colors: any): StatusInfo {
   switch (status) {
     case 'completed': return { label: 'Confirmed', color: colors.success }
-    case 'unproven': return { label: 'Broadcast', color: colors.warning }
-    case 'sending': return { label: 'Sending', color: colors.warning }
-    case 'nosend': return { label: 'Local', color: colors.textQuaternary }
+    case 'unproven': return { label: 'Accepted', color: colors.success }
+    case 'sending': return { label: 'Broadcasting', color: colors.success }
+    case 'nosend': return { label: 'Not Sent', color: colors.warning }
     case 'failed': return { label: 'Failed', color: colors.error }
     default: return { label: status, color: colors.textSecondary }
   }
@@ -59,7 +59,7 @@ export default function TransactionsScreen() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      setLoading(true)
+      if (actions.length === 0) setLoading(true)
       const result = await fetchActions(0)
       if (cancelled || !result) return
       setActions(result.actions.reverse())
