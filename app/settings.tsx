@@ -9,10 +9,12 @@ import { useBrowserMode } from '@/context/BrowserModeContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
+import { router } from 'expo-router'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { sdk } from '@bsv/wallet-toolbox-mobile'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Clipboard from '@react-native-clipboard/clipboard'
+import packageJson from '@/package.json'
 
 const BALANCE_CACHE_KEY = 'cached_wallet_balance'
 const BALANCE_CACHE_TIMESTAMP_KEY = 'cached_wallet_balance_timestamp'
@@ -198,10 +200,10 @@ export default function SettingsScreen() {
           <ListRow
             label={t('bsv_network')}
             value={switchingNetwork ? 'Switching...' : (NETWORKS.find(n => n.id === selectedNetwork)?.label ?? selectedNetwork)}
-            icon="server-outline"
+            icon="globe-outline"
             iconColor={NETWORKS.find(n => n.id === selectedNetwork)?.color ?? colors.success}
             onPress={isWeb2Mode ? undefined : () => setNetworkExpanded(e => !e)}
-            showChevron={!isWeb2Mode}
+            showChevron={networkExpanded}
             chevronDown={networkExpanded}
           />
           {networkExpanded && !isWeb2Mode && (
@@ -242,6 +244,12 @@ export default function SettingsScreen() {
                 />
               </TouchableOpacity>
             }
+          />
+          <ListRow
+            label="Transactions"
+            icon="receipt-outline"
+            iconColor={colors.gold}
+            onPress={() => router.push('/transactions')}
             isLast
           />
         </GroupedSection>
@@ -258,6 +266,13 @@ export default function SettingsScreen() {
             isLast
           />
         </GroupedSection>
+
+        {/* ── Version ── */}
+        <View style={{ alignItems: 'center', paddingTop: spacing.lg }}>
+          <Text style={[typography.caption2, { color: colors.textTertiary }]}>
+            v{packageJson.version}
+          </Text>
+        </View>
       </ScrollView>
     </View>
   )

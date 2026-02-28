@@ -78,6 +78,7 @@ export interface WalletContextValue {
   setWalletBuilt: (current: boolean) => void
   buildWalletFromMnemonic: (mnemonic?: string) => Promise<void>
   switchNetwork: (network: 'main' | 'test') => Promise<void>
+  storage: StorageExpoSQLite | null
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -106,7 +107,8 @@ export const WalletContext = createContext<WalletContextValue>({
   selectedNetwork: 'main',
   setWalletBuilt: (current: boolean) => {},
   buildWalletFromMnemonic: async () => {},
-  switchNetwork: async () => {}
+  switchNetwork: async () => {},
+  storage: null
 })
 
 type PermissionType = 'identity' | 'protocol' | 'renewal' | 'basket'
@@ -168,6 +170,7 @@ interface WalletContextProps {
 
 export const WalletContextProvider: React.FC<WalletContextProps> = ({ children = <></> }) => {
   const [managers, setManagers] = useState<ManagerState>({})
+  const [storage, setStorage] = useState<StorageExpoSQLite | null>(null)
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const adminOriginator = ADMIN_ORIGINATOR
   const [recentApps, setRecentApps] = useState<any[]>([])
@@ -661,6 +664,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           await phoneStorage.migrate('bsv-wallet', identityKey)
 
           console.log('[WalletContext] Local SQLite storage initialized successfully')
+          setStorage(phoneStorage)
 
           // addWalletStorageProvider calls makeAvailable internally
           try {
@@ -1021,7 +1025,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedNetwork,
       setWalletBuilt,
       buildWalletFromMnemonic,
-      switchNetwork
+      switchNetwork,
+      storage
     }),
     [
       managers,
@@ -1048,7 +1053,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedNetwork,
       setWalletBuilt,
       buildWalletFromMnemonic,
-      switchNetwork
+      switchNetwork,
+      storage
     ]
   )
 

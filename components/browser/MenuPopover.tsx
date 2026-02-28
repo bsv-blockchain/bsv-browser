@@ -11,7 +11,6 @@ import { Ionicons } from '@expo/vector-icons'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useBrowserMode } from '@/context/BrowserModeContext'
-import { useSheet } from '@/context/SheetContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 
 let LiquidGlassView: React.ComponentType<any> | null = null

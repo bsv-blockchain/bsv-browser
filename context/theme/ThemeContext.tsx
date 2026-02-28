@@ -67,6 +67,8 @@ export interface ThemeColors {
   basketApproval: string
   identityApproval: string
   renewalApproval: string
+
+  gold: string
 }
 
 export interface ThemeContextType {
@@ -96,6 +98,7 @@ const lightColors: ThemeColors = {
   basketApproval: tokenLightColors.permissionBasket,
   identityApproval: tokenLightColors.permissionIdentity,
   renewalApproval: tokenLightColors.accentSecondary,
+  gold: '#ebcc1c'
 }
 
 const darkColors: ThemeColors = {
@@ -117,6 +120,7 @@ const darkColors: ThemeColors = {
   basketApproval: tokenDarkColors.permissionBasket,
   identityApproval: tokenDarkColors.permissionIdentity,
   renewalApproval: tokenDarkColors.accentSecondary,
+  gold: '#92811f',
 }
 
 // Create the context with default values
