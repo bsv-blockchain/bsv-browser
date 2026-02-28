@@ -37,12 +37,13 @@ function getStatusInfo(status: string, colors: any): StatusInfo {
 export default function TransactionsScreen() {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, selectedNetwork, storage } = useWallet()
+  const { managers, adminOriginator, selectedNetwork, storage, txStatusVersion } = useWallet()
 
   const [actions, setActions] = useState<WalletAction[]>([])
   const [totalActions, setTotalActions] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [copyingTxid, setCopyingTxid] = useState<string | null>(null)
   const offsetRef = useRef(0)
 
@@ -67,7 +68,7 @@ export default function TransactionsScreen() {
       setLoading(false)
     })()
     return () => { cancelled = true }
-  }, [fetchActions])
+  }, [fetchActions, txStatusVersion])
 
   const loadMore = useCallback(async () => {
     if (loadingMore || offsetRef.current >= totalActions) return
@@ -80,6 +81,17 @@ export default function TransactionsScreen() {
     }
     setLoadingMore(false)
   }, [loadingMore, totalActions, fetchActions])
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    const result = await fetchActions(0)
+    if (result) {
+      setActions(result.actions.reverse())
+      setTotalActions(result.totalActions)
+      offsetRef.current = result.actions.length
+    }
+    setRefreshing(false)
+  }, [fetchActions])
 
   const handleExplorerLink = useCallback((txid: string) => {
     const baseUrl = selectedNetwork === 'test'
@@ -189,6 +201,8 @@ export default function TransactionsScreen() {
           renderItem={renderItem}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           ListFooterComponent={
             loadingMore
               ? <ActivityIndicator style={{ padding: spacing.lg }} color={colors.accent} />

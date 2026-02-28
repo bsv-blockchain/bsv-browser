@@ -13,7 +13,7 @@ const CACHE_DURATION = 30000 // 30 seconds
 
 export default function Balance() {
   const { colors } = useTheme()
-  const { managers, adminOriginator } = useWallet()
+  const { managers, adminOriginator, txStatusVersion } = useWallet()
   const [accountBalance, setAccountBalance] = React.useState<number | null>(null)
   const [balanceLoading, setBalanceLoading] = React.useState(false)
 
@@ -88,6 +88,13 @@ export default function Balance() {
       mounted = false
     }
   }, [refreshBalance])
+
+  // Refresh balance when SSE reports a transaction status change
+  useEffect(() => {
+    if (txStatusVersion > 0) {
+      refreshBalance()
+    }
+  }, [txStatusVersion, refreshBalance])
 
   return (
     <View style={[componentStyles.container, { backgroundColor: colors.paperBackground }]}>

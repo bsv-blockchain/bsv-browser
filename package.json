@@ -28,7 +28,7 @@
     "@bsv/btms-permission-module": "^1.0.1",
     "@bsv/message-box-client": "^2.0.2",
     "@bsv/sdk": "^2.0.4",
-    "@bsv/wallet-toolbox-mobile": "^2.0.20",
+    "@bsv/wallet-toolbox-mobile": "^2.0.25-beta.0",
     "@callstack/liquid-glass": "^0.7.0",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",

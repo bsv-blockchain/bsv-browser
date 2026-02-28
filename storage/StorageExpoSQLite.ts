@@ -117,6 +117,28 @@ export class StorageExpoSQLite extends StorageProvider {
     this._settings = undefined
   }
 
+  // ============================================================================
+  // Key-value store (for app-level state like SSE lastEventId)
+  // ============================================================================
+
+  async getKeyValue(key: string): Promise<string | undefined> {
+    const db = this.getDB()
+    const row = await db.getFirstAsync(
+      'SELECT value FROM key_value_store WHERE key = ?',
+      [key]
+    ) as { value: string } | null
+    return row?.value
+  }
+
+  async setKeyValue(key: string, value: string): Promise<void> {
+    const db = this.getDB()
+    await db.runAsync(
+      `INSERT INTO key_value_store (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      [key, value, new Date().toISOString()]
+    )
+  }
+
   async transaction<T>(scope: (trx: TrxToken) => Promise<T>, trx?: TrxToken): Promise<T> {
     // If already inside a transaction, reuse it — no nested BEGIN.
     if (trx) return await scope(trx)

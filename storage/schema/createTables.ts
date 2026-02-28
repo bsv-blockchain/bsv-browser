@@ -309,4 +309,13 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       maxOutputScript INTEGER NOT NULL
     );
   `)
+
+  // Key-value store for app-level state (e.g. SSE lastEventId)
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS key_value_store (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `)
 }

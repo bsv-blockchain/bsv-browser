@@ -1,6 +1,6 @@
 const F = 'context/WalletContext'
 
-import React, { useState, useEffect, createContext, useMemo, useCallback, useContext } from 'react'
+import React, { useState, useEffect, createContext, useMemo, useCallback, useContext, useRef } from 'react'
 import {
   Wallet,
   WalletPermissionsManager,
@@ -34,6 +34,7 @@ import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from '@/storage'
 import { createBtmsModule } from '@bsv/btms-permission-module'
 import { BsvExchangeRate, WalletServicesOptions } from '@bsv/wallet-toolbox-mobile/out/src/sdk'
+import { AppState, AppStateStatus } from 'react-native'
 
 
 // -----
@@ -79,6 +80,8 @@ export interface WalletContextValue {
   buildWalletFromMnemonic: (mnemonic?: string) => Promise<void>
   switchNetwork: (network: 'main' | 'test') => Promise<void>
   storage: StorageExpoSQLite | null
+  /** Incremented when a transaction status changes via SSE, triggers UI refresh */
+  txStatusVersion: number
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -108,7 +111,8 @@ export const WalletContext = createContext<WalletContextValue>({
   setWalletBuilt: (current: boolean) => {},
   buildWalletFromMnemonic: async () => {},
   switchNetwork: async () => {},
-  storage: null
+  storage: null,
+  txStatusVersion: 0
 })
 
 type PermissionType = 'identity' | 'protocol' | 'renewal' | 'basket'
@@ -172,6 +176,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [managers, setManagers] = useState<ManagerState>({})
   const [storage, setStorage] = useState<StorageExpoSQLite | null>(null)
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
+  const [txStatusVersion, setTxStatusVersion] = useState(0)
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState)
   const adminOriginator = ADMIN_ORIGINATOR
   const [recentApps, setRecentApps] = useState<any[]>([])
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
@@ -600,11 +606,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         const bsvExchangeRate = await getExchangeRate()
 
+        // Derive a stable callback token for ARC SSE event streaming
+        const callbackToken = keyDeriver.identityKey.substring(0, 32)
+
         const mainnetServices: WalletServicesOptions = {
           chain: selectedNetwork,
           arcUrl: process.env?.EXPO_PUBLIC_ARC_URL ?? '',
           arcConfig: {
-            apiKey: process.env?.EXPO_PUBLIC_ARC_API_KEY ?? ''
+            apiKey: process.env?.EXPO_PUBLIC_ARC_API_KEY ?? '',
+            callbackToken
           },
           bsvUpdateMsecs: 60 * 60 * 1000,
           fiatExchangeRates: {
@@ -627,7 +637,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           bsvExchangeRate,
           arcUrl: process.env?.EXPO_PUBLIC_TEST_ARC_URL ?? '',
           arcConfig: {
-            apiKey: process.env?.EXPO_PUBLIC_TEST_ARC_API_KEY ?? ''
+            apiKey: process.env?.EXPO_PUBLIC_TEST_ARC_API_KEY ?? '',
+            callbackToken
           },
           bsvUpdateMsecs: 60 * 60 * 1000000,
           fiatExchangeRates: {
@@ -651,11 +662,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         // Use user-selected storage provider
         // Check if user selected local storage
+        let phoneStorage: StorageExpoSQLite | undefined
         if (selectedStorageUrl === 'local') {
           console.log('[WalletContext] Using local SQLite storage')
 
           const identityKey = keyDeriver.identityKey
-          const phoneStorage = new StorageExpoSQLite({
+          phoneStorage = new StorageExpoSQLite({
             ...StorageProvider.createStorageBaseOptions(chain),
             feeModel: { model: 'sat/kb', value: 100 },
             identityKey
@@ -727,12 +739,21 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         // Start background monitor for transaction status updates (sending → unproven → completed)
         try {
           const monitorOptions = Monitor.createDefaultWalletMonitorOptions(chain, storageManager, services)
+          monitorOptions.callbackToken = callbackToken
+          monitorOptions.onTransactionStatusChanged = async (_txid: string, _newStatus: string) => {
+            setTxStatusVersion(v => v + 1)
+          }
+          if (phoneStorage) {
+            const SSE_KEY = 'sse_last_event_id'
+            monitorOptions.loadLastSSEEventId = () => phoneStorage!.getKeyValue(SSE_KEY)
+            monitorOptions.saveLastSSEEventId = (id: string) => phoneStorage!.setKeyValue(SSE_KEY, id)
+          }
           const monitor = new Monitor(monitorOptions)
           monitor.addDefaultTasks()
           // startTasks runs in background — don't await (it never resolves until stopTasks)
           monitor.startTasks().catch(e => console.error('[WalletContext] Monitor error:', e))
           ;(window as any).walletMonitor = monitor
-          logWithTimestamp(F, 'Monitor started successfully')
+          logWithTimestamp(F, 'Monitor started with ARC SSE support')
         } catch (error: any) {
           console.warn('[WalletContext] Failed to start monitor:', error.message)
         }
@@ -906,6 +927,32 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     loadSettings()
   }, [managers])
 
+  // AppState lifecycle: pause SSE on background, resume + catchup on foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      const wasBackground = appStateRef.current.match(/inactive|background/)
+      const isNowForeground = nextAppState === 'active'
+
+      if (wasBackground && isNowForeground) {
+        const monitor = (window as any).walletMonitor as Monitor | undefined
+        if (monitor) {
+          monitor.resumeSSE()
+          // Bump version to trigger UI refresh after returning from background
+          setTxStatusVersion(v => v + 1)
+        }
+      } else if (appStateRef.current === 'active' && nextAppState.match(/inactive|background/)) {
+        const monitor = (window as any).walletMonitor as Monitor | undefined
+        if (monitor) {
+          monitor.pauseSSE()
+        }
+      }
+
+      appStateRef.current = nextAppState
+    })
+
+    return () => subscription.remove()
+  }, [])
+
   const logout = useCallback(() => {
     // Clear localStorage to prevent auto-login
     logWithTimestamp(F, 'Initiating logout process')
@@ -1026,7 +1073,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setWalletBuilt,
       buildWalletFromMnemonic,
       switchNetwork,
-      storage
+      storage,
+      txStatusVersion
     }),
     [
       managers,
@@ -1054,7 +1102,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setWalletBuilt,
       buildWalletFromMnemonic,
       switchNetwork,
-      storage
+      storage,
+      txStatusVersion
     ]
   )
 
