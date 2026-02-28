@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to the Future</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #080c1e 0%, #844ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .landing-container {
+            text-align: center;
+            padding: 40px;
+            max-width: 800px;
+            animation: fadeIn 1s ease-in;
+        }
+
+        .landing-container h1 {
+            font-size: clamp(2.5rem, 8vw, 5rem);
+            font-weight: 300;
+            letter-spacing: -1px;
+            color: white;
+            margin: 0;
+            line-height: 1.2;
+            animation: slideUp 0.8s ease-out;
+        }
+
+        .subtitle {
+            font-size: 1.3rem;
+            color: rgba(255, 255, 255, 0.8);
+            margin-top: 1.5rem;
+            font-weight: 300;
+            animation: slideUp 0.8s ease-out 0.2s both;
+        }
+
+        .arrow-hint {
+            position: fixed;
+            bottom: 80px;
+            right: 80px;
+            font-size: 2.5rem;
+            color: rgba(255, 255, 255, 0.7);
+            animation: bounce 2s infinite;
+            cursor: pointer;
+            transition: color 0.3s ease;
+            z-index: 100;
+        }
+
+        .arrow-hint:hover {
+            color: rgba(255, 255, 255, 1);
+        }
+
+        .arrow-label {
+            position: absolute;
+            bottom: 60px;
+            right: 0;
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.6);
+            white-space: nowrap;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes bounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-15px);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .landing-container h1 {
+                font-size: 2.5rem;
+            }
+
+            .subtitle {
+                font-size: 1.1rem;
+            }
+
+            .arrow-hint {
+                bottom: 70px;
+                right: 70px;
+                font-size: 2rem;
+            }
+
+            .arrow-label {
+                bottom: 50px;
+                font-size: 0.75rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .landing-container {
+                padding: 20px;
+            }
+
+            .landing-container h1 {
+                font-size: 2rem;
+            }
+
+            .subtitle {
+                font-size: 1rem;
+            }
+
+            .arrow-hint {
+                bottom: 60px;
+                right: 60px;
+                font-size: 1.8rem;
+            }
+
+            .arrow-label {
+                bottom: 40px;
+                font-size: 0.7rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="landing-container">
+        <h1>Welcome to the Future</h1>
+        <p class="subtitle">Seamless Web3 Browsing</p>
+    </div>
+
+    <div class="arrow-hint" onclick="scrollToNext()">
+        <span class="arrow-label">Enable Web3 Here</span>
+        ↘
+    </div>
+
+    <script>
+        function scrollToNext() {
+            // Scroll down to next section
+            window.scrollBy({
+                top: window.innerHeight,
+                behavior: 'smooth'
+            });
+        }
+
+        // Optional: Add scroll hint after a few seconds
+        setTimeout(() => {
+            const arrow = document.querySelector('.arrow-hint');
+            if (arrow) {
+                arrow.style.animation = 'bounce 2s infinite';
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
