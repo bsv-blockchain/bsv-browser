@@ -13,7 +13,7 @@ import {
   Monitor,
   ChaintracksServiceClient
 } from '@bsv/wallet-toolbox-mobile'
-import { KeyDeriver, PrivateKey } from '@bsv/sdk'
+import { Beef, KeyDeriver, PrivateKey, Transaction } from '@bsv/sdk'
 import {
   DEFAULT_SETTINGS,
   WalletSettings,
@@ -33,8 +33,9 @@ import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from '@/storage'
 import { createBtmsModule } from '@bsv/btms-permission-module'
-import { BsvExchangeRate, WalletServicesOptions } from '@bsv/wallet-toolbox-mobile/out/src/sdk'
+import { BsvExchangeRate, WalletServicesOptions, PostBeefResult, PostTxResultForTxid } from '@bsv/wallet-toolbox-mobile/out/src/sdk'
 import { AppState, AppStateStatus } from 'react-native'
+import RNEventSource from 'react-native-sse'
 
 
 // -----
@@ -200,13 +201,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   // Separate request queues for basket and certificate access
   const [basketRequests, setBasketRequests] = useState<BasketAccessRequest[]>([])
-  logWithTimestamp(F, 'Basket requests initialized')
   const [certificateRequests, setCertificateRequests] = useState<CertificateAccessRequest[]>([])
-  logWithTimestamp(F, 'Certificate requests initialized')
   const [protocolRequests, setProtocolRequests] = useState<ProtocolAccessRequest[]>([])
-  logWithTimestamp(F, 'Protocol requests initialized')
   const [spendingRequests, setSpendingRequests] = useState<SpendingRequest[]>([])
-  logWithTimestamp(F, 'Spending requests initialized')
 
   // Pop the first request from the basket queue, close if empty, relinquish focus if needed
   const advanceBasketQueue = () => {
@@ -505,21 +502,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   // ---- WAB + network + storage configuration ----
   const [selectedWabUrl, setSelectedWabUrl] = useState<string>(DEFAULT_WAB_URL)
-  logWithTimestamp(F, 'Selected WAB URL initialized')
   const [selectedMethod, setSelectedMethod] = useState<string>('')
-  logWithTimestamp(F, 'Selected method initialized')
   const [selectedNetwork, setSelectedNetwork] = useState<'main' | 'test'>(DEFAULT_CHAIN) // "test" or "main"
-  logWithTimestamp(F, 'Selected network initialized')
   const [selectedStorageUrl, setSelectedStorageUrl] = useState<string>(DEFAULT_STORAGE_URL)
-  logWithTimestamp(F, 'Selected storage URL initialized')
 
   // Flag that indicates configuration is complete. For returning users,
   // if a snapshot exists we auto-mark configComplete.
   const [configStatus, setConfigStatus] = useState<ConfigStatus>('initial')
-  logWithTimestamp(F, 'Config status initialized')
   // Used to trigger a re-render after snapshot load completes.
   const [snapshotLoaded, setSnapshotLoaded] = useState<boolean>(false)
-  logWithTimestamp(F, 'Snapshot loaded state initialized')
 
   // Mark configuration complete. Auto-configured for local-only mode.
   const finalizeConfig = (wabConfig: WABConfig): boolean => {
@@ -655,6 +646,56 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         const serviceOptions = selectedNetwork === 'main' ? mainnetServices : testnetServices
         const services = new Services(serviceOptions)
+
+        // Replace all default broadcast providers with a single Arcade-specific one.
+        // Arcade expects EF format posted to /tx, and we need all broadcasts to go
+        // through our Arcade instance so SSE status events work.
+        const arcadeUrl = serviceOptions.arcUrl!
+        services.postBeefServices.remove('GorillaPoolArcBeef')
+        services.postBeefServices.remove('TaalArcBeef')
+        services.postBeefServices.add({
+          name: 'Arcade',
+          service: async (beef: Beef, txids: string[]): Promise<PostBeefResult> => {
+            const r: PostBeefResult = { name: 'Arcade', status: 'success', txidResults: [] }
+            try {
+              const tx = Transaction.fromBEEF(beef.toBinary())
+              const ef = tx.toEF()
+              const response = await fetch(`${arcadeUrl}/tx`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/octet-stream',
+                  'X-CallbackToken': callbackToken,
+                  'X-FullStatusUpdates': 'true'
+                },
+                body: new Uint8Array(ef)
+              })
+              const data = await response.json()
+              console.log(`[Arcade] POST /tx ${response.status}`, JSON.stringify(data))
+              const txResult: PostTxResultForTxid = {
+                txid: data.txid || txids[0],
+                status: response.ok ? 'success' : 'error',
+                notes: [{ when: new Date().toISOString(), what: 'arcadePostEF', txStatus: data.txStatus }]
+              }
+              if (data.txStatus === 'DOUBLE_SPEND_ATTEMPTED') {
+                txResult.doubleSpend = true
+                txResult.status = 'error'
+              }
+              r.txidResults.push(txResult)
+              r.status = txResult.status
+            } catch (err: any) {
+              console.log(`[Arcade] POST /tx error: ${err.message}`)
+              r.status = 'error'
+              r.txidResults.push({
+                txid: txids[0],
+                status: 'error',
+                serviceError: true,
+                data: err.message
+              })
+            }
+            return r
+          }
+        })
+
         const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)
         newManagers.settingsManager = wallet.settingsManager
 
@@ -740,6 +781,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         try {
           const monitorOptions = Monitor.createDefaultWalletMonitorOptions(chain, storageManager, services)
           monitorOptions.callbackToken = callbackToken
+          monitorOptions.EventSourceClass = RNEventSource
           monitorOptions.onTransactionStatusChanged = async (_txid: string, _newStatus: string) => {
             setTxStatusVersion(v => v + 1)
           }
@@ -927,7 +969,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     loadSettings()
   }, [managers])
 
-  // AppState lifecycle: pause SSE on background, resume + catchup on foreground
+  // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       const wasBackground = appStateRef.current.match(/inactive|background/)
@@ -936,14 +978,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       if (wasBackground && isNowForeground) {
         const monitor = (window as any).walletMonitor as Monitor | undefined
         if (monitor) {
-          monitor.resumeSSE()
-          // Bump version to trigger UI refresh after returning from background
-          setTxStatusVersion(v => v + 1)
-        }
-      } else if (appStateRef.current === 'active' && nextAppState.match(/inactive|background/)) {
-        const monitor = (window as any).walletMonitor as Monitor | undefined
-        if (monitor) {
-          monitor.pauseSSE()
+          monitor.fetchSSEEvents().then(count => {
+            if (count > 0) setTxStatusVersion(v => v + 1)
+          })
         }
       }
 
