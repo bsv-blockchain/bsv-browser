@@ -14,7 +14,6 @@ import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { sdk } from '@bsv/wallet-toolbox-mobile'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Clipboard from '@react-native-clipboard/clipboard'
-import packageJson from '@/package.json'
 
 const BALANCE_CACHE_KEY = 'cached_wallet_balance'
 const BALANCE_CACHE_TIMESTAMP_KEY = 'cached_wallet_balance_timestamp'
@@ -266,13 +265,6 @@ export default function SettingsScreen() {
             isLast
           />
         </GroupedSection>
-
-        {/* ── Version ── */}
-        <View style={{ alignItems: 'center', paddingTop: spacing.lg }}>
-          <Text style={[typography.caption2, { color: colors.textTertiary }]}>
-            v{packageJson.version}
-          </Text>
-        </View>
       </ScrollView>
     </View>
   )

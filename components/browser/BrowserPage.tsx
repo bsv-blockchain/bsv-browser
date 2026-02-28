@@ -22,6 +22,7 @@ import bookmarkStore from '@/stores/BookmarkStore'
 import { isValidUrl } from '@/utils/generalHelpers'
 import { HistoryList } from '@/components/browser/HistoryList'
 import { HistoryEntry } from '@/shared/types/browser'
+import packageJson from '@/package.json'
 
 const kNEW_TAB_URL = 'about:blank'
 
@@ -117,9 +118,14 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
         }}
       >
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-            Homepage
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+              Homepage
+            </Text>
+            <Text style={[typography.caption2, { color: colors.textTertiary }]}>
+              v{packageJson.version}
+            </Text>
+          </View>
           {editingHomepage ? (
             <View style={styles.homepageEdit}>
               <TextInput
@@ -237,13 +243,18 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: spacing.xxl,
   },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.xs,
+  },
   sectionTitle: {
     ...typography.footnote,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: spacing.md,
-    paddingHorizontal: spacing.xs,
   },
   appItem: {
     alignItems: 'center',
