@@ -40,3 +40,4 @@ expo-env.d.ts
 *.aab
 /BSVBrowser.app
 build-*.tar.gz
+/@bsvb__bsv-browser.jks
