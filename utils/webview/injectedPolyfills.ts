@@ -1,6 +1,6 @@
 // Build the injected JavaScript for the WebView from readable TS code instead of a giant string
 // The function below runs inside the WebView context. Do NOT reference any RN variables directly.
-function injectedPolyfills(acceptLanguage: string) {
+function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
   console.log('[Polyfill] injectedPolyfills running, before=', !!(window as any).__downloadInterceptInstalled)
 
   // Console logging bridge: install as early as possible
@@ -283,8 +283,10 @@ function injectedPolyfills(acceptLanguage: string) {
     }
   })()
 
-  // Camera access polyfill - provides mock streams to prevent WKWebView camera access
-  ;(function () {
+  // Camera access polyfill - provides mock streams to prevent WKWebView camera access.
+  // On Android the WebView can access the camera natively via getUserMedia, so we skip
+  // this polyfill and let the native path (+ onPermissionRequest) handle it instead.
+  if (!isAndroid) ;(function () {
     if (!navigator.mediaDevices) return
 
     const originalGetUserMedia = navigator.mediaDevices.getUserMedia?.bind(navigator.mediaDevices)
@@ -801,8 +803,8 @@ function injectedPolyfills(acceptLanguage: string) {
   })()
 }
 
-export function buildInjectedJavaScript(acceptLanguage: string) {
-  // Serialize the function and immediately invoke it with the provided argument
-  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)});`
+export function buildInjectedJavaScript(acceptLanguage: string, isAndroid: boolean) {
+  // Serialize the function and immediately invoke it with the provided arguments
+  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)}, ${isAndroid});`
 }
 

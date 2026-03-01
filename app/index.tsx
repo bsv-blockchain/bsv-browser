@@ -41,6 +41,7 @@ import { useWebAppManifest } from '@/hooks/useWebAppManifest'
 import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
 import PermissionModal from '@/components/browser/PermissionModal'
 import { getPermissionState } from '@/utils/permissionsManager'
+import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
@@ -489,7 +490,7 @@ const shareCurrent = useCallback(async () => {
   /* -------------------------------------------------------------------------- */
 
   const injectedJavaScript = useMemo(
-    () => buildInjectedJavaScript(getAcceptLanguageHeader()),
+    () => buildInjectedJavaScript(getAcceptLanguageHeader(), Platform.OS === 'android'),
     [getAcceptLanguageHeader]
   )
 
@@ -811,7 +812,36 @@ const shareCurrent = useCallback(async () => {
             mediaPlaybackRequiresUserAction={false}
             allowsInlineMediaPlayback={true}
             geolocationEnabled
-            onPermissionRequest={() => false}
+            onPermissionRequest={Platform.OS === 'android' ? (event: any) => {
+              // On Android, WebView fires this when the page calls getUserMedia.
+              // Request the corresponding OS permission, then grant/deny the WebView.
+              const resources: string[] = event.nativeEvent?.resources ?? []
+              ;(async () => {
+                try {
+                  const toGrant: string[] = []
+                  for (const resource of resources) {
+                    if (resource.includes('VIDEO_CAPTURE')) {
+                      const current = await check(PERMISSIONS.ANDROID.CAMERA)
+                      const granted = current === RESULTS.GRANTED
+                        || (await request(PERMISSIONS.ANDROID.CAMERA)) === RESULTS.GRANTED
+                      if (granted) toGrant.push(resource)
+                    } else if (resource.includes('AUDIO_CAPTURE')) {
+                      const current = await check(PERMISSIONS.ANDROID.RECORD_AUDIO)
+                      const granted = current === RESULTS.GRANTED
+                        || (await request(PERMISSIONS.ANDROID.RECORD_AUDIO)) === RESULTS.GRANTED
+                      if (granted) toGrant.push(resource)
+                    }
+                  }
+                  if (toGrant.length > 0) {
+                    event.nativeEvent.request.grant(toGrant)
+                  } else {
+                    event.nativeEvent.request.deny()
+                  }
+                } catch {
+                  event.nativeEvent.request.deny()
+                }
+              })()
+            } : () => false}
             onFileDownload={Platform.OS === 'ios' ? ({ nativeEvent }: any) => {
               handleUrlDownload(nativeEvent.downloadUrl).catch(() => {})
             } : undefined}
@@ -861,8 +891,8 @@ const shareCurrent = useCallback(async () => {
               }
               return true
             }}
-            androidLayerType={Platform.OS === 'android' ? 'software' : 'hardware'}
-            androidHardwareAccelerationDisabled={Platform.OS === 'android'}
+            androidLayerType="hardware"
+            androidHardwareAccelerationDisabled={false}
             onError={(e: any) => {
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
             }}
