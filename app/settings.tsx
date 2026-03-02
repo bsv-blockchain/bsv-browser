@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
+import { ActivityIndicator, View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
@@ -14,6 +14,7 @@ import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { sdk } from '@bsv/wallet-toolbox-mobile'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Clipboard from '@react-native-clipboard/clipboard'
+import { exportAllWalletDatabases } from '@/utils/exportDatabases'
 
 const BALANCE_CACHE_KEY = 'cached_wallet_balance'
 const BALANCE_CACHE_TIMESTAMP_KEY = 'cached_wallet_balance_timestamp'
@@ -22,7 +23,7 @@ const CACHE_DURATION = 30000
 export default function SettingsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  const { managers, adminOriginator, logout, selectedNetwork, switchNetwork } = useWallet()
+  const { managers, adminOriginator, logout, selectedNetwork, switchNetwork, storage } = useWallet()
   const { isWeb2Mode } = useBrowserMode()
   const { getMnemonic } = useLocalStorage()
   const [identityKey, setIdentityKey] = useState('')
@@ -32,6 +33,7 @@ export default function SettingsScreen() {
   const [balanceLoading, setBalanceLoading] = useState(false)
   const [switchingNetwork, setSwitchingNetwork] = useState(false)
   const [networkExpanded, setNetworkExpanded] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
 
   // Fetch identity key
   useEffect(() => {
@@ -114,6 +116,18 @@ export default function SettingsScreen() {
     })()
     return () => { cancelled = true }
   }, [managers.permissionsManager, refreshBalance])
+
+  const handleExportData = async () => {
+    if (isExporting) return
+    setIsExporting(true)
+    try {
+      await exportAllWalletDatabases(storage)
+    } catch (e) {
+      console.warn('[Settings] Export failed:', e)
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   const NETWORKS: { id: 'main' | 'test'; label: string; color: string }[] = [
     { id: 'main', label: t('mainnet'), color: colors.success },
@@ -220,6 +234,14 @@ export default function SettingsScreen() {
                 />
               </TouchableOpacity>
             }
+          />
+          <ListRow
+            label={t('export_data')}
+            icon="share-outline"
+            iconColor={colors.info}
+            onPress={handleExportData}
+            showChevron={false}
+            trailing={isExporting ? <ActivityIndicator size="small" /> : undefined}
           />
           <ListRow
             label={t('trust_network')}

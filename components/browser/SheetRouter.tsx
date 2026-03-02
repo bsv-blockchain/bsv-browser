@@ -11,7 +11,6 @@ import { spacing } from '@/context/theme/tokens'
 import type { SheetContextType } from '@/context/SheetContext'
 
 import { BrowserPage } from '@/components/browser/BrowserPage'
-import { MenuSheet } from '@/components/browser/MenuSheet'
 import PermissionsScreen from '@/components/browser/PermissionsScreen'
 import SettingsScreen from '@/app/settings'
 import Sheet from '@/components/ui/Sheet'
@@ -62,23 +61,8 @@ export function SheetRouter({
       visible={sheet.isOpen && sheet.route !== 'tabs'}
       onClose={sheet.close}
       title={getSheetTitle()}
-      heightPercent={sheet.route === 'menu' ? 0.65 : 0.85}
+      heightPercent={0.85}
     >
-      {sheet.route === 'menu' && (
-        <MenuSheet
-          isNewTab={isNewTab}
-          onBackToHomepage={() => {
-            updateActiveTab({ url: homepageUrl })
-            setAddressText(homepageUrl)
-          }}
-          onAddBookmark={() => {
-            if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
-              addBookmark(activeTab.title || t('untitled'), activeTab.url)
-            }
-          }}
-          onGoToLogin={() => router.push('/auth/mnemonic')}
-        />
-      )}
       {sheet.route === 'bookmarks' && (
         <View style={{ flex: 1, padding: spacing.lg }}>
           <BrowserPage inSheet onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} clearHistory={clearHistory} history={history} removeHistoryItem={removeHistoryItem} />

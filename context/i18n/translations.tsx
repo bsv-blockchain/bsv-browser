@@ -239,6 +239,7 @@ const resources = {
       // Amount input
       send_max: 'Send Max',
       entire_wallet_balance: 'Entire wallet balance',
+      export_data: 'Export Data',
     }
   },
   zh: {
@@ -374,6 +375,7 @@ const resources = {
 
       send_max: '发送最大值',
       entire_wallet_balance: '全部钱包余额',
+      export_data: '导出数据',
     }
   },
   hi: {
@@ -509,6 +511,7 @@ const resources = {
 
       send_max: 'अधिकतम भेजें',
       entire_wallet_balance: 'पूरी वॉलेट शेष राशि',
+      export_data: 'डेटा निर्यात करें',
     }
   },
   es: {
@@ -644,6 +647,7 @@ const resources = {
 
       send_max: 'Enviar máximo',
       entire_wallet_balance: 'Todo el saldo de la billetera',
+      export_data: 'Exportar datos',
     }
   },
   fr: {
@@ -779,6 +783,7 @@ const resources = {
 
       send_max: 'Envoyer le maximum',
       entire_wallet_balance: 'Solde total du portefeuille',
+      export_data: 'Exporter les données',
     }
   },
   ar: {
@@ -914,6 +919,7 @@ const resources = {
 
       send_max: 'إرسال الحد الأقصى',
       entire_wallet_balance: 'رصيد المحفظة بالكامل',
+      export_data: 'تصدير البيانات',
     }
   },
   pt: {
@@ -1049,6 +1055,7 @@ const resources = {
 
       send_max: 'Enviar máximo',
       entire_wallet_balance: 'Saldo total da carteira',
+      export_data: 'Exportar dados',
     }
   },
   bn: {
@@ -1184,6 +1191,7 @@ const resources = {
 
       send_max: 'সর্বোচ্চ পাঠান',
       entire_wallet_balance: 'সম্পূর্ণ ওয়ালেট ব্যালেন্স',
+      export_data: 'ডেটা রপ্তানি করুন',
     }
   },
   ru: {
@@ -1319,6 +1327,7 @@ const resources = {
 
       send_max: 'Отправить максимум',
       entire_wallet_balance: 'Весь баланс кошелька',
+      export_data: 'Экспортировать данные',
     }
   },
   id: {
@@ -1454,6 +1463,7 @@ const resources = {
 
       send_max: 'Kirim Maksimal',
       entire_wallet_balance: 'Seluruh saldo dompet',
+      export_data: 'Ekspor Data',
     }
   }
 }
