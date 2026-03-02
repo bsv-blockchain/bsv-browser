@@ -759,7 +759,7 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
 
     // Intercept fetch requests to add Accept-Language header
     const originalFetch = (window as any).fetch
-    ;(window as any).fetch = function (input: any, init: any = {}) {
+    const patchedFetch = function (input: any, init: any = {}) {
       // Merge headers
       const headers = new Headers(init.headers)
       if (!headers.has('Accept-Language')) {
@@ -774,6 +774,16 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
 
       return originalFetch.call(this, input, newInit)
     }
+    // Restore native toString so bot-detection checks see "[native code]"
+    try {
+      Object.defineProperty(patchedFetch, 'toString', {
+        value: () => 'function fetch() { [native code] }',
+        writable: false,
+        configurable: false
+      })
+      Object.defineProperty(patchedFetch, 'name', { value: 'fetch', configurable: true })
+    } catch {}
+    ;(window as any).fetch = patchedFetch
 
     // Also intercept XMLHttpRequest for older APIs
     const originalXHROpen = XMLHttpRequest.prototype.open
@@ -791,6 +801,14 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
       ;(this as any)._url = url
       return originalXHROpen.call(this, method, url, async, user, password)
     }
+    // Restore native toString on patched XHR prototype methods
+    try {
+      Object.defineProperty(XMLHttpRequest.prototype.open, 'toString', {
+        value: () => 'function open() { [native code] }',
+        writable: false,
+        configurable: false
+      })
+    } catch {}
 
     XMLHttpRequest.prototype.send = function (this: any, data: any) {
       // Add Accept-Language header if not already set
@@ -800,6 +818,13 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
       }
       return originalXHRSend.call(this, data)
     }
+    try {
+      Object.defineProperty(XMLHttpRequest.prototype.send, 'toString', {
+        value: () => 'function send() { [native code] }',
+        writable: false,
+        configurable: false
+      })
+    } catch {}
   })()
 }
 
