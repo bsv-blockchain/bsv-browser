@@ -3,6 +3,7 @@ import {
   View,
   Text,
   FlatList,
+  ListRenderItem,
   TouchableOpacity,
   ActivityIndicator,
   StyleSheet
@@ -62,7 +63,8 @@ export default function TransactionsScreen() {
       if (actions.length === 0) setLoading(true)
       const result = await fetchActions(0)
       if (cancelled || !result) return
-      setActions(result.actions.reverse())
+      const reversedActions = [...result.actions].reverse()
+      setActions(reversedActions)
       setTotalActions(result.totalActions)
       offsetRef.current = result.actions.length
       setLoading(false)
@@ -75,7 +77,8 @@ export default function TransactionsScreen() {
     setLoadingMore(true)
     const result = await fetchActions(offsetRef.current)
     if (result) {
-      setActions(prev => [...prev, ...result.actions.reverse()])
+      const reversedActions = [...result.actions].reverse()
+      setActions(prev => [...prev, ...reversedActions])
       setTotalActions(result.totalActions)
       offsetRef.current += result.actions.length
     }
@@ -86,7 +89,8 @@ export default function TransactionsScreen() {
     setRefreshing(true)
     const result = await fetchActions(0)
     if (result) {
-      setActions(result.actions.reverse())
+      const reversedActions = [...result.actions].reverse()
+      setActions(reversedActions)
       setTotalActions(result.totalActions)
       offsetRef.current = result.actions.length
     }
@@ -122,7 +126,7 @@ export default function TransactionsScreen() {
     }
   }, [storage, copyingTxid])
 
-  const renderItem = useCallback(({ item }: { item: WalletAction }) => {
+  const renderItem: ListRenderItem<WalletAction> = useCallback(({ item }) => {
     const status = getStatusInfo(item.status, colors)
     const isOutgoing = item.isOutgoing
     const amount = item.satoshis
@@ -175,6 +179,39 @@ export default function TransactionsScreen() {
     )
   }, [colors, handleExplorerLink, handleCopyRawTx, copyingTxid])
 
+  let content: React.ReactNode
+  if (loading) {
+    content = (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={colors.accent} />
+      </View>
+    )
+  } else if (actions.length === 0) {
+    content = (
+      <View style={styles.centered}>
+        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No transactions yet</Text>
+      </View>
+    )
+  } else {
+    content = (
+      <FlatList
+        data={actions}
+        keyExtractor={(item, index) => `${item.txid || index}-${index}`}
+        renderItem={renderItem}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.3}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        ListFooterComponent={
+          loadingMore
+            ? <ActivityIndicator style={{ padding: spacing.lg }} color={colors.accent} />
+            : <View style={{ height: insets.bottom + 40 }} />
+        }
+        style={{ backgroundColor: colors.background }}
+      />
+    )
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
       {/* Header */}
@@ -185,32 +222,7 @@ export default function TransactionsScreen() {
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Transactions</Text>
         <View style={styles.backButton} />
       </View>
-
-      {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.accent} />
-        </View>
-      ) : actions.length === 0 ? (
-        <View style={styles.centered}>
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No transactions yet</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={actions}
-          keyExtractor={(item, index) => `${item.txid || index}-${index}`}
-          renderItem={renderItem}
-          onEndReached={loadMore}
-          onEndReachedThreshold={0.3}
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          ListFooterComponent={
-            loadingMore
-              ? <ActivityIndicator style={{ padding: spacing.lg }} color={colors.accent} />
-              : <View style={{ height: insets.bottom + 40 }} />
-          }
-          style={{ backgroundColor: colors.background }}
-        />
-      )}
+      {content}
     </View>
   )
 }
