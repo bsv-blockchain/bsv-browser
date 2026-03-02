@@ -173,29 +173,6 @@ export default function SettingsScreen() {
 
         {/* ── Wallet ── */}
         <GroupedSection header="Wallet">
-          {identityKey ? (
-            <ListRow
-              label="Identity Key"
-              icon="finger-print-outline"
-              iconColor={colors.identityApproval}
-              value={`${identityKey.slice(0, 8)}...${identityKey.slice(-4)}`}
-              showChevron={false}
-              trailing={
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={[localStyles.keyValue, { color: colors.textSecondary }]}>
-                    {`${identityKey.slice(0, 8)}...${identityKey.slice(-4)}`}
-                  </Text>
-                  <TouchableOpacity onPress={handleCopyKey} style={{ padding: spacing.xs, marginLeft: spacing.xs }}>
-                    <Ionicons
-                      name={copiedKey ? 'checkmark' : 'copy-outline'}
-                      size={18}
-                      color={copiedKey ? colors.success : colors.textSecondary}
-                    />
-                  </TouchableOpacity>
-                </View>
-              }
-            />
-          ) : null}
           <ListRow
             label={t('bsv_network')}
             value={switchingNetwork ? 'Switching...' : (NETWORKS.find(n => n.id === selectedNetwork)?.label ?? selectedNetwork)}
@@ -261,8 +238,31 @@ export default function SettingsScreen() {
             icon="people-outline"
             iconColor={colors.info}
             onPress={() => router.push('/payments' as any)}
-            isLast
           />
+          {identityKey ? (
+            <ListRow
+              label="Identity Key"
+              icon="finger-print-outline"
+              iconColor={colors.identityApproval}
+              value={`${identityKey.slice(0, 8)}...${identityKey.slice(-4)}`}
+              showChevron={false}
+              trailing={
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={[localStyles.keyValue, { color: colors.textSecondary }]}>
+                    {`${identityKey.slice(0, 8)}...${identityKey.slice(-4)}`}
+                  </Text>
+                  <TouchableOpacity onPress={handleCopyKey} style={{ padding: spacing.xs, marginLeft: spacing.xs }}>
+                    <Ionicons
+                      name={copiedKey ? 'checkmark' : 'copy-outline'}
+                      size={18}
+                      color={copiedKey ? colors.success : colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+              }
+              isLast
+            />
+          ) : null}
         </GroupedSection>
 
         {/* ── Account ── */}
