@@ -151,9 +151,14 @@ export class StorageExpoSQLite extends StorageProvider {
     // attempt to BEGIN a new transaction while one is still active on this
     // single-writer SQLite connection.
     let resolve!: () => void
-    const acquired = new Promise<void>(r => { resolve = r })
-    const queued = this._txQueue.then(() => acquired)
-    this._txQueue = queued
+    const release = new Promise<void>(r => { resolve = r })
+
+    // Grab the tail of the queue, then advance it to include this transaction.
+    const prev = this._txQueue
+    this._txQueue = this._txQueue.then(() => release)
+
+    // Wait for the previous transaction to finish before beginning a new one.
+    await prev
 
     try {
       let result!: T
