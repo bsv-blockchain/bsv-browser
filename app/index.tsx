@@ -46,6 +46,7 @@ import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
 import { mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
+import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
@@ -571,6 +572,19 @@ const shareCurrent = useCallback(async () => {
         activeTab.webviewRef.current.injectJavaScript(getInjectableJSMessage(message))
       }
 
+      const sendErrorToWebView = (id: string, description: string, code: number = 1) => {
+        if (!activeTab?.webviewRef?.current) return
+        const message = {
+          type: 'CWI',
+          id,
+          isInvocation: false,
+          status: 'error',
+          code,
+          description
+        }
+        activeTab.webviewRef.current.injectJavaScript(getInjectableJSMessage(message))
+      }
+
       let msg
       try {
         msg = JSON.parse(event.nativeEvent.data)
@@ -599,6 +613,15 @@ const shareCurrent = useCallback(async () => {
       if (await routeWebViewMessage(msg)) return
 
       if (msg.call && (!wallet || isWeb2Mode)) {
+        if (msg.type === 'CWI' && msg.id) {
+          sendErrorToWebView(
+            msg.id,
+            isWeb2Mode
+              ? 'Wallet is disabled in Web2 mode'
+              : 'Wallet is not authenticated',
+            1
+          )
+        }
         if (!wallet && !isWeb2Mode) router.push('/auth/mnemonic')
         return
       }
@@ -643,7 +666,11 @@ const shareCurrent = useCallback(async () => {
         }
         sendResponseToWebView(msg.id, response)
       } catch (error: any) {
-        sendResponseToWebView(msg.id, { error: error?.message || 'unknown error' })
+        sendErrorToWebView(
+          msg.id,
+          error?.message || 'unknown error',
+          error?.code || 1
+        )
       }
     },
     [activeTab, wallet, routeWebViewMessage, isWeb2Mode]
@@ -802,6 +829,7 @@ const shareCurrent = useCallback(async () => {
             onMessage={handleMessage}
             injectedJavaScript={injectedJavaScript}
             injectedJavaScriptBeforeContentLoaded={
+              buildCWIProviderScript() + '\n' +
               mediaSourcePolyfill + '\n' +
               downloadInterceptScript + '\n' +
               getPermissionScript(
