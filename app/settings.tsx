@@ -252,6 +252,7 @@ export default function SettingsScreen() {
               iconColor={colors.identityApproval}
               value={`${identityKey.slice(0, 8)}...${identityKey.slice(-4)}`}
               showChevron={false}
+              onPress={handleCopyKey}
               trailing={
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Text style={[localStyles.keyValue, { color: colors.textSecondary }]}>
