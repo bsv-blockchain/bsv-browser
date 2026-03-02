@@ -14,7 +14,6 @@ import { BrowserPage } from '@/components/browser/BrowserPage'
 import { MenuSheet } from '@/components/browser/MenuSheet'
 import PermissionsScreen from '@/components/browser/PermissionsScreen'
 import SettingsScreen from '@/app/settings'
-import TrustScreen from '@/app/trust'
 import Sheet from '@/components/ui/Sheet'
 
 type Props = {
@@ -53,8 +52,6 @@ export function SheetRouter({
         return t('browser')
       case 'settings':
         return t('wallet')
-      case 'trust':
-        return t('trust_network')
       default:
         return undefined
     }
@@ -91,11 +88,6 @@ export function SheetRouter({
       {sheet.route === 'settings' && (
         <View style={{ flex: 1 }}>
           <SettingsScreen />
-        </View>
-      )}
-      {sheet.route === 'trust' && (
-        <View style={{ flex: 1 }}>
-          <TrustScreen />
         </View>
       )}
     </Sheet>

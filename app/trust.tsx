@@ -12,6 +12,8 @@ import {
   ActivityIndicator
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
+import { router } from 'expo-router'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -58,6 +60,7 @@ const fetchWithTimeout = async (url: string, ms: number) => {
 export default function TrustScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
+  const insets = useSafeAreaInsets()
 
   const { settings, updateSettings } = useWallet()
 
@@ -149,7 +152,15 @@ export default function TrustScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
+    <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }}>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: colors.separator }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="chevron-back" size={24} color={colors.accent} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('trust_network')}</Text>
+        <View style={styles.backButton} />
+      </View>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -561,6 +572,23 @@ function AddProviderModal({
 
 // -------------------- Styles --------------------
 const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    ...typography.headline,
+  },
   description: {
     ...typography.footnote,
     paddingHorizontal: spacing.xl,

@@ -222,6 +222,12 @@ export default function SettingsScreen() {
             }
           />
           <ListRow
+            label={t('trust_network')}
+            icon="shield-checkmark-outline"
+            iconColor="#7B4FD4"
+            onPress={() => router.push('/trust' as any)}
+          />
+          <ListRow
             label={t('transactions')}
             icon="receipt-outline"
             iconColor={colors.gold}

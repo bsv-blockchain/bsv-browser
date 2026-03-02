@@ -1077,7 +1077,6 @@ const shareCurrent = useCallback(async () => {
                   setShowTabsView(false)
                 }}
                 onSettings={() => sheet.push('settings')}
-                onTrust={() => sheet.push('trust')}
                 onEnableWeb3={() => router.push('/auth/mnemonic')}
               />
             </Animated.View>

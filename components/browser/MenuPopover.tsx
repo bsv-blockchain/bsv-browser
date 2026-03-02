@@ -35,7 +35,6 @@ interface MenuPopoverProps {
   onTabs: () => void
   onNewTab: () => void
   onSettings: () => void
-  onTrust: () => void
   onEnableWeb3: () => void
 }
 
@@ -85,7 +84,6 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   onTabs,
   onNewTab,
   onSettings,
-  onTrust,
   onEnableWeb3,
 }) => {
   const { t } = useTranslation()
@@ -114,7 +112,6 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       ) : (
         <>
           <Row icon="wallet-outline" label={t('wallet')} onPress={dismiss(onSettings)} />
-          <Row icon="shield-checkmark-outline" label={t('trust_network')} onPress={dismiss(onTrust)} />
         </>
       )}
 
