@@ -385,7 +385,9 @@ export default function LegacyPaymentsScreen() {
               <Text
                 style={[styles.addressText, { color: colors.textPrimary }]}
                 selectable
-                numberOfLines={2}
+                numberOfLines={1}
+                ellipsizeMode="middle"
+                onPress={handleCopy}
               >
                 {paymentAddress}
               </Text>
