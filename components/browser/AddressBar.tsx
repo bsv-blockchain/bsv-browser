@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { spacing, typography } from '@/context/theme/tokens'
@@ -111,6 +112,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   onClearText,
   inputRef,
 }) => {
+  const { t } = useTranslation()
   const { colors } = useTheme()
 
   // Inside LiquidGlassView, iOS semantic colors get vibrant treatment —
@@ -191,7 +193,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
                 textAlign: addressFocused ? 'left' : 'center',
               },
             ]}
-            placeholder="Search or enter website"
+            placeholder={t('search_or_enter_website')}
             placeholderTextColor={gc?.tertiary ?? colors.textTertiary}
             selectTextOnFocus
           />

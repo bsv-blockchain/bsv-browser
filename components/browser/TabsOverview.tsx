@@ -181,7 +181,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
           accessibilityLabel="Close all tabs"
         >
           <Ionicons name="trash-outline" size={20} color={colors.accent} />
-          <Text style={[styles.clearAllText, { color: colors.accent }]}>Clear All Tabs</Text>
+          <Text style={[styles.clearAllText, { color: colors.accent }]}>{t('clear_all_tabs')}</Text>
         </TouchableOpacity>
         <IconButton
           name="close"

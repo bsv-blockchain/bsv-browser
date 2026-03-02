@@ -100,7 +100,7 @@ export const MenuSheet: React.FC<MenuSheetProps> = ({
       {isWeb2Mode && (
         <GroupedSection>
           <ListRow
-            label={t('unlock_web3_features') || 'Unlock Web3 features'}
+            label={t('unlock_web3_features')}
             icon="log-in-outline"
             iconColor="#34C759"
             onPress={() => { onGoToLogin(); close() }}

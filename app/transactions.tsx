@@ -13,6 +13,7 @@ import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { toast } from 'react-toastify'
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
@@ -24,18 +25,19 @@ const PAGE_SIZE = 30
 
 type StatusInfo = { label: string; color: string }
 
-function getStatusInfo(status: string, colors: any): StatusInfo {
+function getStatusInfo(status: string, colors: any, t: (key: string) => string): StatusInfo {
   switch (status) {
-    case 'completed': return { label: 'Confirmed', color: colors.success }
-    case 'unproven': return { label: 'Accepted', color: colors.success }
-    case 'sending': return { label: 'Broadcasting', color: colors.success }
-    case 'nosend': return { label: 'Not Sent', color: colors.warning }
-    case 'failed': return { label: 'Failed', color: colors.error }
+    case 'completed': return { label: t('tx_status_confirmed'), color: colors.success }
+    case 'unproven': return { label: t('tx_status_accepted'), color: colors.success }
+    case 'sending': return { label: t('tx_status_broadcasting'), color: colors.success }
+    case 'nosend': return { label: t('tx_status_not_sent'), color: colors.warning }
+    case 'failed': return { label: t('tx_status_failed'), color: colors.error }
     default: return { label: status, color: colors.textSecondary }
   }
 }
 
 export default function TransactionsScreen() {
+  const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   const { managers, adminOriginator, selectedNetwork, storage, txStatusVersion } = useWallet()
@@ -114,20 +116,20 @@ export default function TransactionsScreen() {
       if (rawTx) {
         const hex = Array.from(rawTx).map(b => b.toString(16).padStart(2, '0')).join('')
         Clipboard.setString(hex)
-        toast.success('Transaction copied')
+        toast.success(t('tx_copied'))
       } else {
-        toast.error('Raw transaction not available')
+        toast.error(t('tx_not_available'))
       }
     } catch (e) {
       console.error('Failed to copy raw tx:', e)
-      toast.error('Failed to copy transaction')
+      toast.error(t('tx_copy_failed'))
     } finally {
       setCopyingTxid(null)
     }
   }, [storage, copyingTxid])
 
   const renderItem: ListRenderItem<WalletAction> = useCallback(({ item }) => {
-    const status = getStatusInfo(item.status, colors)
+    const status = getStatusInfo(item.status, colors, t)
     const isOutgoing = item.isOutgoing
     const amount = item.satoshis
 
@@ -135,7 +137,7 @@ export default function TransactionsScreen() {
       <View style={[styles.row, { borderBottomColor: colors.separator }]}>
         <View style={styles.rowLeft}>
           <Text style={[styles.description, { color: colors.textPrimary }]} numberOfLines={1}>
-            {item.description || 'Transaction'}
+            {item.description || t('transactions')}
           </Text>
           <View style={styles.statusRow}>
             <View style={[styles.statusBadge, { backgroundColor: status.color + '20' }]}>
@@ -177,7 +179,7 @@ export default function TransactionsScreen() {
         </View>
       </View>
     )
-  }, [colors, handleExplorerLink, handleCopyRawTx, copyingTxid])
+  }, [colors, handleExplorerLink, handleCopyRawTx, copyingTxid, t])
 
   let content: React.ReactNode
   if (loading) {
@@ -189,7 +191,7 @@ export default function TransactionsScreen() {
   } else if (actions.length === 0) {
     content = (
       <View style={styles.centered}>
-        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No transactions yet</Text>
+        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{t('no_transactions')}</Text>
       </View>
     )
   } else {
@@ -219,7 +221,7 @@ export default function TransactionsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Transactions</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('transactions')}</Text>
         <View style={styles.backButton} />
       </View>
       {content}

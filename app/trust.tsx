@@ -92,10 +92,10 @@ export default function TrustScreen() {
           })
         )
       )
-      setSnack(t('trust_updated') || 'Trust relationships updated!')
+      setSnack(t('trust_updated'))
       return true
     } catch (e: any) {
-      setSnack(e?.message || (t('failed_to_save') as string) || 'Failed to save settings')
+      setSnack(e?.message || t('failed_to_save'))
       return false
     } finally {
       setSaving(false)
@@ -135,12 +135,12 @@ export default function TrustScreen() {
 
   const onRemove = (identityKey: string) => {
     Alert.alert(
-      t('confirm_delete') || 'Delete Trust Relationship',
-      t('confirm_delete_body') || 'Are you sure you want to delete this trust relationship? This cannot be undone.',
+      t('confirm_delete'),
+      t('confirm_delete_body'),
       [
-        { text: t('cancel') || 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: t('delete') || 'Delete',
+          text: t('delete'),
           style: 'destructive',
           onPress: () => setTrustedEntities(prev => prev.filter(c => c.identityKey !== identityKey))
         }
@@ -160,17 +160,17 @@ export default function TrustScreen() {
       >
         {/* Description */}
         <Text style={[styles.description, { color: colors.textSecondary }]}>
-          Order certifiers by priority. Apps will display higher-ranked certifiers first.
+          {t('order_certifiers_hint')}
         </Text>
 
         {/* ── Certifiers ── */}
-        <GroupedSection header="Certifiers">
+        <GroupedSection header={t('certifiers')}>
           {/* Search bar */}
           <View style={[styles.searchRow, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }]}>
             <Ionicons name="search" size={16} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
             <TextInput
               style={[styles.searchInput, { color: colors.textPrimary }]}
-              placeholder="Search"
+              placeholder={t('search')}
               placeholderTextColor={colors.textSecondary}
               value={query}
               onChangeText={setQuery}
@@ -179,7 +179,7 @@ export default function TrustScreen() {
 
           {filtered.length === 0 ? (
             <View style={styles.emptyBox}>
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No certifiers yet.</Text>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{t('no_certifiers')}</Text>
             </View>
           ) : (
             filtered.map((item, idx) => {
@@ -239,7 +239,7 @@ export default function TrustScreen() {
             onPress={() => setShowAdd(true)}
           >
             <Ionicons name="add" size={18} color={colors.accent} style={{ marginRight: spacing.sm }} />
-            <Text style={[styles.addProviderText, { color: colors.accent }]}>Add Provider</Text>
+            <Text style={[styles.addProviderText, { color: colors.accent }]}>{t('add_provider')}</Text>
           </TouchableOpacity>
         </GroupedSection>
       </ScrollView>
@@ -247,7 +247,7 @@ export default function TrustScreen() {
       {/* Save bar */}
       {settingsNeedsUpdate && (
         <View style={[styles.saveBar, { backgroundColor: colors.backgroundElevated, borderTopColor: colors.separator }]}>
-          <Text style={[styles.saveBarText, { color: colors.textSecondary }]}>You have unsaved changes</Text>
+          <Text style={[styles.saveBarText, { color: colors.textSecondary }]}>{t('unsaved_changes')}</Text>
           <TouchableOpacity
             onPress={handleSave}
             disabled={saving}
@@ -256,7 +256,7 @@ export default function TrustScreen() {
             {saving ? (
               <ActivityIndicator size="small" color={colors.background} />
             ) : (
-              <Text style={[styles.saveBtnText, { color: colors.background }]}>Save</Text>
+              <Text style={[styles.saveBtnText, { color: colors.background }]}>{t('save')}</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -279,7 +279,7 @@ export default function TrustScreen() {
         onClose={() => setShowAdd(false)}
         onAdd={(c) => {
           if (trustedEntities.some(x => x.identityKey === c.identityKey)) {
-            setSnack('An entity with this public key is already in the list!')
+            setSnack(t('duplicate_key_error'))
             return
           }
           setTrustedEntities(prev => [...prev, { ...c, trust: 1 }])
@@ -303,6 +303,7 @@ function AddProviderModal({
   onAdd: (c: Omit<Certifier, 'trust'>) => void
   colors: any
 }) {
+  const { t } = useTranslation()
   const [advanced, setAdvanced] = useState(false)
   const [domain, setDomain] = useState('')
   const [name, setName] = useState('')
@@ -394,7 +395,7 @@ function AddProviderModal({
       <View style={styles.modalOverlay}>
         <View style={[styles.modalCard, { backgroundColor: colors.backgroundElevated, borderColor: colors.separator }]}>
           <View style={[styles.modalHeader]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Add Provider</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t('add_provider')}</Text>
             <TouchableOpacity onPress={onClose}>
               <Ionicons name="close" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
@@ -425,7 +426,7 @@ function AddProviderModal({
               ) : (
                 <TouchableOpacity onPress={handleDomainSubmit} style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
                   <Ionicons name="document-text-outline" size={16} color={colors.background} />
-                  <Text style={[styles.primaryBtnText, { color: colors.background }]}>Get Provider Details</Text>
+                  <Text style={[styles.primaryBtnText, { color: colors.background }]}>{t('get_provider_details')}</Text>
                 </TouchableOpacity>
               )}
             </>
@@ -493,7 +494,7 @@ function AddProviderModal({
               ) : (
                 <TouchableOpacity onPress={handleDirectValidate} style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
                   <Ionicons name="shield-checkmark-outline" size={16} color={colors.background} />
-                  <Text style={[styles.primaryBtnText, { color: colors.background }]}>Validate Details</Text>
+                  <Text style={[styles.primaryBtnText, { color: colors.background }]}>{t('validate_details')}</Text>
                 </TouchableOpacity>
               )}
             </>
@@ -502,7 +503,7 @@ function AddProviderModal({
           {/* Toggle advanced */}
           <TouchableOpacity onPress={() => setAdvanced(v => !v)} style={styles.advancedBtn}>
             <Ionicons name={advanced ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color={colors.textPrimary} />
-            <Text style={{ marginLeft: spacing.xs, color: colors.textPrimary }}>{advanced ? 'Hide' : 'Show'} Advanced</Text>
+            <Text style={{ marginLeft: spacing.xs, color: colors.textPrimary }}>{advanced ? t('hide_advanced') : t('show_advanced')}</Text>
           </TouchableOpacity>
 
           {/* Preview + description edit */}
@@ -533,7 +534,7 @@ function AddProviderModal({
                 />
               </View>
               {descriptionInvalid && (
-                <Text style={[styles.err, { color: colors.error }]}>description must be between 5 and 50 characters</Text>
+                <Text style={[styles.err, { color: colors.error }]}>{t('description_length_error')}</Text>
               )}
             </View>
           )}
@@ -541,7 +542,7 @@ function AddProviderModal({
           {/* Footer Actions */}
           <View style={styles.modalActions}>
             <TouchableOpacity onPress={onClose} style={[styles.secondaryBtn, { borderColor: colors.separator }]}>
-              <Text style={{ color: colors.textPrimary }}>Cancel</Text>
+              <Text style={{ color: colors.textPrimary }}>{t('cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               disabled={!ready}

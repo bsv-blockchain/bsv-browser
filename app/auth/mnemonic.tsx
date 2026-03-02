@@ -17,6 +17,7 @@ import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
+import { useTranslation } from 'react-i18next'
 import { useWallet } from '@/context/WalletContext'
 import {
   generateMnemonicWallet,
@@ -28,6 +29,7 @@ import { useLocalStorage } from '@/context/LocalStorageProvider'
 type MnemonicMode = 'choose' | 'generate' | 'import'
 
 export default function MnemonicScreen() {
+  const { t } = useTranslation()
   const { colors, isDark } = useTheme()
   const { buildWalletFromMnemonic } = useWallet()
   const { setMnemonic: storeMnemonic } = useLocalStorage()
@@ -125,7 +127,7 @@ export default function MnemonicScreen() {
           </View>
 
           <Text style={[s.largeTitle, { color: colors.textPrimary }]}>
-            Wallet Data
+            {t('wallet_data')}
           </Text>
           <Text style={[s.subtitle, { color: colors.textSecondary }]}>
             Your keys and transactions are stored on this device <Text style={{ fontWeight: 'bold', fontStyle: 'italic' }}>only</Text>. Expect occasional loss.{'\n\n'}Designed for p2p electronic cash.{'\n'}<Text style={{ fontWeight: 'bold' }}>Not life savings</Text>.
@@ -141,10 +143,10 @@ export default function MnemonicScreen() {
               <Ionicons name="add-circle-outline" size={22} color={colors.textOnAccent} style={s.btnIcon} />
               <View style={s.btnTextGroup}>
                 <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>
-                  Create New Wallet
+                  {t('create_new_wallet')}
                 </Text>
                 <Text style={[s.btnCaption, { color: colors.textOnAccent, opacity: 0.75 }]}>
-                  Generate a new recovery phrase
+                  {t('generate_recovery_phrase_caption')}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -160,10 +162,10 @@ export default function MnemonicScreen() {
               <Ionicons name="download-outline" size={22} color={colors.accent} style={s.btnIcon} />
               <View style={s.btnTextGroup}>
                 <Text style={[s.btnLabel, { color: colors.textPrimary }]}>
-                  Import Existing Wallet
+                  {t('import_existing_wallet')}
                 </Text>
                 <Text style={[s.btnCaption, { color: colors.textSecondary }]}>
-                  Paste your recovery phrase
+                  {t('paste_recovery_phrase')}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -195,7 +197,7 @@ export default function MnemonicScreen() {
             activeOpacity={0.6}
           >
             <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>
-              Cancel
+              {t('cancel')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -213,7 +215,7 @@ export default function MnemonicScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text style={[s.largeTitle, { color: colors.textPrimary, textAlign: 'left' }]}>
-            Save Your{'\n'}Recovery Phrase
+            {t('save_recovery_phrase_heading')}
           </Text>
 
           {/* Warning banner */}
@@ -253,7 +255,7 @@ export default function MnemonicScreen() {
             >
               <Ionicons name="share-outline" size={20} color={colors.textOnAccent} style={s.btnIcon} />
               <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>
-                Save Recovery Phrase
+                {t('save_recovery_phrase_btn')}
               </Text>
             </TouchableOpacity>
 
@@ -266,7 +268,7 @@ export default function MnemonicScreen() {
             >
               <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={20} color={colors.accent} style={s.btnIcon} />
               <Text style={[s.btnLabel, { color: colors.accent }]}>
-                {copied ? 'Copied' : 'Copy to Clipboard'}
+                {copied ? t('copied') : t('copy_to_clipboard')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -287,7 +289,7 @@ export default function MnemonicScreen() {
               style={{ marginRight: spacing.md }}
             />
             <Text style={[s.acknowledgmentText, { color: colors.textPrimary }]}>
-              I have saved my recovery phrase and understand that losing it will result in total and permanent loss of all associated funds, tokens, and certificates.
+              {t('acknowledgment_text')}
             </Text>
           </TouchableOpacity>
 
@@ -307,7 +309,7 @@ export default function MnemonicScreen() {
               <Text style={[s.btnLabel, {
                 color: hasAcknowledged ? colors.textOnAccent : colors.textTertiary,
               }]}>
-                Continue
+                {t('continue')}
               </Text>
             )}
           </TouchableOpacity>
@@ -322,7 +324,7 @@ export default function MnemonicScreen() {
             activeOpacity={0.6}
           >
             <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>
-              Go Back
+              {t('go_back')}
             </Text>
           </TouchableOpacity>
         </ScrollView>
@@ -345,10 +347,10 @@ export default function MnemonicScreen() {
         </View>
 
         <Text style={[s.largeTitle, { color: colors.textPrimary, textAlign: 'left' }]}>
-          Import Wallet
+          {t('import_wallet')}
         </Text>
         <Text style={[s.bodyText, { color: colors.textSecondary, marginBottom: spacing.xxl }]}>
-          Enter your recovery phrase to restore an existing wallet.
+          {t('restore_wallet_description')}
         </Text>
 
         <TextInput
@@ -359,7 +361,7 @@ export default function MnemonicScreen() {
           }]}
           value={importedMnemonic}
           onChangeText={setImportedMnemonic}
-          placeholder="Enter your recovery words separated by spaces..."
+          placeholder={t('enter_recovery_words')}
           placeholderTextColor={colors.textTertiary}
           multiline
           autoCapitalize="none"
@@ -383,7 +385,7 @@ export default function MnemonicScreen() {
             <Text style={[s.btnLabel, {
               color: importedMnemonic.trim() ? colors.textOnAccent : colors.textTertiary,
             }]}>
-              Import Wallet
+              {t('import_wallet')}
             </Text>
           )}
         </TouchableOpacity>

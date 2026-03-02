@@ -1,6 +1,7 @@
 import React from 'react'
 import { View, TextInput, TouchableOpacity, Text, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 
@@ -12,6 +13,7 @@ interface BsvAmountInputProps {
 }
 
 export const BsvAmountInput: React.FC<BsvAmountInputProps> = ({ value, onChangeText }) => {
+  const { t } = useTranslation()
   const { colors } = useTheme()
   const isSendMax = value === SEND_MAX_VALUE
 
@@ -21,7 +23,7 @@ export const BsvAmountInput: React.FC<BsvAmountInputProps> = ({ value, onChangeT
         <View style={styles.sendMaxDisplay}>
           <Ionicons name="wallet-outline" size={18} color={colors.accent} />
           <Text style={[styles.sendMaxLabel, { color: colors.accent }]}>
-            Entire wallet balance
+            {t('entire_wallet_balance')}
           </Text>
         </View>
         <TouchableOpacity
@@ -49,7 +51,7 @@ export const BsvAmountInput: React.FC<BsvAmountInputProps> = ({ value, onChangeT
         onPress={() => onChangeText(SEND_MAX_VALUE)}
         style={[styles.maxButton, { backgroundColor: colors.accent + '15' }]}
       >
-        <Text style={[styles.maxText, { color: colors.accent }]}>Send Max</Text>
+        <Text style={[styles.maxText, { color: colors.accent }]}>{t('send_max')}</Text>
       </TouchableOpacity>
     </View>
   )

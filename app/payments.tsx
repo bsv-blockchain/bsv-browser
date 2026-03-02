@@ -19,6 +19,7 @@ import { PeerPayClient, IncomingPayment } from '@bsv/message-box-client'
 import { IdentityClient, PublicKey } from '@bsv/sdk'
 import type { DisplayableIdentity } from '@bsv/sdk'
 
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
@@ -33,6 +34,7 @@ const unique = (results: DisplayableIdentity[]) => {
 }
 
 export default function PaymentsScreen() {
+  const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   const { managers, adminOriginator } = useWallet()
@@ -112,7 +114,7 @@ export default function PaymentsScreen() {
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, '')
     if (!trimmed) {
-      toast.error('Please enter a valid URL')
+      toast.error(t('enter_valid_url'))
       return
     }
     setIsSaving(true)
@@ -121,7 +123,7 @@ export default function PaymentsScreen() {
       setMessageBoxUrl(trimmed)
       setIsConfigured(true)
       setShowConfig(false)
-      toast.success('Message Box URL saved')
+      toast.success(t('message_box_saved'))
     } catch (error: any) {
       toast.error(`Failed to save: ${error.message || 'unknown error'}`)
     } finally {
@@ -137,7 +139,7 @@ export default function PaymentsScreen() {
     setShowConfig(true)
     peerPayClientRef.current = null
     setPayments([])
-    toast.success('Message Box URL removed')
+    toast.success(t('message_box_removed'))
   }, [])
 
   // --- Fetch incoming payments ---
@@ -308,7 +310,7 @@ export default function PaymentsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Identity Payments</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('identity_payments')}</Text>
         <TouchableOpacity
           onPress={() => setShowConfig(v => !v)}
           style={styles.headerButton}
@@ -330,10 +332,10 @@ export default function PaymentsScreen() {
         {showConfig && (
           <View style={[styles.configPanel, { backgroundColor: colors.backgroundSecondary }]}>
             <Text style={[styles.configTitle, { color: colors.textPrimary }]}>
-              Message Box Server
+              {t('message_box_server')}
             </Text>
             <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
-              Required to send and receive identity-based payments.
+              {t('message_box_required')}
             </Text>
             <TextInput
               value={urlInput}
@@ -370,7 +372,7 @@ export default function PaymentsScreen() {
                   <ActivityIndicator size="small" color={urlInput.trim() ? colors.background : colors.textSecondary} />
                 ) : (
                   <Text style={[styles.configButtonText, { color: urlInput.trim() ? colors.background : colors.textSecondary }]}>
-                    Save
+                    {t('save')}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -380,13 +382,13 @@ export default function PaymentsScreen() {
                     onPress={() => { setShowConfig(false); setUrlInput(messageBoxUrl) }}
                     style={[styles.configButton, { borderColor: colors.separator, borderWidth: StyleSheet.hairlineWidth }]}
                   >
-                    <Text style={[styles.configButtonText, { color: colors.textSecondary }]}>Cancel</Text>
+                    <Text style={[styles.configButtonText, { color: colors.textSecondary }]}>{t('cancel')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={handleRemove}
                     style={[styles.configButton, { borderColor: colors.error + '40', borderWidth: StyleSheet.hairlineWidth }]}
                   >
-                    <Text style={[styles.configButtonText, { color: colors.error }]}>Remove</Text>
+                    <Text style={[styles.configButtonText, { color: colors.error }]}>{t('remove')}</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -402,19 +404,19 @@ export default function PaymentsScreen() {
           >
             <Ionicons name="alert-circle" size={20} color={colors.warning} style={{ marginRight: spacing.sm }} />
             <Text style={[styles.setupPromptText, { color: colors.warning }]}>
-              Tap to configure your Message Box server
+              {t('message_box_tap_to_configure')}
             </Text>
           </TouchableOpacity>
         )}
 
         {/* --- Send Payment --- */}
         <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-          Send Payment
+          {t('send_payment')}
         </Text>
 
         {/* Recipient search / direct key */}
         <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Recipient</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('recipient')}</Text>
           {selectedIdentity ? (
             <View style={[styles.selectedRecipient, { backgroundColor: colors.backgroundSecondary }]}>
               {selectedIdentity.avatarURL ? (
@@ -428,7 +430,7 @@ export default function PaymentsScreen() {
               )}
               <View style={styles.selectedInfo}>
                 <Text style={[styles.selectedName, { color: colors.textPrimary }]} numberOfLines={1}>
-                  {selectedIdentity.name || 'Unknown'}
+                  {selectedIdentity.name || t('unknown')}
                 </Text>
                 <Text style={[styles.selectedKey, { color: colors.textSecondary }]} numberOfLines={1}>
                   {selectedIdentity.abbreviatedKey || `${selectedIdentity.identityKey.slice(0, 10)}...`}
@@ -442,7 +444,7 @@ export default function PaymentsScreen() {
             <TextInput
               value={searchQuery}
               onChangeText={handleSearchChange}
-              placeholder="Search name or enter identity key"
+              placeholder={t('search_name_or_key')}
               placeholderTextColor={colors.textTertiary}
               autoCapitalize="none"
               autoCorrect={false}
@@ -463,7 +465,7 @@ export default function PaymentsScreen() {
             <View style={styles.directKeyRow}>
               <Ionicons name="key-outline" size={14} color={colors.success} />
               <Text style={[styles.directKeyText, { color: colors.success }]}>
-                Valid identity key entered
+                {t('valid_identity_key')}
               </Text>
             </View>
           )}
@@ -474,7 +476,7 @@ export default function PaymentsScreen() {
               {isSearching ? (
                 <View style={styles.searchLoading}>
                   <ActivityIndicator size="small" color={colors.accent} />
-                  <Text style={[styles.searchLoadingText, { color: colors.textSecondary }]}>Searching...</Text>
+                  <Text style={[styles.searchLoadingText, { color: colors.textSecondary }]}>{t('searching')}</Text>
                 </View>
               ) : (
                 searchResults.map((identity, idx) => (
@@ -497,7 +499,7 @@ export default function PaymentsScreen() {
                     )}
                     <View style={styles.searchResultInfo}>
                       <Text style={[styles.searchResultName, { color: colors.textPrimary }]} numberOfLines={1}>
-                        {identity.name || 'Unknown'}
+                        {identity.name || t('unknown')}
                       </Text>
                       <Text style={[styles.searchResultKey, { color: colors.textSecondary }]} numberOfLines={1}>
                         {identity.abbreviatedKey || `${identity.identityKey.slice(0, 20)}...`}
@@ -517,7 +519,7 @@ export default function PaymentsScreen() {
 
         {/* Amount */}
         <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Amount (BSV)</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_bsv')}</Text>
           <BsvAmountInput value={sendAmount} onChangeText={setSendAmount} />
         </View>
 
@@ -539,7 +541,7 @@ export default function PaymentsScreen() {
             <>
               <Ionicons name="send" size={18} color={canSend ? colors.background : colors.textSecondary} />
               <Text style={[styles.sendButtonText, { color: canSend ? colors.background : colors.textSecondary }]}>
-                Send Payment
+                {t('send_payment')}
               </Text>
             </>
           )}
@@ -583,7 +585,7 @@ export default function PaymentsScreen() {
           <>
             <View style={styles.incomingSectionHeader}>
               <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-                Incoming Payments
+                {t('incoming_payments')}
               </Text>
               <TouchableOpacity onPress={fetchPayments} disabled={loadingPayments}>
                 <Ionicons
@@ -601,7 +603,7 @@ export default function PaymentsScreen() {
             ) : payments.length === 0 ? (
               <View style={styles.centeredSmall}>
                 <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                  No pending payments
+                  {t('no_pending_payments')}
                 </Text>
               </View>
             ) : (
@@ -624,7 +626,7 @@ export default function PaymentsScreen() {
                           </Text>
                         </View>
                         <Text style={[styles.paymentSender, { color: colors.textSecondary }]} numberOfLines={1}>
-                          From: {payment.sender?.slice(0, 16)}...
+                          {t('from_prefix')} {payment.sender?.slice(0, 16)}...
                         </Text>
                       </View>
                       <TouchableOpacity
@@ -635,7 +637,7 @@ export default function PaymentsScreen() {
                         {isAccepting ? (
                           <ActivityIndicator size="small" color={colors.background} />
                         ) : (
-                          <Text style={[styles.acceptButtonText, { color: colors.background }]}>Accept</Text>
+                          <Text style={[styles.acceptButtonText, { color: colors.background }]}>{t('accept')}</Text>
                         )}
                       </TouchableOpacity>
                     </View>

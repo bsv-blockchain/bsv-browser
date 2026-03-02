@@ -116,8 +116,8 @@ export default function SettingsScreen() {
   }, [managers.permissionsManager, refreshBalance])
 
   const NETWORKS: { id: 'main' | 'test'; label: string; color: string }[] = [
-    { id: 'main', label: 'Mainnet', color: colors.success },
-    { id: 'test', label: 'Testnet', color: colors.warning },
+    { id: 'main', label: t('mainnet'), color: colors.success },
+    { id: 'test', label: t('testnet'), color: colors.warning },
     // Future: { id: 'teratest', label: 'Teratest', color: colors.info },
   ]
 
@@ -155,7 +155,7 @@ export default function SettingsScreen() {
         {!isWeb2Mode && (
           <View style={localStyles.balanceContainer}>
             <Text style={[localStyles.balanceLabel, { color: colors.textSecondary }]}>
-              you have
+              {t('you_have')}
             </Text>
             <Text
               onPress={refreshBalance}
@@ -172,10 +172,10 @@ export default function SettingsScreen() {
         )}
 
         {/* ── Wallet ── */}
-        <GroupedSection header="Wallet">
+        <GroupedSection header={t('wallet')}>
           <ListRow
             label={t('bsv_network')}
-            value={switchingNetwork ? 'Switching...' : (NETWORKS.find(n => n.id === selectedNetwork)?.label ?? selectedNetwork)}
+            value={switchingNetwork ? t('switching') : (NETWORKS.find(n => n.id === selectedNetwork)?.label ?? selectedNetwork)}
             icon="globe-outline"
             iconColor={NETWORKS.find(n => n.id === selectedNetwork)?.color ?? colors.success}
             onPress={isWeb2Mode ? undefined : () => setNetworkExpanded(e => !e)}
@@ -222,26 +222,26 @@ export default function SettingsScreen() {
             }
           />
           <ListRow
-            label="Transactions"
+            label={t('transactions')}
             icon="receipt-outline"
             iconColor={colors.gold}
             onPress={() => router.push('/transactions')}
           />
           <ListRow
-            label="Legacy Payments"
+            label={t('legacy_payments')}
             icon="qr-code-outline"
             iconColor="#CC4400"
             onPress={() => router.push('/legacy-payments' as any)}
           />
           <ListRow
-            label="Identity Payments"
+            label={t('identity_payments')}
             icon="people-outline"
             iconColor={colors.info}
             onPress={() => router.push('/payments' as any)}
           />
           {identityKey ? (
             <ListRow
-              label="Identity Key"
+              label={t('identity_key')}
               icon="finger-print-outline"
               iconColor={colors.identityApproval}
               value={`${identityKey.slice(0, 8)}...${identityKey.slice(-4)}`}

@@ -2,6 +2,7 @@ import React from 'react'
 import { FlatList, Pressable, Text, TouchableOpacity, View, StyleSheet } from 'react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { Ionicons } from '@expo/vector-icons'
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => {
+  const { t } = useTranslation()
   const { colors } = useTheme()
 
   const renderItem = ({ item, index }: { item: HistoryEntry; index: number }) => {
@@ -63,11 +65,11 @@ export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => 
   return (
     <View style={styles.container}>
       <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-        History
+        {t('history')}
       </Text>
       <TouchableOpacity style={[styles.clearBtn, { backgroundColor: colors.error }]} onPress={onClear}>
         <Ionicons name="trash-outline" size={18} color="#fff" />
-        <Text style={styles.clearBtnText}>Clear All</Text>
+        <Text style={styles.clearBtnText}>{t('clear_all')}</Text>
       </TouchableOpacity>
       <FlatList
         style={styles.listContainer}

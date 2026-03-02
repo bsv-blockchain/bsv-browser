@@ -50,9 +50,9 @@ export function SheetRouter({
   const getSheetTitle = (): string | undefined => {
     switch (sheet.route) {
       case 'bookmarks':
-        return 'Browser'
+        return t('browser')
       case 'settings':
-        return 'Wallet'
+        return t('wallet')
       case 'trust':
         return t('trust_network')
       default:

@@ -37,3 +37,22 @@ npm run start
 ## License
 
 The license for the code in this repository is the Open BSV License.
+
+## Supported Languages
+
+The app is localised into the following languages using `react-i18next`:
+
+| Code | Language |
+|------|----------|
+| `en` | English |
+| `zh` | Chinese (Simplified) |
+| `hi` | Hindi |
+| `es` | Spanish |
+| `fr` | French |
+| `ar` | Arabic |
+| `pt` | Portuguese |
+| `bn` | Bengali |
+| `ru` | Russian |
+| `id` | Indonesian |
+
+Translations live in `context/i18n/translations.tsx`. The device locale is detected automatically via `expo-localization` and falls back to English.

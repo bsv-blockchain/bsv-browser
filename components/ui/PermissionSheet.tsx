@@ -2,6 +2,7 @@ import React, { useContext, useState, useCallback, useMemo } from 'react'
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native'
 import Sheet from '@/components/ui/Sheet'
 import { spacing, radii, typography } from '@/context/theme/tokens'
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { WalletContext } from '@/context/WalletContext'
 import { UserContext } from '@/context/UserContext'
@@ -166,6 +167,7 @@ function truncate(str: string, max: number): string {
 // ---------------------------------------------------------------------------
 
 const PermissionSheet: React.FC = () => {
+  const { t } = useTranslation()
   const { colors } = useTheme()
 
   const {
@@ -332,7 +334,7 @@ const PermissionSheet: React.FC = () => {
             {active.renewal && (
               <View style={[styles.renewalBadge, { backgroundColor: colors.accentSecondary + '1A' }]}>
                 <Text style={[styles.renewalText, { color: colors.accentSecondary }]}>
-                  Renewal
+                  {t('renewal')}
                 </Text>
               </View>
             )}
@@ -342,7 +344,7 @@ const PermissionSheet: React.FC = () => {
               <ScrollView style={styles.groupScroll} bounces={false}>
                 {active.groupPermissions.spendingAuthorization && (
                   <View style={[styles.groupSection, { borderColor: colors.separator }]}>
-                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>Spending</Text>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>{t('spending_section')}</Text>
                     <View style={styles.groupRow}>
                       <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>
                         <AmountDisplay>{active.groupPermissions.spendingAuthorization.amount}</AmountDisplay>
@@ -357,7 +359,7 @@ const PermissionSheet: React.FC = () => {
                 )}
                 {active.groupPermissions.protocolPermissions && active.groupPermissions.protocolPermissions.length > 0 && (
                   <View style={[styles.groupSection, { borderColor: colors.separator }]}>
-                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>Protocols</Text>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>{t('protocols_section')}</Text>
                     {active.groupPermissions.protocolPermissions.map((p, i) => (
                       <View key={i} style={styles.groupRow}>
                         <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{p.protocolID[1]}</Text>
@@ -370,7 +372,7 @@ const PermissionSheet: React.FC = () => {
                 )}
                 {active.groupPermissions.basketAccess && active.groupPermissions.basketAccess.length > 0 && (
                   <View style={[styles.groupSection, { borderColor: colors.separator }]}>
-                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>Baskets</Text>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>{t('baskets_section')}</Text>
                     {active.groupPermissions.basketAccess.map((b, i) => (
                       <View key={i} style={styles.groupRow}>
                         <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{b.basket}</Text>
@@ -383,7 +385,7 @@ const PermissionSheet: React.FC = () => {
                 )}
                 {active.groupPermissions.certificateAccess && active.groupPermissions.certificateAccess.length > 0 && (
                   <View style={[styles.groupSection, { borderColor: colors.separator }]}>
-                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>Certificates</Text>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>{t('certificates_section')}</Text>
                     {active.groupPermissions.certificateAccess.map((c, i) => (
                       <View key={i} style={styles.groupRow}>
                         <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{c.type}</Text>
@@ -411,7 +413,7 @@ const PermissionSheet: React.FC = () => {
                   activeOpacity={0.7}
                 >
                   <Text style={[styles.detailsToggleText, { color: colors.textSecondary }]}>
-                    {detailsExpanded ? 'Hide details' : 'Details'}
+                    {detailsExpanded ? t('hide_details') : t('details')}
                   </Text>
                   <Text style={[styles.chevron, { color: colors.textTertiary }]}>
                     {detailsExpanded ? '\u25B2' : '\u25BC'}
@@ -439,7 +441,7 @@ const PermissionSheet: React.FC = () => {
                     {active.fields && active.fields.length > 0 && (
                       <>
                         <Text style={[styles.detailLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>
-                          Requested fields
+                          {t('requested_fields')}
                         </Text>
                         {active.fields.map((f, i) => (
                           <Text
@@ -479,7 +481,7 @@ const PermissionSheet: React.FC = () => {
               activeOpacity={0.7}
             >
               <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>
-                Reject
+                {t('reject')}
               </Text>
             </TouchableOpacity>
 
@@ -489,7 +491,7 @@ const PermissionSheet: React.FC = () => {
               activeOpacity={0.7}
             >
               <Text style={[styles.buttonAllowText, { color: '#FFFFFF' }]}>
-                Authorize
+                {t('authorize')}
               </Text>
             </TouchableOpacity>
           </View>

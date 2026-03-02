@@ -9,6 +9,7 @@ import {
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { BlurChrome } from '@/components/ui/BlurChrome'
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
@@ -87,6 +88,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   onTrust,
   onEnableWeb3,
 }) => {
+  const { t } = useTranslation()
   const { isDark, colors } = useTheme()
   const { isWeb2Mode } = useBrowserMode()
 
@@ -96,33 +98,33 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
     <View style={styles.card}>
       {/* Actions group */}
       {!isNewTab && canShare && (
-        <Row icon="share-outline" label="Share" onPress={dismiss(onShare)} />
+        <Row icon="share-outline" label={t('share')} onPress={dismiss(onShare)} />
       )}
       {!isNewTab && (
-        <Row icon="bookmark-outline" label="Add Bookmark" onPress={dismiss(onAddBookmark)} />
+        <Row icon="bookmark-outline" label={t('add_bookmark')} onPress={dismiss(onAddBookmark)} />
       )}
-      <Row icon="globe-outline" label="Browser" onPress={dismiss(onBookmarks)} />
+      <Row icon="globe-outline" label={t('browser')} onPress={dismiss(onBookmarks)} />
 
       <Divider />
 
       {/* Web3 / Settings group */}
-      <Row icon="bug-outline" label="Bug Report" onPress={dismiss(() => Linking.openURL('https://github.com/bsv-blockchain/bsv-browser/issues'))} />
+      <Row icon="bug-outline" label={t('bug_report')} onPress={dismiss(() => Linking.openURL('https://github.com/bsv-blockchain/bsv-browser/issues'))} />
       {isWeb2Mode ? (
-        <Row icon="flash-outline" label="Enable Web3" onPress={dismiss(onEnableWeb3)} />
+        <Row icon="flash-outline" label={t('enable_web3')} onPress={dismiss(onEnableWeb3)} />
       ) : (
         <>
-          <Row icon="wallet-outline" label="Wallet" onPress={dismiss(onSettings)} />
-          <Row icon="shield-checkmark-outline" label="Trust Network" onPress={dismiss(onTrust)} />
+          <Row icon="wallet-outline" label={t('wallet')} onPress={dismiss(onSettings)} />
+          <Row icon="shield-checkmark-outline" label={t('trust_network')} onPress={dismiss(onTrust)} />
         </>
       )}
 
       <Divider />
-      
+
       {/* Tabs — split row */}
       <View style={styles.splitRow}>
         <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onTabs)} activeOpacity={0.6}>
           <Ionicons name="copy-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
-          <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>Tabs</Text>
+          <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('tabs')}</Text>
         </TouchableOpacity>
         <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
         <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onNewTab)} activeOpacity={0.6}>

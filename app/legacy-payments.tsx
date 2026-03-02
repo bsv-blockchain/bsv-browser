@@ -16,6 +16,7 @@ import { toast } from 'react-toastify'
 import QRCode from 'react-native-qrcode-svg'
 import { PublicKey, P2PKH, Beef, Utils, PrivateKey, WalletProtocol, InternalizeActionArgs, InternalizeOutput } from '@bsv/sdk'
 
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
@@ -36,6 +37,7 @@ const getCurrentDate = (daysOffset: number): string => {
 }
 
 export default function LegacyPaymentsScreen() {
+  const { t } = useTranslation()
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
   const { managers, adminOriginator, selectedNetwork } = useWallet()
@@ -316,7 +318,7 @@ export default function LegacyPaymentsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Legacy Payments</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('legacy_payments')}</Text>
         <View style={styles.backButton} />
       </View>
 
@@ -328,7 +330,7 @@ export default function LegacyPaymentsScreen() {
         <View style={[styles.infoBanner, { backgroundColor: colors.info + '15' }]}>
           <Ionicons name="information-circle" size={20} color={colors.info} style={{ marginRight: spacing.sm }} />
           <Text style={[styles.infoText, { color: colors.info }]}>
-            Address-based BSV payments to and from external wallets. A unique address is generated each day for privacy.
+            {t('legacy_info')}
           </Text>
         </View>
 
@@ -361,7 +363,7 @@ export default function LegacyPaymentsScreen() {
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={colors.accent} />
             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-              Generating address...
+              {t('generating_address')}
             </Text>
           </View>
         ) : paymentAddress ? (
@@ -399,10 +401,10 @@ export default function LegacyPaymentsScreen() {
             {/* Balance */}
             <View style={styles.balanceSection}>
               <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>
-                Available Balance
+                {t('available_balance')}
               </Text>
               <Text style={[styles.balanceValue, { color: colors.textPrimary }]}>
-                {balance === -1 ? 'Not checked' : `${balance} BSV`}
+                {balance === -1 ? t('not_checked') : `${balance} BSV`}
               </Text>
             </View>
 
@@ -452,7 +454,7 @@ export default function LegacyPaymentsScreen() {
                   <Ionicons name="refresh" size={18} color={colors.accent} />
                 )}
                 <Text style={[styles.actionButtonText, { color: colors.accent }]}>
-                  Check Balance
+                  {t('check_balance')}
                 </Text>
               </TouchableOpacity>
 
@@ -473,7 +475,7 @@ export default function LegacyPaymentsScreen() {
                   <Ionicons name="download" size={18} color={balance > 0 ? colors.background : colors.accent} />
                 )}
                 <Text style={[styles.actionButtonText, { color: balance > 0 ? colors.background : colors.accent }]}>
-                  Import Funds
+                  {t('import_funds')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -481,7 +483,7 @@ export default function LegacyPaymentsScreen() {
         ) : (
           <View style={styles.centered}>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Unable to generate address
+              {t('unable_to_generate_address')}
             </Text>
           </View>
         )}
@@ -489,15 +491,15 @@ export default function LegacyPaymentsScreen() {
         {/* Send section */}
         <View style={[styles.sendDivider, { borderTopColor: colors.separator }]} />
         <Text style={[styles.sendTitle, { color: colors.textPrimary }]}>
-          Send BSV
+          {t('send_bsv')}
         </Text>
 
         <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Recipient Address</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('recipient_address')}</Text>
           <TextInput
             value={recipientAddress}
             onChangeText={setRecipientAddress}
-            placeholder="Enter BSV address"
+            placeholder={t('enter_bsv_address')}
             placeholderTextColor={colors.textTertiary}
             autoCapitalize="none"
             autoCorrect={false}
@@ -513,7 +515,7 @@ export default function LegacyPaymentsScreen() {
         </View>
 
         <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Amount (BSV)</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_bsv')}</Text>
           <BsvAmountInput value={sendAmount} onChangeText={setSendAmount} />
         </View>
 
@@ -541,7 +543,7 @@ export default function LegacyPaymentsScreen() {
                 styles.sendButtonText,
                 { color: (recipientAddress && sendAmount) ? colors.background : colors.textSecondary }
               ]}>
-                Send BSV
+                {t('send_bsv')}
               </Text>
             </>
           )}
