@@ -142,9 +142,9 @@ export default function TransactionsScreen() {
           </View>
         </View>
         <View style={styles.rowRight}>
-          <Text style={[styles.amount, { color: isOutgoing ? colors.textPrimary : colors.error }]}>
+          <Text style={[styles.amount, { color: isOutgoing ? colors.error : colors.textPrimary }]}>
             <AmountDisplay>
-              {isOutgoing ? amount : -amount}
+              {amount}
             </AmountDisplay>
           </Text>
           <View style={styles.actionButtons}>
