@@ -123,7 +123,7 @@ export function useAddressBarAnimation(
   // Animated style for MenuPopover
   const animatedMenuPopoverStyle = useAnimatedStyle(() => {
     const travelDistance = addressBarTravelDistance.value
-    const menuPopoverHeight = 332
+    const menuPopoverHeight = 291
 
     const progress = 1 - (addressBarTranslateY.value / travelDistance)
     const menuTranslateY = -(travelDistance - addressBarTranslateY.value) + (menuPopoverHeight * progress)
