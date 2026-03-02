@@ -249,6 +249,18 @@ export default function SettingsScreen() {
             icon="receipt-outline"
             iconColor={colors.gold}
             onPress={() => router.push('/transactions')}
+          />
+          <ListRow
+            label="Legacy Payments"
+            icon="qr-code-outline"
+            iconColor="#CC4400"
+            onPress={() => router.push('/legacy-payments' as any)}
+          />
+          <ListRow
+            label="Identity Payments"
+            icon="people-outline"
+            iconColor={colors.info}
+            onPress={() => router.push('/payments' as any)}
             isLast
           />
         </GroupedSection>

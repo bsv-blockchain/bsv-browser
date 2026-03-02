@@ -102,6 +102,8 @@ export default function RootLayout() {
                         <Stack.Screen name="config" />
                         <Stack.Screen name="auth/mnemonic" />
                         <Stack.Screen name="transactions" />
+                        <Stack.Screen name="legacy-payments" />
+                        <Stack.Screen name="payments" />
                         <Stack.Screen name="not-found" />
                       </Stack>
                     </View>
