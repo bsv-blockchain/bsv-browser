@@ -49,6 +49,7 @@ export default function LegacyPaymentsScreen() {
   const [isCheckingBalance, setIsCheckingBalance] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [infoExpanded, setInfoExpanded] = useState(false)
   const [daysOffset, setDaysOffset] = useState(0)
   const [derivationPrefix, setDerivationPrefix] = useState(
     Utils.toBase64(Utils.toArray(getCurrentDate(0), 'utf8'))
@@ -146,6 +147,33 @@ export default function LegacyPaymentsScreen() {
     if (wallet) handleViewAddress(0)
   }, [wallet]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Poll balance every 3 seconds until non-zero, then auto-import
+  useEffect(() => {
+    if (!paymentAddress || balance > 0 || isImporting) return
+    const poll = async () => {
+      if (!paymentAddress) return
+      setIsCheckingBalance(true)
+      try {
+        const bal = await fetchBalance(paymentAddress)
+        setBalance(bal)
+      } catch {
+        // ignore polling errors
+      } finally {
+        setIsCheckingBalance(false)
+      }
+    }
+    poll()
+    const interval = setInterval(poll, 3000)
+    return () => clearInterval(interval)
+  }, [paymentAddress]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-import when balance becomes non-zero
+  useEffect(() => {
+    if (balance > 0 && !isImporting) {
+      handleImportFunds()
+    }
+  }, [balance]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Check balance
   const handleCheckBalance = useCallback(async () => {
     if (!paymentAddress) return
@@ -215,7 +243,7 @@ export default function LegacyPaymentsScreen() {
         }))
 
         const args: InternalizeActionArgs = {
-          tx: tx.toAtomicBEEF(),
+          tx: tx!.toAtomicBEEF(),
           description: 'Legacy Bridge Payment',
           outputs,
           labels: ['legacy', 'inbound', 'bsvbrowser'],
@@ -327,12 +355,18 @@ export default function LegacyPaymentsScreen() {
         contentContainerStyle={styles.content}
       >
         {/* Info banner */}
-        <View style={[styles.infoBanner, { backgroundColor: colors.info + '15' }]}>
+        <TouchableOpacity
+          onPress={() => setInfoExpanded(v => !v)}
+          style={[styles.infoBanner, { backgroundColor: colors.info + '15' }]}
+          activeOpacity={0.7}
+        >
           <Ionicons name="information-circle" size={20} color={colors.info} style={{ marginRight: spacing.sm }} />
-          <Text style={[styles.infoText, { color: colors.info }]}>
-            {t('legacy_info')}
-          </Text>
-        </View>
+          {infoExpanded && (
+            <Text style={[styles.infoText, { color: colors.info }]}>
+              {t('legacy_info')}
+            </Text>
+          )}
+        </TouchableOpacity>
 
         {/* Date navigator */}
         <View style={styles.dateRow}>
@@ -443,44 +477,15 @@ export default function LegacyPaymentsScreen() {
               </View>
             )}
 
-            {/* Action buttons */}
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                onPress={handleCheckBalance}
-                disabled={isCheckingBalance}
-                style={[styles.actionButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator, borderWidth: StyleSheet.hairlineWidth }]}
-              >
-                {isCheckingBalance ? (
-                  <ActivityIndicator size="small" color={colors.accent} />
-                ) : (
-                  <Ionicons name="refresh" size={18} color={colors.accent} />
-                )}
-                <Text style={[styles.actionButtonText, { color: colors.accent }]}>
-                  {t('check_balance')}
+            {/* Polling / import status */}
+            {isImporting && (
+              <View style={styles.pollingRow}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={[styles.pollingText, { color: colors.textSecondary }]}>
+                  {t('import_funds')}…
                 </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={handleImportFunds}
-                disabled={isImporting || balance <= 0}
-                style={[
-                  styles.actionButton,
-                  {
-                    backgroundColor: balance > 0 ? colors.accent : colors.backgroundSecondary,
-                    opacity: balance > 0 ? 1 : 0.5
-                  }
-                ]}
-              >
-                {isImporting ? (
-                  <ActivityIndicator size="small" color={balance > 0 ? colors.background : colors.accent} />
-                ) : (
-                  <Ionicons name="download" size={18} color={balance > 0 ? colors.background : colors.accent} />
-                )}
-                <Text style={[styles.actionButtonText, { color: balance > 0 ? colors.background : colors.accent }]}>
-                  {t('import_funds')}
-                </Text>
-              </TouchableOpacity>
-            </View>
+              </View>
+            )}
           </>
         ) : (
           <View style={styles.centered}>
@@ -586,9 +591,6 @@ const styles = StyleSheet.create({
   infoBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    padding: spacing.md,
-    borderRadius: radii.md,
-    marginBottom: spacing.lg,
   },
   infoText: {
     ...typography.footnote,
@@ -662,29 +664,22 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
   },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  actionButton: {
-    flex: 1,
+  pollingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
     gap: spacing.sm,
+    marginBottom: spacing.lg,
   },
-  actionButtonText: {
+  pollingText: {
     ...typography.subhead,
-    fontWeight: '600',
   },
   emptyText: {
     ...typography.body,
   },
   sendDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    marginTop: spacing.xxxl,
+    marginTop: spacing.sm,
     marginBottom: spacing.xl,
   },
   sendTitle: {
