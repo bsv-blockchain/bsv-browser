@@ -163,7 +163,7 @@ export default function SettingsScreen() {
     <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: spacing.xl, paddingBottom: spacing.xxxl }}
+        contentContainerStyle={{ paddingBottom: spacing.xxxl }}
       >
         {/* ── Balance ── */}
         {!isWeb2Mode && (
