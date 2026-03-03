@@ -120,12 +120,6 @@ const Sheet: React.FC<SheetProps> = ({
           </View>
         </GestureDetector>
 
-        {title && (
-          <View style={[styles.titleRow, { borderBottomColor: colors.separator }]}>
-            <Text style={[styles.titleText, { color: colors.textPrimary }]}>{title}</Text>
-          </View>
-        )}
-
         <View style={{ flex: 1 }}>{rendered ? children : null}</View>
       </Animated.View>
     </GestureHandlerRootView>
@@ -162,15 +156,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 5,
     borderRadius: 2.5,
-  },
-  titleRow: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-  },
-  titleText: {
-    ...typography.headline,
   },
 })
 

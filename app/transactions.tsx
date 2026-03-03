@@ -25,12 +25,16 @@ const PAGE_SIZE = 30
 
 type StatusInfo = { label: string; color: string }
 
+const ABORTABLE_STATUSES = new Set(['unsigned', 'nosend', 'nonfinal'])
+
 function getStatusInfo(status: string, colors: any, t: (key: string) => string): StatusInfo {
   switch (status) {
     case 'completed': return { label: t('tx_status_confirmed'), color: colors.success }
     case 'unproven': return { label: t('tx_status_accepted'), color: colors.success }
     case 'sending': return { label: t('tx_status_broadcasting'), color: colors.success }
     case 'nosend': return { label: t('tx_status_not_sent'), color: colors.warning }
+    case 'unsigned': return { label: t('tx_status_unsigned'), color: colors.warning }
+    case 'nonfinal': return { label: t('tx_status_nonfinal'), color: colors.warning }
     case 'failed': return { label: t('tx_status_failed'), color: colors.error }
     default: return { label: status, color: colors.textSecondary }
   }
@@ -48,6 +52,7 @@ export default function TransactionsScreen() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [copyingTxid, setCopyingTxid] = useState<string | null>(null)
+  const [abortingTxid, setAbortingTxid] = useState<string | null>(null)
   const offsetRef = useRef(0)
 
   const fetchActions = useCallback(async (offset: number) => {
@@ -128,10 +133,27 @@ export default function TransactionsScreen() {
     }
   }, [storage, copyingTxid])
 
+  const handleAbort = useCallback(async (reference: string) => {
+    if (!managers.permissionsManager || abortingTxid) return
+    setAbortingTxid(reference)
+    try {
+      await managers.permissionsManager.abortAction({ reference }, adminOriginator)
+      toast.success(t('tx_abort_success'))
+      onRefresh()
+    } catch (e) {
+      console.error('Failed to abort transaction:', e)
+      toast.error(t('tx_abort_failed'))
+    } finally {
+      setAbortingTxid(null)
+    }
+  }, [managers.permissionsManager, adminOriginator, abortingTxid, onRefresh, t])
+
   const renderItem: ListRenderItem<WalletAction> = useCallback(({ item }) => {
     const status = getStatusInfo(item.status, colors, t)
     const isOutgoing = item.isOutgoing
     const amount = item.satoshis
+    const reference = (item as any).reference as string | undefined
+    const canAbort = ABORTABLE_STATUSES.has(item.status) && !!reference
 
     return (
       <View style={[styles.row, { borderBottomColor: colors.separator }]}>
@@ -154,32 +176,49 @@ export default function TransactionsScreen() {
             </AmountDisplay>
           </Text>
           <View style={styles.actionButtons}>
-            {item.txid ? (
+            {canAbort ? (
               <TouchableOpacity
-                onPress={() => handleExplorerLink(item.txid)}
+                onPress={() => handleAbort(reference)}
                 style={styles.iconButton}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                disabled={abortingTxid === reference}
               >
-                <Ionicons name="open-outline" size={18} color={colors.textSecondary} />
+                <Ionicons
+                  name={abortingTxid === reference ? 'hourglass-outline' : 'close-circle-outline'}
+                  size={18}
+                  color={colors.error}
+                />
               </TouchableOpacity>
-            ) : <View style={styles.iconButton} />}
-            <TouchableOpacity
-              onPress={() => handleCopyRawTx(item.txid)}
-              style={styles.iconButton}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              disabled={!item.txid || copyingTxid === item.txid}
-            >
-              <Ionicons
-                name={copyingTxid === item.txid ? 'hourglass-outline' : 'copy-outline'}
-                size={18}
-                color={item.txid ? colors.textSecondary : colors.textQuaternary}
-              />
-            </TouchableOpacity>
+            ) : (
+              <>
+                {item.txid ? (
+                  <TouchableOpacity
+                    onPress={() => handleExplorerLink(item.txid)}
+                    style={styles.iconButton}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="open-outline" size={18} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ) : <View style={styles.iconButton} />}
+                <TouchableOpacity
+                  onPress={() => handleCopyRawTx(item.txid)}
+                  style={styles.iconButton}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  disabled={!item.txid || copyingTxid === item.txid}
+                >
+                  <Ionicons
+                    name={copyingTxid === item.txid ? 'hourglass-outline' : 'copy-outline'}
+                    size={18}
+                    color={item.txid ? colors.textSecondary : colors.textQuaternary}
+                  />
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
       </View>
     )
-  }, [colors, handleExplorerLink, handleCopyRawTx, copyingTxid, t])
+  }, [colors, handleExplorerLink, handleCopyRawTx, handleAbort, copyingTxid, abortingTxid, t])
 
   let content: React.ReactNode
   if (loading) {

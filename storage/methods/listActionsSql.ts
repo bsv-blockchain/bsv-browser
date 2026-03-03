@@ -117,7 +117,8 @@ export async function listActionsSql(
       isOutgoing: !!tx.isOutgoing,
       description: tx.description || '',
       version: tx.version || 0,
-      lockTime: tx.lockTime || 0
+      lockTime: tx.lockTime || 0,
+      reference: tx.reference
     }
     r.actions.push(wtx)
   }

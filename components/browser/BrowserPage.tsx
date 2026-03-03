@@ -195,9 +195,10 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
         {bookmarks.length > 0 && (
           <View style={styles.halfSection}>
             <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-              {t('bookmarks') || 'Favorites'}
+              {t('bookmarks') || 'Bookmarks'}
             </Text>
             <FlatList
+              style={{ marginTop: spacing.md }}
               data={bookmarks}
               renderItem={renderAppItem}
               keyExtractor={item => `fav-${item.domain}`}
@@ -247,7 +248,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.md,
     paddingHorizontal: spacing.xs,
   },
   sectionTitle: {
@@ -255,6 +255,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+    marginBottom: spacing.md,
   },
   appItem: {
     alignItems: 'center',
