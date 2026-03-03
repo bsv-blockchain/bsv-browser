@@ -96,7 +96,7 @@ export default function LegacyPaymentsScreen() {
       const response = await wallet.listActions({
         labels: ['bsvbrowser', 'inbound'],
         labelQueryMode: 'all',
-        includeOutputs: true,
+        includeInputs: true,
         limit: 1000,
       }, adminOriginator)
       const set = new Set<string>()
@@ -339,6 +339,118 @@ export default function LegacyPaymentsScreen() {
     handleViewAddress(offset)
   }, [handleViewAddress])
 
+  const renderAddressSection = () => {
+    if (isLoadingAddress) {
+      return (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            {t('generating_address')}
+          </Text>
+        </View>
+      )
+    }
+
+    if (!paymentAddress) {
+      return (
+        <View style={styles.centered}>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+            {t('unable_to_generate_address')}
+          </Text>
+        </View>
+      )
+    }
+
+    return (
+      <>
+        {/* QR Code */}
+        <View style={styles.qrContainer}>
+          <View style={[styles.qrWrapper, { backgroundColor: '#FFFFFF' }]}>
+            <QRCode
+              value={paymentAddress}
+              size={200}
+              color="#000000"
+              backgroundColor="#FFFFFF"
+            />
+          </View>
+        </View>
+
+        {/* Address display */}
+        <View style={[styles.addressContainer, { backgroundColor: colors.backgroundSecondary }]}>
+          <Text
+            style={[styles.addressText, { color: colors.textPrimary }]}
+            selectable
+            numberOfLines={1}
+            ellipsizeMode="middle"
+            onPress={handleCopy}
+          >
+            {paymentAddress}
+          </Text>
+          <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
+            <Ionicons
+              name={copied ? 'checkmark' : 'copy-outline'}
+              size={20}
+              color={copied ? colors.success : colors.accent}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Balance */}
+        <View style={styles.balanceSection}>
+          <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>
+            {t('available_balance')}
+          </Text>
+          <Text style={[styles.balanceValue, { color: colors.textPrimary }]}>
+            {balance === -1 ? t('not_checked') : `${balance} BSV`}
+          </Text>
+        </View>
+
+        {/* Import result banner */}
+        {importResult && (
+          <View style={[
+            styles.resultBanner,
+            {
+              backgroundColor: importResult.type === 'success' ? colors.success + '15' : colors.error + '15',
+              borderColor: importResult.type === 'success' ? colors.success : colors.error,
+            }
+          ]}>
+            <Ionicons
+              name={importResult.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
+              size={20}
+              color={importResult.type === 'success' ? colors.success : colors.error}
+            />
+            <Text style={[
+              styles.resultText,
+              { color: importResult.type === 'success' ? colors.success : colors.error }
+            ]}>
+              {importResult.message}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setImportResult(null)}
+              style={styles.resultDismiss}
+            >
+              <Ionicons
+                name="close"
+                size={18}
+                color={importResult.type === 'success' ? colors.success : colors.error}
+              />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Polling / import status */}
+        {isImporting && (
+          <View style={styles.pollingRow}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={[styles.pollingText, { color: colors.textSecondary }]}>
+              {t('import_funds')}…
+            </Text>
+          </View>
+        )}
+      </>
+    )
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
       {/* Header */}
@@ -393,107 +505,7 @@ export default function LegacyPaymentsScreen() {
         </View>
 
         {/* Address + QR */}
-        {isLoadingAddress ? (
-          <View style={styles.centered}>
-            <ActivityIndicator size="large" color={colors.accent} />
-            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-              {t('generating_address')}
-            </Text>
-          </View>
-        ) : paymentAddress ? (
-          <>
-            {/* QR Code */}
-            <View style={styles.qrContainer}>
-              <View style={[styles.qrWrapper, { backgroundColor: '#FFFFFF' }]}>
-                <QRCode
-                  value={paymentAddress}
-                  size={200}
-                  color="#000000"
-                  backgroundColor="#FFFFFF"
-                />
-              </View>
-            </View>
-
-            {/* Address display */}
-            <View style={[styles.addressContainer, { backgroundColor: colors.backgroundSecondary }]}>
-              <Text
-                style={[styles.addressText, { color: colors.textPrimary }]}
-                selectable
-                numberOfLines={1}
-                ellipsizeMode="middle"
-                onPress={handleCopy}
-              >
-                {paymentAddress}
-              </Text>
-              <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
-                <Ionicons
-                  name={copied ? 'checkmark' : 'copy-outline'}
-                  size={20}
-                  color={copied ? colors.success : colors.accent}
-                />
-              </TouchableOpacity>
-            </View>
-
-            {/* Balance */}
-            <View style={styles.balanceSection}>
-              <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>
-                {t('available_balance')}
-              </Text>
-              <Text style={[styles.balanceValue, { color: colors.textPrimary }]}>
-                {balance === -1 ? t('not_checked') : `${balance} BSV`}
-              </Text>
-            </View>
-
-            {/* Import result banner */}
-            {importResult && (
-              <View style={[
-                styles.resultBanner,
-                {
-                  backgroundColor: importResult.type === 'success' ? colors.success + '15' : colors.error + '15',
-                  borderColor: importResult.type === 'success' ? colors.success : colors.error,
-                }
-              ]}>
-                <Ionicons
-                  name={importResult.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
-                  size={20}
-                  color={importResult.type === 'success' ? colors.success : colors.error}
-                />
-                <Text style={[
-                  styles.resultText,
-                  { color: importResult.type === 'success' ? colors.success : colors.error }
-                ]}>
-                  {importResult.message}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setImportResult(null)}
-                  style={styles.resultDismiss}
-                >
-                  <Ionicons
-                    name="close"
-                    size={18}
-                    color={importResult.type === 'success' ? colors.success : colors.error}
-                  />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Polling / import status */}
-            {isImporting && (
-              <View style={styles.pollingRow}>
-                <ActivityIndicator size="small" color={colors.accent} />
-                <Text style={[styles.pollingText, { color: colors.textSecondary }]}>
-                  {t('import_funds')}…
-                </Text>
-              </View>
-            )}
-          </>
-        ) : (
-          <View style={styles.centered}>
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              {t('unable_to_generate_address')}
-            </Text>
-          </View>
-        )}
+        {renderAddressSection()}
 
         {/* Send section */}
         <View style={[styles.sendDivider, { borderTopColor: colors.separator }]} />

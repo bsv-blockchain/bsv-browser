@@ -184,6 +184,8 @@ const resources = {
       message_box_saved: 'Message Box server saved',
       message_box_removed: 'Message Box server removed',
       enter_valid_url: 'Please enter a valid URL',
+      checking_connection: 'Checking connection...',
+      connection_failed: 'Connection failed',
       search_name_or_key: 'Search by name or identity key...',
 
       // Trust screen
@@ -330,6 +332,8 @@ const resources = {
       message_box_saved: '消息箱服务器已保存',
       message_box_removed: '消息箱服务器已删除',
       enter_valid_url: '请输入有效的网址',
+      checking_connection: '正在检查连接...',
+      connection_failed: '连接失败',
       search_name_or_key: '按名称或身份密钥搜索...',
 
       trust_updated: '信任网络已更新',
@@ -471,6 +475,8 @@ const resources = {
       message_box_saved: 'मैसेज बॉक्स सर्वर सहेजा गया',
       message_box_removed: 'मैसेज बॉक्स सर्वर हटाया गया',
       enter_valid_url: 'कृपया एक वैध URL दर्ज करें',
+      checking_connection: 'कनेक्शन जाँच रहे हैं...',
+      connection_failed: 'कनेक्शन विफल',
       search_name_or_key: 'नाम या पहचान कुंजी द्वारा खोजें...',
 
       trust_updated: 'विश्वास नेटवर्क अपडेट किया गया',
@@ -612,6 +618,8 @@ const resources = {
       message_box_saved: 'Servidor de buzón guardado',
       message_box_removed: 'Servidor de buzón eliminado',
       enter_valid_url: 'Por favor ingresa una URL válida',
+      checking_connection: 'Verificando conexión...',
+      connection_failed: 'Conexión fallida',
       search_name_or_key: 'Buscar por nombre o clave de identidad...',
 
       trust_updated: 'Red de confianza actualizada',
@@ -753,6 +761,8 @@ const resources = {
       message_box_saved: 'Serveur de boîte aux lettres enregistré',
       message_box_removed: 'Serveur de boîte aux lettres supprimé',
       enter_valid_url: 'Veuillez saisir une URL valide',
+      checking_connection: 'Vérification de la connexion...',
+      connection_failed: 'Échec de la connexion',
       search_name_or_key: "Rechercher par nom ou clé d'identité...",
 
       trust_updated: 'Réseau de confiance mis à jour',
@@ -894,6 +904,8 @@ const resources = {
       message_box_saved: 'تم حفظ خادم صندوق الرسائل',
       message_box_removed: 'تم إزالة خادم صندوق الرسائل',
       enter_valid_url: 'يرجى إدخال عنوان URL صالح',
+      checking_connection: 'جارٍ التحقق من الاتصال...',
+      connection_failed: 'فشل الاتصال',
       search_name_or_key: 'البحث بالاسم أو مفتاح الهوية...',
 
       trust_updated: 'تم تحديث شبكة الثقة',
@@ -1035,6 +1047,8 @@ const resources = {
       message_box_saved: 'Servidor de caixa de mensagens salvo',
       message_box_removed: 'Servidor de caixa de mensagens removido',
       enter_valid_url: 'Por favor, insira uma URL válida',
+      checking_connection: 'Verificando conexão...',
+      connection_failed: 'Falha na conexão',
       search_name_or_key: 'Pesquisar por nome ou chave de identidade...',
 
       trust_updated: 'Rede de confiança atualizada',
@@ -1176,6 +1190,8 @@ const resources = {
       message_box_saved: 'মেসেজ বক্স সার্ভার সংরক্ষিত হয়েছে',
       message_box_removed: 'মেসেজ বক্স সার্ভার সরানো হয়েছে',
       enter_valid_url: 'একটি বৈধ URL প্রবেশ করুন',
+      checking_connection: 'সংযোগ পরীক্ষা করা হচ্ছে...',
+      connection_failed: 'সংযোগ ব্যর্থ',
       search_name_or_key: 'নাম বা পরিচয় কী দিয়ে খুঁজুন...',
 
       trust_updated: 'বিশ্বাস নেটওয়ার্ক আপডেট হয়েছে',
@@ -1317,6 +1333,8 @@ const resources = {
       message_box_saved: 'Сервер почтового ящика сохранён',
       message_box_removed: 'Сервер почтового ящика удалён',
       enter_valid_url: 'Введите действительный URL',
+      checking_connection: 'Проверка соединения...',
+      connection_failed: 'Ошибка соединения',
       search_name_or_key: 'Поиск по имени или ключу идентификатора...',
 
       trust_updated: 'Сеть доверия обновлена',
@@ -1458,6 +1476,8 @@ const resources = {
       message_box_saved: 'Server kotak pesan disimpan',
       message_box_removed: 'Server kotak pesan dihapus',
       enter_valid_url: 'Masukkan URL yang valid',
+      checking_connection: 'Memeriksa koneksi...',
+      connection_failed: 'Koneksi gagal',
       search_name_or_key: 'Cari berdasarkan nama atau kunci identitas...',
 
       trust_updated: 'Jaringan kepercayaan diperbarui',

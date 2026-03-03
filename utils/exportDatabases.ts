@@ -7,10 +7,16 @@ import type { StorageExpoSQLite } from '@/storage'
  * Finds all wallet SQLite database files on the device, copies them into a
  * single temporary folder, and presents one share dialogue for that folder.
  * Returns the number of database files found.
+ *
+ * On Android, uses serializeAsync to avoid file-system permission issues when
+ * reading from the native database directory.
  */
 export async function exportAllWalletDatabases(storage: StorageExpoSQLite | null): Promise<number> {
-  // Resolve the SQLite database directory from the open db path, or fall back
-  // to the standard expo-sqlite location (Documents/SQLite on iOS).
+  if (Platform.OS === 'android') {
+    return exportAndroid(storage)
+  }
+
+  // iOS: find all wallet db files on disk and share the folder in one dialogue.
   let sqliteDir: Directory
   if (storage?.db?.databasePath) {
     const dbPath = storage.db.databasePath
@@ -22,15 +28,10 @@ export async function exportAllWalletDatabases(storage: StorageExpoSQLite | null
 
   if (!sqliteDir.exists) return 0
 
-  // Filter for wallet database files matching the naming convention.
-  const entries = sqliteDir.list()
-  const walletDbs = entries.filter(
-    (e): e is File => !(e instanceof Directory) && /^wallet-.+\.db$/.test(e.name)
-  )
+  const walletDbs = sqliteDir.list()
 
   if (walletDbs.length === 0) return 0
 
-  // Live SQLite files may be held open, so we always copy before sharing.
   const tempDir = new Directory(Paths.cache, 'bsv-wallet-export')
   if (tempDir.exists) tempDir.delete()
   tempDir.create({ intermediates: true })
@@ -39,22 +40,36 @@ export async function exportAllWalletDatabases(storage: StorageExpoSQLite | null
     for (const dbFile of walletDbs) {
       dbFile.copy(new File(tempDir, dbFile.name))
     }
-
-    if (Platform.OS === 'ios') {
-      // iOS: share the folder in one dialogue
-      await shareAsync(tempDir.uri, { dialogTitle: 'bsv-wallet-export' })
-    } else {
-      // Android: share each file individually
-      for (const dbFile of walletDbs) {
-        await shareAsync(new File(tempDir, dbFile.name).uri, {
-          mimeType: 'application/octet-stream',
-          dialogTitle: dbFile.name,
-        })
-      }
-    }
+    await shareAsync(tempDir.uri, { dialogTitle: 'bsv-wallet-export' })
   } finally {
     try { tempDir.delete() } catch {}
   }
 
   return walletDbs.length
+}
+
+async function exportAndroid(storage: StorageExpoSQLite | null): Promise<number> {
+  if (!storage?.db) return 0
+
+  const dbName = storage.dbName
+  const tempDir = new Directory(Paths.cache, 'bsv-wallet-export')
+  if (tempDir.exists) tempDir.delete()
+  tempDir.create({ intermediates: true })
+
+  try {
+    // serializeAsync dumps the live database to bytes — no file-system
+    // permission issues accessing the native database directory.
+    const bytes = await storage.db.serializeAsync()
+    const outFile = new File(tempDir, dbName)
+    outFile.write(bytes)
+
+    await shareAsync(outFile.uri, {
+      mimeType: 'application/octet-stream',
+      dialogTitle: dbName,
+    })
+  } finally {
+    try { tempDir.delete() } catch {}
+  }
+
+  return 1
 }

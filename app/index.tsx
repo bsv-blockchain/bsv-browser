@@ -240,9 +240,6 @@ function Browser() {
       const timer = setTimeout(() => {
         if (tabStore.activeTab?.id === tabId && tabStore.activeTab?.url === kNEW_TAB_URL) {
           addressInputRef.current?.focus()
-          if (Platform.OS === 'android') {
-            Keyboard.open()
-          }
         }
       }, 100)
       return () => clearTimeout(timer)

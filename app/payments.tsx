@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { toast } from 'react-toastify'
 import { PeerPayClient, IncomingPayment } from '@bsv/message-box-client'
-import { IdentityClient, PublicKey } from '@bsv/sdk'
+import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
 import type { DisplayableIdentity } from '@bsv/sdk'
 
 import { useTranslation } from 'react-i18next'
@@ -26,6 +26,7 @@ import { useWallet } from '@/context/WalletContext'
 import { BsvAmountInput } from '@/components/wallet/BsvAmountInput'
 
 const MESSAGE_BOX_URL_KEY = 'message_box_url'
+const DEFAULT_MESSAGE_BOX_URL = 'https://message-box-us-1.bsvb.tech'
 
 const unique = (results: DisplayableIdentity[]) => {
   return results.filter((identity, index) => {
@@ -33,8 +34,23 @@ const unique = (results: DisplayableIdentity[]) => {
   })
 }
 
-function mergeIdentityRecords(records: DisplayableIdentity[]): DisplayableIdentity | null {
-  return records.reduce<DisplayableIdentity | null>((acc, cur) => {
+async function resolveAvatarURL(urls: (string | undefined)[]): Promise<string | undefined> {
+  const defined = urls.filter((u): u is string => !!u)
+  const httpUrl = defined.find(u => u.startsWith('http'))
+  if (httpUrl) return httpUrl
+  const nonHttp = defined.find(u => !!u)
+  if (!nonHttp) return undefined
+  try {
+    const downloader = new StorageDownloader()
+    const resolved = await downloader.resolve(nonHttp)
+    return resolved[0] ?? nonHttp
+  } catch {
+    return nonHttp
+  }
+}
+
+async function mergeIdentityRecords(records: DisplayableIdentity[]): Promise<DisplayableIdentity | null> {
+  const merged = records.reduce<DisplayableIdentity | null>((acc, cur) => {
     if (!acc) return cur
     return {
       identityKey: acc.identityKey,
@@ -46,12 +62,15 @@ function mergeIdentityRecords(records: DisplayableIdentity[]): DisplayableIdenti
       badgeClickURL: acc.badgeClickURL || cur.badgeClickURL,
     }
   }, null)
+  if (!merged) return null
+  const avatarURL = await resolveAvatarURL(records.map(r => r.avatarURL)) || ''
+  return { ...merged, avatarURL }
 }
 
 async function resolveIdentity(idClient: IdentityClient, sender: string): Promise<readonly [string, DisplayableIdentity | null]> {
   try {
     const results = await idClient.resolveByIdentityKey({ identityKey: sender, seekPermission: false })
-    return [sender, mergeIdentityRecords(results)] as const
+    return [sender, await mergeIdentityRecords(results)] as const
   } catch {
     return [sender, null] as const
   }
@@ -155,7 +174,7 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
   useEffect(() => {
     AsyncStorage.getItem(MESSAGE_BOX_URL_KEY).then(saved => {
       if (saved) { setMessageBoxUrl(saved); setUrlInput(saved); setIsConfigured(true) }
-      else { setShowConfig(true) }
+      else { setUrlInput(DEFAULT_MESSAGE_BOX_URL); setShowConfig(true) }
     })
   }, [])
 
@@ -176,7 +195,7 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
 
   const handleRemove = useCallback(async () => {
     await AsyncStorage.removeItem(MESSAGE_BOX_URL_KEY)
-    setMessageBoxUrl(''); setUrlInput(''); setIsConfigured(false); setShowConfig(true)
+    setMessageBoxUrl(''); setUrlInput(DEFAULT_MESSAGE_BOX_URL); setIsConfigured(false); setShowConfig(true)
     toast.success(t('message_box_removed'))
   }, [t])
 
@@ -292,7 +311,7 @@ function ConfigPanel({ urlInput, isSaving, isConfigured, colors, t, onChangeUrl,
       <TextInput
         value={urlInput}
         onChangeText={onChangeUrl}
-        placeholder="https://messagebox.example.com"
+        placeholder={DEFAULT_MESSAGE_BOX_URL}
         placeholderTextColor={colors.textTertiary}
         autoCapitalize="none"
         autoCorrect={false}
@@ -353,9 +372,7 @@ function RecipientField({ selectedIdentity, searchQuery, recipientKey, isSearchi
           ? <Image source={{ uri: selectedIdentity.avatarURL }} style={styles.avatar} />
           : (
             <View style={[styles.avatarPlaceholder, { backgroundColor: colors.accent }]}>
-              <Text style={[styles.avatarText, { color: colors.background }]}>
-                {(selectedIdentity.name || selectedIdentity.identityKey).slice(0, 2).toUpperCase()}
-              </Text>
+              <Ionicons name="person" size={20} color={colors.background} />
             </View>
           )}
         <View style={styles.selectedInfo}>
@@ -419,9 +436,7 @@ function RecipientField({ selectedIdentity, searchQuery, recipientKey, isSearchi
                   ? <Image source={{ uri: identity.avatarURL }} style={styles.searchAvatar} />
                   : (
                     <View style={[styles.searchAvatarPlaceholder, { backgroundColor: colors.accent }]}>
-                      <Text style={[styles.searchAvatarText, { color: colors.background }]}>
-                        {(identity.name || identity.identityKey).slice(0, 2).toUpperCase()}
-                      </Text>
+                      <Ionicons name="person" size={18} color={colors.background} />
                     </View>
                   )}
                 <View style={styles.searchResultInfo}>
@@ -476,9 +491,7 @@ function PaymentRow({
         <Image source={{ uri: identity.avatarURL }} style={styles.paymentAvatar} />
       ) : (
         <View style={[styles.paymentAvatarPlaceholder, { backgroundColor: colors.accent + 'CC' }]}>
-          <Text style={[styles.paymentAvatarText, { color: colors.background }]}>
-            {(identity?.name || senderKey).slice(0, 2).toUpperCase()}
-          </Text>
+          <Ionicons name="person" size={24} color={colors.background} />
         </View>
       )}
 
@@ -576,7 +589,18 @@ export default function PaymentsScreen() {
     } catch { peerPayClientRef.current = null }
   }, [isConfigured, messageBoxUrl, wallet, adminOriginator])
 
-  const handleSave = useCallback(() => handleSaveUrl(urlInput), [handleSaveUrl, urlInput])
+  const handleSave = useCallback(async () => {
+    const trimmed = urlInput.trim().replace(/\/+$/, '')
+    if (!trimmed || !wallet) { await handleSaveUrl(urlInput); return }
+    try {
+      toast.info(t('checking_connection'))
+      const tempClient = new PeerPayClient({ messageBoxHost: trimmed, walletClient: wallet as any, originator: adminOriginator })
+      await tempClient.init(trimmed)
+      await handleSaveUrl(urlInput)
+    } catch (error: any) {
+      toast.error(`${t('connection_failed')}: ${error.message || 'unknown error'}`)
+    }
+  }, [handleSaveUrl, urlInput, wallet, adminOriginator, t])
   const handleRemove = useCallback(async () => {
     await handleRemoveUrl()
     peerPayClientRef.current = null
@@ -639,7 +663,7 @@ export default function PaymentsScreen() {
     const client = peerPayClientRef.current
     if (!client) return
     const id = String(payment.messageId)
-    const description = paymentNotes[id]?.trim() || 'PeerPay Payment'
+    const description = paymentNotes[id]?.trim() || 'Identity Payment'
     setAcceptingId(id)
     setEditingNoteId(null)
     try {
@@ -930,10 +954,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
   selectedInfo: {
     flex: 1,
     marginLeft: spacing.md,
@@ -997,10 +1017,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,
-  },
-  searchAvatarText: {
-    fontSize: 11,
-    fontWeight: '700',
   },
   searchResultInfo: {
     flex: 1,
@@ -1081,10 +1097,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-  },
-  paymentAvatarText: {
-    ...typography.subhead,
-    fontWeight: '700',
   },
   paymentInfo: {
     flex: 1,
