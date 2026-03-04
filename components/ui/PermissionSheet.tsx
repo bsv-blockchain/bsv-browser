@@ -12,7 +12,7 @@ import AmountDisplay from '@/components/wallet/AmountDisplay'
 // Types
 // ---------------------------------------------------------------------------
 
-type PermissionKind = 'protocol' | 'basket' | 'certificate' | 'spending' | 'group'
+type PermissionKind = 'protocol' | 'basket' | 'certificate' | 'spending' | 'group' | 'btms'
 
 interface GroupProtocol {
   protocolID: [number, string]
@@ -71,22 +71,25 @@ function deriveActive(ctx: {
   basketRequests: any[]
   certificateRequests: any[]
   spendingRequests: any[]
+  btmsRequests: any[]
   protocolAccessModalOpen: boolean
   basketAccessModalOpen: boolean
   certificateAccessModalOpen: boolean
   spendingAuthorizationModalOpen: boolean
+  btmsAccessModalOpen: boolean
 }): ActivePermission | null {
-  // Priority: spending > certificate > protocol > basket (spending is most
+  // Priority: spending > certificate > protocol > basket > btms (spending is most
   // time-sensitive). We show only one at a time — exactly like the originals.
 
   if (ctx.spendingAuthorizationModalOpen && ctx.spendingRequests.length > 0) {
     const r = ctx.spendingRequests[0]
     // Map lineItems [{type, satoshis, description}] to detail rows
-    const lineItemDetails: { label: string; value: string }[] =
-      (r.lineItems ?? []).map((item: { description?: string; satoshis: number }) => ({
+    const lineItemDetails: { label: string; value: string }[] = (r.lineItems ?? []).map(
+      (item: { description?: string; satoshis: number }) => ({
         label: item.description || 'Payment',
         value: `${item.satoshis} sats`
-      }))
+      })
+    )
     return {
       kind: 'spending',
       requestID: r.requestID,
@@ -103,9 +106,7 @@ function deriveActive(ctx: {
     const r = ctx.certificateRequests[0]
     const certType = r.certificate?.certType ?? r.certificateType
     const verifier = r.certificate?.verifier ?? r.verifierPublicKey
-    const fieldsArray: string[] =
-      r.fieldsArray ??
-      (r.certificate?.fields ? Object.keys(r.certificate.fields) : [])
+    const fieldsArray: string[] = r.fieldsArray ?? (r.certificate?.fields ? Object.keys(r.certificate.fields) : [])
 
     const details: { label: string; value: string }[] = []
     if (certType) details.push({ label: 'Certificate type', value: certType })
@@ -152,6 +153,31 @@ function deriveActive(ctx: {
     }
   }
 
+  if (ctx.btmsAccessModalOpen && ctx.btmsRequests.length > 0) {
+    const r = ctx.btmsRequests[0]
+    let promptData: { type?: string; action?: string; assetId?: string } = {}
+    try {
+      promptData = JSON.parse(r.message)
+    } catch {
+      // message not valid JSON — ignore, use defaults
+    }
+    const details: { label: string; value: string }[] = [
+      { label: 'Action', value: promptData.action || 'access BTMS tokens' }
+    ]
+    if (promptData.assetId) {
+      details.push({ label: 'Asset ID', value: truncate(promptData.assetId, 28) })
+    }
+    return {
+      kind: 'btms',
+      // btms requests are resolved via advanceBtmsQueue, not permissionsManager — use a sentinel requestID
+      requestID: '',
+      originator: r.originator || 'Unknown app',
+      title: 'Token Access Request',
+      description: `wants to ${promptData.action || 'access BTMS tokens'}`,
+      details
+    }
+  }
+
   return null
 }
 
@@ -175,10 +201,12 @@ const PermissionSheet: React.FC = () => {
     basketRequests,
     certificateRequests,
     spendingRequests,
+    btmsRequests,
     advanceProtocolQueue,
     advanceBasketQueue,
     advanceCertificateQueue,
     advanceSpendingQueue,
+    advanceBtmsQueue,
     managers
   } = useContext(WalletContext)
 
@@ -190,7 +218,9 @@ const PermissionSheet: React.FC = () => {
     certificateAccessModalOpen,
     setCertificateAccessModalOpen,
     spendingAuthorizationModalOpen,
-    setSpendingAuthorizationModalOpen
+    setSpendingAuthorizationModalOpen,
+    btmsAccessModalOpen,
+    setBtmsAccessModalOpen
   } = useContext(UserContext)
 
   const [detailsExpanded, setDetailsExpanded] = useState(false)
@@ -203,20 +233,24 @@ const PermissionSheet: React.FC = () => {
         basketRequests,
         certificateRequests,
         spendingRequests,
+        btmsRequests,
         protocolAccessModalOpen,
         basketAccessModalOpen,
         certificateAccessModalOpen,
-        spendingAuthorizationModalOpen
+        spendingAuthorizationModalOpen,
+        btmsAccessModalOpen
       }),
     [
       protocolRequests,
       basketRequests,
       certificateRequests,
       spendingRequests,
+      btmsRequests,
       protocolAccessModalOpen,
       basketAccessModalOpen,
       certificateAccessModalOpen,
-      spendingAuthorizationModalOpen
+      spendingAuthorizationModalOpen,
+      btmsAccessModalOpen
     ]
   )
 
@@ -225,28 +259,34 @@ const PermissionSheet: React.FC = () => {
   // ---- Deny ----
   const handleDeny = useCallback(async () => {
     if (!active) return
-    try {
-      await managers.permissionsManager?.denyPermission(active.requestID)
-    } catch {
-      // User denial is expected -- not an error condition
-    }
-    switch (active.kind) {
-      case 'protocol':
-        advanceProtocolQueue()
-        setProtocolAccessModalOpen(false)
-        break
-      case 'basket':
-        advanceBasketQueue()
-        setBasketAccessModalOpen(false)
-        break
-      case 'certificate':
-        advanceCertificateQueue()
-        setCertificateAccessModalOpen(false)
-        break
-      case 'spending':
-        advanceSpendingQueue()
-        setSpendingAuthorizationModalOpen(false)
-        break
+    if (active.kind === 'btms') {
+      // BTMS uses its own promise-based resolution — no permissionsManager.denyPermission
+      advanceBtmsQueue(false)
+      setBtmsAccessModalOpen(false)
+    } else {
+      try {
+        await managers.permissionsManager?.denyPermission(active.requestID)
+      } catch {
+        // User denial is expected -- not an error condition
+      }
+      switch (active.kind) {
+        case 'protocol':
+          advanceProtocolQueue()
+          setProtocolAccessModalOpen(false)
+          break
+        case 'basket':
+          advanceBasketQueue()
+          setBasketAccessModalOpen(false)
+          break
+        case 'certificate':
+          advanceCertificateQueue()
+          setCertificateAccessModalOpen(false)
+          break
+        case 'spending':
+          advanceSpendingQueue()
+          setSpendingAuthorizationModalOpen(false)
+          break
+      }
     }
     setDetailsExpanded(false)
   }, [
@@ -256,16 +296,22 @@ const PermissionSheet: React.FC = () => {
     advanceBasketQueue,
     advanceCertificateQueue,
     advanceSpendingQueue,
+    advanceBtmsQueue,
     setProtocolAccessModalOpen,
     setBasketAccessModalOpen,
     setCertificateAccessModalOpen,
-    setSpendingAuthorizationModalOpen
+    setSpendingAuthorizationModalOpen,
+    setBtmsAccessModalOpen
   ])
 
   // ---- Grant ----
   const handleGrant = useCallback(async () => {
     if (!active) return
-    if (active.kind === 'spending') {
+    if (active.kind === 'btms') {
+      // BTMS uses its own promise-based resolution — no permissionsManager.grantPermission
+      advanceBtmsQueue(true)
+      setBtmsAccessModalOpen(false)
+    } else if (active.kind === 'spending') {
       managers.permissionsManager?.grantPermission({
         requestID: active.requestID,
         ephemeral: true,
@@ -300,18 +346,16 @@ const PermissionSheet: React.FC = () => {
     advanceBasketQueue,
     advanceCertificateQueue,
     advanceSpendingQueue,
+    advanceBtmsQueue,
     setProtocolAccessModalOpen,
     setBasketAccessModalOpen,
     setCertificateAccessModalOpen,
-    setSpendingAuthorizationModalOpen
+    setSpendingAuthorizationModalOpen,
+    setBtmsAccessModalOpen
   ])
 
   return (
-    <Sheet
-      visible={visible}
-      onClose={handleDeny}
-      heightPercent={0.92}
-    >
+    <Sheet visible={visible} onClose={handleDeny} heightPercent={0.92}>
       {active && (
         <View style={styles.sheetInner}>
           <View style={[styles.content, active.kind === 'group' && { flex: 1 }]}>
@@ -322,10 +366,7 @@ const PermissionSheet: React.FC = () => {
                   {(active.originator[0] ?? '?').toUpperCase()}
                 </Text>
               </View>
-              <Text
-                style={[styles.originator, { color: colors.textPrimary }]}
-                numberOfLines={1}
-              >
+              <Text style={[styles.originator, { color: colors.textPrimary }]} numberOfLines={1}>
                 {active.originator}
               </Text>
             </View>
@@ -333,9 +374,7 @@ const PermissionSheet: React.FC = () => {
             {/* -------- Renewal badge -------- */}
             {active.renewal && (
               <View style={[styles.renewalBadge, { backgroundColor: colors.accentSecondary + '1A' }]}>
-                <Text style={[styles.renewalText, { color: colors.accentSecondary }]}>
-                  {t('renewal')}
-                </Text>
+                <Text style={[styles.renewalText, { color: colors.accentSecondary }]}>{t('renewal')}</Text>
               </View>
             )}
 
@@ -344,7 +383,9 @@ const PermissionSheet: React.FC = () => {
               <ScrollView style={styles.groupScroll} bounces={false}>
                 {active.groupPermissions.spendingAuthorization && (
                   <View style={[styles.groupSection, { borderColor: colors.separator }]}>
-                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>{t('spending_section')}</Text>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>
+                      {t('spending_section')}
+                    </Text>
                     <View style={styles.groupRow}>
                       <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>
                         <AmountDisplay>{active.groupPermissions.spendingAuthorization.amount}</AmountDisplay>
@@ -357,22 +398,27 @@ const PermissionSheet: React.FC = () => {
                     </View>
                   </View>
                 )}
-                {active.groupPermissions.protocolPermissions && active.groupPermissions.protocolPermissions.length > 0 && (
-                  <View style={[styles.groupSection, { borderColor: colors.separator }]}>
-                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>{t('protocols_section')}</Text>
-                    {active.groupPermissions.protocolPermissions.map((p, i) => (
-                      <View key={i} style={styles.groupRow}>
-                        <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{p.protocolID[1]}</Text>
-                        {p.description && (
-                          <Text style={[styles.groupRowDesc, { color: colors.textSecondary }]}>{p.description}</Text>
-                        )}
-                      </View>
-                    ))}
-                  </View>
-                )}
+                {active.groupPermissions.protocolPermissions &&
+                  active.groupPermissions.protocolPermissions.length > 0 && (
+                    <View style={[styles.groupSection, { borderColor: colors.separator }]}>
+                      <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>
+                        {t('protocols_section')}
+                      </Text>
+                      {active.groupPermissions.protocolPermissions.map((p, i) => (
+                        <View key={i} style={styles.groupRow}>
+                          <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{p.protocolID[1]}</Text>
+                          {p.description && (
+                            <Text style={[styles.groupRowDesc, { color: colors.textSecondary }]}>{p.description}</Text>
+                          )}
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 {active.groupPermissions.basketAccess && active.groupPermissions.basketAccess.length > 0 && (
                   <View style={[styles.groupSection, { borderColor: colors.separator }]}>
-                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>{t('baskets_section')}</Text>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>
+                      {t('baskets_section')}
+                    </Text>
                     {active.groupPermissions.basketAccess.map((b, i) => (
                       <View key={i} style={styles.groupRow}>
                         <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{b.basket}</Text>
@@ -385,7 +431,9 @@ const PermissionSheet: React.FC = () => {
                 )}
                 {active.groupPermissions.certificateAccess && active.groupPermissions.certificateAccess.length > 0 && (
                   <View style={[styles.groupSection, { borderColor: colors.separator }]}>
-                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>{t('certificates_section')}</Text>
+                    <Text style={[styles.groupSectionTitle, { color: colors.textSecondary }]}>
+                      {t('certificates_section')}
+                    </Text>
                     {active.groupPermissions.certificateAccess.map((c, i) => (
                       <View key={i} style={styles.groupRow}>
                         <Text style={[styles.groupRowLabel, { color: colors.textPrimary }]}>{c.type}</Text>
@@ -421,19 +469,11 @@ const PermissionSheet: React.FC = () => {
                 </TouchableOpacity>
 
                 {detailsExpanded && (
-                  <ScrollView
-                    style={[styles.detailsCard, { backgroundColor: colors.fillTertiary }]}
-                    bounces={false}
-                  >
+                  <ScrollView style={[styles.detailsCard, { backgroundColor: colors.fillTertiary }]} bounces={false}>
                     {active.details.map((d, i) => (
                       <View key={i} style={styles.detailRow}>
-                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                          {d.label}
-                        </Text>
-                        <Text
-                          style={[styles.detailValue, { color: colors.textPrimary }]}
-                          numberOfLines={1}
-                        >
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{d.label}</Text>
+                        <Text style={[styles.detailValue, { color: colors.textPrimary }]} numberOfLines={1}>
                           {d.value}
                         </Text>
                       </View>
@@ -444,10 +484,7 @@ const PermissionSheet: React.FC = () => {
                           {t('requested_fields')}
                         </Text>
                         {active.fields.map((f, i) => (
-                          <Text
-                            key={i}
-                            style={[styles.fieldItem, { color: colors.textPrimary }]}
-                          >
+                          <Text key={i} style={[styles.fieldItem, { color: colors.textPrimary }]}>
                             {'\u2022'} {f}
                           </Text>
                         ))}
@@ -459,9 +496,7 @@ const PermissionSheet: React.FC = () => {
             )}
 
             {/* -------- Plain-English description -------- */}
-            <Text style={[styles.description, { color: colors.primary }]}>
-              {active.description}
-            </Text>
+            <Text style={[styles.description, { color: colors.primary }]}>{active.description}</Text>
 
             {/* -------- Spending: prominent amount -------- */}
             {active.kind === 'spending' && active.amount != null && (
@@ -480,9 +515,7 @@ const PermissionSheet: React.FC = () => {
               onPress={handleDeny}
               activeOpacity={0.7}
             >
-              <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>
-                {t('reject')}
-              </Text>
+              <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>{t('reject')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -490,9 +523,7 @@ const PermissionSheet: React.FC = () => {
               onPress={handleGrant}
               activeOpacity={0.7}
             >
-              <Text style={[styles.buttonAllowText, { color: '#FFFFFF' }]}>
-                {t('authorize')}
-              </Text>
+              <Text style={[styles.buttonAllowText, { color: '#FFFFFF' }]}>{t('authorize')}</Text>
             </TouchableOpacity>
           </View>
         </View>

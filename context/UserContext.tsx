@@ -66,6 +66,8 @@ export interface UserContextValue {
   setProtocolAccessModalOpen: Dispatch<SetStateAction<boolean>>
   spendingAuthorizationModalOpen: boolean
   setSpendingAuthorizationModalOpen: Dispatch<SetStateAction<boolean>>
+  btmsAccessModalOpen: boolean
+  setBtmsAccessModalOpen: Dispatch<SetStateAction<boolean>>
   pageLoaded: boolean
   setPageLoaded: Dispatch<SetStateAction<boolean>>
 }
@@ -88,6 +90,7 @@ export const UserContextProvider: React.FC<UserContextProps> = ({
   const [certificateAccessModalOpen, setCertificateAccessModalOpen] = useState(false)
   const [protocolAccessModalOpen, setProtocolAccessModalOpen] = useState(false)
   const [spendingAuthorizationModalOpen, setSpendingAuthorizationModalOpen] = useState(false)
+  const [btmsAccessModalOpen, setBtmsAccessModalOpen] = useState(false)
   const [pageLoaded, setPageLoaded] = useState(false)
 
   const userContext = useMemo(
@@ -106,6 +109,8 @@ export const UserContextProvider: React.FC<UserContextProps> = ({
       setProtocolAccessModalOpen,
       spendingAuthorizationModalOpen,
       setSpendingAuthorizationModalOpen,
+      btmsAccessModalOpen,
+      setBtmsAccessModalOpen,
       pageLoaded,
       setPageLoaded
     }),
@@ -116,6 +121,7 @@ export const UserContextProvider: React.FC<UserContextProps> = ({
       certificateAccessModalOpen,
       protocolAccessModalOpen,
       spendingAuthorizationModalOpen,
+      btmsAccessModalOpen,
       pageLoaded
     ]
   )
