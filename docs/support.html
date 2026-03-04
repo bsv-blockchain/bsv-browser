@@ -1,0 +1,1185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BSV Browser - Support &amp; User Guide</title>
+    <meta
+      name="description"
+      content="Support and user guide for BSV Browser, the open source BSV Blockchain Web3 browser for iOS and Android."
+    />
+    <meta
+      name="keywords"
+      content="BSV, blockchain, wallet, mobile, iOS, Android, Bitcoin SV, identity, payments, Web3, support, help"
+    />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bsv-blockchain.github.io/bsv-browser/support.html" />
+    <meta property="og:title" content="BSV Browser - Support &amp; User Guide" />
+    <meta
+      property="og:description"
+      content="Get help with BSV Browser. Learn how to browse the web, manage your wallet, make payments, and use Web3 features."
+    />
+    <meta property="og:image" content="https://bsv-blockchain.github.io/bsv-browser/1.PNG" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="../assets/images/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="192x192" href="../assets/images/android-chrome-192x192.png" />
+
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      /* Support page specific styles */
+      .support-hero {
+        background: linear-gradient(135deg, #080c1e 0%, #844ba2 100%);
+        color: white;
+        padding: 80px 0 60px;
+        text-align: center;
+      }
+
+      .support-hero h1 {
+        color: white;
+        font-size: 3rem;
+        font-weight: 300;
+        margin-bottom: 0.5rem;
+      }
+
+      .support-hero p {
+        font-size: 1.2rem;
+        opacity: 0.85;
+        max-width: 700px;
+        margin: 0 auto;
+        line-height: 1.7;
+      }
+
+      .support-nav {
+        background: #f8fafc;
+        border-bottom: 1px solid #e2e8f0;
+        padding: 20px 0;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+
+      .support-nav .container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+      }
+
+      .support-nav a {
+        color: #555;
+        text-decoration: none;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+      }
+
+      .support-nav a:hover {
+        background: #e2e8f0;
+        color: #1a1a1a;
+      }
+
+      .guide-section {
+        padding: 80px 0;
+        border-bottom: 1px solid #eee;
+      }
+
+      .guide-section:nth-child(even) {
+        background: #f8fafc;
+      }
+
+      .guide-section h2 {
+        font-size: 2rem;
+        font-weight: 300;
+        margin-bottom: 1rem;
+        text-align: left;
+      }
+
+      .guide-section .section-intro {
+        font-size: 1.1rem;
+        color: #555;
+        margin-bottom: 2.5rem;
+        line-height: 1.7;
+        max-width: 800px;
+      }
+
+      .guide-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 60px;
+        align-items: center;
+        margin-bottom: 3rem;
+      }
+
+      .guide-row.reverse {
+        direction: rtl;
+      }
+
+      .guide-row.reverse > * {
+        direction: ltr;
+      }
+
+      .guide-text h3 {
+        font-size: 1.4rem;
+        font-weight: 500;
+        margin-bottom: 1rem;
+        color: #1a1a1a;
+      }
+
+      .guide-text p {
+        color: #555;
+        line-height: 1.7;
+        margin-bottom: 1rem;
+        font-size: 1rem;
+      }
+
+      .guide-text ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+
+      .guide-text ul li {
+        padding: 6px 0;
+        color: #555;
+        line-height: 1.6;
+        font-size: 1rem;
+      }
+
+      .guide-text ul li::before {
+        content: '  ';
+        margin-right: 10px;
+      }
+
+      .guide-image {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .guide-screenshot {
+        max-width: 280px;
+        width: 100%;
+        height: auto;
+        border-radius: 20px;
+        box-shadow: 0 12px 35px rgba(0, 0, 0, 0.15);
+      }
+
+      .guide-screenshot-small {
+        max-width: 240px;
+        width: 100%;
+        height: auto;
+        border-radius: 16px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+      }
+
+      .dual-screenshot {
+        display: flex;
+        gap: 20px;
+        justify-content: center;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .tip-box {
+        background: #f0f7ff;
+        border-left: 4px solid #3b82f6;
+        padding: 16px 20px;
+        border-radius: 0 8px 8px 0;
+        margin: 1.5rem 0;
+      }
+
+      .tip-box p {
+        margin: 0;
+        color: #1e40af;
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+
+      .tip-box strong {
+        color: #1e3a8a;
+      }
+
+      .warning-box {
+        background: #fef3c7;
+        border-left: 4px solid #f59e0b;
+        padding: 16px 20px;
+        border-radius: 0 8px 8px 0;
+        margin: 1.5rem 0;
+      }
+
+      .warning-box p {
+        margin: 0;
+        color: #92400e;
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+
+      .warning-box strong {
+        color: #78350f;
+      }
+
+      /* Contact / Support section */
+      .contact-section {
+        background: linear-gradient(135deg, #080c1e 0%, #844ba2 100%);
+        color: white;
+        padding: 80px 0;
+        text-align: center;
+      }
+
+      .contact-section h2 {
+        color: white;
+        font-size: 2.2rem;
+        font-weight: 300;
+        margin-bottom: 1rem;
+      }
+
+      .contact-section > .container > p {
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 1.1rem;
+        max-width: 700px;
+        margin: 0 auto 3rem;
+        line-height: 1.7;
+      }
+
+      .contact-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 30px;
+        max-width: 900px;
+        margin: 0 auto;
+      }
+
+      .contact-card {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 16px;
+        padding: 40px 30px;
+        text-align: center;
+        transition:
+          transform 0.3s ease,
+          background 0.3s ease;
+      }
+
+      .contact-card:hover {
+        transform: translateY(-4px);
+        background: rgba(255, 255, 255, 0.15);
+      }
+
+      .contact-icon {
+        font-size: 2.5rem;
+        margin-bottom: 1rem;
+        display: block;
+      }
+
+      .contact-card h3 {
+        color: white;
+        font-size: 1.3rem;
+        font-weight: 500;
+        margin-bottom: 0.75rem;
+      }
+
+      .contact-card p {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 0.95rem;
+        line-height: 1.6;
+        margin-bottom: 1.25rem;
+      }
+
+      .contact-card a.contact-link {
+        color: #a5f3fc;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 1rem;
+        border-bottom: 2px solid transparent;
+        padding-bottom: 2px;
+        transition: border-color 0.2s ease;
+      }
+
+      .contact-card a.contact-link:hover {
+        border-bottom-color: #a5f3fc;
+      }
+
+      /* Open source banner */
+      .open-source-banner {
+        background: #1a1a1a;
+        color: white;
+        padding: 60px 0;
+        text-align: center;
+      }
+
+      .open-source-banner h2 {
+        color: white;
+        font-size: 2rem;
+        font-weight: 300;
+        margin-bottom: 1rem;
+      }
+
+      .open-source-banner p {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 1.05rem;
+        line-height: 1.7;
+        max-width: 750px;
+        margin: 0 auto 1.5rem;
+      }
+
+      .open-source-banner a {
+        color: #a5f3fc;
+        text-decoration: none;
+        font-weight: 500;
+      }
+
+      .open-source-banner a:hover {
+        text-decoration: underline;
+      }
+
+      .license-badge {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        padding: 8px 20px;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        color: rgba(255, 255, 255, 0.9);
+        margin-top: 1rem;
+      }
+
+      /* FAQ section */
+      .faq-list {
+        max-width: 800px;
+        margin: 0 auto;
+      }
+
+      .faq-item {
+        border-bottom: 1px solid #e2e8f0;
+        padding: 1.5rem 0;
+      }
+
+      .faq-item:last-child {
+        border-bottom: none;
+      }
+
+      .faq-item h3 {
+        font-size: 1.15rem;
+        font-weight: 500;
+        margin-bottom: 0.75rem;
+        color: #1a1a1a;
+      }
+
+      .faq-item p {
+        color: #555;
+        line-height: 1.7;
+        font-size: 1rem;
+      }
+
+      .back-to-home {
+        display: inline-block;
+        color: rgba(255, 255, 255, 0.8);
+        text-decoration: none;
+        font-size: 0.95rem;
+        margin-bottom: 1.5rem;
+        transition: color 0.2s ease;
+      }
+
+      .back-to-home:hover {
+        color: white;
+      }
+
+      /* Responsive */
+      @media (max-width: 768px) {
+        .support-hero {
+          padding: 60px 0 40px;
+        }
+
+        .support-hero h1 {
+          font-size: 2.2rem;
+        }
+
+        .guide-section {
+          padding: 50px 0;
+        }
+
+        .guide-row {
+          grid-template-columns: 1fr;
+          gap: 30px;
+        }
+
+        .guide-row.reverse {
+          direction: ltr;
+        }
+
+        .guide-image {
+          order: -1;
+        }
+
+        .guide-screenshot {
+          max-width: 220px;
+        }
+
+        .guide-screenshot-small {
+          max-width: 200px;
+        }
+
+        .contact-cards {
+          grid-template-columns: 1fr;
+        }
+
+        .guide-section h2 {
+          font-size: 1.6rem;
+          text-align: center;
+        }
+
+        .guide-section .section-intro {
+          text-align: center;
+        }
+
+        .support-nav a {
+          font-size: 0.8rem;
+          padding: 6px 12px;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .support-hero h1 {
+          font-size: 1.8rem;
+        }
+
+        .support-hero p {
+          font-size: 1rem;
+        }
+
+        .guide-screenshot {
+          max-width: 200px;
+        }
+
+        .dual-screenshot {
+          gap: 12px;
+        }
+
+        .dual-screenshot .guide-screenshot-small {
+          max-width: 150px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Hero -->
+    <section class="support-hero">
+      <div class="container">
+        <a href="index.html" class="back-to-home">&larr; Back to Home</a>
+        <h1>Support &amp; User Guide</h1>
+        <p>
+          Everything you need to know about BSV Browser &mdash; a free, open source Web3 browser with built-in wallet,
+          identity, and micropayment capabilities for the BSV Blockchain.
+        </p>
+      </div>
+    </section>
+
+    <!-- Quick Nav -->
+    <nav class="support-nav">
+      <div class="container">
+        <a href="#what-is-bsv-browser">What is BSV Browser?</a>
+        <a href="#getting-started">Getting Started</a>
+        <a href="#browsing">Browsing the Web</a>
+        <a href="#wallet">Wallet &amp; Payments</a>
+        <a href="#identity">Identity &amp; Trust</a>
+        <a href="#permissions">Permissions</a>
+        <a href="#tips">Tips &amp; Settings</a>
+        <a href="#faq">FAQ</a>
+        <a href="#contact">Contact Support</a>
+      </div>
+    </nav>
+
+    <!-- SECTION: What is BSV Browser? -->
+    <section id="what-is-bsv-browser" class="guide-section">
+      <div class="container">
+        <h2>What is BSV Browser?</h2>
+        <p class="section-intro">
+          BSV Browser is a mobile web browser for iOS and Android that works just like any browser you already know
+          &mdash; but with built-in support for BSV Blockchain technology. It lets you browse regular websites, manage a
+          self-custodial BSV wallet, prove your identity cryptographically, and make instant micropayments, all from one
+          app.
+        </p>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>A regular browser, with superpowers</h3>
+            <p>
+              At its core, BSV Browser is a full-featured web browser. You can visit any website, manage bookmarks, keep
+              browsing history, and open multiple tabs. What sets it apart is the optional Web3 layer: when you enable
+              it, websites that support the BRC-100 standard can interact with your wallet for payments, identity
+              verification, encryption, and more &mdash; all with your explicit permission.
+            </p>
+            <p>The browser ships with two modes:</p>
+            <ul>
+              <li>
+                <strong>Web2 Mode</strong> &mdash; a standard browser with no blockchain features active. This is the
+                default until you choose to create or import a wallet.
+              </li>
+              <li>
+                <strong>Web3 Mode</strong> &mdash; enables the full suite of wallet, identity, and payment capabilities
+                for compatible applications.
+              </li>
+            </ul>
+          </div>
+          <div class="guide-image">
+            <img src="9.png" alt="BSV Browser showing the feature list" class="guide-screenshot" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: Getting Started -->
+    <section id="getting-started" class="guide-section">
+      <div class="container">
+        <h2>Getting Started</h2>
+        <p class="section-intro">
+          Setting up BSV Browser takes just a few minutes. You can start browsing the web immediately and enable Web3
+          features whenever you are ready.
+        </p>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Step 1: Enable Web3</h3>
+            <p>
+              When you first open the app, you are in Web2 mode. To unlock wallet and blockchain features, tap the menu
+              button (the three dots at the bottom-right of the screen) and select <strong>Enable Web3</strong>. You
+              will be presented with two options:
+            </p>
+            <ul>
+              <li><strong>Create New Wallet</strong> &mdash; generates a fresh 12-word recovery phrase.</li>
+              <li><strong>Import Existing Wallet</strong> &mdash; paste a BIP-39 recovery phrase you already have.</li>
+            </ul>
+            <p>
+              If you are not ready to create a wallet, tap <strong>Cancel</strong> and continue browsing in Web2 mode.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img src="WEB3.PNG" alt="Wallet setup screen with Create and Import options" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Step 2: Secure your recovery phrase</h3>
+            <p>
+              If you create a new wallet, you will see a 12-word recovery phrase. This is the
+              <strong>only way</strong> to recover your wallet if you lose your device or reinstall the app.
+            </p>
+            <ul>
+              <li>Use <strong>Save Recovery Phrase</strong> to share it to a secure location.</li>
+              <li>Use <strong>Copy to Clipboard</strong> and store it somewhere safe.</li>
+              <li>Confirm you have saved it by checking the acknowledgment box.</li>
+            </ul>
+            <div class="warning-box">
+              <p>
+                <strong>Important:</strong> Your keys and transaction data are stored on your device only. BSV Browser
+                is self-custodial &mdash; nobody else holds your keys. If you lose your recovery phrase, your wallet
+                cannot be recovered.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img src="5.PNG" alt="Recovery phrase backup screen" class="guide-screenshot" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: Browsing the Web -->
+    <section id="browsing" class="guide-section">
+      <div class="container">
+        <h2>Browsing the Web</h2>
+        <p class="section-intro">
+          BSV Browser works like any mobile browser you are used to. Type a URL or search query into the address bar,
+          navigate with back and forward buttons, and manage tabs and bookmarks.
+        </p>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Address bar and navigation</h3>
+            <p>
+              The address bar sits at the bottom of the screen. Tap it to enter a URL or search query. As you type, the
+              browser shows autocomplete suggestions drawn from your bookmarks and browsing history.
+            </p>
+            <p>
+              If you type a term that does not look like a URL, the browser checks the BSV overlay network for a
+              matching application. If a match is found, you are taken directly there.
+            </p>
+            <div class="tip-box">
+              <p>
+                <strong>Tip:</strong> Look for the lock icon next to the URL &mdash; it indicates the site is served
+                over HTTPS.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img src="TOPBAR.png" alt="Browser top bar with navigation and menu" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Tabs</h3>
+            <p>
+              Open the menu and tap <strong>Tabs</strong> to see all your open tabs in a card-style overview. You can:
+            </p>
+            <ul>
+              <li>Swipe a tab card left or right to close it.</li>
+              <li>Tap <strong>+</strong> to open a new tab.</li>
+              <li>Tap <strong>Clear All Tabs</strong> to start fresh.</li>
+            </ul>
+            <p>Your open tabs are automatically saved between sessions, so you pick up right where you left off.</p>
+          </div>
+          <div class="guide-image">
+            <img src="3.png" alt="Tab manager showing multiple open tabs" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Bookmarks, history, and homepage</h3>
+            <p>
+              From the menu, tap <strong>Browser</strong> to access your bookmarks, browsing history, and homepage
+              settings.
+            </p>
+            <ul>
+              <li>
+                <strong>Bookmarks</strong> appear as a scrollable row at the top. Tap one to open it in a new tab.
+              </li>
+              <li>
+                <strong>History</strong> lists recently visited pages. You can delete individual entries or clear
+                everything.
+              </li>
+              <li><strong>Homepage</strong> can be set to any URL. New tabs always open to your homepage.</li>
+            </ul>
+          </div>
+          <div class="guide-image">
+            <img
+              src="8.PNG"
+              alt="Browser page showing bookmarks, history, and homepage settings"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>The menu</h3>
+            <p>Tap the three-dot button at the bottom right to open the menu popover. From here you can:</p>
+            <ul>
+              <li><strong>Share</strong> the current page.</li>
+              <li><strong>Add Bookmark</strong> for the page you are on.</li>
+              <li>Open the <strong>Browser</strong> page (bookmarks, history, homepage).</li>
+              <li>Submit a <strong>Bug Report</strong> (links directly to the GitHub issues page).</li>
+              <li>
+                Open <strong>Wallet</strong> settings (or <strong>Enable Web3</strong> if you have not set up yet).
+              </li>
+              <li>View and manage <strong>Tabs</strong>.</li>
+            </ul>
+          </div>
+          <div class="guide-image">
+            <img src="2.png" alt="Menu popover showing available options" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Overlay app discovery</h3>
+            <p>
+              BSV Browser can discover applications registered on the BSV overlay network. When you enter a search term
+              in the address bar that is not a recognisable URL, the browser queries the overlay for matching apps. If a
+              single match is found, you are navigated there automatically. If multiple matches are found, they appear
+              as suggestions.
+            </p>
+            <p>This means you can find BSV-powered apps by name without needing to know their exact URL.</p>
+          </div>
+          <div class="guide-image">
+            <img src="OVERLAY.png" alt="Overlay lookup in progress" class="guide-screenshot" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: Wallet & Payments -->
+    <section id="wallet" class="guide-section">
+      <div class="container">
+        <h2>Wallet &amp; Payments</h2>
+        <p class="section-intro">
+          Once Web3 is enabled, BSV Browser includes a fully self-custodial BSV wallet. You can view your balance, send
+          and receive payments, and interact with Web3 applications that use micropayments.
+        </p>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Wallet overview</h3>
+            <p>Open the menu and tap <strong>Wallet</strong> to see your wallet settings. Here you can:</p>
+            <ul>
+              <li>
+                View your current <strong>balance</strong> in satoshis or fiat (USD, EUR, GBP). Tap the balance to
+                refresh.
+              </li>
+              <li>
+                Switch between <strong>Mainnet</strong>, <strong>Testnet</strong>, and
+                <strong>Teratest</strong> networks.
+              </li>
+              <li>View or copy your <strong>recovery phrase</strong> and <strong>identity key</strong>.</li>
+              <li>
+                Access <strong>Transaction History</strong>, <strong>Trust Network</strong>, and
+                <strong>Payments</strong> screens.
+              </li>
+              <li><strong>Export</strong> your wallet data for backup.</li>
+              <li><strong>Logout</strong> to clear all wallet data and return to Web2 mode.</li>
+            </ul>
+          </div>
+          <div class="guide-image">
+            <img src="1.PNG" alt="Wallet settings showing balance, network, and options" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Micropayments in Web3 apps</h3>
+            <p>
+              When you visit a Web3-enabled website, it can request a payment from your wallet. A permission sheet
+              slides up from the bottom of the screen showing:
+            </p>
+            <ul>
+              <li>The requesting website's domain.</li>
+              <li>A description of what you are paying for.</li>
+              <li>The exact amount in satoshis (and fiat equivalent).</li>
+            </ul>
+            <p>
+              You can tap <strong>Authorize</strong> to approve or <strong>Reject</strong> to decline. No payment is
+              ever made without your explicit approval.
+            </p>
+            <div class="tip-box">
+              <p>
+                <strong>Tip:</strong> Micropayments on BSV are typically fractions of a cent, making it practical to pay
+                for individual actions like saving a note, posting a message, or accessing premium content.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img src="7.PNG" alt="Micropayment authorization prompt" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Peer-to-peer identity payments</h3>
+            <p>
+              The <strong>Identity Payments</strong> screen (accessible from Wallet settings) lets you send BSV directly
+              to another person using their identity rather than a raw blockchain address. Search for the recipient by
+              name across the BSV identity network, enter an amount, and send.
+            </p>
+            <p>
+              You can also receive identity-based payments here. Incoming payments appear in a list and can be accepted
+              with a single tap.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img src="6.PNG" alt="PeerPay identity payment screen" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Legacy address-based payments</h3>
+            <p>
+              For compatibility with traditional BSV wallets and services, BSV Browser also supports standard
+              address-based transactions via the <strong>Legacy Payments</strong> screen.
+            </p>
+            <ul>
+              <li>
+                <strong>Receive:</strong> A unique address and QR code are generated daily. Share them with anyone who
+                wants to send you BSV. Incoming funds are automatically detected and imported into your wallet.
+              </li>
+              <li>
+                <strong>Send:</strong> Enter a BSV address and amount, then confirm. You can also tap
+                <strong>Send Max</strong> to send your entire balance.
+              </li>
+            </ul>
+          </div>
+          <div class="guide-image">
+            <img src="PAY.PNG" alt="Payment authorization for a Web3 app" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Transaction history</h3>
+            <p>
+              The <strong>Transactions</strong> screen (accessible from Wallet settings) lists all your transactions
+              with colour-coded status badges:
+            </p>
+            <ul>
+              <li><strong>Green</strong> &mdash; Confirmed, accepted, or broadcasting.</li>
+              <li><strong>Yellow</strong> &mdash; Pending states (unsigned, non-final, not yet sent).</li>
+              <li><strong>Red</strong> &mdash; Failed transactions.</li>
+            </ul>
+            <p>
+              For each transaction, you can view it on the block explorer, copy the raw transaction data, or abort
+              transactions that are still pending.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img src="4.PNG" alt="Web3 app showing transaction data" class="guide-screenshot" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: Identity & Trust -->
+    <section id="identity" class="guide-section">
+      <div class="container">
+        <h2>Identity &amp; Trust</h2>
+        <p class="section-intro">
+          BSV Browser gives you a cryptographic identity that you control. There are no usernames, passwords, or sign-up
+          forms. Your identity key is derived from your recovery phrase, and you decide which applications and entities
+          can verify aspects of your identity.
+        </p>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Your identity key</h3>
+            <p>
+              When you create or import a wallet, a unique identity key is generated. This key represents you across all
+              Web3 applications. It is shown in your Wallet settings &mdash; tap it to copy.
+            </p>
+            <p>
+              Web3 applications use this key to identify you without needing email addresses, phone numbers, or any
+              other personal information. Mutual authentication means both you and the app prove who you are.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img src="1.PNG" alt="Wallet settings showing identity key" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Trust network</h3>
+            <p>
+              The <strong>Trust Network</strong> screen lets you manage which identity certifiers you trust. Certifiers
+              are entities that vouch for identity attributes (like a real name or organisation membership).
+            </p>
+            <ul>
+              <li>View your list of trusted certifiers, ordered by priority.</li>
+              <li>Reorder certifiers to set preference priority.</li>
+              <li>
+                Add new providers by entering their domain (the app fetches their trust manifest) or manually by
+                entering their details.
+              </li>
+              <li>Remove certifiers you no longer trust.</li>
+            </ul>
+            <p>When a Web3 app asks to verify an identity certificate, it checks against your trusted certifiers.</p>
+          </div>
+          <div class="guide-image">
+            <img src="ADD_TRUST.PNG" alt="Adding a trusted identity provider" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Certificates and selective revelation</h3>
+            <p>
+              BSV Browser supports identity certificates that allow you to prove specific attributes about yourself
+              without revealing everything. For example, you could prove you are over 18 without revealing your exact
+              date of birth, or prove your organisation membership without revealing your name.
+            </p>
+            <p>
+              When a Web3 application requests certificate information, a permission sheet appears showing exactly which
+              fields are being requested. You always have the choice to approve or reject.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img src="WEB3.PNG" alt="Web3 wallet creation screen" class="guide-screenshot" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: Permissions -->
+    <section id="permissions" class="guide-section">
+      <div class="container">
+        <h2>Permissions &amp; Privacy</h2>
+        <p class="section-intro">
+          BSV Browser is designed around explicit user consent. No wallet operation happens without your approval, and
+          the app does not collect or transmit your browsing data.
+        </p>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Wallet permissions</h3>
+            <p>
+              When a Web3 application requests an action from your wallet, a detailed permission sheet appears.
+              Depending on the request type, you may see:
+            </p>
+            <ul>
+              <li><strong>Spending requests</strong> &mdash; the domain, amount, and description of the payment.</li>
+              <li>
+                <strong>Protocol access</strong> &mdash; requests to use cryptographic operations (signing, encryption).
+              </li>
+              <li>
+                <strong>Certificate access</strong> &mdash; requests to read specific identity certificate fields.
+              </li>
+              <li><strong>Basket access</strong> &mdash; requests to manage transaction output groups.</li>
+            </ul>
+            <p>
+              Every request shows the originating domain. Tap <strong>Authorize</strong> to approve or
+              <strong>Reject</strong> to decline.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img src="PAY.PNG" alt="Permission sheet for a spending request" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Device permissions</h3>
+            <p>
+              Websites may also request standard device permissions such as camera, microphone, or location access.
+              These are handled per-domain:
+            </p>
+            <ul>
+              <li>A clear modal explains what permission is being requested and by which website.</li>
+              <li>You can choose to <strong>Allow</strong> or <strong>Deny</strong>.</li>
+              <li>Your decision is remembered for that domain.</li>
+            </ul>
+          </div>
+          <div class="guide-image">
+            <img src="TOPBAR.png" alt="Browser interface with permission controls" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Your privacy</h3>
+            <p>
+              BSV Browser does not collect your browsing history, cookies, or tracking data. Browsing history and
+              bookmarks are stored only on your device and are never transmitted to BSV Association or any third party.
+            </p>
+            <p>
+              For full details, read the <a href="privacy.html">Privacy Policy</a> and
+              <a href="usage.html">Usage Policy</a>.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img src="8.PNG" alt="Browser page with history and bookmarks" class="guide-screenshot" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: Tips & Settings -->
+    <section id="tips" class="guide-section">
+      <div class="container">
+        <h2>Tips &amp; Settings</h2>
+        <p class="section-intro">Get the most out of BSV Browser with these tips.</p>
+
+        <div class="faq-list">
+          <div class="faq-item">
+            <h3>Set BSV Browser as your default browser</h3>
+            <p>
+              On first launch, BSV Browser will offer to become your default browser. On iOS, go to Settings &gt; Apps
+              &gt; Default Apps. On Android, go to Settings &gt; Apps &gt; Default apps &gt; Browser app. This way, all
+              links you tap in other apps open in BSV Browser.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>Switch between networks</h3>
+            <p>
+              In Wallet settings, tap the network selector to switch between <strong>Mainnet</strong> (real BSV),
+              <strong>Testnet</strong> (test coins for development), and <strong>Teratest</strong>. Switching networks
+              rebuilds the wallet on the selected chain. Use Testnet to experiment without risking real funds.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>Export your wallet data</h3>
+            <p>
+              In Wallet settings, tap <strong>Export Data</strong> to save a backup of your wallet database files. This
+              uses the system share dialog so you can send the files to cloud storage, email, or any other location.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>View amounts in your local currency</h3>
+            <p>
+              BSV Browser supports displaying amounts in satoshis or fiat currencies (USD, EUR, GBP). Tap the balance
+              display to cycle through formats. Exchange rates are updated automatically every five minutes.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>Supported languages</h3>
+            <p>
+              The app automatically detects your device language. It is localised into English, Chinese (Simplified),
+              Hindi, Spanish, French, Arabic, Portuguese, Bengali, Russian, and Indonesian.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>Downloads</h3>
+            <p>
+              BSV Browser handles file downloads natively. When a website offers a file (PDF, ZIP, images, etc.), the
+              browser intercepts the download and saves it using your device's native download mechanism.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: FAQ -->
+    <section id="faq" class="guide-section">
+      <div class="container">
+        <h2>Frequently Asked Questions</h2>
+
+        <div class="faq-list">
+          <div class="faq-item">
+            <h3>Do I need a wallet to use BSV Browser?</h3>
+            <p>
+              No. BSV Browser works as a fully functional web browser in Web2 mode without any wallet setup. You can
+              enable Web3 features at any time by creating or importing a wallet.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>Can I lose my funds?</h3>
+            <p>
+              BSV Browser is self-custodial. Your keys are stored only on your device. If you lose your device and have
+              not saved your 12-word recovery phrase, your wallet cannot be recovered. Always back up your recovery
+              phrase in a safe location.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>Can websites take money from my wallet without permission?</h3>
+            <p>
+              No. Every spending request triggers a permission sheet that shows the exact amount and the requesting
+              domain. You must explicitly tap <strong>Authorize</strong> before any funds leave your wallet.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>Does BSV Association have access to my keys or browsing data?</h3>
+            <p>
+              No. BSV Browser does not collect or transmit your browsing history, wallet keys, or personal data to BSV
+              Association or any other party. Everything stays on your device. See the
+              <a href="privacy.html">Privacy Policy</a> for details.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>What is a recovery phrase?</h3>
+            <p>
+              A recovery phrase (also called a seed phrase or mnemonic) is a set of 12 words generated when you create
+              your wallet. These words can be used to restore your wallet on any compatible device. Keep them secret and
+              stored safely offline.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>What is the BRC-100 standard?</h3>
+            <p>
+              BRC-100 is the BSV Wallet Interface standard. It defines how web applications communicate with wallets.
+              BSV Browser implements all 28 methods of the standard, enabling any compliant web application to request
+              payments, signatures, encryption, certificates, and more &mdash; always with your consent.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>Is BSV Browser available on desktop?</h3>
+            <p>
+              Yes. A desktop version is available at
+              <a href="https://desktop.bsvb.tech" target="_blank" rel="noopener">desktop.bsvb.tech</a>.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Open Source Banner -->
+    <section class="open-source-banner">
+      <div class="container">
+        <h2>Free &amp; Open Source Software</h2>
+        <p>
+          BSV Browser is open source. The full source code is publicly available for review, audit, and contribution. We
+          believe transparency is essential for trust, especially when it comes to software that manages cryptographic
+          keys and financial transactions.
+        </p>
+        <p>
+          The project is licensed under the <strong>Open BSV License</strong> and developed in the open on GitHub.
+          Anyone can inspect the code, report issues, suggest improvements, or contribute directly.
+        </p>
+        <p>
+          <a href="https://github.com/bsv-blockchain/bsv-browser" target="_blank" rel="noopener"
+            >View the source code on GitHub &rarr;</a
+          >
+        </p>
+        <span class="license-badge">Open BSV License</span>
+      </div>
+    </section>
+
+    <!-- Contact / Support Section -->
+    <section id="contact" class="contact-section">
+      <div class="container">
+        <h2>Get Help</h2>
+        <p>Whether you have a question, found a bug, or want to request a feature &mdash; we are here to help.</p>
+
+        <div class="contact-cards">
+          <div class="contact-card">
+            <span class="contact-icon">&#9993;</span>
+            <h3>Email Support</h3>
+            <p>
+              For direct support requests, account questions, or anything you need help with, email the development
+              team.
+            </p>
+            <a href="mailto:support@bsvassociation.org" class="contact-link">support@bsvassociation.org</a>
+          </div>
+
+          <div class="contact-card">
+            <span class="contact-icon">&#128736;</span>
+            <h3>Issues &amp; Feature Requests</h3>
+            <p>
+              Found a bug? Have an idea for a new feature? The GitHub issues page is the place to report problems and
+              make feature requests. As an open source project, your feedback directly shapes the development roadmap.
+            </p>
+            <a
+              href="https://github.com/bsv-blockchain/bsv-browser/issues"
+              target="_blank"
+              rel="noopener"
+              class="contact-link"
+              >Open an issue on GitHub &rarr;</a
+            >
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-content">
+          <div class="footer-links">
+            <a href="index.html">Home</a>
+            <a href="privacy.html">Privacy Policy</a>
+            <a href="usage.html">Usage Policy</a>
+            <a href="https://github.com/bsv-blockchain/bsv-browser" target="_blank" rel="noopener">GitHub Repository</a>
+            <a href="https://bsvblockchain.org" target="_blank" rel="noopener">BSV Blockchain</a>
+            <a href="https://x.com/bsvblockchain" target="_blank" rel="noopener">@bsvblockchain</a>
+          </div>
+          <p class="footer-copyright">&copy; 2026 BSV Association</p>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
