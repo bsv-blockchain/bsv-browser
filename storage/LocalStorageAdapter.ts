@@ -7,9 +7,10 @@
 
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from './StorageExpoSQLite'
+import type { AppChain } from '@/context/config'
 
 export interface LocalStorageConfig {
-  network: 'main' | 'test'
+  network: AppChain
   identityKey: string
   storageName?: string
 }

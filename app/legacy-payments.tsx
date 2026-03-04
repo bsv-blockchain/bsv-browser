@@ -55,8 +55,12 @@ export default function LegacyPaymentsScreen() {
     Utils.toBase64(Utils.toArray(getCurrentDate(0), 'utf8'))
   )
   const derivationSuffix = Utils.toBase64(Utils.toArray('legacy', 'utf8'))
-  const network = selectedNetwork === 'test' ? 'testnet' : 'mainnet'
-  const wocNetwork = selectedNetwork === 'test' ? 'test' : 'main'
+  const wocConfig = {
+    main:     { apiBase: 'https://api.whatsonchain.com', segment: 'main', network: 'mainnet' as const },
+    test:     { apiBase: 'https://api.whatsonchain.com', segment: 'test', network: 'testnet' as const },
+    teratest: { apiBase: 'https://api.woc-ttn.bsvb.tech', segment: 'test', network: 'testnet' as const },
+  }[selectedNetwork]
+  const network = wocConfig.network
 
   // Send state
   const [recipientAddress, setRecipientAddress] = useState('')
@@ -81,13 +85,13 @@ export default function LegacyPaymentsScreen() {
   // Fetch UTXOs for address from WhatsOnChain
   const getUtxosForAddress = useCallback(async (address: string): Promise<Utxo[]> => {
     const response = await fetch(
-      `https://api.whatsonchain.com/v1/bsv/${wocNetwork}/address/${address}/unspent/all`
+      `${wocConfig.apiBase}/v1/bsv/${wocConfig.segment}/address/${address}/unspent/all`
     )
     const rp = await response.json()
     return rp.result
       .filter((r: any) => r.isSpentInMempoolTx === false)
       .map((r: any) => ({ txid: r.tx_hash, vout: r.tx_pos, satoshis: r.value }))
-  }, [wocNetwork])
+  }, [wocConfig])
 
   // Get internalized UTXOs from transaction history
   const getInternalizedUtxos = useCallback(async (): Promise<Set<string>> => {
@@ -220,7 +224,7 @@ export default function LegacyPaymentsScreen() {
       for (const utxo of utxos) {
         if (!beef.findTxid(utxo.txid)) {
           const resp = await fetch(
-            `https://api.whatsonchain.com/v1/bsv/${wocNetwork}/tx/${utxo.txid}/beef`
+            `${wocConfig.apiBase}/v1/bsv/${wocConfig.segment}/tx/${utxo.txid}/beef`
           )
           const beefHex = await resp.text()
           beef.mergeBeef(Utils.toArray(beefHex, 'hex'))
@@ -294,7 +298,7 @@ export default function LegacyPaymentsScreen() {
     } finally {
       setIsImporting(false)
     }
-  }, [paymentAddress, wallet, balance, getUtxosForAddress, getInternalizedUtxos, wocNetwork, derivationPrefix, derivationSuffix, adminOriginator, fetchBalance])
+  }, [paymentAddress, wallet, balance, getUtxosForAddress, getInternalizedUtxos, wocConfig, derivationPrefix, derivationSuffix, adminOriginator, fetchBalance])
 
   // Send BSV to address
   const handleSendBSV = useCallback(async () => {

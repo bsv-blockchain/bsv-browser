@@ -105,9 +105,9 @@ export default function TransactionsScreen() {
   }, [fetchActions])
 
   const handleExplorerLink = useCallback((txid: string) => {
-    const baseUrl = selectedNetwork === 'test'
-      ? 'https://test.whatsonchain.com'
-      : 'https://whatsonchain.com'
+    const baseUrl = selectedNetwork === 'main' ? 'https://whatsonchain.com'
+      : selectedNetwork === 'teratest' ? 'https://woc-ttn.bsvb.tech'
+      : 'https://test.whatsonchain.com'
     const url = `${baseUrl}/tx/${txid}`
     tabStore.updateTab(tabStore.activeTabId, { url })
     router.push('/')

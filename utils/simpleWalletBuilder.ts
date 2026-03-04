@@ -13,9 +13,10 @@ import {
   Services
 } from '@bsv/wallet-toolbox-mobile'
 import { KeyDeriver, PrivateKey, WalletInterface } from '@bsv/sdk'
+import type { AppChain } from '@/context/config'
 
 export interface SimpleWalletBuilderConfig {
-  chain: 'main' | 'test'
+  chain: AppChain
   useLocalStorage?: boolean // If true, don't add remote storage
 }
 

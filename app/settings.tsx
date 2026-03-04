@@ -5,6 +5,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
 import { Ionicons } from '@expo/vector-icons'
 import { useWallet } from '@/context/WalletContext'
+import type { AppChain } from '@/context/config'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { GroupedSection } from '@/components/ui/GroupedList'
@@ -129,13 +130,13 @@ export default function SettingsScreen() {
     }
   }
 
-  const NETWORKS: { id: 'main' | 'test'; label: string; color: string }[] = [
+  const NETWORKS: { id: AppChain; label: string; color: string }[] = [
     { id: 'main', label: t('mainnet'), color: colors.success },
     { id: 'test', label: t('testnet'), color: colors.warning },
-    // Future: { id: 'teratest', label: 'Teratest', color: colors.info },
+    { id: 'teratest', label: t('teratest'), color: colors.info },
   ]
 
-  const handleSelectNetwork = async (target: 'main' | 'test') => {
+  const handleSelectNetwork = async (target: AppChain) => {
     if (target === selectedNetwork) {
       setNetworkExpanded(false)
       return
