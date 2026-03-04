@@ -81,14 +81,12 @@ function deriveActive(ctx: {
   basketAccessModalOpen: boolean
   certificateAccessModalOpen: boolean
   spendingAuthorizationModalOpen: boolean
-  btmsAccessModalOpen: boolean
 }): ActivePermission | null {
   // Dev preview — override ctx with real captured data so the description
   // logic below is exercised exactly as it would be in production.
   if (DEV_BTMS_PREVIEW) {
     ctx = {
       ...ctx,
-      btmsAccessModalOpen: true,
       btmsRequests: [
         {
           originator: 'btms.metanet.app',
@@ -181,7 +179,8 @@ function deriveActive(ctx: {
     }
   }
 
-  if (ctx.btmsAccessModalOpen && ctx.btmsRequests.length > 0) {
+  // btms: driven purely by queue length — no separate modal-open flag needed
+  if (ctx.btmsRequests.length > 0) {
     const r = ctx.btmsRequests[0]
     let promptData: {
       type?: string
@@ -269,9 +268,7 @@ const PermissionSheet: React.FC = () => {
     certificateAccessModalOpen,
     setCertificateAccessModalOpen,
     spendingAuthorizationModalOpen,
-    setSpendingAuthorizationModalOpen,
-    btmsAccessModalOpen,
-    setBtmsAccessModalOpen
+    setSpendingAuthorizationModalOpen
   } = useContext(UserContext)
 
   const [detailsExpanded, setDetailsExpanded] = useState(false)
@@ -288,8 +285,7 @@ const PermissionSheet: React.FC = () => {
         protocolAccessModalOpen,
         basketAccessModalOpen,
         certificateAccessModalOpen,
-        spendingAuthorizationModalOpen,
-        btmsAccessModalOpen
+        spendingAuthorizationModalOpen
       }),
     [
       protocolRequests,
@@ -300,8 +296,7 @@ const PermissionSheet: React.FC = () => {
       protocolAccessModalOpen,
       basketAccessModalOpen,
       certificateAccessModalOpen,
-      spendingAuthorizationModalOpen,
-      btmsAccessModalOpen
+      spendingAuthorizationModalOpen
     ]
   )
 
@@ -313,7 +308,6 @@ const PermissionSheet: React.FC = () => {
     if (active.kind === 'btms') {
       // BTMS uses its own promise-based resolution — no permissionsManager.denyPermission
       advanceBtmsQueue(false)
-      setBtmsAccessModalOpen(false)
     } else {
       try {
         await managers.permissionsManager?.denyPermission(active.requestID)
@@ -351,8 +345,7 @@ const PermissionSheet: React.FC = () => {
     setProtocolAccessModalOpen,
     setBasketAccessModalOpen,
     setCertificateAccessModalOpen,
-    setSpendingAuthorizationModalOpen,
-    setBtmsAccessModalOpen
+    setSpendingAuthorizationModalOpen
   ])
 
   // ---- Grant ----
@@ -361,7 +354,6 @@ const PermissionSheet: React.FC = () => {
     if (active.kind === 'btms') {
       // BTMS uses its own promise-based resolution — no permissionsManager.grantPermission
       advanceBtmsQueue(true)
-      setBtmsAccessModalOpen(false)
     } else if (active.kind === 'spending') {
       managers.permissionsManager?.grantPermission({
         requestID: active.requestID,
@@ -401,8 +393,7 @@ const PermissionSheet: React.FC = () => {
     setProtocolAccessModalOpen,
     setBasketAccessModalOpen,
     setCertificateAccessModalOpen,
-    setSpendingAuthorizationModalOpen,
-    setBtmsAccessModalOpen
+    setSpendingAuthorizationModalOpen
   ])
 
   return (
