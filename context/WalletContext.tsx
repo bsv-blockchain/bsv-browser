@@ -322,26 +322,23 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
    */
   const btmsPromptHandler = useCallback(
     (originator: string, message: string): Promise<boolean> => {
-      logWithTimestamp(F, 'btmsPromptHandler called', originator)
       return new Promise<boolean>(resolve => {
         setBtmsRequests(prev => {
           const wasEmpty = prev.length === 0
-          logWithTimestamp(F, 'BTMS setBtmsRequests updater, wasEmpty=', wasEmpty)
-          // Open the modal eagerly — do not defer behind isFocused() so that
-          // the state update is enqueued in the same React batch as the queue update.
           if (wasEmpty) {
+            // Track focus state for cleanup, but open the modal via setTimeout so
+            // the state update is processed as a standalone React flush after the
+            // queue update is committed. Calling setBtmsAccessModalOpen(true) inside
+            // isFocused().then() can be swallowed by React 19's automatic batching
+            // when the prompt originates from deep inside an async wallet call chain
+            // (e.g. createAction spend), causing the sheet never to appear.
             isFocused().then(currentlyFocused => {
               setWasOriginallyFocused(currentlyFocused)
               if (!currentlyFocused) {
                 onFocusRequested()
               }
             })
-            // Schedule the modal open outside the updater so React processes it
-            // as a standalone flush after the queue update is committed.
-            setTimeout(() => {
-              logWithTimestamp(F, 'BTMS opening modal via setTimeout')
-              setBtmsAccessModalOpen(true)
-            }, 0)
+            setTimeout(() => setBtmsAccessModalOpen(true), 0)
           }
           logWithTimestamp(F, 'BTMS permission request enqueued')
           return [...prev, { originator, message, resolve }]

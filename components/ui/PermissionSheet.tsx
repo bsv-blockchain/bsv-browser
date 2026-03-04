@@ -9,6 +9,11 @@ import { UserContext } from '@/context/UserContext'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 
 // ---------------------------------------------------------------------------
+// Dev preview — set to true to keep the BTMS spend sheet visible for design work
+// ---------------------------------------------------------------------------
+const DEV_BTMS_PREVIEW = false
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -78,6 +83,29 @@ function deriveActive(ctx: {
   spendingAuthorizationModalOpen: boolean
   btmsAccessModalOpen: boolean
 }): ActivePermission | null {
+  // Dev preview — override ctx with real captured data so the description
+  // logic below is exercised exactly as it would be in production.
+  if (DEV_BTMS_PREVIEW) {
+    ctx = {
+      ...ctx,
+      btmsAccessModalOpen: true,
+      btmsRequests: [
+        {
+          originator: 'btms.metanet.app',
+          message: JSON.stringify({
+            type: 'btms_spend',
+            sendAmount: 23,
+            tokenName: 'Goose',
+            assetId: '615a06abf1b0eeac9ff1f8ac438bb1de830f70144e94b9868cad55f47d08f924.0',
+            changeAmount: 17,
+            totalInputAmount: 40
+          }),
+          resolve: () => {}
+        }
+      ]
+    }
+  }
+
   // Priority: spending > certificate > protocol > basket > btms (spending is most
   // time-sensitive). We show only one at a time — exactly like the originals.
 
@@ -155,25 +183,48 @@ function deriveActive(ctx: {
 
   if (ctx.btmsAccessModalOpen && ctx.btmsRequests.length > 0) {
     const r = ctx.btmsRequests[0]
-    let promptData: { type?: string; action?: string; assetId?: string } = {}
+    let promptData: {
+      type?: string
+      action?: string
+      assetId?: string
+      sendAmount?: number
+      tokenName?: string
+      changeAmount?: number
+      totalInputAmount?: number
+      burnAmount?: number
+      burnAll?: boolean
+    } = {}
     try {
       promptData = JSON.parse(r.message)
     } catch {
       // message not valid JSON — ignore, use defaults
     }
-    const details: { label: string; value: string }[] = [
-      { label: 'Action', value: promptData.action || 'access BTMS tokens' }
-    ]
-    if (promptData.assetId) {
-      details.push({ label: 'Asset ID', value: truncate(promptData.assetId, 28) })
+
+    // Build a human-readable description using amount + token name where available
+    let description: string
+    if (promptData.type === 'btms_spend' && promptData.sendAmount != null && promptData.tokenName) {
+      description = `wants to spend ${promptData.sendAmount} ${promptData.tokenName} tokens`
+    } else if (promptData.type === 'btms_burn' && promptData.burnAmount != null && promptData.tokenName) {
+      description = `wants to burn ${promptData.burnAmount} ${promptData.tokenName} tokens`
+    } else {
+      description = `wants to ${promptData.action || 'access BTMS tokens'}`
     }
+
+    const details: { label: string; value: string }[] = []
+    if (promptData.tokenName) details.push({ label: 'Token', value: promptData.tokenName })
+    if (promptData.sendAmount != null) details.push({ label: 'Send amount', value: String(promptData.sendAmount) })
+    if (promptData.changeAmount != null) details.push({ label: 'Change', value: String(promptData.changeAmount) })
+    if (promptData.totalInputAmount != null)
+      details.push({ label: 'Total input', value: String(promptData.totalInputAmount) })
+    if (promptData.assetId) details.push({ label: 'Asset ID', value: truncate(promptData.assetId, 28) })
+
     return {
       kind: 'btms',
       // btms requests are resolved via advanceBtmsQueue, not permissionsManager — use a sentinel requestID
       requestID: '',
       originator: r.originator || 'Unknown app',
-      title: 'Token Access Request',
-      description: `wants to ${promptData.action || 'access BTMS tokens'}`,
+      title: 'Token Spend Request',
+      description,
       details
     }
   }
