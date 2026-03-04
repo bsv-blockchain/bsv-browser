@@ -1,12 +1,5 @@
 import React from 'react'
-import {
-  Keyboard,
-  PlatformColor,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native'
+import { Keyboard, PlatformColor, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -57,16 +50,12 @@ function domainFromUrl(url: string): string {
 }
 
 /** Floating glass capsule */
-const GlassPill: React.FC<{ style?: any; children: React.ReactNode; flex?: number }> = ({
-  style,
-  children,
-  flex,
-}) => {
+const GlassPill: React.FC<{ style?: any; children: React.ReactNode; flex?: number }> = ({ style, children, flex }) => {
   const { isDark } = useTheme()
   const pillStyle = [styles.pill, flex !== undefined && { flex }, style]
   const border = {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
+    borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)'
   }
 
   if (isLiquidGlassSupported && LiquidGlassView) {
@@ -82,11 +71,7 @@ const GlassPill: React.FC<{ style?: any; children: React.ReactNode; flex?: numbe
   }
 
   return (
-    <BlurChrome
-      intensity={85}
-      borderRadius={PILL_RADIUS}
-      style={[pillStyle, { borderRadius: PILL_RADIUS }, border]}
-    >
+    <BlurChrome intensity={85} borderRadius={PILL_RADIUS} style={[pillStyle, { borderRadius: PILL_RADIUS }, border]}>
       {children}
     </BlurChrome>
   )
@@ -110,7 +95,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   onForward,
   onReloadOrStop,
   onClearText,
-  inputRef,
+  inputRef
 }) => {
   const { t } = useTranslation()
   const { colors } = useTheme()
@@ -118,14 +103,16 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   // Inside LiquidGlassView, iOS semantic colors get vibrant treatment —
   // the system auto-adjusts them for contrast against whatever is behind the glass.
   // Hardcoded hex colors do NOT get this treatment, so we swap them out.
-  const gc = isLiquidGlassSupported ? {
-    accent: PlatformColor('labelColor'),
-    primary: PlatformColor('labelColor'),
-    secondary: PlatformColor('secondaryLabelColor'),
-    tertiary: PlatformColor('tertiaryLabelColor'),
-    quaternary: PlatformColor('quaternaryLabelColor'),
-    separator: PlatformColor('separatorColor'),
-  } : null
+  const gc = isLiquidGlassSupported
+    ? {
+        accent: PlatformColor('labelColor'),
+        primary: PlatformColor('labelColor'),
+        secondary: PlatformColor('secondaryLabelColor'),
+        tertiary: PlatformColor('tertiaryLabelColor'),
+        quaternary: PlatformColor('quaternaryLabelColor'),
+        separator: PlatformColor('separatorColor')
+      }
+    : null
 
   const displayText = addressFocused ? addressText : domainFromUrl(addressText)
   const isBackDisabled = !canGoBack || isNewTab
@@ -137,12 +124,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
         {/* Back / Forward — hidden while editing */}
         {!addressFocused && (
           <GlassPill style={styles.navPill}>
-            <TouchableOpacity
-              onPress={onBack}
-              disabled={isBackDisabled}
-              style={styles.navButton}
-              activeOpacity={0.6}
-            >
+            <TouchableOpacity onPress={onBack} disabled={isBackDisabled} style={styles.navButton} activeOpacity={0.6}>
               <Ionicons
                 name="chevron-back"
                 size={22}
@@ -190,8 +172,8 @@ export const AddressBar: React.FC<AddressBarProps> = ({
               styles.urlInput,
               {
                 color: gc?.primary ?? colors.textPrimary,
-                textAlign: addressFocused ? 'left' : 'center',
-              },
+                textAlign: addressFocused ? 'left' : 'center'
+              }
             ]}
             placeholder={t('search_or_enter_website')}
             placeholderTextColor={gc?.tertiary ?? colors.textTertiary}
@@ -215,10 +197,14 @@ export const AddressBar: React.FC<AddressBarProps> = ({
         {/* More button — hidden when popover is open (popover renders in its place) or when editing */}
         {addressFocused ? (
           <GlassPill style={styles.morePill}>
-            <TouchableOpacity onPress={() => {
-              inputRef.current?.blur()
-              Keyboard.dismiss()
-            }} style={styles.moreButton} activeOpacity={0.6}>
+            <TouchableOpacity
+              onPress={() => {
+                inputRef.current?.blur()
+                Keyboard.dismiss()
+              }}
+              style={styles.moreButton}
+              activeOpacity={0.6}
+            >
               <Ionicons name="close" size={20} color={gc?.accent ?? colors.accent} />
             </TouchableOpacity>
           </GlassPill>
@@ -242,73 +228,76 @@ const styles = StyleSheet.create({
     // No background — fully transparent, pills float over content
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xs,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.md
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.sm
   },
   pill: {
     overflow: 'hidden',
-    height: 44,
-    borderRadius: PILL_RADIUS,
+    minHeight: 44,
+    borderRadius: PILL_RADIUS
   },
   navPill: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.xs,
-    width: 88,
+    width: 88
   },
   navButton: {
     flex: 1,
     height: 44,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   navDivider: {
     width: StyleSheet.hairlineWidth,
-    height: 20,
+    height: 20
   },
   urlPill: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
   },
   lockIcon: {
-    marginRight: spacing.xs,
+    marginRight: spacing.xs
   },
   urlInput: {
     flex: 1,
-    ...typography.subhead,
-    paddingVertical: 0,
+    fontSize: typography.subhead.fontSize,
+    fontWeight: typography.subhead.fontWeight,
+    // No explicit lineHeight — lets iOS scale it correctly with Dynamic Type
+    paddingVertical: 0
   },
   inputAction: {
     width: 28,
     height: 28,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   morePill: {
     width: 44,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   moreButton: {
     width: 44,
     height: 44,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   morePlaceholder: {
-    width: 44,
+    width: 44
   },
   cancelButton: {
     paddingHorizontal: spacing.md,
     height: 44,
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   cancelText: {
-    ...typography.body,
-  },
+    ...typography.body
+  }
 })
