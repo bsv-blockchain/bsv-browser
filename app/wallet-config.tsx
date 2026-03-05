@@ -132,7 +132,7 @@ export default function WalletConfigScreen() {
         <Text style={[localStyles.headerTitle, { color: colors.textPrimary }]}>{t('settings')}</Text>
         <View style={localStyles.headerBack} />
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: spacing.lg, paddingBottom: spacing.xxxl }}>
         {/* ── Configuration ── */}
         <GroupedSection header={t('configuration')}>
           <ListRow
