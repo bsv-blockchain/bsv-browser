@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
-import { DEFAULT_HOMEPAGE_URL } from '@/shared/constants'
+import { DEFAULT_HOMEPAGE_URL, SEARCH_ENGINES, DEFAULT_SEARCH_ENGINE_ID } from '@/shared/constants'
 import bookmarkStore from '@/stores/BookmarkStore'
 import { isValidUrl } from '@/utils/generalHelpers'
 import { HistoryList } from '@/components/browser/HistoryList'
@@ -40,7 +40,13 @@ interface BookmarkItem {
   appIconImageUrl?: string
 }
 
-const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = false, history, removeHistoryItem, clearHistory }) => {
+const BrowserPageBase: React.FC<BrowserPageProps> = ({
+  onNavigate,
+  inSheet = false,
+  history,
+  removeHistoryItem,
+  clearHistory
+}) => {
   const { colors } = useTheme()
   const { t } = useTranslation()
   const insets = useSafeAreaInsets()
@@ -48,11 +54,15 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
 
   const [homepageUrl, setHomepageUrl] = useState(DEFAULT_HOMEPAGE_URL)
   const [editingHomepage, setEditingHomepage] = useState(false)
+  const [searchEngineId, setSearchEngineId] = useState(DEFAULT_SEARCH_ENGINE_ID)
+  const [searchEngineExpanded, setSearchEngineExpanded] = useState(false)
 
   useEffect(() => {
     ;(async () => {
       const stored = await getItem('homepageUrl')
       if (stored) setHomepageUrl(stored)
+      const storedEngine = await getItem('searchEngineId')
+      if (storedEngine) setSearchEngineId(storedEngine)
     })()
   }, [getItem])
 
@@ -69,6 +79,14 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
     Keyboard.dismiss()
   }
 
+  const selectSearchEngine = async (id: string) => {
+    setSearchEngineId(id)
+    setSearchEngineExpanded(false)
+    await setItem('searchEngineId', id)
+  }
+
+  const selectedEngine = SEARCH_ENGINES.find(e => e.id === searchEngineId) ?? SEARCH_ENGINES[0]
+
   const bookmarks = useMemo(() => {
     return bookmarkStore.bookmarks
       .filter(b => b.url && b.url !== kNEW_TAB_URL && isValidUrl(b.url) && !b.url.includes('about:blank'))
@@ -76,16 +94,12 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
       .map(b => ({
         domain: b.url,
         appName: b.title || b.url,
-        appIconImageUrl: `${b.url.replace(/\/$/, '')}/favicon.ico`,
+        appIconImageUrl: `${b.url.replace(/\/$/, '')}/favicon.ico`
       }))
   }, [])
 
   const renderAppItem = ({ item }: { item: BookmarkItem }) => (
-    <TouchableOpacity
-      style={styles.appItem}
-      onPress={() => onNavigate(item.domain)}
-      activeOpacity={0.6}
-    >
+    <TouchableOpacity style={styles.appItem} onPress={() => onNavigate(item.domain)} activeOpacity={0.6}>
       {item.appIconImageUrl ? (
         <Image
           source={{ uri: item.appIconImageUrl }}
@@ -98,10 +112,7 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
           </Text>
         </View>
       )}
-      <Text
-        numberOfLines={2}
-        style={[styles.appLabel, { color: colors.textPrimary }]}
-      >
+      <Text numberOfLines={2} style={[styles.appLabel, { color: colors.textPrimary }]}>
         {item.appName.slice(0, 12)}
       </Text>
     </TouchableOpacity>
@@ -114,17 +125,13 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
         style={styles.homepageSection}
         contentContainerStyle={{
           paddingTop: inSheet ? spacing.sm : insets.top + spacing.xxl,
-          paddingHorizontal: spacing.xs,
+          paddingHorizontal: spacing.xs
         }}
       >
         <View style={styles.section}>
           <View style={styles.titleRow}>
-            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-              Homepage
-            </Text>
-            <Text style={[typography.caption2, { color: colors.textTertiary }]}>
-              v{packageJson.version}
-            </Text>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Homepage</Text>
+            <Text style={[typography.caption2, { color: colors.textTertiary }]}>v{packageJson.version}</Text>
           </View>
           {editingHomepage ? (
             <View style={styles.homepageEdit}>
@@ -134,7 +141,7 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
                   {
                     backgroundColor: colors.fillTertiary,
                     borderColor: colors.separator,
-                    color: colors.textPrimary,
+                    color: colors.textPrimary
                   }
                 ]}
                 value={homepageUrl}
@@ -156,11 +163,14 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
                   <Text style={[styles.homepageButtonText, { color: colors.textOnAccent }]}>Save</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.homepageButton, {
-                    backgroundColor: colors.fillTertiary,
-                    borderWidth: StyleSheet.hairlineWidth,
-                    borderColor: colors.separator,
-                  }]}
+                  style={[
+                    styles.homepageButton,
+                    {
+                      backgroundColor: colors.fillTertiary,
+                      borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: colors.separator
+                    }
+                  ]}
                   onPress={() => {
                     setEditingHomepage(false)
                     ;(async () => {
@@ -179,12 +189,77 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
               onPress={() => setEditingHomepage(true)}
               activeOpacity={0.6}
             >
-              <Ionicons name="globe-outline" size={18} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
+              <Ionicons
+                name="globe-outline"
+                size={18}
+                color={colors.textSecondary}
+                style={{ marginRight: spacing.sm }}
+              />
               <Text style={[styles.homepageUrl, { color: colors.textPrimary }]} numberOfLines={1}>
                 {homepageUrl}
               </Text>
-              <Ionicons name="pencil-outline" size={16} color={colors.textSecondary} style={{ marginLeft: spacing.sm }} />
+              <Ionicons
+                name="pencil-outline"
+                size={16}
+                color={colors.textSecondary}
+                style={{ marginLeft: spacing.sm }}
+              />
             </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Search Engine */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Search Engine</Text>
+          <TouchableOpacity
+            style={[styles.homepageRow, { backgroundColor: colors.backgroundElevated }]}
+            onPress={() => setSearchEngineExpanded(prev => !prev)}
+            activeOpacity={0.6}
+          >
+            <Ionicons
+              name={selectedEngine.icon as any}
+              size={18}
+              color={colors.textSecondary}
+              style={{ marginRight: spacing.sm }}
+            />
+            <Text style={[styles.homepageUrl, { color: colors.textPrimary }]} numberOfLines={1}>
+              {selectedEngine.label}
+            </Text>
+            <Ionicons
+              name={searchEngineExpanded ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={colors.textSecondary}
+              style={{ marginLeft: spacing.sm }}
+            />
+          </TouchableOpacity>
+          {searchEngineExpanded && (
+            <View style={[styles.engineList, { backgroundColor: colors.backgroundElevated }]}>
+              {SEARCH_ENGINES.map((engine, index) => (
+                <TouchableOpacity
+                  key={engine.id}
+                  style={[
+                    styles.engineOption,
+                    index < SEARCH_ENGINES.length - 1 && {
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: colors.separator
+                    }
+                  ]}
+                  onPress={() => selectSearchEngine(engine.id)}
+                  activeOpacity={0.6}
+                >
+                  <Ionicons
+                    name={engine.icon as any}
+                    size={18}
+                    color={colors.textSecondary}
+                    style={{ marginRight: spacing.sm }}
+                  />
+                  <Text style={[styles.engineLabel, { color: colors.textPrimary }]}>{engine.label}</Text>
+                  {engine.id === searchEngineId && (
+                    <Ionicons name="checkmark" size={18} color={colors.identityApproval} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
           )}
         </View>
       </ScrollView>
@@ -194,9 +269,7 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
         {/* Bookmarks - 50% */}
         {bookmarks.length > 0 && (
           <View style={styles.halfSection}>
-            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-              {t('bookmarks') || 'Bookmarks'}
-            </Text>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('bookmarks') || 'Bookmarks'}</Text>
             <FlatList
               style={{ marginTop: spacing.md }}
               data={bookmarks}
@@ -212,12 +285,7 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
 
         {/* History - 50% */}
         {history && history.length > 0 && (
-          <HistoryList
-            history={history}
-            onSelect={onNavigate}
-            onDelete={removeHistoryItem}
-            onClear={clearHistory}
-          />
+          <HistoryList history={history} onSelect={onNavigate} onDelete={removeHistoryItem} onClear={clearHistory} />
         )}
       </View>
     </View>
@@ -228,34 +296,34 @@ export const BrowserPage = observer(BrowserPageBase)
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex: 1
   },
   homepageSection: {
-    flex: 0,
+    flex: 0
   },
   bottomHalf: {
     flex: 1,
-    flexDirection: 'column',
+    flexDirection: 'column'
   },
   halfSection: {
-    flex: 1,
+    flex: 1
   },
   content: {},
   section: {
-    marginBottom: spacing.xxl,
+    marginBottom: spacing.xxl
   },
   titleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: spacing.xs,
+    paddingHorizontal: spacing.xs
   },
   sectionTitle: {
     ...typography.footnote,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: spacing.md,
+    marginBottom: spacing.md
   },
   appItem: {
     alignItems: 'center',
@@ -268,29 +336,29 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: radii.lg,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.sm
   },
   placeholderIcon: {
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'center'
   },
   appLabel: {
     ...typography.caption1,
-    textAlign: 'center',
+    textAlign: 'center'
   },
   homepageRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
+    borderRadius: radii.md
   },
   homepageUrl: {
     ...typography.footnote,
-    flex: 1,
+    flex: 1
   },
   homepageEdit: {
-    paddingHorizontal: spacing.xs,
+    paddingHorizontal: spacing.xs
   },
   homepageInput: {
     ...typography.body,
@@ -298,20 +366,35 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.sm
   },
   homepageButtons: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: spacing.sm
   },
   homepageButton: {
     flex: 1,
     paddingVertical: spacing.md,
     borderRadius: radii.sm,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   homepageButtonText: {
-    ...typography.headline,
+    ...typography.headline
   },
+  engineList: {
+    marginTop: spacing.sm,
+    borderRadius: radii.md,
+    overflow: 'hidden' as const
+  },
+  engineOption: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md
+  },
+  engineLabel: {
+    ...typography.footnote,
+    flex: 1
+  }
 })

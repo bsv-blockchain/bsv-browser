@@ -1,4 +1,3 @@
-
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import {
   Keyboard,
@@ -12,7 +11,7 @@ import {
   KeyboardAvoidingView,
   BackHandler,
   InteractionManager,
-  ActivityIndicator,
+  ActivityIndicator
 } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -26,11 +25,11 @@ import { router } from 'expo-router'
 
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useWallet } from '@/context/WalletContext'
-import { WalletInterface, LookupResolver, Transaction, Utils } from '@bsv/sdk'
+import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
 import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'
-import { DEFAULT_HOMEPAGE_URL, kNEW_TAB_URL } from '@/shared/constants'
+import { DEFAULT_HOMEPAGE_URL, kNEW_TAB_URL, SEARCH_ENGINES, DEFAULT_SEARCH_ENGINE_ID } from '@/shared/constants'
 import { isValidUrl } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
@@ -59,7 +58,6 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useHistory } from '@/hooks/useHistory'
 import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
 import { usePermissions } from '@/hooks/usePermissions'
-
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
@@ -130,16 +128,36 @@ function Browser() {
 
   /* -------------------------------- bookmarks ------------------------------- */
   const [homepageUrl, setHomepageUrlState] = useState(DEFAULT_HOMEPAGE_URL)
+  const searchEngineTemplate = useRef(SEARCH_ENGINES.find(e => e.id === DEFAULT_SEARCH_ENGINE_ID)!.urlTemplate)
 
   useEffect(() => {
     const load = async () => {
       try {
         const storedHomepage = await getItem('homepageUrl')
         if (storedHomepage) setHomepageUrlState(storedHomepage)
+        const storedEngine = await getItem('searchEngineId')
+        if (storedEngine) {
+          const engine = SEARCH_ENGINES.find(e => e.id === storedEngine)
+          if (engine) searchEngineTemplate.current = engine.urlTemplate
+        }
       } catch {}
     }
     load()
   }, [getItem])
+
+  // Re-read search engine preference when the settings sheet closes
+  useEffect(() => {
+    if (sheet.isOpen) return
+    ;(async () => {
+      try {
+        const storedEngine = await getItem('searchEngineId')
+        if (storedEngine) {
+          const engine = SEARCH_ENGINES.find(e => e.id === storedEngine)
+          if (engine) searchEngineTemplate.current = engine.urlTemplate
+        }
+      } catch {}
+    })()
+  }, [sheet.isOpen, getItem])
 
   const addBookmark = useCallback((title: string, url: string) => {
     if (url && url !== kNEW_TAB_URL && isValidUrl(url) && !url.includes('about:blank')) {
@@ -158,25 +176,22 @@ function Browser() {
 
   const addressInputRef = useRef<TextInput>(null)
 
-  const {
-    keyboardVisible,
-    addressBarPanGesture,
-    animatedAddressBarStyle,
-    animatedMenuPopoverStyle,
-  } = useAddressBarAnimation(insets, addressFocused, addressEditing, addressInputRef, setAddressFocused, setAddressSuggestions)
+  const { keyboardVisible, addressBarPanGesture, animatedAddressBarStyle, animatedMenuPopoverStyle } =
+    useAddressBarAnimation(
+      insets,
+      addressFocused,
+      addressEditing,
+      addressInputRef,
+      setAddressFocused,
+      setAddressSuggestions
+    )
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
-  const [isOverlaySearching, setIsOverlaySearching] = useState(false)
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
   const activeCameraStreams = useRef<Set<string>>(new Set())
-
-  /* --------------------------------- overlay lookup cache --------------------------------- */
-  const overlayLookupCache = useRef<Map<string, string[]>>(new Map())
-  const overlayLookupAbortController = useRef<AbortController | null>(null)
-  const isOverlayLookupCancelled = useRef(false)
 
   /* -------------------------------- permissions ----------------------------- */
   const domainForUrl = useCallback((u: string): string => {
@@ -196,7 +211,7 @@ function Browser() {
     permissionsDeniedForCurrentDomain,
     onDecision,
     handlePermissionChange,
-    permissionRouterConfig,
+    permissionRouterConfig
   } = usePermissions(activeTab, domainForUrl)
 
   /* -------------------------------------------------------------------------- */
@@ -265,144 +280,25 @@ function Browser() {
   /*                                 UTILITIES                                  */
   /* -------------------------------------------------------------------------- */
 
-  const updateActiveTab = useCallback(
-    (patch: Partial<Tab>) => {
-      const raw = patch.url?.trim()
-      if (raw) {
-        if (!isValidUrl(raw)) {
-          const candidate =
-            raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw.replace(/^\/+/, '')}`
-          if (candidate !== raw && isValidUrl(candidate)) {
-            patch.url = candidate
-          } else if (raw !== kNEW_TAB_URL) {
-            patch.url = kNEW_TAB_URL
-          }
+  const updateActiveTab = useCallback((patch: Partial<Tab>) => {
+    const raw = patch.url?.trim()
+    if (raw) {
+      if (!isValidUrl(raw)) {
+        const candidate =
+          raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw.replace(/^\/+/, '')}`
+        if (candidate !== raw && isValidUrl(candidate)) {
+          patch.url = candidate
+        } else if (raw !== kNEW_TAB_URL) {
+          patch.url = kNEW_TAB_URL
         }
       }
-      tabStore.updateTab(tabStore.activeTabId, patch)
-    },
-    []
-  )
+    }
+    tabStore.updateTab(tabStore.activeTabId, patch)
+  }, [])
 
   /* -------------------------------------------------------------------------- */
   /*                              ADDRESS HANDLING                              */
   /* -------------------------------------------------------------------------- */
-
-  const cancelOverlayLookup = useCallback(() => {
-    isOverlayLookupCancelled.current = true
-    overlayLookupAbortController.current?.abort()
-    setIsOverlaySearching(false)
-  }, [])
-
-  const performOverlayLookup = useCallback(async (searchParam: string) => {
-    const cachedResults = overlayLookupCache.current.get(searchParam)
-
-    if (cachedResults) {
-      // Cache hit: apply results immediately
-      if (cachedResults.length === 1) {
-        const domain = cachedResults[0]
-        const url = domain.startsWith('http') ? domain : `https://${domain}`
-        updateActiveTab({ url })
-      } else if (cachedResults.length > 1) {
-        setAddressSuggestions(cachedResults.map(domain => ({
-          title: domain,
-          url: domain.startsWith('http') ? domain : `https://${domain}`,
-          timestamp: Date.now()
-        })))
-      }
-
-      // Update cache in background (no loading indicator)
-      ;(async () => {
-        try {
-          const overlay = new LookupResolver()
-          const response = await overlay.query({
-            service: 'ls_apps',
-            query: { name: searchParam }
-          }, 10000)
-          if (response?.outputs?.length) {
-            const searchResults = response.outputs.map((o: any) => {
-              try {
-                const data = JSON.parse(Utils.toUTF8(
-                  Transaction.fromBEEF(o.beef).outputs[0].lockingScript.chunks[2].data as number[]
-                ))
-                return data.domain
-              } catch {
-                return null
-              }
-            }).filter(Boolean) as string[]
-
-            overlayLookupCache.current.set(searchParam, searchResults)
-            // Update UI if results changed
-            if (JSON.stringify(searchResults) !== JSON.stringify(cachedResults)) {
-              if (searchResults.length === 1) {
-                const domain = searchResults[0]
-                const url = domain.startsWith('http') ? domain : `https://${domain}`
-                updateActiveTab({ url })
-              } else if (searchResults.length > 1) {
-                setAddressSuggestions(searchResults.map(domain => ({
-                  title: domain,
-                  url: domain.startsWith('http') ? domain : `https://${domain}`,
-                  timestamp: Date.now()
-                })))
-              }
-            }
-          }
-        } catch (error) {
-          console.warn('[OverlayLookup] Background cache update failed:', error)
-        }
-      })()
-      return
-    }
-
-    // Cache miss: show loading and fetch
-    isOverlayLookupCancelled.current = false
-    overlayLookupAbortController.current = new AbortController()
-    setIsOverlaySearching(true)
-    try {
-      const overlay = new LookupResolver()
-      const response = await overlay.query({
-        service: 'ls_apps',
-        query: { name: searchParam }
-      }, 10000)
-
-      // Ignore response if cancelled
-      if (isOverlayLookupCancelled.current) return
-
-      if (response?.outputs?.length) {
-        const searchResults = response.outputs.map((o: any) => {
-          try {
-            const data = JSON.parse(Utils.toUTF8(
-              Transaction.fromBEEF(o.beef).outputs[0].lockingScript.chunks[2].data as number[]
-            ))
-            return data.domain
-          } catch {
-            return null
-          }
-        }).filter(Boolean) as string[]
-
-        overlayLookupCache.current.set(searchParam, searchResults)
-
-        if (searchResults.length === 1) {
-          const domain = searchResults[0]
-          const url = domain.startsWith('http') ? domain : `https://${domain}`
-          updateActiveTab({ url })
-        } else if (searchResults.length > 1) {
-          setAddressSuggestions(searchResults.map(domain => ({
-            title: domain,
-            url: domain.startsWith('http') ? domain : `https://${domain}`,
-            timestamp: Date.now()
-          })))
-        }
-      }
-    } catch (error) {
-      // Ignore errors from cancelled requests
-      if (!isOverlayLookupCancelled.current) {
-        console.warn('[OverlayLookup] Search failed:', error)
-      }
-    } finally {
-      setIsOverlaySearching(false)
-    }
-  }, [updateActiveTab])
 
   const onAddressSubmit = useCallback(() => {
     let entry = addressText.trim()
@@ -413,9 +309,7 @@ function Browser() {
     if (entry === '') {
       entry = kNEW_TAB_URL
     } else if (!isProbablyUrl) {
-      performOverlayLookup(entry)
-      addressEditing.current = false
-      return
+      entry = searchEngineTemplate.current.replace('%s', encodeURIComponent(entry))
     } else if (!hasProtocol) {
       entry = isIpAddress ? 'http://' + entry : 'https://' + entry
     }
@@ -423,7 +317,7 @@ function Browser() {
     if (!isValidUrl(entry)) entry = kNEW_TAB_URL
     updateActiveTab({ url: entry })
     addressEditing.current = false
-  }, [addressText, updateActiveTab, performOverlayLookup])
+  }, [addressText, updateActiveTab])
 
   /* -------------------------------------------------------------------------- */
   /*                          ADDRESS BAR AUTOCOMPLETE                          */
@@ -478,7 +372,7 @@ function Browser() {
     }
   }, [])
 
-const shareCurrent = useCallback(async () => {
+  const shareCurrent = useCallback(async () => {
     const currentTab = tabStore.activeTab
     if (!currentTab) return
     try {
@@ -597,27 +491,30 @@ const shareCurrent = useCallback(async () => {
       if (msg.type === 'CONSOLE') {
         const logPrefix = '[WebView]'
         switch (msg.method) {
-          case 'log': console.log(logPrefix, ...msg.args); break
-          case 'warn': console.warn(logPrefix, ...msg.args); break
-          case 'error': console.error(logPrefix, ...msg.args); break
-          case 'info': console.info(logPrefix, ...msg.args); break
-          case 'debug': console.debug(logPrefix, ...msg.args); break
+          case 'log':
+            console.log(logPrefix, ...msg.args)
+            break
+          case 'warn':
+            console.warn(logPrefix, ...msg.args)
+            break
+          case 'error':
+            console.error(logPrefix, ...msg.args)
+            break
+          case 'info':
+            console.info(logPrefix, ...msg.args)
+            break
+          case 'debug':
+            console.debug(logPrefix, ...msg.args)
+            break
         }
         return
       }
-
 
       if (await routeWebViewMessage(msg)) return
 
       if (msg.call && (!wallet || isWeb2Mode)) {
         if (msg.type === 'CWI' && msg.id) {
-          sendErrorToWebView(
-            msg.id,
-            isWeb2Mode
-              ? 'Wallet is disabled in Web2 mode'
-              : 'Wallet is not authenticated',
-            1
-          )
+          sendErrorToWebView(msg.id, isWeb2Mode ? 'Wallet is disabled in Web2 mode' : 'Wallet is not authenticated', 1)
         }
         if (!wallet && !isWeb2Mode) router.push('/auth/mnemonic')
         return
@@ -663,11 +560,7 @@ const shareCurrent = useCallback(async () => {
         }
         sendResponseToWebView(msg.id, response)
       } catch (error: any) {
-        sendErrorToWebView(
-          msg.id,
-          error?.message || 'unknown error',
-          error?.code || 1
-        )
+        sendErrorToWebView(msg.id, error?.message || 'unknown error', error?.code || 1)
       }
     },
     [activeTab, wallet, routeWebViewMessage, isWeb2Mode]
@@ -693,7 +586,6 @@ const shareCurrent = useCallback(async () => {
         })();
       `)
     }
-
 
     tabStore.handleNavigationStateChange(activeTab.id, navState)
     if (!addressEditing.current) setAddressText(navState.url)
@@ -770,7 +662,6 @@ const shareCurrent = useCallback(async () => {
 
   const showAddressBar = Platform.OS === 'android' ? !keyboardVisible || addressFocused : true
 
-
   const [ready, setReady] = useState(false)
   useEffect(() => {
     const handle = InteractionManager.runAfterInteractions(() => setReady(true))
@@ -794,13 +685,15 @@ const shareCurrent = useCallback(async () => {
     }
     if (activeTab) {
       return (
-        <View style={{
-          position: 'absolute',
-          top: isFullscreen ? 0 : insets.top,
-          left: 0,
-          right: 0,
-          bottom: 0,
-        }}>
+        <View
+          style={{
+            position: 'absolute',
+            top: isFullscreen ? 0 : insets.top,
+            left: 0,
+            right: 0,
+            bottom: 0
+          }}
+        >
           {isFullscreen && (
             <TouchableOpacity
               style={styles.exitFullscreen}
@@ -832,53 +725,62 @@ const shareCurrent = useCallback(async () => {
             onMessage={handleMessage}
             injectedJavaScript={injectedJavaScript}
             injectedJavaScriptBeforeContentLoaded={
-              buildCWIProviderScript() + '\n' +
-              mediaSourcePolyfill + '\n' +
-              downloadInterceptScript + '\n' +
-              getPermissionScript(
-                permissionsDeniedForCurrentDomain,
-                pendingPermission
-              )
+              buildCWIProviderScript() +
+              '\n' +
+              mediaSourcePolyfill +
+              '\n' +
+              downloadInterceptScript +
+              '\n' +
+              getPermissionScript(permissionsDeniedForCurrentDomain, pendingPermission)
             }
             onNavigationStateChange={handleNavStateChange}
-
             allowsFullscreenVideo={true}
             mediaPlaybackRequiresUserAction={false}
             allowsInlineMediaPlayback={true}
             geolocationEnabled
-            onPermissionRequest={Platform.OS === 'android' ? (event: any) => {
-              // On Android, WebView fires this when the page calls getUserMedia.
-              // Request the corresponding OS permission, then grant/deny the WebView.
-              const resources: string[] = event.nativeEvent?.resources ?? []
-              ;(async () => {
-                try {
-                  const toGrant: string[] = []
-                  for (const resource of resources) {
-                    if (resource.includes('VIDEO_CAPTURE')) {
-                      const current = await check(PERMISSIONS.ANDROID.CAMERA)
-                      const granted = current === RESULTS.GRANTED
-                        || (await request(PERMISSIONS.ANDROID.CAMERA)) === RESULTS.GRANTED
-                      if (granted) toGrant.push(resource)
-                    } else if (resource.includes('AUDIO_CAPTURE')) {
-                      const current = await check(PERMISSIONS.ANDROID.RECORD_AUDIO)
-                      const granted = current === RESULTS.GRANTED
-                        || (await request(PERMISSIONS.ANDROID.RECORD_AUDIO)) === RESULTS.GRANTED
-                      if (granted) toGrant.push(resource)
-                    }
+            onPermissionRequest={
+              Platform.OS === 'android'
+                ? (event: any) => {
+                    // On Android, WebView fires this when the page calls getUserMedia.
+                    // Request the corresponding OS permission, then grant/deny the WebView.
+                    const resources: string[] = event.nativeEvent?.resources ?? []
+                    ;(async () => {
+                      try {
+                        const toGrant: string[] = []
+                        for (const resource of resources) {
+                          if (resource.includes('VIDEO_CAPTURE')) {
+                            const current = await check(PERMISSIONS.ANDROID.CAMERA)
+                            const granted =
+                              current === RESULTS.GRANTED ||
+                              (await request(PERMISSIONS.ANDROID.CAMERA)) === RESULTS.GRANTED
+                            if (granted) toGrant.push(resource)
+                          } else if (resource.includes('AUDIO_CAPTURE')) {
+                            const current = await check(PERMISSIONS.ANDROID.RECORD_AUDIO)
+                            const granted =
+                              current === RESULTS.GRANTED ||
+                              (await request(PERMISSIONS.ANDROID.RECORD_AUDIO)) === RESULTS.GRANTED
+                            if (granted) toGrant.push(resource)
+                          }
+                        }
+                        if (toGrant.length > 0) {
+                          event.nativeEvent.request.grant(toGrant)
+                        } else {
+                          event.nativeEvent.request.deny()
+                        }
+                      } catch {
+                        event.nativeEvent.request.deny()
+                      }
+                    })()
                   }
-                  if (toGrant.length > 0) {
-                    event.nativeEvent.request.grant(toGrant)
-                  } else {
-                    event.nativeEvent.request.deny()
+                : () => false
+            }
+            onFileDownload={
+              Platform.OS === 'ios'
+                ? ({ nativeEvent }: any) => {
+                    handleUrlDownload(nativeEvent.downloadUrl).catch(() => {})
                   }
-                } catch {
-                  event.nativeEvent.request.deny()
-                }
-              })()
-            } : () => false}
-            onFileDownload={Platform.OS === 'ios' ? ({ nativeEvent }: any) => {
-              handleUrlDownload(nativeEvent.downloadUrl).catch(() => {})
-            } : undefined}
+                : undefined
+            }
             onShouldStartLoadWithRequest={(request: any) => {
               const { url: reqUrl, navigationType } = request
               // Intercept blob: and data: URLs — read from __blobReg (set by downloadInterceptScript)
@@ -917,7 +819,8 @@ const shareCurrent = useCallback(async () => {
               }
               // Detect direct file links triggered by user click
               if (navigationType === 'click') {
-                const fileExtPattern = /\.(pdf|zip|gz|tar|rar|7z|doc|docx|xls|xlsx|ppt|pptx|csv|mp3|mp4|avi|mov|dmg|exe|apk|ipa)(\?|$)/i
+                const fileExtPattern =
+                  /\.(pdf|zip|gz|tar|rar|7z|doc|docx|xls|xlsx|ppt|pptx|csv|mp3|mp4|avi|mov|dmg|exe|apk|ipa)(\?|$)/i
                 if (fileExtPattern.test(reqUrl)) {
                   handleUrlDownload(reqUrl).catch(() => {})
                   return false
@@ -967,11 +870,7 @@ const shareCurrent = useCallback(async () => {
             <>
               <GestureDetector gesture={addressBarPanGesture}>
                 <Animated.View
-                  style={[
-                    styles.chromeWrapper,
-                    { top: insets.top },
-                    animatedAddressBarStyle
-                  ]}
+                  style={[styles.chromeWrapper, { top: insets.top }, animatedAddressBarStyle]}
                   pointerEvents="box-none"
                 >
                   <AddressBar
@@ -1019,7 +918,7 @@ const shareCurrent = useCallback(async () => {
                   suggestions={addressSuggestions}
                   colors={colors}
                   bottomOffset={insets.bottom}
-                  onSelect={(url) => {
+                  onSelect={url => {
                     addressInputRef.current?.blur()
                     Keyboard.dismiss()
                     setAddressFocused(false)
@@ -1030,31 +929,17 @@ const shareCurrent = useCallback(async () => {
                   }}
                 />
               )}
-
-              {/* ---- Overlay Search Loading Indicator ---- */}
-              {isOverlaySearching && (
-                <View style={styles.overlaySearchContainer}>
-                  <BlurChrome style={styles.overlaySearchCard} borderRadius={radii.xl}>
-                    <ActivityIndicator size="small" color={colors.textPrimary} />
-                    <Text style={[styles.overlaySearchText, { color: colors.textPrimary }]}>
-                      Searching for app on overlay
-                    </Text>
-                    <TouchableOpacity
-                      onPress={cancelOverlayLookup}
-                      hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-                      style={styles.overlaySearchCloseButton}
-                    >
-                      <Ionicons name="close" size={18} color={colors.textPrimary} />
-                    </TouchableOpacity>
-                  </BlurChrome>
-                </View>
-              )}
             </>
           )}
 
           {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
           {menuPopoverOpen && (
-            <Animated.View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }, animatedMenuPopoverStyle]}>
+            <Animated.View
+              style={[
+                { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
+                animatedMenuPopoverStyle
+              ]}
+            >
               <MenuPopover
                 isNewTab={isNewTab}
                 canShare={!isNewTab}
@@ -1081,10 +966,7 @@ const shareCurrent = useCallback(async () => {
 
           {/* ---- Tabs Overview ---- */}
           {!isFullscreen && showTabsView && (
-            <TabsOverview
-              onDismiss={() => setShowTabsView(false)}
-              setAddressFocused={setAddressFocused}
-            />
+            <TabsOverview onDismiss={() => setShowTabsView(false)} setAddressFocused={setAddressFocused} />
           )}
 
           {/* ---- Unified Sheet System ---- */}
@@ -1141,7 +1023,7 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   container: {
-    flex: 1,
+    flex: 1
   },
   exitFullscreen: {
     position: 'absolute',
@@ -1153,32 +1035,12 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'center'
   },
   chromeWrapper: {
     position: 'absolute',
     left: 0,
     right: 0,
-    zIndex: 20,
-  },
-  overlaySearchContainer: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 90,
-  },
-  overlaySearchCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
-  },
-  overlaySearchText: {
-    ...typography.subhead,
-  },
-  overlaySearchCloseButton: {
-    marginLeft: spacing.md,
-    padding: spacing.xs,
-  },
+    zIndex: 20
+  }
 })

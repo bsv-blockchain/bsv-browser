@@ -29,7 +29,7 @@
       "env": {
         "EXPO_PUBLIC_DEFAULT_WAB_URL": "https://wab-us-1.bsvb.tech",
         "EXPO_PUBLIC_DEFAULT_STORAGE_URL": "https://store-us-1.bsvb.tech",
-        "EXPO_PUBLIC_DEFAULT_MESSAGEBOX_URL": "https://message-box-us-1.bsvb.tech",
+        "EXPO_PUBLIC_DEFAULT_MESSAGEBOX_URL": "https://messagebox.babbage.systems",
         "EXPO_PUBLIC_DEFAULT_CHAIN": "main",
         "EXPO_PUBLIC_ADMIN_ORIGINATOR": "admin.com",
         "EXPO_PUBLIC_DEFAULT_HOMEPAGE": "https://mobile.bsvb.tech/landing.html"

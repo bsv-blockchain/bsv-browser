@@ -13,7 +13,6 @@ import {
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import AsyncStorage from '@react-native-async-storage/async-storage'
 import { toast } from 'react-toastify'
 import { PeerPayClient, IncomingPayment } from '@bsv/message-box-client'
 import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
@@ -25,8 +24,7 @@ import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import { BsvAmountInput } from '@/components/wallet/BsvAmountInput'
 
-const MESSAGE_BOX_URL_KEY = 'message_box_url'
-const DEFAULT_MESSAGE_BOX_URL = 'https://message-box-us-1.bsvb.tech'
+const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
 
 const unique = (results: DisplayableIdentity[]) => {
   return results.filter((identity, index) => {
@@ -59,15 +57,18 @@ async function mergeIdentityRecords(records: DisplayableIdentity[]): Promise<Dis
       abbreviatedKey: acc.abbreviatedKey || cur.abbreviatedKey,
       badgeIconURL: acc.badgeIconURL || cur.badgeIconURL,
       badgeLabel: acc.badgeLabel || cur.badgeLabel,
-      badgeClickURL: acc.badgeClickURL || cur.badgeClickURL,
+      badgeClickURL: acc.badgeClickURL || cur.badgeClickURL
     }
   }, null)
   if (!merged) return null
-  const avatarURL = await resolveAvatarURL(records.map(r => r.avatarURL)) || ''
+  const avatarURL = (await resolveAvatarURL(records.map(r => r.avatarURL))) || ''
   return { ...merged, avatarURL }
 }
 
-async function resolveIdentity(idClient: IdentityClient, sender: string): Promise<readonly [string, DisplayableIdentity | null]> {
+async function resolveIdentity(
+  idClient: IdentityClient,
+  sender: string
+): Promise<readonly [string, DisplayableIdentity | null]> {
   try {
     const results = await idClient.resolveByIdentityKey({ identityKey: sender, seekPermission: false })
     return [sender, await mergeIdentityRecords(results)] as const
@@ -77,7 +78,11 @@ async function resolveIdentity(idClient: IdentityClient, sender: string): Promis
 }
 
 async function searchIdentities(idClient: IdentityClient, text: string): Promise<DisplayableIdentity[]> {
-  const results = await idClient.resolveByAttributes({ attributes: { any: text.trim() }, limit: 5, seekPermission: false })
+  const results = await idClient.resolveByAttributes({
+    attributes: { any: text.trim() },
+    limit: 5,
+    seekPermission: false
+  })
   return unique(results)
 }
 
@@ -85,7 +90,9 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
   const identityClientRef = useRef<IdentityClient | null>(null)
   useEffect(() => {
     if (!wallet) return
-    try { identityClientRef.current = new IdentityClient(wallet, undefined, adminOriginator) } catch {}
+    try {
+      identityClientRef.current = new IdentityClient(wallet, undefined, adminOriginator)
+    } catch {}
   }, [wallet, adminOriginator])
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -95,30 +102,43 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
   const [recipientKey, setRecipientKey] = useState('')
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const handleSearchChange = useCallback((text: string) => {
-    setSearchQuery(text)
-    setSelectedIdentity(null)
-    setRecipientKey('')
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
-    if (!text.trim()) { setSearchResults([]); setIsSearching(false); return }
-    try {
-      PublicKey.fromString(text.trim())
-      setRecipientKey(text.trim()); setSearchResults([]); setIsSearching(false); return
-    } catch {}
-    setIsSearching(true)
-    searchTimerRef.current = setTimeout(async () => {
-      const client = identityClientRef.current
-      if (!client) { setIsSearching(false); return }
-      try {
-        setSearchResults(await searchIdentities(client, text))
-      } catch (error) {
-        console.error('Identity search error:', error)
+  const handleSearchChange = useCallback(
+    (text: string) => {
+      setSearchQuery(text)
+      setSelectedIdentity(null)
+      setRecipientKey('')
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+      if (!text.trim()) {
         setSearchResults([])
-      } finally {
         setIsSearching(false)
+        return
       }
-    }, 400)
-  }, [identityClientRef])
+      try {
+        PublicKey.fromString(text.trim())
+        setRecipientKey(text.trim())
+        setSearchResults([])
+        setIsSearching(false)
+        return
+      } catch {}
+      setIsSearching(true)
+      searchTimerRef.current = setTimeout(async () => {
+        const client = identityClientRef.current
+        if (!client) {
+          setIsSearching(false)
+          return
+        }
+        try {
+          setSearchResults(await searchIdentities(client, text))
+        } catch (error) {
+          console.error('Identity search error:', error)
+          setSearchResults([])
+        } finally {
+          setIsSearching(false)
+        }
+      }, 400)
+    },
+    [identityClientRef]
+  )
 
   const handleSelectIdentity = useCallback((identity: DisplayableIdentity) => {
     setSelectedIdentity(identity)
@@ -129,17 +149,26 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
   }, [])
 
   const clearRecipient = useCallback(() => {
-    setSelectedIdentity(null); setRecipientKey(''); setSearchQuery(''); setSearchResults([])
+    setSelectedIdentity(null)
+    setRecipientKey('')
+    setSearchQuery('')
+    setSearchResults([])
   }, [])
 
-  return { identityClientRef, searchQuery, searchResults, isSearching, selectedIdentity, recipientKey, handleSearchChange, handleSelectIdentity, clearRecipient }
+  return {
+    identityClientRef,
+    searchQuery,
+    searchResults,
+    isSearching,
+    selectedIdentity,
+    recipientKey,
+    handleSearchChange,
+    handleSelectIdentity,
+    clearRecipient
+  }
 }
 
-async function sendPayment(
-  client: PeerPayClient,
-  recipientKey: string,
-  sendAmount: string,
-): Promise<{ bsv: number }> {
+async function sendPayment(client: PeerPayClient, recipientKey: string, sendAmount: string): Promise<{ bsv: number }> {
   const bsv = Number(sendAmount)
   if (Number.isNaN(bsv) || bsv <= 0) throw new RangeError('invalid_amount')
   const sats = Math.round(bsv * 100000000)
@@ -152,7 +181,7 @@ async function acceptWithRetry(
   messageBoxUrl: string,
   payment: IncomingPayment,
   description: string,
-  internalize: (p: IncomingPayment, d: string) => Promise<void>,
+  internalize: (p: IncomingPayment, d: string) => Promise<void>
 ): Promise<void> {
   try {
     await internalize(payment, description)
@@ -164,42 +193,8 @@ async function acceptWithRetry(
   }
 }
 
-function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTranslation>['t']) {
-  const [messageBoxUrl, setMessageBoxUrl] = useState('')
-  const [urlInput, setUrlInput] = useState('')
-  const [isConfigured, setIsConfigured] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [showConfig, setShowConfig] = useState(false)
-
-  useEffect(() => {
-    AsyncStorage.getItem(MESSAGE_BOX_URL_KEY).then(saved => {
-      if (saved) { setMessageBoxUrl(saved); setUrlInput(saved); setIsConfigured(true) }
-      else { setUrlInput(DEFAULT_MESSAGE_BOX_URL); setShowConfig(true) }
-    })
-  }, [])
-
-  const handleSave = useCallback(async (urlInput: string) => {
-    const trimmed = urlInput.trim().replace(/\/+$/, '')
-    if (!trimmed) { toast.error(t('enter_valid_url')); return }
-    setIsSaving(true)
-    try {
-      await AsyncStorage.setItem(MESSAGE_BOX_URL_KEY, trimmed)
-      setMessageBoxUrl(trimmed); setIsConfigured(true); setShowConfig(false)
-      toast.success(t('message_box_saved'))
-    } catch (error: any) {
-      toast.error(`Failed to save: ${error.message || 'unknown error'}`)
-    } finally {
-      setIsSaving(false)
-    }
-  }, [t])
-
-  const handleRemove = useCallback(async () => {
-    await AsyncStorage.removeItem(MESSAGE_BOX_URL_KEY)
-    setMessageBoxUrl(''); setUrlInput(DEFAULT_MESSAGE_BOX_URL); setIsConfigured(false); setShowConfig(true)
-    toast.success(t('message_box_removed'))
-  }, [t])
-
-  return { messageBoxUrl, urlInput, setUrlInput, isConfigured, isSaving, showConfig, setShowConfig, handleSave, handleRemove }
+function useMessageBoxConfig() {
+  return { messageBoxUrl: DEFAULT_MESSAGE_BOX_URL, isConfigured: true }
 }
 
 interface ResultBannerProps {
@@ -240,9 +235,22 @@ interface IncomingPaymentsSectionProps {
   readonly onDismissResult: () => void
 }
 function IncomingPaymentsSection({
-  isConfigured, loadingPayments, payments, senderIdentities, acceptingId, editingNoteId,
-  paymentNotes, acceptResult, colors, t,
-  onRefresh, onAccept, onEditNote, onChangeNote, onSubmitNote, onDismissResult,
+  isConfigured,
+  loadingPayments,
+  payments,
+  senderIdentities,
+  acceptingId,
+  editingNoteId,
+  paymentNotes,
+  acceptResult,
+  colors,
+  t,
+  onRefresh,
+  onAccept,
+  onEditNote,
+  onChangeNote,
+  onSubmitNote,
+  onDismissResult
 }: IncomingPaymentsSectionProps) {
   if (!isConfigured) return null
   return (
@@ -254,7 +262,9 @@ function IncomingPaymentsSection({
         </TouchableOpacity>
       </View>
       {loadingPayments && payments.length === 0 && (
-        <View style={styles.centeredSmall}><ActivityIndicator size="small" color={colors.accent} /></View>
+        <View style={styles.centeredSmall}>
+          <ActivityIndicator size="small" color={colors.accent} />
+        </View>
       )}
       {!loadingPayments && payments.length === 0 && (
         <View style={styles.centeredSmall}>
@@ -262,7 +272,9 @@ function IncomingPaymentsSection({
         </View>
       )}
       {payments.length > 0 && (
-        <View style={[styles.paymentsList, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator }]}>
+        <View
+          style={[styles.paymentsList, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator }]}
+        >
           {payments.map((payment, idx) => {
             const id = String(payment.messageId)
             return (
@@ -290,67 +302,6 @@ function IncomingPaymentsSection({
   )
 }
 
-interface ConfigPanelProps {
-  readonly urlInput: string
-  readonly isSaving: boolean
-  readonly isConfigured: boolean
-  readonly colors: ReturnType<typeof import('@/context/theme/ThemeContext').useTheme>['colors']
-  readonly t: ReturnType<typeof import('react-i18next').useTranslation>['t']
-  readonly onChangeUrl: (v: string) => void
-  readonly onSave: () => void
-  readonly onCancel: () => void
-  readonly onRemove: () => void
-}
-
-function ConfigPanel({ urlInput, isSaving, isConfigured, colors, t, onChangeUrl, onSave, onCancel, onRemove }: ConfigPanelProps) {
-  const hasUrl = !!urlInput.trim()
-  return (
-    <View style={[styles.configPanel, { backgroundColor: colors.backgroundSecondary }]}>
-      <Text style={[styles.configTitle, { color: colors.textPrimary }]}>{t('message_box_server')}</Text>
-      <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>{t('message_box_required')}</Text>
-      <TextInput
-        value={urlInput}
-        onChangeText={onChangeUrl}
-        placeholder={DEFAULT_MESSAGE_BOX_URL}
-        placeholderTextColor={colors.textTertiary}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="url"
-        returnKeyType="done"
-        onSubmitEditing={onSave}
-        style={[styles.urlInput, { color: colors.textPrimary, backgroundColor: colors.background, borderColor: colors.separator }]}
-      />
-      <View style={styles.configActions}>
-        <TouchableOpacity
-          onPress={onSave}
-          disabled={isSaving || !hasUrl}
-          style={[styles.configButton, { backgroundColor: hasUrl ? colors.accent : colors.backgroundSecondary, opacity: hasUrl ? 1 : 0.5 }]}
-        >
-          {isSaving
-            ? <ActivityIndicator size="small" color={hasUrl ? colors.background : colors.textSecondary} />
-            : <Text style={[styles.configButtonText, { color: hasUrl ? colors.background : colors.textSecondary }]}>{t('save')}</Text>}
-        </TouchableOpacity>
-        {isConfigured && (
-          <>
-            <TouchableOpacity
-              onPress={onCancel}
-              style={[styles.configButton, { borderColor: colors.separator, borderWidth: StyleSheet.hairlineWidth }]}
-            >
-              <Text style={[styles.configButtonText, { color: colors.textSecondary }]}>{t('cancel')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={onRemove}
-              style={[styles.configButton, { borderColor: colors.error + '40', borderWidth: StyleSheet.hairlineWidth }]}
-            >
-              <Text style={[styles.configButtonText, { color: colors.error }]}>{t('remove')}</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
-    </View>
-  )
-}
-
 interface RecipientFieldProps {
   readonly selectedIdentity: DisplayableIdentity | null
   readonly searchQuery: string
@@ -364,17 +315,28 @@ interface RecipientFieldProps {
   readonly onClear: () => void
 }
 
-function RecipientField({ selectedIdentity, searchQuery, recipientKey, isSearching, searchResults, colors, t, onSearchChange, onSelectIdentity, onClear }: RecipientFieldProps) {
+function RecipientField({
+  selectedIdentity,
+  searchQuery,
+  recipientKey,
+  isSearching,
+  searchResults,
+  colors,
+  t,
+  onSearchChange,
+  onSelectIdentity,
+  onClear
+}: RecipientFieldProps) {
   if (selectedIdentity) {
     return (
       <View style={[styles.selectedRecipient, { backgroundColor: colors.backgroundSecondary }]}>
-        {selectedIdentity.avatarURL
-          ? <Image source={{ uri: selectedIdentity.avatarURL }} style={styles.avatar} />
-          : (
-            <View style={[styles.avatarPlaceholder, { backgroundColor: colors.accent }]}>
-              <Ionicons name="person" size={20} color={colors.background} />
-            </View>
-          )}
+        {selectedIdentity.avatarURL ? (
+          <Image source={{ uri: selectedIdentity.avatarURL }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.avatarPlaceholder, { backgroundColor: colors.accent }]}>
+            <Ionicons name="person" size={20} color={colors.background} />
+          </View>
+        )}
         <View style={styles.selectedInfo}>
           <Text style={[styles.selectedName, { color: colors.textPrimary }]} numberOfLines={1}>
             {selectedIdentity.name || t('unknown')}
@@ -405,7 +367,7 @@ function RecipientField({ selectedIdentity, searchQuery, recipientKey, isSearchi
             color: colors.textPrimary,
             backgroundColor: colors.backgroundSecondary,
             borderColor: recipientKey ? colors.success : colors.separator,
-            borderWidth: recipientKey ? 1 : StyleSheet.hairlineWidth,
+            borderWidth: recipientKey ? 1 : StyleSheet.hairlineWidth
           }
         ]}
       />
@@ -416,7 +378,9 @@ function RecipientField({ selectedIdentity, searchQuery, recipientKey, isSearchi
         </View>
       )}
       {showDropdown && (
-        <View style={[styles.searchResults, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator }]}>
+        <View
+          style={[styles.searchResults, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator }]}
+        >
           {isSearching ? (
             <View style={styles.searchLoading}>
               <ActivityIndicator size="small" color={colors.accent} />
@@ -429,16 +393,19 @@ function RecipientField({ selectedIdentity, searchQuery, recipientKey, isSearchi
                 onPress={() => onSelectIdentity(identity)}
                 style={[
                   styles.searchResultRow,
-                  idx < searchResults.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
+                  idx < searchResults.length - 1 && {
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderBottomColor: colors.separator
+                  }
                 ]}
               >
-                {identity.avatarURL
-                  ? <Image source={{ uri: identity.avatarURL }} style={styles.searchAvatar} />
-                  : (
-                    <View style={[styles.searchAvatarPlaceholder, { backgroundColor: colors.accent }]}>
-                      <Ionicons name="person" size={18} color={colors.background} />
-                    </View>
-                  )}
+                {identity.avatarURL ? (
+                  <Image source={{ uri: identity.avatarURL }} style={styles.searchAvatar} />
+                ) : (
+                  <View style={[styles.searchAvatarPlaceholder, { backgroundColor: colors.accent }]}>
+                    <Ionicons name="person" size={18} color={colors.background} />
+                  </View>
+                )}
                 <View style={styles.searchResultInfo}>
                   <Text style={[styles.searchResultName, { color: colors.textPrimary }]} numberOfLines={1}>
                     {identity.name || t('unknown')}
@@ -447,9 +414,11 @@ function RecipientField({ selectedIdentity, searchQuery, recipientKey, isSearchi
                     {identity.abbreviatedKey || `${identity.identityKey.slice(0, 20)}...`}
                   </Text>
                 </View>
-                {identity.badgeLabel
-                  ? <View style={[styles.badge, { backgroundColor: colors.accent + '20' }]}><Text style={[styles.badgeText, { color: colors.accent }]}>{identity.badgeLabel}</Text></View>
-                  : null}
+                {identity.badgeLabel ? (
+                  <View style={[styles.badge, { backgroundColor: colors.accent + '20' }]}>
+                    <Text style={[styles.badgeText, { color: colors.accent }]}>{identity.badgeLabel}</Text>
+                  </View>
+                ) : null}
               </TouchableOpacity>
             ))
           )}
@@ -475,8 +444,18 @@ interface PaymentRowProps {
 }
 
 function PaymentRow({
-  payment, identity, isLast, isAccepting, isEditingNote, note,
-  onAccept, onEditNote, onChangeNote, onSubmitNote, colors, t,
+  payment,
+  identity,
+  isLast,
+  isAccepting,
+  isEditingNote,
+  note,
+  onAccept,
+  onEditNote,
+  onChangeNote,
+  onSubmitNote,
+  colors,
+  t
 }: PaymentRowProps) {
   const senderKey = payment.sender ?? ''
   return (
@@ -521,7 +500,12 @@ function PaymentRow({
             style={styles.noteTapTarget}
             hitSlop={{ top: 4, bottom: 4, left: 0, right: 8 }}
           >
-            <Ionicons name="pencil" size={11} color={note ? colors.accent : colors.textQuaternary} style={{ marginRight: 4, marginTop: 1 }} />
+            <Ionicons
+              name="pencil"
+              size={11}
+              color={note ? colors.accent : colors.textQuaternary}
+              style={{ marginRight: 4, marginTop: 1 }}
+            />
             <Text style={[styles.noteText, { color: note ? colors.accent : colors.textQuaternary }]} numberOfLines={1}>
               {note || t('payment_note_placeholder')}
             </Text>
@@ -557,11 +541,19 @@ export default function PaymentsScreen() {
   const { managers, adminOriginator } = useWallet()
   const wallet = managers?.permissionsManager || null
 
-  const { messageBoxUrl, urlInput, setUrlInput, isConfigured, isSaving, showConfig, setShowConfig,
-    handleSave: handleSaveUrl, handleRemove: handleRemoveUrl } = useMessageBoxConfig(t)
+  const { messageBoxUrl, isConfigured } = useMessageBoxConfig()
 
-  const { identityClientRef, searchQuery, searchResults, isSearching, selectedIdentity, recipientKey,
-    handleSearchChange, handleSelectIdentity, clearRecipient } = useIdentitySearch(wallet as any, adminOriginator)
+  const {
+    identityClientRef,
+    searchQuery,
+    searchResults,
+    isSearching,
+    selectedIdentity,
+    recipientKey,
+    handleSearchChange,
+    handleSelectIdentity,
+    clearRecipient
+  } = useIdentitySearch(wallet as any, adminOriginator)
 
   // --- PeerPay state ---
   const peerPayClientRef = useRef<PeerPayClient | null>(null)
@@ -583,29 +575,20 @@ export default function PaymentsScreen() {
 
   // --- Init PeerPayClient ---
   useEffect(() => {
-    if (!isConfigured || !messageBoxUrl || !wallet) { peerPayClientRef.current = null; return }
-    try {
-      peerPayClientRef.current = new PeerPayClient({ messageBoxHost: messageBoxUrl, walletClient: wallet as any, originator: adminOriginator })
-    } catch { peerPayClientRef.current = null }
-  }, [isConfigured, messageBoxUrl, wallet, adminOriginator])
-
-  const handleSave = useCallback(async () => {
-    const trimmed = urlInput.trim().replace(/\/+$/, '')
-    if (!trimmed || !wallet) { await handleSaveUrl(urlInput); return }
-    try {
-      toast.info(t('checking_connection'))
-      const tempClient = new PeerPayClient({ messageBoxHost: trimmed, walletClient: wallet as any, originator: adminOriginator })
-      await tempClient.init(trimmed)
-      await handleSaveUrl(urlInput)
-    } catch (error: any) {
-      toast.error(`${t('connection_failed')}: ${error.message || 'unknown error'}`)
+    if (!isConfigured || !messageBoxUrl || !wallet) {
+      peerPayClientRef.current = null
+      return
     }
-  }, [handleSaveUrl, urlInput, wallet, adminOriginator, t])
-  const handleRemove = useCallback(async () => {
-    await handleRemoveUrl()
-    peerPayClientRef.current = null
-    setPayments([])
-  }, [handleRemoveUrl])
+    try {
+      peerPayClientRef.current = new PeerPayClient({
+        messageBoxHost: messageBoxUrl,
+        walletClient: wallet as any,
+        originator: adminOriginator
+      })
+    } catch {
+      peerPayClientRef.current = null
+    }
+  }, [isConfigured, messageBoxUrl, wallet, adminOriginator])
 
   // --- Fetch incoming payments ---
   const fetchPayments = useCallback(async () => {
@@ -639,44 +622,55 @@ export default function PaymentsScreen() {
   }, [isConfigured, fetchPayments])
 
   // --- Accept payment (with optional custom description) ---
-  const internalizePayment = useCallback(async (payment: IncomingPayment, description: string) => {
-    const client = peerPayClientRef.current
-    if (!client || !wallet) throw new Error('Not ready')
-    await wallet.internalizeAction({
-      tx: payment.token.transaction,
-      outputs: [{
-        paymentRemittance: {
-          derivationPrefix: payment.token.customInstructions.derivationPrefix,
-          derivationSuffix: payment.token.customInstructions.derivationSuffix,
-          senderIdentityKey: payment.sender,
+  const internalizePayment = useCallback(
+    async (payment: IncomingPayment, description: string) => {
+      const client = peerPayClientRef.current
+      if (!client || !wallet) throw new Error('Not ready')
+      await wallet.internalizeAction(
+        {
+          tx: payment.token.transaction,
+          outputs: [
+            {
+              paymentRemittance: {
+                derivationPrefix: payment.token.customInstructions.derivationPrefix,
+                derivationSuffix: payment.token.customInstructions.derivationSuffix,
+                senderIdentityKey: payment.sender
+              },
+              outputIndex: payment.token.outputIndex ?? 0,
+              protocol: 'wallet payment'
+            }
+          ],
+          labels: ['peerpay'],
+          description
         },
-        outputIndex: payment.token.outputIndex ?? 0,
-        protocol: 'wallet payment',
-      }],
-      labels: ['peerpay'],
-      description,
-    }, adminOriginator)
-    await client.acknowledgeMessage({ messageIds: [payment.messageId] })
-  }, [wallet, adminOriginator])
+        adminOriginator
+      )
+      await client.acknowledgeMessage({ messageIds: [payment.messageId] })
+    },
+    [wallet, adminOriginator]
+  )
 
-  const handleAcceptPayment = useCallback(async (payment: IncomingPayment) => {
-    const client = peerPayClientRef.current
-    if (!client) return
-    const id = String(payment.messageId)
-    const description = paymentNotes[id]?.trim() || 'Identity Payment'
-    setAcceptingId(id)
-    setEditingNoteId(null)
-    try {
-      await acceptWithRetry(client, messageBoxUrl, payment, description, internalizePayment)
-      setAcceptResult({ type: 'success', message: 'Payment accepted successfully' })
-      fetchPayments()
-    } catch (error_: any) {
-      setAcceptResult({ type: 'error', message: `Accept failed: ${error_?.message || 'unknown error'}` })
-    } finally {
-      setAcceptingId(null)
-      setTimeout(() => setAcceptResult(null), 5000)
-    }
-  }, [messageBoxUrl, fetchPayments, internalizePayment, paymentNotes])
+  const handleAcceptPayment = useCallback(
+    async (payment: IncomingPayment) => {
+      const client = peerPayClientRef.current
+      if (!client) return
+      const id = String(payment.messageId)
+      const description = paymentNotes[id]?.trim() || 'Identity Payment'
+      setAcceptingId(id)
+      setEditingNoteId(null)
+      try {
+        await acceptWithRetry(client, messageBoxUrl, payment, description, internalizePayment)
+        setAcceptResult({ type: 'success', message: 'Payment accepted successfully' })
+        fetchPayments()
+      } catch (error_: any) {
+        setAcceptResult({ type: 'error', message: `Accept failed: ${error_?.message || 'unknown error'}` })
+      } finally {
+        setAcceptingId(null)
+        setTimeout(() => setAcceptResult(null), 5000)
+      }
+    },
+    [messageBoxUrl, fetchPayments, internalizePayment, paymentNotes]
+  )
 
   // --- Send payment ---
   const handleSend = useCallback(async () => {
@@ -690,7 +684,7 @@ export default function PaymentsScreen() {
       clearRecipient()
       fetchPayments()
     } catch (error: any) {
-      const msg = error instanceof RangeError ? t('enter_valid_amount') : (error.message || 'unknown error')
+      const msg = error instanceof RangeError ? t('enter_valid_amount') : error.message || 'unknown error'
       setSendResult({ type: 'error', message: `Send failed: ${msg}` })
     } finally {
       setIsSending(false)
@@ -708,16 +702,7 @@ export default function PaymentsScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('identity_payments')}</Text>
-        <TouchableOpacity
-          onPress={() => setShowConfig(v => !v)}
-          style={styles.headerButton}
-        >
-          <Ionicons
-            name="settings-outline"
-            size={22}
-            color={showConfig ? colors.accent : colors.textSecondary}
-          />
-        </TouchableOpacity>
+        <View style={styles.headerButton} />
       </View>
 
       <ScrollView
@@ -725,38 +710,8 @@ export default function PaymentsScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        {/* --- Config panel (collapsible) --- */}
-        {showConfig && (
-          <ConfigPanel
-            urlInput={urlInput}
-            isSaving={isSaving}
-            isConfigured={isConfigured}
-            colors={colors}
-            t={t}
-            onChangeUrl={setUrlInput}
-            onSave={handleSave}
-            onCancel={() => { setShowConfig(false); setUrlInput(messageBoxUrl) }}
-            onRemove={handleRemove}
-          />
-        )}
-
-        {/* Not configured prompt */}
-        {!isConfigured && !showConfig && (
-          <TouchableOpacity
-            onPress={() => setShowConfig(true)}
-            style={[styles.setupPrompt, { backgroundColor: colors.warning + '15' }]}
-          >
-            <Ionicons name="alert-circle" size={20} color={colors.warning} style={{ marginRight: spacing.sm }} />
-            <Text style={[styles.setupPromptText, { color: colors.warning }]}>
-              {t('message_box_tap_to_configure')}
-            </Text>
-          </TouchableOpacity>
-        )}
-
         {/* --- Send Payment --- */}
-        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-          {t('send_payment')}
-        </Text>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t('send_payment')}</Text>
 
         {/* Recipient search / direct key */}
         <View style={styles.fieldGroup}>
@@ -789,7 +744,7 @@ export default function PaymentsScreen() {
             styles.sendButton,
             {
               backgroundColor: canSend ? colors.accent : colors.backgroundSecondary,
-              opacity: canSend ? 1 : 0.5,
+              opacity: canSend ? 1 : 0.5
             }
           ]}
         >
@@ -834,7 +789,7 @@ export default function PaymentsScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex: 1
   },
   header: {
     flexDirection: 'row',
@@ -842,97 +797,46 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth
   },
   headerButton: {
     width: 44,
     height: 44,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   headerTitle: {
     ...typography.headline,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   content: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-  },
-
-  // Config panel
-  configPanel: {
-    padding: spacing.lg,
-    borderRadius: radii.md,
-    marginBottom: spacing.xl,
-  },
-  configTitle: {
-    ...typography.headline,
-    marginBottom: spacing.xs,
-  },
-  configSubtitle: {
-    ...typography.footnote,
-    marginBottom: spacing.md,
-  },
-  urlInput: {
-    ...typography.body,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: spacing.md,
-  },
-  configActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  configButton: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  configButtonText: {
-    ...typography.subhead,
-    fontWeight: '600',
-  },
-
-  // Setup prompt
-  setupPrompt: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    borderRadius: radii.md,
-    marginBottom: spacing.xl,
-  },
-  setupPromptText: {
-    ...typography.subhead,
-    flex: 1,
+    paddingTop: spacing.lg
   },
 
   // Section
   sectionTitle: {
     ...typography.title3,
-    marginBottom: spacing.md,
+    marginBottom: spacing.md
   },
 
   // Field group
   fieldGroup: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing.lg
   },
   fieldLabel: {
     ...typography.footnote,
     fontWeight: '500',
     marginBottom: spacing.sm,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.5
   },
   textInput: {
     ...typography.body,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: StyleSheet.hairlineWidth
   },
 
   // Selected recipient
@@ -940,34 +844,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.md,
-    borderRadius: radii.md,
+    borderRadius: radii.md
   },
   avatar: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 18
   },
   avatarPlaceholder: {
     width: 36,
     height: 36,
     borderRadius: 18,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   selectedInfo: {
     flex: 1,
-    marginLeft: spacing.md,
+    marginLeft: spacing.md
   },
   selectedName: {
     ...typography.subhead,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   selectedKey: {
     ...typography.caption1,
-    fontFamily: 'monospace',
+    fontFamily: 'monospace'
   },
   clearButton: {
-    padding: spacing.xs,
+    padding: spacing.xs
   },
 
   // Direct key
@@ -975,11 +879,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    marginTop: spacing.sm,
+    marginTop: spacing.sm
   },
   directKeyText: {
     ...typography.caption1,
-    fontWeight: '500',
+    fontWeight: '500'
   },
 
   // Search results
@@ -987,28 +891,28 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     marginTop: spacing.sm,
-    overflow: 'hidden',
+    overflow: 'hidden'
   },
   searchLoading: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     padding: spacing.md,
-    gap: spacing.sm,
+    gap: spacing.sm
   },
   searchLoadingText: {
-    ...typography.subhead,
+    ...typography.subhead
   },
   searchResultRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
+    padding: spacing.md
   },
   searchAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    marginRight: spacing.md,
+    marginRight: spacing.md
   },
   searchAvatarPlaceholder: {
     width: 32,
@@ -1016,30 +920,30 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing.md,
+    marginRight: spacing.md
   },
   searchResultInfo: {
-    flex: 1,
+    flex: 1
   },
   searchResultName: {
     ...typography.subhead,
-    fontWeight: '500',
+    fontWeight: '500'
   },
   searchResultKey: {
     ...typography.caption1,
-    fontFamily: 'monospace',
+    fontFamily: 'monospace'
   },
   badge: {
     paddingHorizontal: spacing.xs,
     paddingVertical: 1,
     borderRadius: 3,
     marginLeft: spacing.sm,
-    flexShrink: 1,
+    flexShrink: 1
   },
   badgeText: {
     ...typography.caption2,
     fontWeight: '600',
-    fontSize: 10,
+    fontSize: 10
   },
 
   // Send button
@@ -1050,11 +954,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: radii.md,
     gap: spacing.sm,
-    marginBottom: spacing.xxxl,
+    marginBottom: spacing.xxxl
   },
   sendButtonText: {
     ...typography.subhead,
-    fontWeight: '600',
+    fontWeight: '600'
   },
 
   // Incoming payments
@@ -1062,33 +966,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
+    marginBottom: spacing.md
   },
   centeredSmall: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.xxl,
+    paddingVertical: spacing.xxl
   },
   emptyText: {
-    ...typography.body,
+    ...typography.body
   },
   paymentsList: {
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
+    overflow: 'hidden'
   },
   paymentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
-    gap: spacing.md,
+    gap: spacing.md
   },
   paymentAvatar: {
     width: 42,
     height: 42,
     borderRadius: 21,
-    flexShrink: 0,
+    flexShrink: 0
   },
   paymentAvatarPlaceholder: {
     width: 42,
@@ -1096,58 +1000,58 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    flexShrink: 0,
+    flexShrink: 0
   },
   paymentInfo: {
     flex: 1,
-    minWidth: 0,
+    minWidth: 0
   },
   paymentSenderName: {
     ...typography.subhead,
     fontWeight: '600',
-    marginBottom: 1,
+    marginBottom: 1
   },
   paymentSender: {
     ...typography.caption1,
     fontFamily: 'monospace',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.xs
   },
   noteTapTarget: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 2,
+    marginTop: 2
   },
   noteText: {
     ...typography.caption2,
     flex: 1,
-    fontStyle: 'italic',
+    fontStyle: 'italic'
   },
   noteInput: {
     ...typography.caption1,
     marginTop: 4,
     paddingVertical: 3,
     borderBottomWidth: 1,
-    paddingHorizontal: 0,
+    paddingHorizontal: 0
   },
   paymentActions: {
     alignItems: 'flex-end',
     gap: spacing.xs,
-    flexShrink: 0,
+    flexShrink: 0
   },
   paymentAmount: {
     ...typography.footnote,
-    fontWeight: '700',
+    fontWeight: '700'
   },
   acceptButton: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: radii.sm,
     alignItems: 'center',
-    minWidth: 70,
+    minWidth: 70
   },
   acceptButtonText: {
     ...typography.footnote,
-    fontWeight: '600',
+    fontWeight: '600'
   },
 
   // Result banners
@@ -1160,14 +1064,14 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     borderWidth: 1,
     marginTop: spacing.lg,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.lg
   },
   resultText: {
     ...typography.subhead,
     fontWeight: '500',
-    flex: 1,
+    flex: 1
   },
   resultDismiss: {
-    padding: spacing.xs,
-  },
+    padding: spacing.xs
+  }
 })
