@@ -100,38 +100,41 @@ export default function LegacyPaymentsScreen() {
   )
 
   // Get internalized UTXOs from transaction history
-  const getInternalizedUtxos = useCallback(async (): Promise<Set<string>> => {
-    if (!wallet) return new Set()
-    try {
-      const response = await wallet.listActions(
-        {
-          labels: ['bsvbrowser', 'inbound'],
-          labelQueryMode: 'all',
-          includeInputs: true,
-          limit: 1000
-        },
-        adminOriginator
-      )
-      const set = new Set<string>()
-      for (const action of response.actions) {
-        if (action.inputs) {
-          for (const input of action.inputs) {
-            if (input.sourceOutpoint) set.add(input.sourceOutpoint)
+  const getInternalizedUtxos = useCallback(
+    async (address: string): Promise<Set<string>> => {
+      if (!wallet) return new Set()
+      try {
+        const response = await wallet.listActions(
+          {
+            labels: [address],
+            labelQueryMode: 'all',
+            includeInputs: true,
+            limit: 1000
+          },
+          adminOriginator
+        )
+        const set = new Set<string>()
+        for (const action of response.actions) {
+          if (action.inputs) {
+            for (const input of action.inputs) {
+              if (input.sourceOutpoint) set.add(input.sourceOutpoint)
+            }
           }
         }
+        return set
+      } catch (error) {
+        console.error('Error fetching internalized UTXOs:', error)
+        return new Set()
       }
-      return set
-    } catch (error) {
-      console.error('Error fetching internalized UTXOs:', error)
-      return new Set()
-    }
-  }, [wallet, adminOriginator])
+    },
+    [wallet, adminOriginator]
+  )
 
   // Fetch balance for address
   const fetchBalance = useCallback(
     async (address: string): Promise<number> => {
       const allUtxos = await getUtxosForAddress(address)
-      const internalizedUtxos = await getInternalizedUtxos()
+      const internalizedUtxos = await getInternalizedUtxos(address)
       const available = allUtxos.filter(utxo => {
         const outpoint = `${utxo.txid}.${utxo.vout}`
         return !internalizedUtxos.has(outpoint)
@@ -222,7 +225,7 @@ export default function LegacyPaymentsScreen() {
     setIsImporting(true)
     try {
       const allUtxos = await getUtxosForAddress(paymentAddress)
-      const internalizedUtxos = await getInternalizedUtxos()
+      const internalizedUtxos = await getInternalizedUtxos(paymentAddress)
       const utxos = allUtxos.filter(utxo => {
         const outpoint = `${utxo.txid}.${utxo.vout}`
         return !internalizedUtxos.has(outpoint)
@@ -264,7 +267,7 @@ export default function LegacyPaymentsScreen() {
             tx: tx!.toAtomicBEEF(),
             description: 'Legacy Bridge Payment',
             outputs,
-            labels: ['legacy', 'inbound', 'bsvbrowser']
+            labels: ['legacy', 'inbound', 'bsvbrowser', paymentAddress!]
           }
           return args
         })
