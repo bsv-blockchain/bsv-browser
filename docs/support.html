@@ -21,7 +21,7 @@
       property="og:description"
       content="Get help with BSV Browser. Learn how to browse the web, manage your wallet, make payments, and use Web3 features."
     />
-    <meta property="og:image" content="https://bsv-blockchain.github.io/bsv-browser/1.PNG" />
+    <meta property="og:image" content="https://bsv-blockchain.github.io/bsv-browser/browser_home_page.png" />
 
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="../assets/images/favicon.ico" />
@@ -487,6 +487,7 @@
         <a href="#getting-started">Getting Started</a>
         <a href="#browsing">Browsing the Web</a>
         <a href="#wallet">Wallet &amp; Payments</a>
+        <a href="#backup">Backup &amp; Recovery</a>
         <a href="#identity">Identity &amp; Trust</a>
         <a href="#permissions">Permissions</a>
         <a href="#tips">Tips &amp; Settings</a>
@@ -528,7 +529,11 @@
             </ul>
           </div>
           <div class="guide-image">
-            <img src="9.png" alt="BSV Browser showing the feature list" class="guide-screenshot" />
+            <img
+              src="browser_home_page.png"
+              alt="BSV Browser home page showing bookmarks, history, and search engine selector"
+              class="guide-screenshot"
+            />
           </div>
         </div>
       </div>
@@ -553,14 +558,21 @@
             </p>
             <ul>
               <li><strong>Create New Wallet</strong> &mdash; generates a fresh 12-word recovery phrase.</li>
-              <li><strong>Import Existing Wallet</strong> &mdash; paste a BIP-39 recovery phrase you already have.</li>
+              <li>
+                <strong>Import Existing Wallet</strong> &mdash; paste a BIP-39 recovery phrase you already have, or scan
+                backup shares from a printed recovery sheet.
+              </li>
             </ul>
             <p>
               If you are not ready to create a wallet, tap <strong>Cancel</strong> and continue browsing in Web2 mode.
             </p>
           </div>
           <div class="guide-image">
-            <img src="WEB3.PNG" alt="Wallet setup screen with Create and Import options" class="guide-screenshot" />
+            <img
+              src="enable_web3_options.png"
+              alt="Wallet setup screen with Create and Import options"
+              class="guide-screenshot"
+            />
           </div>
         </div>
 
@@ -572,9 +584,12 @@
               <strong>only way</strong> to recover your wallet if you lose your device or reinstall the app.
             </p>
             <ul>
-              <li>Use <strong>Save Recovery Phrase</strong> to share it to a secure location.</li>
-              <li>Use <strong>Copy to Clipboard</strong> and store it somewhere safe.</li>
-              <li>Confirm you have saved it by checking the acknowledgment box.</li>
+              <li>
+                <strong>Save Recovery Phrase</strong> &mdash; exports your phrase as a text file via the system share
+                sheet, so you can save it to cloud storage, AirDrop it, or print it.
+              </li>
+              <li><strong>Copy to Clipboard</strong> &mdash; copies the phrase so you can paste it somewhere safe.</li>
+              <li>Confirm you have saved it by checking the acknowledgment box, then tap <strong>Continue</strong>.</li>
             </ul>
             <div class="warning-box">
               <p>
@@ -585,7 +600,11 @@
             </div>
           </div>
           <div class="guide-image">
-            <img src="5.PNG" alt="Recovery phrase backup screen" class="guide-screenshot" />
+            <img
+              src="save_recovery_phrase.png"
+              alt="Recovery phrase screen with Save and Copy options"
+              class="guide-screenshot"
+            />
           </div>
         </div>
       </div>
@@ -602,14 +621,20 @@
 
         <div class="guide-row">
           <div class="guide-text">
-            <h3>Address bar and navigation</h3>
+            <h3>Address bar and search</h3>
             <p>
               The address bar sits at the bottom of the screen. Tap it to enter a URL or search query. As you type, the
               browser shows autocomplete suggestions drawn from your bookmarks and browsing history.
             </p>
             <p>
-              If you type a term that does not look like a URL, the browser checks the BSV overlay network for a
-              matching application. If a match is found, you are taken directly there.
+              If you type a term that does not look like a URL, the browser searches using your chosen search engine.
+              You can pick from <strong>Startpage</strong> (the default), <strong>Brave</strong>,
+              <strong>Google</strong>, <strong>Bing</strong>, or <strong>DuckDuckGo</strong> in the browser home page
+              settings.
+            </p>
+            <p>
+              The browser also checks the BSV overlay network for matching applications. If a match is found, you are
+              taken directly there.
             </p>
             <div class="tip-box">
               <p>
@@ -619,7 +644,11 @@
             </div>
           </div>
           <div class="guide-image">
-            <img src="TOPBAR.png" alt="Browser top bar with navigation and menu" class="guide-screenshot" />
+            <img
+              src="address_bar_suggestions.png"
+              alt="Address bar with autocomplete suggestions"
+              class="guide-screenshot"
+            />
           </div>
         </div>
 
@@ -637,32 +666,71 @@
             <p>Your open tabs are automatically saved between sessions, so you pick up right where you left off.</p>
           </div>
           <div class="guide-image">
-            <img src="3.png" alt="Tab manager showing multiple open tabs" class="guide-screenshot" />
+            <img src="tabs_overview.png" alt="Tab manager showing multiple open tabs" class="guide-screenshot" />
           </div>
         </div>
 
         <div class="guide-row">
           <div class="guide-text">
-            <h3>Bookmarks, history, and homepage</h3>
+            <h3>Bookmarks</h3>
             <p>
-              From the menu, tap <strong>Browser</strong> to access your bookmarks, browsing history, and homepage
-              settings.
+              Bookmarks appear as a scrollable row at the top of the browser home page. Tap any bookmark to open it. To
+              manage all your bookmarks, tap <strong>See All &gt;</strong> next to the Bookmarks heading to open a
+              full-page list where you can:
             </p>
             <ul>
+              <li><strong>Swipe left</strong> on any bookmark to delete it.</li>
+              <li>Tap <strong>Clear All</strong> to remove all bookmarks at once.</li>
+              <li>Tap any bookmark to navigate to it.</li>
+            </ul>
+            <p>To add a bookmark, open the menu on any page and tap <strong>Add Bookmark</strong>.</p>
+          </div>
+          <div class="guide-image">
+            <img
+              src="bookmarks_list_swipe.png"
+              alt="Full bookmarks list with swipe to delete"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>History</h3>
+            <p>
+              The browser home page shows your recent browsing history. Tap <strong>See All &gt;</strong> next to the
+              History heading to open the full history list. From there you can:
+            </p>
+            <ul>
+              <li><strong>Swipe left</strong> on any entry to delete it individually.</li>
+              <li>Tap <strong>Clear All</strong> to wipe your entire browsing history.</li>
+              <li>Tap any entry to revisit that page.</li>
+            </ul>
+          </div>
+          <div class="guide-image">
+            <img src="history_list_swipe.png" alt="History list with swipe to delete" class="guide-screenshot" />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Search engine and homepage</h3>
+            <p>On the browser home page you can customise two key settings:</p>
+            <ul>
               <li>
-                <strong>Bookmarks</strong> appear as a scrollable row at the top. Tap one to open it in a new tab.
+                <strong>Search Engine</strong> &mdash; tap the dropdown to switch between Startpage, Brave, Google,
+                Bing, and DuckDuckGo. Your choice is remembered across sessions.
               </li>
               <li>
-                <strong>History</strong> lists recently visited pages. You can delete individual entries or clear
-                everything.
+                <strong>Homepage</strong> &mdash; tap the pencil icon next to the current homepage URL to change it. New
+                tabs always open to your homepage.
               </li>
-              <li><strong>Homepage</strong> can be set to any URL. New tabs always open to your homepage.</li>
             </ul>
           </div>
           <div class="guide-image">
             <img
-              src="8.PNG"
-              alt="Browser page showing bookmarks, history, and homepage settings"
+              src="search_engine_selector.png"
+              alt="Search engine dropdown and homepage editor on the browser home page"
               class="guide-screenshot"
             />
           </div>
@@ -675,7 +743,7 @@
             <ul>
               <li><strong>Share</strong> the current page.</li>
               <li><strong>Add Bookmark</strong> for the page you are on.</li>
-              <li>Open the <strong>Browser</strong> page (bookmarks, history, homepage).</li>
+              <li>Open the <strong>Browser</strong> page (bookmarks, history, homepage, search engine).</li>
               <li>Submit a <strong>Bug Report</strong> (links directly to the GitHub issues page).</li>
               <li>
                 Open <strong>Wallet</strong> settings (or <strong>Enable Web3</strong> if you have not set up yet).
@@ -684,7 +752,7 @@
             </ul>
           </div>
           <div class="guide-image">
-            <img src="2.png" alt="Menu popover showing available options" class="guide-screenshot" />
+            <img src="menu_popover.png" alt="Menu popover showing available options" class="guide-screenshot" />
           </div>
         </div>
 
@@ -700,7 +768,7 @@
             <p>This means you can find BSV-powered apps by name without needing to know their exact URL.</p>
           </div>
           <div class="guide-image">
-            <img src="OVERLAY.png" alt="Overlay lookup in progress" class="guide-screenshot" />
+            <img src="overlay_app_lookup.png" alt="Overlay lookup discovering a BSV app" class="guide-screenshot" />
           </div>
         </div>
       </div>
@@ -718,31 +786,58 @@
         <div class="guide-row">
           <div class="guide-text">
             <h3>Wallet overview</h3>
-            <p>Open the menu and tap <strong>Wallet</strong> to see your wallet settings. Here you can:</p>
+            <p>Open the menu and tap <strong>Wallet</strong> to see your wallet. The main screen shows:</p>
             <ul>
+              <li>Your current <strong>balance</strong> in satoshis or fiat. Tap it to refresh.</li>
               <li>
-                View your current <strong>balance</strong> in satoshis or fiat (USD, EUR, GBP). Tap the balance to
-                refresh.
+                Quick links to <strong>Transactions</strong>, <strong>Payments</strong>, and
+                <strong>Legacy Bridge</strong>.
               </li>
-              <li>
-                Switch between <strong>Mainnet</strong>, <strong>Testnet</strong>, and
-                <strong>Teratest</strong> networks.
-              </li>
-              <li>View or copy your <strong>recovery phrase</strong> and <strong>identity key</strong>.</li>
-              <li>
-                Access <strong>Transaction History</strong>, <strong>Trust Network</strong>, and
-                <strong>Payments</strong> screens.
-              </li>
-              <li><strong>Export</strong> your wallet data for backup.</li>
-              <li><strong>Logout</strong> to clear all wallet data and return to Web2 mode.</li>
+              <li>Your <strong>Identity Key</strong> with a copy button.</li>
+              <li>A <strong>Settings</strong> row that opens the full wallet configuration screen.</li>
             </ul>
           </div>
           <div class="guide-image">
-            <img src="1.PNG" alt="Wallet settings showing balance, network, and options" class="guide-screenshot" />
+            <img
+              src="wallet_overview.png"
+              alt="Wallet overview showing balance, activity links, and settings"
+              class="guide-screenshot"
+            />
           </div>
         </div>
 
         <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Wallet configuration</h3>
+            <p>Tap <strong>Settings</strong> from the wallet overview to access all wallet configuration options:</p>
+            <ul>
+              <li>
+                <strong>BSV Network</strong> &mdash; switch between Mainnet, Testnet, and Teratest. Changing the network
+                rebuilds the wallet on the selected chain.
+              </li>
+              <li><strong>Trust Network</strong> &mdash; manage your trusted identity certifiers.</li>
+              <li><strong>Recovery Phrase</strong> &mdash; tap to copy your mnemonic to the clipboard.</li>
+              <li>
+                <strong>Print Recovery Shares</strong> &mdash; generate printable backup sheets (see Backup &amp;
+                Recovery below).
+              </li>
+              <li>
+                <strong>Export Wallet Data</strong> &mdash; export your wallet database files via the system share
+                sheet.
+              </li>
+              <li><strong>Logout</strong> &mdash; clear all wallet data and return to Web2 mode.</li>
+            </ul>
+          </div>
+          <div class="guide-image">
+            <img
+              src="wallet_config_screen.png"
+              alt="Wallet configuration screen with network, recovery, and export options"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row">
           <div class="guide-text">
             <h3>Micropayments in Web3 apps</h3>
             <p>
@@ -766,58 +861,95 @@
             </div>
           </div>
           <div class="guide-image">
-            <img src="7.PNG" alt="Micropayment authorization prompt" class="guide-screenshot" />
-          </div>
-        </div>
-
-        <div class="guide-row">
-          <div class="guide-text">
-            <h3>Peer-to-peer identity payments</h3>
-            <p>
-              The <strong>Identity Payments</strong> screen (accessible from Wallet settings) lets you send BSV directly
-              to another person using their identity rather than a raw blockchain address. Search for the recipient by
-              name across the BSV identity network, enter an amount, and send.
-            </p>
-            <p>
-              You can also receive identity-based payments here. Incoming payments appear in a list and can be accepted
-              with a single tap.
-            </p>
-          </div>
-          <div class="guide-image">
-            <img src="6.PNG" alt="PeerPay identity payment screen" class="guide-screenshot" />
+            <img
+              src="micropayment_authorization.png"
+              alt="Micropayment authorization prompt from a Web3 app"
+              class="guide-screenshot"
+            />
           </div>
         </div>
 
         <div class="guide-row reverse">
           <div class="guide-text">
-            <h3>Legacy address-based payments</h3>
+            <h3>Peer-to-peer identity payments</h3>
             <p>
-              For compatibility with traditional BSV wallets and services, BSV Browser also supports standard
-              address-based transactions via the <strong>Legacy Payments</strong> screen.
+              The <strong>Payments</strong> screen lets you send BSV directly to another person using their identity
+              rather than a raw blockchain address. Search for the recipient by name across the BSV identity network,
+              enter an amount, and send.
+            </p>
+            <p>
+              Incoming payments appear in a list. You can accept them individually, or tap
+              <strong>Accept All</strong> to batch-accept every pending payment at once. A result banner confirms how
+              many were accepted.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img
+              src="payments_accept_all.png"
+              alt="Payments screen showing incoming payments with Accept All button"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Legacy Bridge</h3>
+            <p>
+              For compatibility with traditional BSV wallets and services, BSV Browser supports standard address-based
+              transactions via the <strong>Legacy Bridge</strong> screen.
             </p>
             <ul>
               <li>
-                <strong>Receive:</strong> A unique address and QR code are generated daily. Share them with anyone who
-                wants to send you BSV. Incoming funds are automatically detected and imported into your wallet.
+                <strong>Receive:</strong> A unique address and QR code are generated for each day. Share them with
+                anyone who wants to send you BSV. Incoming funds are automatically detected and imported into your
+                wallet &mdash; no manual action needed.
               </li>
               <li>
                 <strong>Send:</strong> Enter a BSV address and amount, then confirm. You can also tap
                 <strong>Send Max</strong> to send your entire balance.
               </li>
+              <li>
+                Use the <strong>arrow buttons</strong> to navigate between daily addresses if you need to check a
+                previous day's receive address.
+              </li>
             </ul>
           </div>
           <div class="guide-image">
-            <img src="PAY.PNG" alt="Payment authorization for a Web3 app" class="guide-screenshot" />
+            <img
+              src="legacy_bridge_receive.png"
+              alt="Legacy Bridge screen showing QR code, address, and auto-import"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Sending from Legacy Bridge</h3>
+            <p>
+              Below the receive section, the Legacy Bridge includes a full send form. Enter the recipient's BSV address
+              and the amount you want to send.
+            </p>
+            <ul>
+              <li>Tap <strong>Send BSV</strong> to broadcast the transaction.</li>
+              <li>Tap <strong>Send Max</strong> to send your full available balance.</li>
+            </ul>
+            <p>A success or error banner appears after the transaction is submitted.</p>
+          </div>
+          <div class="guide-image">
+            <img
+              src="legacy_bridge_send.png"
+              alt="Legacy Bridge send form with address and amount fields"
+              class="guide-screenshot"
+            />
           </div>
         </div>
 
         <div class="guide-row">
           <div class="guide-text">
             <h3>Transaction history</h3>
-            <p>
-              The <strong>Transactions</strong> screen (accessible from Wallet settings) lists all your transactions
-              with colour-coded status badges:
-            </p>
+            <p>The <strong>Transactions</strong> screen lists all your transactions with colour-coded status badges:</p>
             <ul>
               <li><strong>Green</strong> &mdash; Confirmed, accepted, or broadcasting.</li>
               <li><strong>Yellow</strong> &mdash; Pending states (unsigned, non-final, not yet sent).</li>
@@ -829,7 +961,116 @@
             </p>
           </div>
           <div class="guide-image">
-            <img src="4.PNG" alt="Web3 app showing transaction data" class="guide-screenshot" />
+            <img
+              src="transaction_history.png"
+              alt="Transaction history with colour-coded status badges"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: Backup & Recovery -->
+    <section id="backup" class="guide-section">
+      <div class="container">
+        <h2>Backup &amp; Recovery</h2>
+        <p class="section-intro">
+          BSV Browser is self-custodial &mdash; you are the only one who holds your keys. The app provides multiple ways
+          to back up and recover your wallet so you are never locked out.
+        </p>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Recovery phrase</h3>
+            <p>
+              When you create a wallet, a 12-word recovery phrase is generated. This phrase can restore your wallet on
+              any compatible device. You can access it at any time from
+              <strong>Wallet &gt; Settings &gt; Recovery Phrase</strong>.
+            </p>
+            <p>During wallet creation, you can save it two ways:</p>
+            <ul>
+              <li>
+                <strong>Save Recovery Phrase</strong> &mdash; exports a <code>.txt</code> file via the system share
+                sheet (AirDrop, Files, email, etc.).
+              </li>
+              <li>
+                <strong>Copy to Clipboard</strong> &mdash; copies the words so you can paste them into a secure note or
+                password manager.
+              </li>
+            </ul>
+            <div class="warning-box">
+              <p>
+                <strong>Important:</strong> Anyone with your recovery phrase can access your wallet. Store it somewhere
+                safe and never share it.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img
+              src="recovery_phrase_file_export.png"
+              alt="Recovery phrase screen with Save as file and Copy to clipboard options"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Print recovery shares</h3>
+            <p>
+              For extra security, BSV Browser can split your wallet key into <strong>three printed shares</strong> using
+              Shamir's Secret Sharing. Any <strong>two of the three</strong> shares are enough to recover your wallet,
+              but a single share alone reveals nothing.
+            </p>
+            <p>To generate shares:</p>
+            <ul>
+              <li>Go to <strong>Wallet &gt; Settings &gt; Print Recovery Shares</strong>.</li>
+              <li>The app generates three pages, each containing a QR code and the share text.</li>
+              <li>The system print dialog opens so you can print them to paper or save as PDF.</li>
+            </ul>
+            <p>
+              Store each share in a separate, secure location. For example: one at home, one at work, one with a trusted
+              family member.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img
+              src="print_recovery_shares.png"
+              alt="Printed recovery share page with QR code and share text"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Recover from backup shares</h3>
+            <p>
+              If you have printed recovery shares, you can restore your wallet by scanning any two of the three sheets:
+            </p>
+            <ul>
+              <li>
+                On the wallet setup screen, tap <strong>Import Existing Wallet</strong>, then tap
+                <strong>Scan Backup Shares</strong>.
+              </li>
+              <li>The camera opens with a QR scanner. Point it at your first share.</li>
+              <li>Progress dots at the bottom show how many shares you have scanned and how many are still needed.</li>
+              <li>
+                After scanning the second share, the wallet is automatically recovered and you are taken to the browser.
+              </li>
+            </ul>
+            <p>
+              The scanner validates each share as you scan it. Duplicate or incompatible shares are rejected with an
+              error message so you always know what is happening.
+            </p>
+          </div>
+          <div class="guide-image">
+            <img
+              src="scan_backup_shares.png"
+              alt="Camera QR scanner with progress dots showing one of two shares scanned"
+              class="guide-screenshot"
+            />
           </div>
         </div>
       </div>
@@ -850,7 +1091,7 @@
             <h3>Your identity key</h3>
             <p>
               When you create or import a wallet, a unique identity key is generated. This key represents you across all
-              Web3 applications. It is shown in your Wallet settings &mdash; tap it to copy.
+              Web3 applications. It is shown on the wallet overview screen &mdash; tap the copy button next to it.
             </p>
             <p>
               Web3 applications use this key to identify you without needing email addresses, phone numbers, or any
@@ -858,7 +1099,11 @@
             </p>
           </div>
           <div class="guide-image">
-            <img src="1.PNG" alt="Wallet settings showing identity key" class="guide-screenshot" />
+            <img
+              src="identity_key_copy.png"
+              alt="Wallet overview with identity key and copy button"
+              class="guide-screenshot"
+            />
           </div>
         </div>
 
@@ -881,7 +1126,11 @@
             <p>When a Web3 app asks to verify an identity certificate, it checks against your trusted certifiers.</p>
           </div>
           <div class="guide-image">
-            <img src="ADD_TRUST.PNG" alt="Adding a trusted identity provider" class="guide-screenshot" />
+            <img
+              src="trust_network.png"
+              alt="Trust network screen showing list of trusted certifiers"
+              class="guide-screenshot"
+            />
           </div>
         </div>
 
@@ -899,7 +1148,11 @@
             </p>
           </div>
           <div class="guide-image">
-            <img src="WEB3.PNG" alt="Web3 wallet creation screen" class="guide-screenshot" />
+            <img
+              src="certificate_permission_request.png"
+              alt="Permission sheet showing certificate field request from a Web3 app"
+              class="guide-screenshot"
+            />
           </div>
         </div>
       </div>
@@ -937,7 +1190,11 @@
             </p>
           </div>
           <div class="guide-image">
-            <img src="PAY.PNG" alt="Permission sheet for a spending request" class="guide-screenshot" />
+            <img
+              src="spending_permission_sheet.png"
+              alt="Permission sheet for a spending request"
+              class="guide-screenshot"
+            />
           </div>
         </div>
 
@@ -955,7 +1212,11 @@
             </ul>
           </div>
           <div class="guide-image">
-            <img src="TOPBAR.png" alt="Browser interface with permission controls" class="guide-screenshot" />
+            <img
+              src="device_permission_modal.png"
+              alt="Device permission modal for camera access"
+              class="guide-screenshot"
+            />
           </div>
         </div>
 
@@ -972,7 +1233,11 @@
             </p>
           </div>
           <div class="guide-image">
-            <img src="8.PNG" alt="Browser page with history and bookmarks" class="guide-screenshot" />
+            <img
+              src="browser_home_page.png"
+              alt="Browser home page with locally stored bookmarks and history"
+              class="guide-screenshot"
+            />
           </div>
         </div>
       </div>
@@ -995,19 +1260,39 @@
           </div>
 
           <div class="faq-item">
+            <h3>Choose your search engine</h3>
+            <p>
+              Open the browser home page (tap the menu, then <strong>Browser</strong>) and use the
+              <strong>Search Engine</strong> dropdown to pick your preferred engine. Startpage is selected by default
+              for its privacy focus, but you can switch to Brave, Google, Bing, or DuckDuckGo at any time.
+            </p>
+          </div>
+
+          <div class="faq-item">
             <h3>Switch between networks</h3>
             <p>
-              In Wallet settings, tap the network selector to switch between <strong>Mainnet</strong> (real BSV),
-              <strong>Testnet</strong> (test coins for development), and <strong>Teratest</strong>. Switching networks
-              rebuilds the wallet on the selected chain. Use Testnet to experiment without risking real funds.
+              In Wallet &gt; Settings, tap <strong>BSV Network</strong> to switch between <strong>Mainnet</strong> (real
+              BSV), <strong>Testnet</strong> (test coins for development), and <strong>Teratest</strong>. Switching
+              networks rebuilds the wallet on the selected chain. Use Testnet to experiment without risking real funds.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>Print backup shares for peace of mind</h3>
+            <p>
+              Go to Wallet &gt; Settings &gt; <strong>Print Recovery Shares</strong> to generate three printed pages
+              containing your wallet key split into shares. Store each page in a different location. Any two of the
+              three are enough to recover your wallet, but one alone is useless to an attacker. This is the most
+              resilient backup option the app offers.
             </p>
           </div>
 
           <div class="faq-item">
             <h3>Export your wallet data</h3>
             <p>
-              In Wallet settings, tap <strong>Export Data</strong> to save a backup of your wallet database files. This
-              uses the system share dialog so you can send the files to cloud storage, email, or any other location.
+              In Wallet &gt; Settings, tap <strong>Export Wallet Data</strong> to save a backup of your wallet database
+              files. This uses the system share dialog so you can send the files to cloud storage, email, or any other
+              location.
             </p>
           </div>
 
@@ -1056,8 +1341,18 @@
             <h3>Can I lose my funds?</h3>
             <p>
               BSV Browser is self-custodial. Your keys are stored only on your device. If you lose your device and have
-              not saved your 12-word recovery phrase, your wallet cannot be recovered. Always back up your recovery
-              phrase in a safe location.
+              not saved your recovery phrase (or printed backup shares), your wallet cannot be recovered. Always back up
+              using at least one of the methods described in the Backup &amp; Recovery section.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>What is the difference between a recovery phrase and backup shares?</h3>
+            <p>
+              A <strong>recovery phrase</strong> is a single set of 12 words that can fully restore your wallet.
+              <strong>Backup shares</strong> split your key into three pieces using Shamir's Secret Sharing &mdash; you
+              need any two of the three to recover. Shares are useful when you want to distribute backups across
+              multiple locations so that no single compromised location exposes your wallet.
             </p>
           </div>
 
