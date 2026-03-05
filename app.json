@@ -3,7 +3,7 @@
     "name": "BSV Browser",
     "slug": "bsv-browser",
     "scheme": "bsv-browser",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
@@ -71,7 +71,10 @@
               "scheme": "http"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -85,10 +88,18 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
-            "CFBundleURLSchemes": ["https", "http"]
+            "CFBundleURLSchemes": [
+              "https",
+              "http"
+            ]
           }
         ],
-        "LSApplicationQueriesSchemes": ["https", "http", "blob", "data"],
+        "LSApplicationQueriesSchemes": [
+          "https",
+          "http",
+          "blob",
+          "data"
+        ],
         "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use."
       }
     },
