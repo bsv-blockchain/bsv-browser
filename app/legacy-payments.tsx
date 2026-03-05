@@ -108,16 +108,16 @@ export default function LegacyPaymentsScreen() {
           {
             labels: [address],
             labelQueryMode: 'all',
-            includeInputs: true,
+            includeOutputs: true,
             limit: 1000
           },
           adminOriginator
         )
         const set = new Set<string>()
         for (const action of response.actions) {
-          if (action.inputs) {
-            for (const input of action.inputs) {
-              if (input.sourceOutpoint) set.add(input.sourceOutpoint)
+          if (action.outputs) {
+            for (const output of action.outputs) {
+              if (action.txid) set.add(`${action.txid}.${output.outputIndex}`)
             }
           }
         }
@@ -263,23 +263,25 @@ export default function LegacyPaymentsScreen() {
             }
           }))
 
+          const satoshis = relevantUtxos.reduce((sum, o) => sum + o.satoshis, 0)
+
           const args: InternalizeActionArgs = {
             tx: tx!.toAtomicBEEF(),
             description: 'Legacy Bridge Payment',
             outputs,
             labels: ['legacy', 'inbound', 'bsvbrowser', paymentAddress!]
           }
-          return args
+          return { args, satoshis }
         })
-        .filter(Boolean) as InternalizeActionArgs[]
+        .filter(Boolean) as { args: InternalizeActionArgs; satoshis: number }[]
 
-      let successCount = 0
+      let importedSatoshis = 0
       let failureCount = 0
-      for (const t of txs) {
+      for (const { args, satoshis } of txs) {
         try {
-          const response = await wallet.internalizeAction(t, adminOriginator)
+          const response = await wallet.internalizeAction(args, adminOriginator)
           if (response?.accepted) {
-            successCount++
+            importedSatoshis += satoshis
           } else {
             failureCount++
             toast.error('Payment was rejected')
@@ -292,10 +294,11 @@ export default function LegacyPaymentsScreen() {
       }
 
       // Show result banner
-      if (successCount > 0) {
+      if (importedSatoshis > 0) {
+        const importedBsv = (importedSatoshis / 100000000).toFixed(8).replace(/\.?0+$/, '')
         setImportResult({
           type: 'success',
-          message: `Successfully imported ${successCount} transaction${successCount > 1 ? 's' : ''}${failureCount > 0 ? ` (${failureCount} failed)` : ''}`
+          message: `Successfully imported ${importedBsv} BSV${failureCount > 0 ? ` (${failureCount} failed)` : ''}`
         })
       } else if (failureCount > 0) {
         setImportResult({
