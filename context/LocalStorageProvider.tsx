@@ -16,6 +16,9 @@ export interface LocalStorageContextType {
   setMnemonic: (mnemonic: string) => Promise<void>
   getMnemonic: () => Promise<string | null>
   deleteMnemonic: () => Promise<void>
+  setRecoveredKey: (wif: string) => Promise<void>
+  getRecoveredKey: () => Promise<string | null>
+  deleteRecoveredKey: () => Promise<void>
 
   /* general */
   setItem: (item: string, value: string) => Promise<void>
@@ -26,20 +29,24 @@ export interface LocalStorageContextType {
 const SNAP_KEY = 'snap'
 const PASSWORD_KEY = 'password'
 const MNEMONIC_KEY = 'mnemonic'
+const RECOVERED_KEY = 'recoveredKey'
 
 export const LocalStorageContext = createContext<LocalStorageContextType>({
   /* non-secure */
-  setSnap: async () => { },
+  setSnap: async () => {},
   getSnap: async () => null,
-  deleteSnap: async () => { },
+  deleteSnap: async () => {},
 
   /* secure */
-  setPassword: async () => { },
+  setPassword: async () => {},
   getPassword: async () => null,
-  deletePassword: async () => { },
-  setMnemonic: async () => { },
+  deletePassword: async () => {},
+  setMnemonic: async () => {},
   getMnemonic: async () => null,
-  deleteMnemonic: async () => { },
+  deleteMnemonic: async () => {},
+  setRecoveredKey: async () => {},
+  getRecoveredKey: async () => null,
+  deleteRecoveredKey: async () => {},
 
   getItem: AsyncStorage.getItem,
   setItem: AsyncStorage.setItem,
@@ -171,6 +178,37 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
     }
   }, [ensureAuth])
 
+  /* ----------------------------- recovered key ------------------------------ */
+
+  const setRecoveredKey = useCallback(async (wif: string): Promise<void> => {
+    try {
+      await SecureStore.setItemAsync(RECOVERED_KEY, wif, {
+        keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
+      })
+    } catch (err) {
+      console.warn('[setRecoveredKey]', err)
+    }
+  }, [])
+
+  const getRecoveredKey = useCallback(async (): Promise<string | null> => {
+    try {
+      if (!(await ensureAuth())) return null
+      return await SecureStore.getItemAsync(RECOVERED_KEY)
+    } catch (err) {
+      console.warn('[getRecoveredKey]', err)
+      return null
+    }
+  }, [ensureAuth])
+
+  const deleteRecoveredKey = useCallback(async (): Promise<void> => {
+    try {
+      if (!(await ensureAuth())) return
+      await SecureStore.deleteItemAsync(RECOVERED_KEY)
+    } catch (err) {
+      console.warn('[deleteRecoveredKey]', err)
+    }
+  }, [ensureAuth])
+
   /* -------------------------------- output --------------------------------- */
 
   const value: LocalStorageContextType = useMemo(
@@ -187,13 +225,29 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
       setMnemonic,
       getMnemonic,
       deleteMnemonic,
+      setRecoveredKey,
+      getRecoveredKey,
+      deleteRecoveredKey,
 
       /* general */
       getItem: AsyncStorage.getItem,
       setItem: AsyncStorage.setItem,
       deleteItem: AsyncStorage.removeItem
     }),
-    [setSnap, getSnap, deleteSnap, setPassword, getPassword, deletePassword, setMnemonic, getMnemonic, deleteMnemonic]
+    [
+      setSnap,
+      getSnap,
+      deleteSnap,
+      setPassword,
+      getPassword,
+      deletePassword,
+      setMnemonic,
+      getMnemonic,
+      deleteMnemonic,
+      setRecoveredKey,
+      getRecoveredKey,
+      deleteRecoveredKey
+    ]
   )
 
   return <LocalStorageContext.Provider value={value}>{children}</LocalStorageContext.Provider>

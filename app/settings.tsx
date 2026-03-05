@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { ActivityIndicator, View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
+import { ActivityIndicator, Alert, View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
@@ -16,6 +16,9 @@ import { sdk } from '@bsv/wallet-toolbox-mobile'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { exportAllWalletDatabases } from '@/utils/exportDatabases'
+import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
+import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
+import * as Print from 'expo-print'
 
 const BALANCE_CACHE_KEY = 'cached_wallet_balance'
 const BALANCE_CACHE_TIMESTAMP_KEY = 'cached_wallet_balance_timestamp'
@@ -26,8 +29,9 @@ export default function SettingsScreen() {
   const { colors } = useTheme()
   const { managers, adminOriginator, logout, selectedNetwork, switchNetwork, storage } = useWallet()
   const { isWeb2Mode } = useBrowserMode()
-  const { getMnemonic } = useLocalStorage()
+  const { getMnemonic, getRecoveredKey } = useLocalStorage()
   const [identityKey, setIdentityKey] = useState('')
+  const [isPrinting, setIsPrinting] = useState(false)
   const [copiedKey, setCopiedKey] = useState(false)
   const [copiedMnemonic, setCopiedMnemonic] = useState(false)
   const [accountBalance, setAccountBalance] = useState<number | null>(null)
@@ -38,7 +42,8 @@ export default function SettingsScreen() {
 
   // Fetch identity key
   useEffect(() => {
-    managers?.permissionsManager?.getPublicKey({ identityKey: true }, adminOriginator)
+    managers?.permissionsManager
+      ?.getPublicKey({ identityKey: true }, adminOriginator)
       .then(r => r && setIdentityKey(r.publicKey))
   }, [managers, adminOriginator])
 
@@ -58,6 +63,42 @@ export default function SettingsScreen() {
       setTimeout(() => setCopiedMnemonic(false), 2000)
     } catch (error) {
       console.error('Error retrieving mnemonic:', error)
+    }
+  }
+
+  const handlePrintRecoveryShares = async () => {
+    if (isPrinting) return
+    setIsPrinting(true)
+    try {
+      let primaryKeyBytes: number[] | null = null
+
+      // Try mnemonic-based key first
+      const mnemonic = await getMnemonic()
+      if (mnemonic) {
+        const { primaryKey } = recoverMnemonicWallet(mnemonic)
+        primaryKeyBytes = primaryKey
+      } else {
+        // Fall back to recovered key
+        const { PrivateKey } = require('@bsv/sdk')
+        const wif = await getRecoveredKey()
+        if (wif) {
+          primaryKeyBytes = PrivateKey.fromWif(wif).toArray()
+        }
+      }
+
+      if (!primaryKeyBytes) {
+        Alert.alert('Error', 'Unable to access wallet key. Please authenticate and try again.')
+        return
+      }
+
+      const shares = generateBackupShares(primaryKeyBytes)
+      const html = await generatePrintHTML(shares, identityKey)
+      await Print.printAsync({ html })
+    } catch (error: any) {
+      console.error('[Settings] Print recovery shares failed:', error)
+      Alert.alert('Error', `Failed to generate recovery shares: ${error.message}`)
+    } finally {
+      setIsPrinting(false)
     }
   }
 
@@ -115,7 +156,9 @@ export default function SettingsScreen() {
         refreshBalance()
       }
     })()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [managers.permissionsManager, refreshBalance])
 
   const handleExportData = async () => {
@@ -133,7 +176,7 @@ export default function SettingsScreen() {
   const NETWORKS: { id: AppChain; label: string; color: string }[] = [
     { id: 'main', label: t('mainnet'), color: colors.success },
     { id: 'test', label: t('testnet'), color: colors.warning },
-    { id: 'teratest', label: t('teratest'), color: colors.info },
+    { id: 'teratest', label: t('teratest'), color: colors.info }
   ]
 
   const handleSelectNetwork = async (target: AppChain) => {
@@ -148,7 +191,7 @@ export default function SettingsScreen() {
     pendingNetworkRefreshRef.current = true
     await Promise.all([
       AsyncStorage.removeItem(BALANCE_CACHE_KEY),
-      AsyncStorage.removeItem(BALANCE_CACHE_TIMESTAMP_KEY),
+      AsyncStorage.removeItem(BALANCE_CACHE_TIMESTAMP_KEY)
     ])
     try {
       await switchNetwork(target)
@@ -162,26 +205,16 @@ export default function SettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: spacing.xxxl }}
-      >
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
         {/* ── Balance ── */}
         {!isWeb2Mode && (
           <View style={localStyles.balanceContainer}>
-            <Text style={[localStyles.balanceLabel, { color: colors.textSecondary }]}>
-              {t('you_have')}
-            </Text>
+            <Text style={[localStyles.balanceLabel, { color: colors.textSecondary }]}>{t('you_have')}</Text>
             <Text
               onPress={refreshBalance}
-              style={[
-                localStyles.balanceAmount,
-                { color: colors.textPrimary, opacity: balanceLoading ? 0.4 : 1 }
-              ]}
+              style={[localStyles.balanceAmount, { color: colors.textPrimary, opacity: balanceLoading ? 0.4 : 1 }]}
             >
-              {accountBalance !== null ? (
-                <AmountDisplay abbreviate>{accountBalance}</AmountDisplay>
-              ) : '...'}
+              {accountBalance !== null ? <AmountDisplay abbreviate>{accountBalance}</AmountDisplay> : '...'}
             </Text>
           </View>
         )}
@@ -190,7 +223,11 @@ export default function SettingsScreen() {
         <GroupedSection header={t('wallet')}>
           <ListRow
             label={t('bsv_network')}
-            value={switchingNetwork ? t('switching') : (NETWORKS.find(n => n.id === selectedNetwork)?.label ?? selectedNetwork)}
+            value={
+              switchingNetwork
+                ? t('switching')
+                : (NETWORKS.find(n => n.id === selectedNetwork)?.label ?? selectedNetwork)
+            }
             icon="globe-outline"
             iconColor={NETWORKS.find(n => n.id === selectedNetwork)?.color ?? colors.success}
             onPress={isWeb2Mode ? undefined : () => setNetworkExpanded(e => !e)}
@@ -209,9 +246,7 @@ export default function SettingsScreen() {
                     activeOpacity={0.6}
                   >
                     <View style={[localStyles.networkDot, { backgroundColor: net.color }]} />
-                    <Text style={[localStyles.networkLabel, { color: colors.textPrimary }]}>
-                      {net.label}
-                    </Text>
+                    <Text style={[localStyles.networkLabel, { color: colors.textPrimary }]}>{net.label}</Text>
                     {isActive && (
                       <Ionicons name="checkmark" size={20} color={colors.accent} style={{ marginLeft: 'auto' }} />
                     )}
@@ -235,6 +270,14 @@ export default function SettingsScreen() {
                 />
               </TouchableOpacity>
             }
+          />
+          <ListRow
+            label={t('print_recovery_shares')}
+            icon="print-outline"
+            iconColor={colors.accent}
+            onPress={handlePrintRecoveryShares}
+            showChevron={false}
+            trailing={isPrinting ? <ActivityIndicator size="small" /> : undefined}
           />
           <ListRow
             label={t('export_data')}
@@ -318,44 +361,44 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     height: 100,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.lg
   },
   balanceLabel: {
     ...typography.subhead,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.xs
   },
   balanceAmount: {
     fontSize: 34,
     fontWeight: '700',
     letterSpacing: 0.4,
     minHeight: 42,
-    lineHeight: 42,
+    lineHeight: 42
   },
 
   /* ── Network picker ── */
   networkList: {
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.sm
   },
   networkOption: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.sm
   },
   networkDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    marginRight: spacing.md,
+    marginRight: spacing.md
   },
   networkLabel: {
-    ...typography.body,
+    ...typography.body
   },
 
   keyValue: {
     ...typography.body,
     fontFamily: 'monospace',
-    maxWidth: 200,
-  },
+    maxWidth: 200
+  }
 })

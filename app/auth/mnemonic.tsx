@@ -419,6 +419,33 @@ export default function MnemonicScreen() {
           )}
         </TouchableOpacity>
 
+        {/* ── Divider ── */}
+        <View style={[s.orDivider, { marginTop: spacing.xl }]}>
+          <View style={[s.orDividerLine, { backgroundColor: colors.separator }]} />
+          <Text style={[s.orDividerText, { color: colors.textTertiary }]}>{t('or')}</Text>
+          <View style={[s.orDividerLine, { backgroundColor: colors.separator }]} />
+        </View>
+
+        {/* ── Scan Backup Shares ── */}
+        <TouchableOpacity
+          style={[
+            s.secondaryButton,
+            {
+              backgroundColor: colors.fillTertiary,
+              borderColor: colors.separator,
+              marginTop: spacing.xl
+            }
+          ]}
+          onPress={() => router.push('/auth/scan-shares')}
+          activeOpacity={0.75}
+        >
+          <Ionicons name="scan-outline" size={22} color={colors.accent} style={s.btnIcon} />
+          <View style={s.btnTextGroup}>
+            <Text style={[s.btnLabel, { color: colors.textPrimary }]}>{t('scan_backup_shares')}</Text>
+            <Text style={[s.btnCaption, { color: colors.textSecondary }]}>{t('scan_backup_shares_caption')}</Text>
+          </View>
+        </TouchableOpacity>
+
         <TouchableOpacity style={s.textButton} onPress={() => setMode('choose')} activeOpacity={0.6}>
           <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>Go Back</Text>
         </TouchableOpacity>
@@ -602,5 +629,21 @@ const s = StyleSheet.create({
     padding: spacing.lg,
     paddingTop: spacing.lg,
     lineHeight: 26
+  },
+
+  // ─── Or divider ───────────────────────────────────────────────────
+  orDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%'
+  },
+  orDividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth
+  },
+  orDividerText: {
+    ...typography.footnote,
+    marginHorizontal: spacing.md,
+    textTransform: 'uppercase'
   }
 })

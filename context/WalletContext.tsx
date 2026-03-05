@@ -85,6 +85,7 @@ export interface WalletContextValue {
   selectedNetwork: 'main' | 'test'
   setWalletBuilt: (current: boolean) => void
   buildWalletFromMnemonic: (mnemonic?: string) => Promise<void>
+  buildWalletFromRecoveredKey: (wif: string) => Promise<void>
   switchNetwork: (network: 'main' | 'test') => Promise<void>
   storage: StorageExpoSQLite | null
   /** Incremented when a transaction status changes via SSE, triggers UI refresh */
@@ -119,6 +120,7 @@ export const WalletContext = createContext<WalletContextValue>({
   selectedNetwork: 'main',
   setWalletBuilt: (current: boolean) => {},
   buildWalletFromMnemonic: async () => {},
+  buildWalletFromRecoveredKey: async () => {},
   switchNetwork: async () => {},
   storage: null,
   txStatusVersion: 0
@@ -200,7 +202,18 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [recentApps, setRecentApps] = useState<any[]>([])
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
 
-  const { getSnap, deleteSnap, getItem, setItem, setMnemonic, getMnemonic, deleteMnemonic } = useLocalStorage()
+  const {
+    getSnap,
+    deleteSnap,
+    getItem,
+    setItem,
+    setMnemonic,
+    getMnemonic,
+    deleteMnemonic,
+    setRecoveredKey,
+    getRecoveredKey,
+    deleteRecoveredKey
+  } = useLocalStorage()
   const { setWeb2Mode } = useBrowserMode()
 
   const {
@@ -992,6 +1005,51 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     [walletBuilt, configStatus, getMnemonic, getSnap, setMnemonic, buildWallet]
   )
 
+  // Build wallet from a recovered PrivateKey (WIF) obtained via backup share scanning
+  const buildWalletFromRecoveredKey = useCallback(
+    async (wif: string) => {
+      if (walletBuilt) return
+      if (configStatus !== 'configured') return
+
+      logWithTimestamp(F, 'Building wallet from recovered key')
+
+      try {
+        const recoveredKey = PrivateKey.fromWif(wif)
+        const primaryKey = recoveredKey.toArray()
+
+        // Use the recovered primary key as both the signing key and the privileged key
+        const privilegedKeyManager = new PrivilegedKeyManager(async () => recoveredKey)
+
+        logWithTimestamp(F, 'privilegedKeyManager built from recovered key')
+
+        const snap = await getSnap()
+        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
+
+        await swm.providePrimaryKey(primaryKey)
+        logWithTimestamp(F, 'recovered primaryKey provided successfully')
+
+        await swm.providePrivilegedKeyManager(privilegedKeyManager)
+        logWithTimestamp(F, 'recovered privilegedKeyManager provided successfully')
+
+        setManagers(m => ({
+          ...m,
+          walletManager: swm
+        }))
+        setWalletBuilt(true)
+        setWeb2Mode(false)
+
+        // Persist the recovered key for future auto-build
+        await setRecoveredKey(wif)
+
+        logWithTimestamp(F, 'Recovered key wallet initialization completed')
+      } catch (error: any) {
+        console.error('[WalletContext] Error initializing wallet from recovered key:', error)
+        logWithTimestamp(F, 'Error initializing wallet from recovered key', error.message)
+      }
+    },
+    [walletBuilt, configStatus, getSnap, setRecoveredKey, buildWallet]
+  )
+
   // Switch network: tear down wallet, update config, and rebuild on new chain
   const switchNetwork = useCallback(
     async (network: 'main' | 'test') => {
@@ -1025,12 +1083,22 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     [selectedNetwork, setItem]
   )
 
-  // Auto-build wallet from mnemonic for returning users
+  // Auto-build wallet for returning users (mnemonic first, then recovered key)
   useEffect(() => {
-    if (configStatus === 'configured' && !walletBuilt) {
-      buildWalletFromMnemonic()
-    }
-  }, [configStatus, walletBuilt, buildWalletFromMnemonic])
+    if (configStatus !== 'configured' || walletBuilt) return
+    ;(async () => {
+      // Try mnemonic-based build first (calls getMnemonic internally)
+      await buildWalletFromMnemonic()
+      // If still not built (no mnemonic), try recovered key
+      // We check walletBuilt via a ref-like approach: buildWalletFromMnemonic
+      // sets walletBuilt=true synchronously in its body, but the state update
+      // won't be visible in this closure. Instead, we read from SecureStore.
+      const recoveredWif = await getRecoveredKey()
+      if (recoveredWif) {
+        await buildWalletFromRecoveredKey(recoveredWif)
+      }
+    })()
+  }, [configStatus, walletBuilt, buildWalletFromMnemonic, buildWalletFromRecoveredKey, getRecoveredKey])
 
   // When Settings manager becomes available, populate the user's settings
   useEffect(() => {
@@ -1086,6 +1154,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setSnapshotLoaded(false)
       setWalletBuilt(false)
       deleteMnemonic()
+      deleteRecoveredKey()
       logWithTimestamp(F, 'Configuration and state reset')
 
       // Clear recent apps (web3-specific data)
@@ -1193,6 +1262,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedNetwork,
       setWalletBuilt,
       buildWalletFromMnemonic,
+      buildWalletFromRecoveredKey,
       switchNetwork,
       storage,
       txStatusVersion
@@ -1224,6 +1294,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedNetwork,
       setWalletBuilt,
       buildWalletFromMnemonic,
+      buildWalletFromRecoveredKey,
       switchNetwork,
       storage,
       txStatusVersion

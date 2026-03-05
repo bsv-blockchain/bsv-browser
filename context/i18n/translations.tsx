@@ -218,7 +218,8 @@ const resources = {
       send_bsv: 'Send BSV',
       recipient_address: 'Recipient Address',
       enter_bsv_address: 'Enter BSV address',
-      legacy_info: 'Address-based BSV payments to and from external wallets. A unique address is generated each day for privacy.',
+      legacy_info:
+        'Address-based BSV payments to and from external wallets. A unique address is generated each day for privacy.',
 
       // Mnemonic / wallet setup screen
       wallet_data: 'Wallet Data',
@@ -229,7 +230,8 @@ const resources = {
       save_recovery_phrase_heading: 'Save Your Recovery Phrase',
       save_recovery_phrase_btn: 'Save Recovery Phrase',
       recovery_phrase_write_down: 'Write down these 12 words in order and store them in a safe place.',
-      acknowledgment_text: 'I have saved my recovery phrase and understand that losing it will result in total and permanent loss of all associated funds, tokens, and certificates.',
+      acknowledgment_text:
+        'I have saved my recovery phrase and understand that losing it will result in total and permanent loss of all associated funds, tokens, and certificates.',
       enter_recovery_words: 'Enter your recovery words separated by spaces...',
       restore_wallet_description: 'Enter your recovery phrase to restore your wallet',
       import_wallet: 'Import Wallet',
@@ -248,6 +250,22 @@ const resources = {
       send_max: 'Send Max',
       entire_wallet_balance: 'Entire wallet balance',
       export_data: 'Export Data',
+
+      // Backup shares
+      or: 'or',
+      print_recovery_shares: 'Print Recovery Shares',
+      scan_backup_shares: 'Scan Backup Shares',
+      scan_backup_shares_caption: 'Recover wallet from printed shares',
+      scan_shares_invalid_format: 'Invalid share format. Please scan a valid backup share QR code.',
+      scan_shares_camera_needed: 'Camera Access Needed',
+      scan_shares_camera_description: 'Camera access is required to scan your printed backup share QR codes.',
+      scan_shares_grant_camera: 'Grant Camera Access',
+      scan_shares_recovering: 'Recovering wallet...',
+      scan_shares_scan_first: 'Scan your first backup share',
+      scan_shares_progress: '{{scanned}} of {{needed}} shares scanned',
+      scan_shares_remaining: '{{count}} more share needed',
+      scan_shares_complete: 'All shares collected!',
+      scan_shares_recovery_failed: 'Recovery failed. Please try scanning again.'
     }
   },
   zh: {
@@ -392,6 +410,20 @@ const resources = {
       send_max: '发送最大值',
       entire_wallet_balance: '全部钱包余额',
       export_data: '导出数据',
+      or: '或',
+      print_recovery_shares: '打印恢复份额',
+      scan_backup_shares: '扫描备份份额',
+      scan_backup_shares_caption: '从打印的份额恢复钱包',
+      scan_shares_invalid_format: '无效的份额格式。请扫描有效的备份份额二维码。',
+      scan_shares_camera_needed: '需要相机权限',
+      scan_shares_camera_description: '需要相机权限来扫描您打印的备份份额二维码。',
+      scan_shares_grant_camera: '授予相机权限',
+      scan_shares_recovering: '正在恢复钱包...',
+      scan_shares_scan_first: '扫描您的第一个备份份额',
+      scan_shares_progress: '已扫描 {{scanned}}/{{needed}} 个份额',
+      scan_shares_remaining: '还需要 {{count}} 个份额',
+      scan_shares_complete: '所有份额已收集！',
+      scan_shares_recovery_failed: '恢复失败。请重试扫描。'
     }
   },
   hi: {
@@ -486,7 +518,8 @@ const resources = {
       failed_to_save: 'सहेजने में विफल',
       confirm_delete: 'हटाने की पुष्टि करें',
       confirm_delete_body: 'क्या आप वाकई इस सर्टिफायर को हटाना चाहते हैं?',
-      order_certifiers_hint: 'सर्टिफायरों को प्राथमिकता के अनुसार क्रमबद्ध करें। ऐप्स उच्च-रैंक वाले सर्टिफायरों को पहले दिखाएंगे।',
+      order_certifiers_hint:
+        'सर्टिफायरों को प्राथमिकता के अनुसार क्रमबद्ध करें। ऐप्स उच्च-रैंक वाले सर्टिफायरों को पहले दिखाएंगे।',
       certifiers: 'सर्टिफायर',
       no_certifiers: 'अभी तक कोई सर्टिफायर नहीं।',
       add_provider: 'प्रदाता जोड़ें',
@@ -519,7 +552,8 @@ const resources = {
       save_recovery_phrase_heading: 'अपना रिकवरी वाक्यांश सहेजें',
       save_recovery_phrase_btn: 'रिकवरी वाक्यांश सहेजें',
       recovery_phrase_write_down: 'इन 12 शब्दों को क्रम में लिखें और उन्हें सुरक्षित स्थान पर रखें।',
-      acknowledgment_text: 'मैंने अपना रिकवरी वाक्यांश लिख लिया है और समझता/समझती हूं कि इसे खोने का मतलब मेरे वॉलेट तक पहुंच खोना है।',
+      acknowledgment_text:
+        'मैंने अपना रिकवरी वाक्यांश लिख लिया है और समझता/समझती हूं कि इसे खोने का मतलब मेरे वॉलेट तक पहुंच खोना है।',
       enter_recovery_words: 'अपने रिकवरी शब्द स्पेस से अलग करके दर्ज करें...',
       restore_wallet_description: 'अपना वॉलेट पुनर्स्थापित करने के लिए रिकवरी वाक्यांश दर्ज करें',
       import_wallet: 'वॉलेट आयात करें',
@@ -536,6 +570,20 @@ const resources = {
       send_max: 'अधिकतम भेजें',
       entire_wallet_balance: 'पूरी वॉलेट शेष राशि',
       export_data: 'डेटा निर्यात करें',
+      or: 'या',
+      print_recovery_shares: 'रिकवरी शेयर प्रिंट करें',
+      scan_backup_shares: 'बैकअप शेयर स्कैन करें',
+      scan_backup_shares_caption: 'प्रिंटेड शेयर से वॉलेट पुनर्प्राप्त करें',
+      scan_shares_invalid_format: 'अमान्य शेयर प्रारूप। कृपया एक वैध बैकअप शेयर QR कोड स्कैन करें।',
+      scan_shares_camera_needed: 'कैमरा एक्सेस आवश्यक',
+      scan_shares_camera_description: 'आपके प्रिंटेड बैकअप शेयर QR कोड स्कैन करने के लिए कैमरा एक्सेस आवश्यक है।',
+      scan_shares_grant_camera: 'कैमरा एक्सेस दें',
+      scan_shares_recovering: 'वॉलेट पुनर्प्राप्त हो रहा है...',
+      scan_shares_scan_first: 'अपना पहला बैकअप शेयर स्कैन करें',
+      scan_shares_progress: '{{scanned}}/{{needed}} शेयर स्कैन किए गए',
+      scan_shares_remaining: '{{count}} और शेयर आवश्यक',
+      scan_shares_complete: 'सभी शेयर एकत्रित!',
+      scan_shares_recovery_failed: 'पुनर्प्राप्ति विफल। कृपया पुनः स्कैन करें।'
     }
   },
   es: {
@@ -630,7 +678,8 @@ const resources = {
       failed_to_save: 'Error al guardar',
       confirm_delete: 'Confirmar eliminación',
       confirm_delete_body: '¿Estás seguro de que deseas eliminar este certificador?',
-      order_certifiers_hint: 'Ordena los certificadores por prioridad. Las aplicaciones mostrarán primero los certificadores con mayor rango.',
+      order_certifiers_hint:
+        'Ordena los certificadores por prioridad. Las aplicaciones mostrarán primero los certificadores con mayor rango.',
       certifiers: 'Certificadores',
       no_certifiers: 'Aún no hay certificadores.',
       add_provider: 'Agregar proveedor',
@@ -653,7 +702,8 @@ const resources = {
       send_bsv: 'Enviar BSV',
       recipient_address: 'Dirección del destinatario',
       enter_bsv_address: 'Ingresa dirección BSV',
-      legacy_info: 'Los pagos heredados te permiten importar fondos de una billetera BSV heredada usando una dirección P2PKH.',
+      legacy_info:
+        'Los pagos heredados te permiten importar fondos de una billetera BSV heredada usando una dirección P2PKH.',
 
       wallet_data: 'Datos de billetera',
       create_new_wallet: 'Crear nueva billetera',
@@ -663,7 +713,8 @@ const resources = {
       save_recovery_phrase_heading: 'Guarda tu frase de recuperación',
       save_recovery_phrase_btn: 'Guardar frase de recuperación',
       recovery_phrase_write_down: 'Escribe estas 12 palabras en orden y guárdalas en un lugar seguro.',
-      acknowledgment_text: 'He anotado mi frase de recuperación y entiendo que perderla significa perder el acceso a mi billetera.',
+      acknowledgment_text:
+        'He anotado mi frase de recuperación y entiendo que perderla significa perder el acceso a mi billetera.',
       enter_recovery_words: 'Ingresa tus palabras de recuperación separadas por espacios...',
       restore_wallet_description: 'Ingresa tu frase de recuperación para restaurar tu billetera',
       import_wallet: 'Importar billetera',
@@ -680,6 +731,21 @@ const resources = {
       send_max: 'Enviar máximo',
       entire_wallet_balance: 'Todo el saldo de la billetera',
       export_data: 'Exportar datos',
+      or: 'o',
+      print_recovery_shares: 'Imprimir Partes de Recuperación',
+      scan_backup_shares: 'Escanear Partes de Respaldo',
+      scan_backup_shares_caption: 'Recuperar billetera desde partes impresas',
+      scan_shares_invalid_format: 'Formato de parte inválido. Escanee un código QR de parte de respaldo válido.',
+      scan_shares_camera_needed: 'Se Necesita Acceso a la Cámara',
+      scan_shares_camera_description:
+        'Se requiere acceso a la cámara para escanear los códigos QR de sus partes de respaldo impresas.',
+      scan_shares_grant_camera: 'Conceder Acceso a la Cámara',
+      scan_shares_recovering: 'Recuperando billetera...',
+      scan_shares_scan_first: 'Escanee su primera parte de respaldo',
+      scan_shares_progress: '{{scanned}} de {{needed}} partes escaneadas',
+      scan_shares_remaining: '{{count}} parte más necesaria',
+      scan_shares_complete: '¡Todas las partes recopiladas!',
+      scan_shares_recovery_failed: 'La recuperación falló. Intente escanear de nuevo.'
     }
   },
   fr: {
@@ -774,7 +840,8 @@ const resources = {
       failed_to_save: "Échec de l'enregistrement",
       confirm_delete: 'Confirmer la suppression',
       confirm_delete_body: 'Êtes-vous sûr de vouloir supprimer ce certificateur ?',
-      order_certifiers_hint: 'Classez les certificateurs par priorité. Les applications afficheront en premier les certificateurs les mieux classés.',
+      order_certifiers_hint:
+        'Classez les certificateurs par priorité. Les applications afficheront en premier les certificateurs les mieux classés.',
       certifiers: 'Certificateurs',
       no_certifiers: 'Aucun certificateur pour le moment.',
       add_provider: 'Ajouter un fournisseur',
@@ -797,7 +864,8 @@ const resources = {
       send_bsv: 'Envoyer BSV',
       recipient_address: 'Adresse du destinataire',
       enter_bsv_address: "Saisir l'adresse BSV",
-      legacy_info: "Les paiements hérités vous permettent d'importer des fonds depuis un portefeuille BSV hérité en utilisant une adresse P2PKH.",
+      legacy_info:
+        "Les paiements hérités vous permettent d'importer des fonds depuis un portefeuille BSV hérité en utilisant une adresse P2PKH.",
 
       wallet_data: 'Données du portefeuille',
       create_new_wallet: 'Créer un nouveau portefeuille',
@@ -807,7 +875,8 @@ const resources = {
       save_recovery_phrase_heading: 'Sauvegardez votre phrase de récupération',
       save_recovery_phrase_btn: 'Enregistrer la phrase de récupération',
       recovery_phrase_write_down: "Notez ces 12 mots dans l'ordre et conservez-les en lieu sûr.",
-      acknowledgment_text: "J'ai noté ma phrase de récupération et je comprends que la perdre signifie perdre l'accès à mon portefeuille.",
+      acknowledgment_text:
+        "J'ai noté ma phrase de récupération et je comprends que la perdre signifie perdre l'accès à mon portefeuille.",
       enter_recovery_words: 'Entrez vos mots de récupération séparés par des espaces...',
       restore_wallet_description: 'Entrez votre phrase de récupération pour restaurer votre portefeuille',
       import_wallet: 'Importer le portefeuille',
@@ -824,6 +893,21 @@ const resources = {
       send_max: 'Envoyer le maximum',
       entire_wallet_balance: 'Solde total du portefeuille',
       export_data: 'Exporter les données',
+      or: 'ou',
+      print_recovery_shares: 'Imprimer les Parts de Récupération',
+      scan_backup_shares: 'Scanner les Parts de Sauvegarde',
+      scan_backup_shares_caption: 'Récupérer le portefeuille à partir des parts imprimées',
+      scan_shares_invalid_format: 'Format de part invalide. Veuillez scanner un code QR de part de sauvegarde valide.',
+      scan_shares_camera_needed: 'Accès à la Caméra Requis',
+      scan_shares_camera_description:
+        "L'accès à la caméra est nécessaire pour scanner vos codes QR de parts de sauvegarde imprimées.",
+      scan_shares_grant_camera: "Accorder l'Accès à la Caméra",
+      scan_shares_recovering: 'Récupération du portefeuille...',
+      scan_shares_scan_first: 'Scannez votre première part de sauvegarde',
+      scan_shares_progress: '{{scanned}} sur {{needed}} parts scannées',
+      scan_shares_remaining: '{{count}} part supplémentaire nécessaire',
+      scan_shares_complete: 'Toutes les parts collectées !',
+      scan_shares_recovery_failed: 'La récupération a échoué. Veuillez réessayer.'
     }
   },
   ar: {
@@ -968,6 +1052,20 @@ const resources = {
       send_max: 'إرسال الحد الأقصى',
       entire_wallet_balance: 'رصيد المحفظة بالكامل',
       export_data: 'تصدير البيانات',
+      or: 'أو',
+      print_recovery_shares: 'طباعة حصص الاسترداد',
+      scan_backup_shares: 'مسح حصص النسخ الاحتياطي',
+      scan_backup_shares_caption: 'استرداد المحفظة من الحصص المطبوعة',
+      scan_shares_invalid_format: 'تنسيق حصة غير صالح. يرجى مسح رمز QR صالح لحصة النسخ الاحتياطي.',
+      scan_shares_camera_needed: 'يلزم الوصول إلى الكاميرا',
+      scan_shares_camera_description: 'يلزم الوصول إلى الكاميرا لمسح رموز QR لحصص النسخ الاحتياطي المطبوعة.',
+      scan_shares_grant_camera: 'منح الوصول إلى الكاميرا',
+      scan_shares_recovering: 'جار استرداد المحفظة...',
+      scan_shares_scan_first: 'امسح حصة النسخ الاحتياطي الأولى',
+      scan_shares_progress: '{{scanned}} من {{needed}} حصص تم مسحها',
+      scan_shares_remaining: 'يلزم {{count}} حصة إضافية',
+      scan_shares_complete: 'تم جمع جميع الحصص!',
+      scan_shares_recovery_failed: 'فشل الاسترداد. يرجى المحاولة مرة أخرى.'
     }
   },
   pt: {
@@ -1062,7 +1160,8 @@ const resources = {
       failed_to_save: 'Falha ao salvar',
       confirm_delete: 'Confirmar exclusão',
       confirm_delete_body: 'Tem certeza de que deseja excluir este certificador?',
-      order_certifiers_hint: 'Ordene os certificadores por prioridade. Os aplicativos exibirão os certificadores de maior ranking primeiro.',
+      order_certifiers_hint:
+        'Ordene os certificadores por prioridade. Os aplicativos exibirão os certificadores de maior ranking primeiro.',
       certifiers: 'Certificadores',
       no_certifiers: 'Nenhum certificador ainda.',
       add_provider: 'Adicionar provedor',
@@ -1085,7 +1184,8 @@ const resources = {
       send_bsv: 'Enviar BSV',
       recipient_address: 'Endereço do destinatário',
       enter_bsv_address: 'Digite o endereço BSV',
-      legacy_info: 'Os pagamentos legados permitem que você importe fundos de uma carteira BSV legada usando um endereço P2PKH.',
+      legacy_info:
+        'Os pagamentos legados permitem que você importe fundos de uma carteira BSV legada usando um endereço P2PKH.',
 
       wallet_data: 'Dados da carteira',
       create_new_wallet: 'Criar nova carteira',
@@ -1095,7 +1195,8 @@ const resources = {
       save_recovery_phrase_heading: 'Salve sua frase de recuperação',
       save_recovery_phrase_btn: 'Salvar frase de recuperação',
       recovery_phrase_write_down: 'Anote essas 12 palavras em ordem e guarde-as em um lugar seguro.',
-      acknowledgment_text: 'Anotei minha frase de recuperação e entendo que perdê-la significa perder o acesso à minha carteira.',
+      acknowledgment_text:
+        'Anotei minha frase de recuperação e entendo que perdê-la significa perder o acesso à minha carteira.',
       enter_recovery_words: 'Digite suas palavras de recuperação separadas por espaços...',
       restore_wallet_description: 'Digite sua frase de recuperação para restaurar sua carteira',
       import_wallet: 'Importar carteira',
@@ -1112,6 +1213,21 @@ const resources = {
       send_max: 'Enviar máximo',
       entire_wallet_balance: 'Saldo total da carteira',
       export_data: 'Exportar dados',
+      or: 'ou',
+      print_recovery_shares: 'Imprimir Partes de Recuperação',
+      scan_backup_shares: 'Escanear Partes de Backup',
+      scan_backup_shares_caption: 'Recuperar carteira a partir das partes impressas',
+      scan_shares_invalid_format: 'Formato de parte inválido. Escaneie um código QR de parte de backup válido.',
+      scan_shares_camera_needed: 'Acesso à Câmera Necessário',
+      scan_shares_camera_description:
+        'O acesso à câmera é necessário para escanear os códigos QR das suas partes de backup impressas.',
+      scan_shares_grant_camera: 'Conceder Acesso à Câmera',
+      scan_shares_recovering: 'Recuperando carteira...',
+      scan_shares_scan_first: 'Escaneie sua primeira parte de backup',
+      scan_shares_progress: '{{scanned}} de {{needed}} partes escaneadas',
+      scan_shares_remaining: '{{count}} parte a mais necessária',
+      scan_shares_complete: 'Todas as partes coletadas!',
+      scan_shares_recovery_failed: 'A recuperação falhou. Tente escanear novamente.'
     }
   },
   bn: {
@@ -1206,7 +1322,8 @@ const resources = {
       failed_to_save: 'সংরক্ষণ করতে ব্যর্থ',
       confirm_delete: 'মুছে ফেলার নিশ্চয়তা দিন',
       confirm_delete_body: 'আপনি কি সত্যিই এই সার্টিফায়ারটি মুছতে চান?',
-      order_certifiers_hint: 'সার্টিফায়ারগুলো অগ্রাধিকার অনুযায়ী সাজান। অ্যাপগুলো উচ্চ-র্যাঙ্কের সার্টিফায়ারগুলো প্রথমে দেখাবে।',
+      order_certifiers_hint:
+        'সার্টিফায়ারগুলো অগ্রাধিকার অনুযায়ী সাজান। অ্যাপগুলো উচ্চ-র্যাঙ্কের সার্টিফায়ারগুলো প্রথমে দেখাবে।',
       certifiers: 'সার্টিফায়ার',
       no_certifiers: 'এখনো কোনো সার্টিফায়ার নেই।',
       add_provider: 'প্রদানকারী যোগ করুন',
@@ -1239,7 +1356,8 @@ const resources = {
       save_recovery_phrase_heading: 'আপনার রিকভারি বাক্যাংশ সংরক্ষণ করুন',
       save_recovery_phrase_btn: 'রিকভারি বাক্যাংশ সংরক্ষণ করুন',
       recovery_phrase_write_down: 'এই ১২টি শব্দ ক্রমানুসারে লিখুন এবং একটি নিরাপদ স্থানে সংরক্ষণ করুন।',
-      acknowledgment_text: 'আমি আমার রিকভারি বাক্যাংশ লিখে নিয়েছি এবং বুঝি যে এটি হারিয়ে ফেললে আমার ওয়ালেটে প্রবেশাধিকার হারাবো।',
+      acknowledgment_text:
+        'আমি আমার রিকভারি বাক্যাংশ লিখে নিয়েছি এবং বুঝি যে এটি হারিয়ে ফেললে আমার ওয়ালেটে প্রবেশাধিকার হারাবো।',
       enter_recovery_words: 'আপনার রিকভারি শব্দগুলো স্পেস দিয়ে আলাদা করে লিখুন...',
       restore_wallet_description: 'আপনার ওয়ালেট পুনরুদ্ধার করতে রিকভারি বাক্যাংশ প্রবেশ করুন',
       import_wallet: 'ওয়ালেট আমদানি করুন',
@@ -1256,6 +1374,20 @@ const resources = {
       send_max: 'সর্বোচ্চ পাঠান',
       entire_wallet_balance: 'সম্পূর্ণ ওয়ালেট ব্যালেন্স',
       export_data: 'ডেটা রপ্তানি করুন',
+      or: 'অথবা',
+      print_recovery_shares: 'রিকভারি শেয়ার প্রিন্ট করুন',
+      scan_backup_shares: 'ব্যাকআপ শেয়ার স্ক্যান করুন',
+      scan_backup_shares_caption: 'প্রিন্টেড শেয়ার থেকে ওয়ালেট পুনরুদ্ধার করুন',
+      scan_shares_invalid_format: 'অবৈধ শেয়ার ফরম্যাট। একটি বৈধ ব্যাকআপ শেয়ার QR কোড স্ক্যান করুন।',
+      scan_shares_camera_needed: 'ক্যামেরা অ্যাক্সেস প্রয়োজন',
+      scan_shares_camera_description: 'আপনার প্রিন্টেড ব্যাকআপ শেয়ার QR কোড স্ক্যান করতে ক্যামেরা অ্যাক্সেস প্রয়োজন।',
+      scan_shares_grant_camera: 'ক্যামেরা অ্যাক্সেস দিন',
+      scan_shares_recovering: 'ওয়ালেট পুনরুদ্ধার হচ্ছে...',
+      scan_shares_scan_first: 'আপনার প্রথম ব্যাকআপ শেয়ার স্ক্যান করুন',
+      scan_shares_progress: '{{scanned}}/{{needed}} শেয়ার স্ক্যান করা হয়েছে',
+      scan_shares_remaining: 'আরও {{count}} শেয়ার প্রয়োজন',
+      scan_shares_complete: 'সব শেয়ার সংগৃহীত!',
+      scan_shares_recovery_failed: 'পুনরুদ্ধার ব্যর্থ। পুনরায় স্ক্যান করুন।'
     }
   },
   ru: {
@@ -1350,7 +1482,8 @@ const resources = {
       failed_to_save: 'Не удалось сохранить',
       confirm_delete: 'Подтвердить удаление',
       confirm_delete_body: 'Вы уверены, что хотите удалить этого сертификатора?',
-      order_certifiers_hint: 'Упорядочите сертификаторов по приоритету. Приложения будут отображать сертификаторов с более высоким рейтингом первыми.',
+      order_certifiers_hint:
+        'Упорядочите сертификаторов по приоритету. Приложения будут отображать сертификаторов с более высоким рейтингом первыми.',
       certifiers: 'Сертификаторы',
       no_certifiers: 'Сертификаторов пока нет.',
       add_provider: 'Добавить провайдера',
@@ -1373,7 +1506,8 @@ const resources = {
       send_bsv: 'Отправить BSV',
       recipient_address: 'Адрес получателя',
       enter_bsv_address: 'Введите адрес BSV',
-      legacy_info: 'Устаревшие платежи позволяют импортировать средства из старого кошелька BSV с использованием адреса P2PKH.',
+      legacy_info:
+        'Устаревшие платежи позволяют импортировать средства из старого кошелька BSV с использованием адреса P2PKH.',
 
       wallet_data: 'Данные кошелька',
       create_new_wallet: 'Создать новый кошелёк',
@@ -1383,7 +1517,8 @@ const resources = {
       save_recovery_phrase_heading: 'Сохраните мнемоническую фразу',
       save_recovery_phrase_btn: 'Сохранить мнемоническую фразу',
       recovery_phrase_write_down: 'Запишите эти 12 слов по порядку и храните их в надёжном месте.',
-      acknowledgment_text: 'Я записал(а) мнемоническую фразу и понимаю, что её утеря означает потерю доступа к кошельку.',
+      acknowledgment_text:
+        'Я записал(а) мнемоническую фразу и понимаю, что её утеря означает потерю доступа к кошельку.',
       enter_recovery_words: 'Введите слова мнемоники через пробел...',
       restore_wallet_description: 'Введите мнемоническую фразу для восстановления кошелька',
       import_wallet: 'Импортировать кошелёк',
@@ -1400,6 +1535,21 @@ const resources = {
       send_max: 'Отправить максимум',
       entire_wallet_balance: 'Весь баланс кошелька',
       export_data: 'Экспортировать данные',
+      or: 'или',
+      print_recovery_shares: 'Распечатать доли восстановления',
+      scan_backup_shares: 'Сканировать резервные доли',
+      scan_backup_shares_caption: 'Восстановить кошелёк из напечатанных долей',
+      scan_shares_invalid_format: 'Неверный формат доли. Отсканируйте действительный QR-код резервной доли.',
+      scan_shares_camera_needed: 'Требуется доступ к камере',
+      scan_shares_camera_description:
+        'Доступ к камере необходим для сканирования QR-кодов напечатанных резервных долей.',
+      scan_shares_grant_camera: 'Предоставить доступ к камере',
+      scan_shares_recovering: 'Восстановление кошелька...',
+      scan_shares_scan_first: 'Отсканируйте первую резервную долю',
+      scan_shares_progress: '{{scanned}} из {{needed}} долей отсканировано',
+      scan_shares_remaining: 'Требуется ещё {{count}} доля',
+      scan_shares_complete: 'Все доли собраны!',
+      scan_shares_recovery_failed: 'Восстановление не удалось. Попробуйте отсканировать снова.'
     }
   },
   id: {
@@ -1494,7 +1644,8 @@ const resources = {
       failed_to_save: 'Gagal menyimpan',
       confirm_delete: 'Konfirmasi Hapus',
       confirm_delete_body: 'Apakah Anda yakin ingin menghapus sertifikator ini?',
-      order_certifiers_hint: 'Urutkan sertifikator berdasarkan prioritas. Aplikasi akan menampilkan sertifikator berperingkat lebih tinggi terlebih dahulu.',
+      order_certifiers_hint:
+        'Urutkan sertifikator berdasarkan prioritas. Aplikasi akan menampilkan sertifikator berperingkat lebih tinggi terlebih dahulu.',
       certifiers: 'Sertifikator',
       no_certifiers: 'Belum ada sertifikator.',
       add_provider: 'Tambah Penyedia',
@@ -1527,7 +1678,8 @@ const resources = {
       save_recovery_phrase_heading: 'Simpan Frasa Pemulihan Anda',
       save_recovery_phrase_btn: 'Simpan Frasa Pemulihan',
       recovery_phrase_write_down: 'Tulis 12 kata ini secara berurutan dan simpan di tempat yang aman.',
-      acknowledgment_text: 'Saya telah menuliskan frasa pemulihan saya dan memahami bahwa kehilangannya berarti kehilangan akses ke dompet saya.',
+      acknowledgment_text:
+        'Saya telah menuliskan frasa pemulihan saya dan memahami bahwa kehilangannya berarti kehilangan akses ke dompet saya.',
       enter_recovery_words: 'Masukkan kata-kata pemulihan Anda dipisahkan dengan spasi...',
       restore_wallet_description: 'Masukkan frasa pemulihan untuk memulihkan dompet Anda',
       import_wallet: 'Impor Dompet',
@@ -1544,6 +1696,20 @@ const resources = {
       send_max: 'Kirim Maksimal',
       entire_wallet_balance: 'Seluruh saldo dompet',
       export_data: 'Ekspor Data',
+      or: 'atau',
+      print_recovery_shares: 'Cetak Bagian Pemulihan',
+      scan_backup_shares: 'Pindai Bagian Cadangan',
+      scan_backup_shares_caption: 'Pulihkan dompet dari bagian yang dicetak',
+      scan_shares_invalid_format: 'Format bagian tidak valid. Pindai kode QR bagian cadangan yang valid.',
+      scan_shares_camera_needed: 'Akses Kamera Diperlukan',
+      scan_shares_camera_description: 'Akses kamera diperlukan untuk memindai kode QR bagian cadangan yang dicetak.',
+      scan_shares_grant_camera: 'Berikan Akses Kamera',
+      scan_shares_recovering: 'Memulihkan dompet...',
+      scan_shares_scan_first: 'Pindai bagian cadangan pertama Anda',
+      scan_shares_progress: '{{scanned}} dari {{needed}} bagian dipindai',
+      scan_shares_remaining: '{{count}} bagian lagi diperlukan',
+      scan_shares_complete: 'Semua bagian terkumpul!',
+      scan_shares_recovery_failed: 'Pemulihan gagal. Silakan coba pindai lagi.'
     }
   }
 }
@@ -1598,7 +1764,7 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType>({
   currentLanguage: 'en',
-  setCurrentLanguage: () => { }
+  setCurrentLanguage: () => {}
 })
 
 interface LanguageProviderProps {
