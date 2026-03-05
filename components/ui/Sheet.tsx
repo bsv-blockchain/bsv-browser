@@ -86,7 +86,7 @@ const Sheet: React.FC<SheetProps> = ({ visible, onClose, title, onBack, heightPe
           styles.sheet,
           {
             backgroundColor: colors.backgroundSecondary,
-            maxHeight: sheetHeight
+            height: sheetHeight
           },
           animatedStyle
         ]}

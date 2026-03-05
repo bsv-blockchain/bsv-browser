@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useRef, useState } from 'react'
 import { FlatList, Image, Pressable, Text, TouchableOpacity, View, StyleSheet } from 'react-native'
-import { Swipeable } from 'react-native-gesture-handler'
+import ReanimatedSwipeable, { SwipeDirection } from 'react-native-gesture-handler/ReanimatedSwipeable'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
@@ -51,14 +51,16 @@ const BookmarkRow = memo(
     }
 
     return (
-      <Swipeable
+      <ReanimatedSwipeable
         overshootRight={false}
         renderRightActions={() => (
           <View style={[styles.swipeDelete, deleteStyle, { backgroundColor: colors.error }]}>
             <Ionicons name="trash-outline" size={20} color="#fff" />
           </View>
         )}
-        onSwipeableRightOpen={() => onDelete(item.url)}
+        onSwipeableOpen={direction => {
+          if (direction === SwipeDirection.RIGHT) onDelete(item.url)
+        }}
       >
         <Pressable style={[styles.bookmarkItem, itemStyle]} onPress={() => onSelect(item.url)}>
           <Image source={{ uri: faviconUrl }} style={[styles.favicon, { backgroundColor: colors.fillTertiary }]} />
@@ -71,7 +73,7 @@ const BookmarkRow = memo(
             </Text>
           </View>
         </Pressable>
-      </Swipeable>
+      </ReanimatedSwipeable>
     )
   }
 )
