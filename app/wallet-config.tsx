@@ -81,8 +81,7 @@ export default function WalletConfigScreen() {
       const html = await generatePrintHTML(shares, identityKey)
       await Print.printAsync({ html })
     } catch (error: any) {
-      console.error('[WalletConfig] Print recovery shares failed:', error)
-      Alert.alert('Error', `Failed to generate recovery shares: ${error.message}`)
+      console.info('[WalletConfig] Print recovery shares did not complete:', error?.message)
     } finally {
       setIsPrinting(false)
     }
