@@ -2,6 +2,7 @@ import React, { memo, useEffect } from 'react'
 import { Dimensions, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
@@ -12,6 +13,7 @@ interface SheetProps {
   title?: string
   onBack?: () => void
   heightPercent?: number
+  fullPage?: boolean
   children?: React.ReactNode
 }
 
@@ -19,11 +21,24 @@ interface SheetProps {
  * Unified bottom sheet.
  * Uses Reanimated 4 + Gesture v2 so the swipe-to-close spring
  * is never interrupted by a stale Animated.event reset.
+ *
+ * When `fullPage` is true the sheet covers the entire screen with a
+ * Transactions-style navigation header (safe-area aware, hairline separator,
+ * no drag handle, no backdrop dimming).
  */
-const Sheet: React.FC<SheetProps> = ({ visible, onClose, title, onBack, heightPercent = 0.75, children }) => {
+const Sheet: React.FC<SheetProps> = ({
+  visible,
+  onClose,
+  title,
+  onBack,
+  heightPercent = 0.75,
+  fullPage = false,
+  children
+}) => {
   const { colors } = useTheme()
+  const insets = useSafeAreaInsets()
   const { height: windowHeight } = Dimensions.get('window')
-  const sheetHeight = Math.max(0, Math.min(1, heightPercent)) * windowHeight
+  const sheetHeight = fullPage ? windowHeight : Math.max(0, Math.min(1, heightPercent)) * windowHeight
 
   // 0 = fully open, sheetHeight = fully hidden (below screen)
   const translateY = useSharedValue(sheetHeight)
@@ -73,11 +88,49 @@ const Sheet: React.FC<SheetProps> = ({ visible, onClose, title, onBack, heightPe
 
   const isVisible = visible || rendered
 
-  // Don't mount while hidden — RNGH registers native gesture recognizers
-  // at the OS level regardless of pointerEvents, which would silently block
-  // touches on the content underneath (especially at the top of the screen).
   if (!isVisible) return null
 
+  /* ------------------------------------------------------------------ */
+  /* Full-page mode — matches the Transactions screen style              */
+  /* ------------------------------------------------------------------ */
+  if (fullPage) {
+    return (
+      <Animated.View
+        style={[
+          styles.fullPageSheet,
+          {
+            backgroundColor: colors.backgroundSecondary,
+            height: sheetHeight,
+            paddingTop: insets.top
+          },
+          animatedStyle
+        ]}
+      >
+        {/* Header */}
+        <View style={[styles.fullPageHeader, { borderBottomColor: colors.separator }]}>
+          {onBack ? (
+            <TouchableOpacity style={styles.fullPageBack} onPress={onBack} activeOpacity={0.6}>
+              <Ionicons name="chevron-back" size={24} color={colors.accent} />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.fullPageBack} />
+          )}
+          {title && (
+            <Text style={[styles.fullPageTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+              {title}
+            </Text>
+          )}
+          <View style={styles.fullPageBack} />
+        </View>
+
+        <View style={{ flex: 1 }}>{rendered ? children : null}</View>
+      </Animated.View>
+    )
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Standard bottom-sheet mode                                          */
+  /* ------------------------------------------------------------------ */
   return (
     <View style={[StyleSheet.absoluteFill, { zIndex: 50 }]}>
       {isVisible && <Pressable style={styles.backdrop} onPress={onClose} />}
@@ -122,6 +175,40 @@ const Sheet: React.FC<SheetProps> = ({ visible, onClose, title, onBack, heightPe
 }
 
 const styles = StyleSheet.create({
+  /* Full-page styles */
+  fullPageSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10
+  },
+  fullPageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth
+  },
+  fullPageBack: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  fullPageTitle: {
+    ...typography.headline,
+    flex: 1,
+    textAlign: 'center'
+  },
+
+  /* Standard sheet styles */
   sheet: {
     position: 'absolute',
     left: 0,

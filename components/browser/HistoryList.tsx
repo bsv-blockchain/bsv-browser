@@ -143,6 +143,7 @@ const HistoryListInner = ({ history, onSelect, onDelete, onClear, hideTitle = fa
       )}
       <FlatList
         style={styles.listContainer}
+        contentContainerStyle={styles.listContent}
         data={items}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
@@ -162,6 +163,7 @@ const styles = StyleSheet.create({
   listContainer: {
     flex: 1
   },
+  listContent: {},
   sectionTitle: {
     ...typography.footnote,
     fontWeight: '600',

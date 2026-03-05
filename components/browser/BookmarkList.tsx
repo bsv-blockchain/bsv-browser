@@ -84,11 +84,12 @@ const BookmarkRow = memo(
 
 interface Props {
   onSelect: (url: string) => void
+  hideTitle?: boolean
 }
 
 const FOOTER = <View style={{ height: 80 }} />
 
-const BookmarkListBase = ({ onSelect }: Props) => {
+const BookmarkListBase = ({ onSelect, hideTitle = false }: Props) => {
   const { t } = useTranslation()
   const { colors } = useTheme()
 
@@ -132,7 +133,9 @@ const BookmarkListBase = ({ onSelect }: Props) => {
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('bookmarks') || 'Bookmarks'}</Text>
+      {!hideTitle && (
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('bookmarks') || 'Bookmarks'}</Text>
+      )}
       {bookmarks.length === 0 ? (
         <View style={styles.emptyState}>
           <Ionicons name="bookmark-outline" size={40} color={colors.textTertiary} />

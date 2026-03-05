@@ -45,8 +45,15 @@ export function SheetRouter({
   const { t } = useTranslation()
   const isNewTab = activeTab?.url === kNEW_TAB_URL
 
+  const FULL_PAGE_ROUTES = ['bookmarks', 'history'] as const
+  const isFullPage = FULL_PAGE_ROUTES.includes(sheet.route as any)
+
   const getSheetTitle = (): string | undefined => {
     switch (sheet.route) {
+      case 'bookmarks':
+        return t('bookmarks') || 'Bookmarks'
+      case 'history':
+        return t('history') || 'History'
       case 'wallet-config':
         return t('settings')
       default:
@@ -72,6 +79,7 @@ export function SheetRouter({
       title={getSheetTitle()}
       onBack={canGoBack ? sheet.pop : undefined}
       heightPercent={0.85}
+      fullPage={isFullPage}
     >
       {sheet.route === 'browser-menu' && (
         <View style={{ flex: 1, padding: spacing.lg }}>
@@ -79,21 +87,16 @@ export function SheetRouter({
         </View>
       )}
 
-      {sheet.route === 'bookmarks' && (
-        <View style={{ flex: 1, padding: spacing.lg }}>
-          <BookmarkList onSelect={navigateAndClose} />
-        </View>
-      )}
+      {sheet.route === 'bookmarks' && <BookmarkList onSelect={navigateAndClose} hideTitle />}
 
       {sheet.route === 'history' && (
-        <View style={{ flex: 1, padding: spacing.lg }}>
-          <HistoryList
-            history={history}
-            onSelect={navigateAndClose}
-            onDelete={removeHistoryItem}
-            onClear={clearHistory}
-          />
-        </View>
+        <HistoryList
+          history={history}
+          onSelect={navigateAndClose}
+          onDelete={removeHistoryItem}
+          onClear={clearHistory}
+          hideTitle
+        />
       )}
 
       {sheet.route === 'settings' && (
