@@ -13,7 +13,6 @@ import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { sdk } from '@bsv/wallet-toolbox-mobile'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Clipboard from '@react-native-clipboard/clipboard'
-import { useSheet } from '@/context/SheetContext'
 
 const BALANCE_CACHE_KEY = 'cached_wallet_balance'
 const BALANCE_CACHE_TIMESTAMP_KEY = 'cached_wallet_balance_timestamp'
@@ -24,7 +23,6 @@ export default function SettingsScreen() {
   const { colors } = useTheme()
   const { managers, adminOriginator, selectedNetwork } = useWallet()
   const { isWeb2Mode } = useBrowserMode()
-  const sheet = useSheet()
   const [identityKey, setIdentityKey] = useState('')
   const [copiedKey, setCopiedKey] = useState(false)
   const [accountBalance, setAccountBalance] = useState<number | null>(null)
@@ -104,8 +102,8 @@ export default function SettingsScreen() {
   }, [managers.permissionsManager, refreshBalance])
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
+    <View style={{ backgroundColor: colors.backgroundSecondary }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
         {/* ── Balance ── */}
         {!isWeb2Mode && (
           <View style={localStyles.balanceContainer}>
@@ -172,7 +170,7 @@ export default function SettingsScreen() {
             label={t('settings')}
             icon="settings-outline"
             iconColor="#636366"
-            onPress={() => sheet.push('wallet-config')}
+            onPress={() => router.push('/wallet-config')}
             isLast
           />
         </GroupedSection>

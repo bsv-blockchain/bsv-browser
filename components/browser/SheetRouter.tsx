@@ -12,7 +12,6 @@ import { BrowserPage } from '@/components/browser/BrowserPage'
 import { HistoryList } from '@/components/browser/HistoryList'
 import { BookmarkList } from '@/components/browser/BookmarkList'
 import SettingsScreen from '@/app/settings'
-import WalletConfigScreen from '@/app/wallet-config'
 import Sheet from '@/components/ui/Sheet'
 
 type Props = {
@@ -46,7 +45,9 @@ export function SheetRouter({
   const isNewTab = activeTab?.url === kNEW_TAB_URL
 
   const FULL_PAGE_ROUTES = ['bookmarks', 'history'] as const
+  const FIT_CONTENT_ROUTES = ['settings'] as const
   const isFullPage = FULL_PAGE_ROUTES.includes(sheet.route as any)
+  const isFitContent = FIT_CONTENT_ROUTES.includes(sheet.route as any)
 
   const getSheetTitle = (): string | undefined => {
     switch (sheet.route) {
@@ -54,8 +55,6 @@ export function SheetRouter({
         return t('bookmarks') || 'Bookmarks'
       case 'history':
         return t('history') || 'History'
-      case 'wallet-config':
-        return t('settings')
       default:
         return undefined
     }
@@ -80,6 +79,7 @@ export function SheetRouter({
       onBack={canGoBack ? sheet.pop : undefined}
       heightPercent={0.85}
       fullPage={isFullPage}
+      fitContent={isFitContent}
     >
       {sheet.route === 'browser-menu' && (
         <View style={{ flex: 1, padding: spacing.lg }}>
@@ -99,17 +99,7 @@ export function SheetRouter({
         />
       )}
 
-      {sheet.route === 'settings' && (
-        <View style={{ flex: 1 }}>
-          <SettingsScreen />
-        </View>
-      )}
-
-      {sheet.route === 'wallet-config' && (
-        <View style={{ flex: 1 }}>
-          <WalletConfigScreen />
-        </View>
-      )}
+      {sheet.route === 'settings' && <SettingsScreen />}
     </Sheet>
   )
 }

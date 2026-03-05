@@ -16,6 +16,7 @@ import { exportAllWalletDatabases } from '@/utils/exportDatabases'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
 import * as Print from 'expo-print'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 export default function WalletConfigScreen() {
   const { t } = useTranslation()
@@ -23,6 +24,7 @@ export default function WalletConfigScreen() {
   const { managers, adminOriginator, logout, selectedNetwork, switchNetwork, storage } = useWallet()
   const { isWeb2Mode } = useBrowserMode()
   const { getMnemonic, getRecoveredKey } = useLocalStorage()
+  const insets = useSafeAreaInsets()
 
   const [identityKey, setIdentityKey] = useState('')
   const [isPrinting, setIsPrinting] = useState(false)
@@ -121,7 +123,15 @@ export default function WalletConfigScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary }}>
+    <View style={{ flex: 1, backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }}>
+      {/* Header */}
+      <View style={[localStyles.header, { borderBottomColor: colors.separator }]}>
+        <TouchableOpacity onPress={() => router.back()} style={localStyles.headerBack}>
+          <Ionicons name="chevron-back" size={24} color={colors.accent} />
+        </TouchableOpacity>
+        <Text style={[localStyles.headerTitle, { color: colors.textPrimary }]}>{t('settings')}</Text>
+        <View style={localStyles.headerBack} />
+      </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
         {/* ── Configuration ── */}
         <GroupedSection header={t('configuration')}>
@@ -223,6 +233,24 @@ export default function WalletConfigScreen() {
 }
 
 const localStyles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth
+  },
+  headerBack: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  headerTitle: {
+    ...typography.headline,
+    fontWeight: '600'
+  },
   networkList: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm

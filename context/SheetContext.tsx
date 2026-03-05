@@ -11,7 +11,6 @@ export type SheetRoute =
   | 'history'
   | 'menu'
   | 'settings'
-  | 'wallet-config'
   | 'identity'
   | 'trust'
   | 'permissions'

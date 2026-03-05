@@ -397,9 +397,9 @@ const PermissionSheet: React.FC = () => {
   ])
 
   return (
-    <Sheet visible={visible} onClose={handleDeny} heightPercent={0.92}>
+    <Sheet visible={visible} onClose={handleDeny} heightPercent={0.92} fitContent={active?.kind !== 'group'}>
       {active && (
-        <View style={styles.sheetInner}>
+        <View style={active.kind === 'group' ? styles.sheetInnerGroup : undefined}>
           <View style={[styles.content, active.kind === 'group' && { flex: 1 }]}>
             {/* -------- Originator / domain -------- */}
             <View style={styles.originatorRow}>
@@ -579,7 +579,7 @@ const PermissionSheet: React.FC = () => {
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  sheetInner: {
+  sheetInnerGroup: {
     flex: 1,
     justifyContent: 'flex-end'
   },

@@ -14,6 +14,8 @@ interface SheetProps {
   onBack?: () => void
   heightPercent?: number
   fullPage?: boolean
+  /** When true the sheet sizes to its content (up to heightPercent max). */
+  fitContent?: boolean
   children?: React.ReactNode
 }
 
@@ -33,12 +35,17 @@ const Sheet: React.FC<SheetProps> = ({
   onBack,
   heightPercent = 0.75,
   fullPage = false,
+  fitContent = false,
   children
 }) => {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   const { height: windowHeight } = Dimensions.get('window')
-  const sheetHeight = fullPage ? windowHeight : Math.max(0, Math.min(1, heightPercent)) * windowHeight
+  const maxSheetHeight = fullPage ? windowHeight : Math.max(0, Math.min(1, heightPercent)) * windowHeight
+
+  // For fitContent mode we measure the actual rendered height; fall back to max.
+  const [measuredHeight, setMeasuredHeight] = React.useState(0)
+  const sheetHeight = fitContent && measuredHeight > 0 ? Math.min(measuredHeight, maxSheetHeight) : maxSheetHeight
 
   // 0 = fully open, sheetHeight = fully hidden (below screen)
   const translateY = useSharedValue(sheetHeight)
@@ -56,7 +63,7 @@ const Sheet: React.FC<SheetProps> = ({
         if (finished) runOnJS(setRendered)(false)
       })
     }
-  }, [visible]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visible, sheetHeight]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }]
@@ -139,10 +146,18 @@ const Sheet: React.FC<SheetProps> = ({
           styles.sheet,
           {
             backgroundColor: colors.backgroundSecondary,
-            height: sheetHeight
+            ...(fitContent ? { maxHeight: maxSheetHeight } : { height: sheetHeight })
           },
           animatedStyle
         ]}
+        onLayout={
+          fitContent
+            ? e => {
+                const h = e.nativeEvent.layout.height
+                if (h > 0 && h !== measuredHeight) setMeasuredHeight(h)
+              }
+            : undefined
+        }
       >
         {/* Draggable handle + header */}
         <GestureDetector gesture={panGesture}>
@@ -168,7 +183,7 @@ const Sheet: React.FC<SheetProps> = ({
           </View>
         </GestureDetector>
 
-        <View style={{ flex: 1 }}>{rendered ? children : null}</View>
+        <View style={fitContent ? undefined : { flex: 1 }}>{rendered ? children : null}</View>
       </Animated.View>
     </View>
   )
