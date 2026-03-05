@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { toast } from 'react-toastify'
 import { PeerPayClient, IncomingPayment } from '@bsv/message-box-client'
 import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
@@ -24,6 +25,7 @@ import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import { BsvAmountInput } from '@/components/wallet/BsvAmountInput'
 
+const MESSAGE_BOX_URL_KEY = 'message_box_url'
 const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
 
 const unique = (results: DisplayableIdentity[]) => {
@@ -193,8 +195,79 @@ async function acceptWithRetry(
   }
 }
 
-function useMessageBoxConfig() {
-  return { messageBoxUrl: DEFAULT_MESSAGE_BOX_URL, isConfigured: true }
+function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTranslation>['t']) {
+  const [messageBoxUrl, setMessageBoxUrl] = useState(DEFAULT_MESSAGE_BOX_URL)
+  const [urlInput, setUrlInput] = useState(DEFAULT_MESSAGE_BOX_URL)
+  const [isSaving, setIsSaving] = useState(false)
+  const [showConfig, setShowConfig] = useState(false)
+
+  useEffect(() => {
+    AsyncStorage.getItem(MESSAGE_BOX_URL_KEY).then(saved => {
+      if (saved) {
+        setMessageBoxUrl(saved)
+        setUrlInput(saved)
+        if (saved === 'noMessageBox') setShowConfig(true)
+      }
+    })
+  }, [])
+
+  const handleSave = useCallback(
+    async (input: string) => {
+      const trimmed = input.trim().replace(/\/+$/, '')
+      if (!trimmed) {
+        toast.error(t('enter_valid_url'))
+        return
+      }
+      setIsSaving(true)
+      try {
+        await AsyncStorage.setItem(MESSAGE_BOX_URL_KEY, trimmed)
+        setMessageBoxUrl(trimmed)
+        setShowConfig(false)
+        toast.success(t('message_box_saved'))
+      } catch (error: any) {
+        toast.error(`Failed to save: ${error.message || 'unknown error'}`)
+      } finally {
+        setIsSaving(false)
+      }
+    },
+    [t]
+  )
+
+  const handleReset = useCallback(async () => {
+    await AsyncStorage.removeItem(MESSAGE_BOX_URL_KEY)
+    setMessageBoxUrl(DEFAULT_MESSAGE_BOX_URL)
+    setUrlInput(DEFAULT_MESSAGE_BOX_URL)
+    setShowConfig(false)
+    toast.success(t('message_box_removed'))
+  }, [t])
+
+  const handleNone = useCallback(async () => {
+    const noneValue = 'noMessageBox'
+    setIsSaving(true)
+    try {
+      await AsyncStorage.setItem(MESSAGE_BOX_URL_KEY, noneValue)
+      setMessageBoxUrl(noneValue)
+      setUrlInput(noneValue)
+      setShowConfig(true)
+      toast.success(t('message_box_removed'))
+    } catch (error: any) {
+      toast.error(`Failed to save: ${error.message || 'unknown error'}`)
+    } finally {
+      setIsSaving(false)
+    }
+  }, [t])
+
+  return {
+    messageBoxUrl,
+    urlInput,
+    setUrlInput,
+    isSaving,
+    showConfig,
+    setShowConfig,
+    handleSave,
+    handleReset,
+    handleNone
+  }
 }
 
 interface ResultBannerProps {
@@ -299,6 +372,94 @@ function IncomingPaymentsSection({
       )}
       {acceptResult && <ResultBanner result={acceptResult} onDismiss={onDismissResult} colors={colors} />}
     </>
+  )
+}
+
+interface ConfigPanelProps {
+  readonly urlInput: string
+  readonly isSaving: boolean
+  readonly colors: ReturnType<typeof import('@/context/theme/ThemeContext').useTheme>['colors']
+  readonly t: ReturnType<typeof import('react-i18next').useTranslation>['t']
+  readonly onChangeUrl: (v: string) => void
+  readonly onSave: () => void
+  readonly onCancel: () => void
+  readonly onReset: () => void
+  readonly onNone: () => void
+}
+
+function ConfigPanel({
+  urlInput,
+  isSaving,
+  colors,
+  t,
+  onChangeUrl,
+  onSave,
+  onCancel,
+  onReset,
+  onNone
+}: ConfigPanelProps) {
+  const hasUrl = !!urlInput.trim()
+  const isNone = urlInput === 'noMessageBox'
+  return (
+    <View style={[styles.configPanel, { backgroundColor: colors.backgroundSecondary }]}>
+      <Text style={[styles.configTitle, { color: colors.textPrimary }]}>{t('message_box_server')}</Text>
+      <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>{t('message_box_required')}</Text>
+      <TextInput
+        value={urlInput}
+        onChangeText={onChangeUrl}
+        placeholder={DEFAULT_MESSAGE_BOX_URL}
+        placeholderTextColor={colors.textTertiary}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+        returnKeyType="done"
+        onSubmitEditing={onSave}
+        style={[
+          styles.urlInput,
+          { color: colors.textPrimary, backgroundColor: colors.background, borderColor: colors.separator }
+        ]}
+      />
+      <View style={styles.configActions}>
+        <TouchableOpacity
+          onPress={onSave}
+          disabled={isSaving || !hasUrl}
+          style={[
+            styles.configButton,
+            { backgroundColor: hasUrl ? colors.accent : colors.backgroundSecondary, opacity: hasUrl ? 1 : 0.5 }
+          ]}
+        >
+          {isSaving ? (
+            <ActivityIndicator size="small" color={hasUrl ? colors.background : colors.textSecondary} />
+          ) : (
+            <Text style={[styles.configButtonText, { color: hasUrl ? colors.background : colors.textSecondary }]}>
+              {t('save')}
+            </Text>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onCancel}
+          style={[styles.configButton, { borderColor: colors.separator, borderWidth: StyleSheet.hairlineWidth }]}
+        >
+          <Text style={[styles.configButtonText, { color: colors.textSecondary }]}>{t('cancel')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onReset}
+          style={[styles.configButton, { borderColor: colors.success + '40', borderWidth: StyleSheet.hairlineWidth }]}
+        >
+          <Text style={[styles.configButtonText, { color: colors.success }]}>Reset</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onNone}
+          disabled={isSaving}
+          style={[
+            styles.configButton,
+            { borderColor: colors.error + '40', borderWidth: StyleSheet.hairlineWidth, opacity: isSaving ? 0.5 : 1 }
+          ]}
+        >
+          <Text style={[styles.configButtonText, { color: colors.error }]}>None</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   )
 }
 
@@ -541,7 +702,18 @@ export default function PaymentsScreen() {
   const { managers, adminOriginator } = useWallet()
   const wallet = managers?.permissionsManager || null
 
-  const { messageBoxUrl, isConfigured } = useMessageBoxConfig()
+  const {
+    messageBoxUrl,
+    urlInput,
+    setUrlInput,
+    isSaving,
+    showConfig,
+    setShowConfig,
+    handleSave: handleSaveUrl,
+    handleReset,
+    handleNone
+  } = useMessageBoxConfig(t)
+  const isConfigured = !!messageBoxUrl
 
   const {
     identityClientRef,
@@ -590,10 +762,35 @@ export default function PaymentsScreen() {
     }
   }, [isConfigured, messageBoxUrl, wallet, adminOriginator])
 
+  const handleSave = useCallback(async () => {
+    const trimmed = urlInput.trim().replace(/\/+$/, '')
+    if (!trimmed || !wallet) {
+      await handleSaveUrl(urlInput)
+      return
+    }
+    try {
+      toast.info(t('checking_connection'))
+      const tempClient = new PeerPayClient({
+        messageBoxHost: trimmed,
+        walletClient: wallet as any,
+        originator: adminOriginator
+      })
+      await tempClient.init(trimmed)
+      await handleSaveUrl(urlInput)
+    } catch (error: any) {
+      toast.error(`${t('connection_failed')}: ${error.message || 'unknown error'}`)
+    }
+  }, [handleSaveUrl, urlInput, wallet, adminOriginator, t])
+
+  const handleRemove = useCallback(async () => {
+    await handleReset()
+    peerPayClientRef.current = null
+  }, [handleReset])
+
   // --- Fetch incoming payments ---
   const fetchPayments = useCallback(async () => {
     const client = peerPayClientRef.current
-    if (!client || !messageBoxUrl) return
+    if (!client || !messageBoxUrl || messageBoxUrl === 'noMessageBox') return
     setLoadingPayments(true)
     try {
       const list = await client.listIncomingPayments(messageBoxUrl)
@@ -702,7 +899,12 @@ export default function PaymentsScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('identity_payments')}</Text>
-        <View style={styles.headerButton} />
+        <TouchableOpacity
+          onPress={() => setShowConfig(v => (messageBoxUrl === 'noMessageBox' ? true : !v))}
+          style={styles.headerButton}
+        >
+          <Ionicons name="settings-outline" size={22} color={showConfig ? colors.accent : colors.textSecondary} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -710,76 +912,120 @@ export default function PaymentsScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        {/* --- Send Payment --- */}
-        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t('send_payment')}</Text>
+        {/* --- Active server indicator --- */}
+        {messageBoxUrl !== 'noMessageBox' && (
+          <View
+            style={[
+              styles.serverIndicator,
+              { backgroundColor: colors.success + '15', borderColor: colors.success + '40' }
+            ]}
+          >
+            <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+            <Text style={[styles.serverIndicatorText, { color: colors.success }]} numberOfLines={1}>
+              {messageBoxUrl}
+            </Text>
+          </View>
+        )}
 
-        {/* Recipient search / direct key */}
-        <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('recipient')}</Text>
-          <RecipientField
-            selectedIdentity={selectedIdentity}
-            searchQuery={searchQuery}
-            recipientKey={recipientKey}
-            isSearching={isSearching}
-            searchResults={searchResults}
+        {/* --- Config panel (collapsible) --- */}
+        {showConfig && (
+          <ConfigPanel
+            urlInput={urlInput}
+            isSaving={isSaving}
             colors={colors}
             t={t}
-            onSearchChange={handleSearchChange}
-            onSelectIdentity={handleSelectIdentity}
-            onClear={clearRecipient}
+            onChangeUrl={setUrlInput}
+            onSave={handleSave}
+            onCancel={() => {
+              if (messageBoxUrl !== 'noMessageBox') setShowConfig(false)
+              setUrlInput(messageBoxUrl)
+            }}
+            onReset={handleRemove}
+            onNone={handleNone}
           />
-        </View>
+        )}
 
-        {/* Amount */}
-        <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_bsv')}</Text>
-          <BsvAmountInput value={sendAmount} onChangeText={setSendAmount} />
-        </View>
+        {messageBoxUrl === 'noMessageBox' ? (
+          <View
+            style={[styles.noServerWarning, { backgroundColor: colors.error + '15', borderColor: colors.error + '40' }]}
+          >
+            <Ionicons name="alert-circle" size={24} color={colors.error} style={{ marginBottom: spacing.sm }} />
+            <Text style={[styles.noServerWarningText, { color: colors.error }]}>No Message Box Set</Text>
+          </View>
+        ) : (
+          <>
+            {/* --- Send Payment --- */}
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t('send_payment')}</Text>
 
-        {/* Send button */}
-        <TouchableOpacity
-          onPress={handleSend}
-          disabled={!canSend}
-          style={[
-            styles.sendButton,
-            {
-              backgroundColor: canSend ? colors.accent : colors.backgroundSecondary,
-              opacity: canSend ? 1 : 0.5
-            }
-          ]}
-        >
-          {isSending ? (
-            <ActivityIndicator size="small" color={canSend ? colors.background : colors.textSecondary} />
-          ) : (
-            <>
-              <Ionicons name="send" size={18} color={canSend ? colors.background : colors.textSecondary} />
-              <Text style={[styles.sendButtonText, { color: canSend ? colors.background : colors.textSecondary }]}>
-                {t('send_payment')}
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
+            {/* Recipient search / direct key */}
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('recipient')}</Text>
+              <RecipientField
+                selectedIdentity={selectedIdentity}
+                searchQuery={searchQuery}
+                recipientKey={recipientKey}
+                isSearching={isSearching}
+                searchResults={searchResults}
+                colors={colors}
+                t={t}
+                onSearchChange={handleSearchChange}
+                onSelectIdentity={handleSelectIdentity}
+                onClear={clearRecipient}
+              />
+            </View>
 
-        {sendResult && <ResultBanner result={sendResult} onDismiss={() => setSendResult(null)} colors={colors} />}
+            {/* Amount */}
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_bsv')}</Text>
+              <BsvAmountInput value={sendAmount} onChangeText={setSendAmount} />
+            </View>
 
-        <IncomingPaymentsSection
-          isConfigured={isConfigured}
-          loadingPayments={loadingPayments}
-          payments={payments}
-          senderIdentities={senderIdentities}
-          acceptingId={acceptingId}
-          editingNoteId={editingNoteId}
-          paymentNotes={paymentNotes}
-          acceptResult={acceptResult}
-          colors={colors}
-          t={t}
-          onRefresh={fetchPayments}
-          onAccept={handleAcceptPayment}
-          onEditNote={setEditingNoteId}
-          onChangeNote={handleChangeNote}
-          onSubmitNote={() => setEditingNoteId(null)}
-          onDismissResult={() => setAcceptResult(null)}
-        />
+            {/* Send button */}
+            <TouchableOpacity
+              onPress={handleSend}
+              disabled={!canSend}
+              style={[
+                styles.sendButton,
+                {
+                  backgroundColor: canSend ? colors.accent : colors.backgroundSecondary,
+                  opacity: canSend ? 1 : 0.5
+                }
+              ]}
+            >
+              {isSending ? (
+                <ActivityIndicator size="small" color={canSend ? colors.background : colors.textSecondary} />
+              ) : (
+                <>
+                  <Ionicons name="send" size={18} color={canSend ? colors.background : colors.textSecondary} />
+                  <Text style={[styles.sendButtonText, { color: canSend ? colors.background : colors.textSecondary }]}>
+                    {t('send_payment')}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            {sendResult && <ResultBanner result={sendResult} onDismiss={() => setSendResult(null)} colors={colors} />}
+
+            <IncomingPaymentsSection
+              isConfigured={isConfigured}
+              loadingPayments={loadingPayments}
+              payments={payments}
+              senderIdentities={senderIdentities}
+              acceptingId={acceptingId}
+              editingNoteId={editingNoteId}
+              paymentNotes={paymentNotes}
+              acceptResult={acceptResult}
+              colors={colors}
+              t={t}
+              onRefresh={fetchPayments}
+              onAccept={handleAcceptPayment}
+              onEditNote={setEditingNoteId}
+              onChangeNote={handleChangeNote}
+              onSubmitNote={() => setEditingNoteId(null)}
+              onDismissResult={() => setAcceptResult(null)}
+            />
+          </>
+        )}
 
         <View style={{ height: insets.bottom + 40 }} />
       </ScrollView>
@@ -812,6 +1058,73 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg
+  },
+
+  // Config panel
+  configPanel: {
+    padding: spacing.lg,
+    borderRadius: radii.md,
+    marginBottom: spacing.xl
+  },
+  configTitle: {
+    ...typography.headline,
+    marginBottom: spacing.xs
+  },
+  configSubtitle: {
+    ...typography.footnote,
+    marginBottom: spacing.md
+  },
+  urlInput: {
+    ...typography.body,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: spacing.md
+  },
+  configActions: {
+    flexDirection: 'row',
+    gap: spacing.sm
+  },
+  configButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  configButtonText: {
+    ...typography.subhead,
+    fontWeight: '600'
+  },
+
+  // Active server indicator
+  serverIndicator: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.lg
+  },
+  serverIndicatorText: {
+    ...typography.caption1,
+    flex: 1
+  },
+
+  // No server warning
+  noServerWarning: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.md,
+    padding: spacing.xl,
+    alignItems: 'center' as const,
+    marginTop: spacing.xl
+  },
+  noServerWarningText: {
+    ...typography.subhead,
+    textAlign: 'center' as const
   },
 
   // Section
