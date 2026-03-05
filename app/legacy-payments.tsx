@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { BsvAmountInput } from '@/components/wallet/BsvAmountInput'
+import { SatsAmountInput } from '@/components/wallet/SatsAmountInput'
 
 const brc29ProtocolID: WalletProtocol = [2, '3241645161d8']
 
@@ -139,7 +139,7 @@ export default function LegacyPaymentsScreen() {
         const outpoint = `${utxo.txid}.${utxo.vout}`
         return !internalizedUtxos.has(outpoint)
       })
-      return available.reduce((acc, r) => acc + r.satoshis, 0) / 100000000
+      return available.reduce((acc, r) => acc + r.satoshis, 0)
     },
     [getUtxosForAddress, getInternalizedUtxos]
   )
@@ -295,10 +295,9 @@ export default function LegacyPaymentsScreen() {
 
       // Show result banner
       if (importedSatoshis > 0) {
-        const importedBsv = (importedSatoshis / 100000000).toFixed(8).replace(/\.?0+$/, '')
         setImportResult({
           type: 'success',
-          message: `Successfully imported ${importedBsv} BSV${failureCount > 0 ? ` (${failureCount} failed)` : ''}`
+          message: `Successfully imported ${importedSatoshis.toLocaleString()} sats${failureCount > 0 ? ` (${failureCount} failed)` : ''}`
         })
       } else if (failureCount > 0) {
         setImportResult({
@@ -336,8 +335,8 @@ export default function LegacyPaymentsScreen() {
   const handleSendBSV = useCallback(async () => {
     if (!wallet || !recipientAddress || !sendAmount) return
 
-    const amt = Number(sendAmount)
-    if (isNaN(amt) || amt <= 0) {
+    const sats = Math.round(Number(sendAmount))
+    if (isNaN(sats) || sats <= 0) {
       toast.error('Please enter a valid amount > 0')
       return
     }
@@ -356,7 +355,7 @@ export default function LegacyPaymentsScreen() {
           outputs: [
             {
               lockingScript,
-              satoshis: Math.round(amt * 100000000),
+              satoshis: sats,
               outputDescription: 'BSV for recipient address'
             }
           ],
@@ -364,7 +363,7 @@ export default function LegacyPaymentsScreen() {
         },
         adminOriginator
       )
-      toast.success(`Sent ${amt} BSV to ${recipientAddress}`)
+      toast.success(`Sent ${sats.toLocaleString()} sats to ${recipientAddress}`)
       setRecipientAddress('')
       setSendAmount('')
     } catch (error: any) {
@@ -434,7 +433,7 @@ export default function LegacyPaymentsScreen() {
         <View style={styles.balanceSection}>
           <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>{t('available_balance')}</Text>
           <Text style={[styles.balanceValue, { color: colors.textPrimary }]}>
-            {balance === -1 ? t('not_checked') : `${balance} BSV`}
+            {balance === -1 ? t('not_checked') : `${balance.toLocaleString()} sats`}
           </Text>
         </View>
 
@@ -549,8 +548,8 @@ export default function LegacyPaymentsScreen() {
         </View>
 
         <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_bsv')}</Text>
-          <BsvAmountInput value={sendAmount} onChangeText={setSendAmount} />
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_sats')}</Text>
+          <SatsAmountInput value={sendAmount} onChangeText={setSendAmount} />
         </View>
 
         <TouchableOpacity

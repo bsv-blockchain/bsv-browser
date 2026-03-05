@@ -5,14 +5,14 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 
-export const SEND_MAX_VALUE = '20999999.99999999'
+export const SEND_MAX_VALUE = '2099999999999999'
 
-interface BsvAmountInputProps {
+interface SatsAmountInputProps {
   value: string
   onChangeText: (text: string) => void
 }
 
-export const BsvAmountInput: React.FC<BsvAmountInputProps> = ({ value, onChangeText }) => {
+export const SatsAmountInput: React.FC<SatsAmountInputProps> = ({ value, onChangeText }) => {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const isSendMax = value === SEND_MAX_VALUE
@@ -22,9 +22,7 @@ export const BsvAmountInput: React.FC<BsvAmountInputProps> = ({ value, onChangeT
       <View style={[styles.row, { backgroundColor: colors.backgroundSecondary, borderColor: colors.accent }]}>
         <View style={styles.sendMaxDisplay}>
           <Ionicons name="wallet-outline" size={18} color={colors.accent} />
-          <Text style={[styles.sendMaxLabel, { color: colors.accent }]}>
-            {t('entire_wallet_balance')}
-          </Text>
+          <Text style={[styles.sendMaxLabel, { color: colors.accent }]}>{t('entire_wallet_balance')}</Text>
         </View>
         <TouchableOpacity
           onPress={() => onChangeText('')}
@@ -41,9 +39,9 @@ export const BsvAmountInput: React.FC<BsvAmountInputProps> = ({ value, onChangeT
       <TextInput
         value={value}
         onChangeText={onChangeText}
-        placeholder="0.00000000"
+        placeholder="0"
         placeholderTextColor={colors.textTertiary}
-        keyboardType="decimal-pad"
+        keyboardType="number-pad"
         returnKeyType="done"
         style={[styles.input, { color: colors.textPrimary }]}
       />
@@ -62,23 +60,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: StyleSheet.hairlineWidth
   },
   input: {
     ...typography.body,
     flex: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.md
   },
   maxButton: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radii.sm,
-    marginRight: spacing.sm,
+    marginRight: spacing.sm
   },
   maxText: {
     ...typography.footnote,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   sendMaxDisplay: {
     flex: 1,
@@ -86,11 +84,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.md
   },
   sendMaxLabel: {
     ...typography.body,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   clearButton: {
     width: 28,
@@ -98,6 +96,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing.sm,
-  },
+    marginRight: spacing.sm
+  }
 })

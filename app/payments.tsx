@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { BsvAmountInput } from '@/components/wallet/BsvAmountInput'
+import { SatsAmountInput } from '@/components/wallet/SatsAmountInput'
 
 const MESSAGE_BOX_URL_KEY = 'message_box_url'
 const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
@@ -170,12 +170,11 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
   }
 }
 
-async function sendPayment(client: PeerPayClient, recipientKey: string, sendAmount: string): Promise<{ bsv: number }> {
-  const bsv = Number(sendAmount)
-  if (Number.isNaN(bsv) || bsv <= 0) throw new RangeError('invalid_amount')
-  const sats = Math.round(bsv * 100000000)
+async function sendPayment(client: PeerPayClient, recipientKey: string, sendAmount: string): Promise<{ sats: number }> {
+  const sats = Math.round(Number(sendAmount))
+  if (Number.isNaN(sats) || sats <= 0) throw new RangeError('invalid_amount')
   await client.sendPayment({ recipient: recipientKey, amount: sats })
-  return { bsv }
+  return { sats }
 }
 
 async function acceptWithRetry(
@@ -934,8 +933,8 @@ export default function PaymentsScreen() {
     if (!client || !recipientKey || !sendAmount) return
     setIsSending(true)
     try {
-      const { bsv } = await sendPayment(client, recipientKey, sendAmount)
-      setSendResult({ type: 'success', message: `Sent ${bsv} BSV successfully` })
+      const { sats } = await sendPayment(client, recipientKey, sendAmount)
+      setSendResult({ type: 'success', message: `Sent ${sats.toLocaleString()} sats successfully` })
       setSendAmount('')
       clearRecipient()
       fetchPayments()
@@ -1035,8 +1034,8 @@ export default function PaymentsScreen() {
 
             {/* Amount */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_bsv')}</Text>
-              <BsvAmountInput value={sendAmount} onChangeText={setSendAmount} />
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_sats')}</Text>
+              <SatsAmountInput value={sendAmount} onChangeText={setSendAmount} />
             </View>
 
             {/* Send button */}
