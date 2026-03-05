@@ -91,11 +91,19 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({
     return bookmarkStore.bookmarks
       .filter(b => b.url && b.url !== kNEW_TAB_URL && isValidUrl(b.url) && !b.url.includes('about:blank'))
       .slice(0, 8)
-      .map(b => ({
-        domain: b.url,
-        appName: b.title || b.url,
-        appIconImageUrl: `${b.url.replace(/\/$/, '')}/favicon.ico`
-      }))
+      .map(b => {
+        let faviconUrl: string
+        try {
+          faviconUrl = new URL(b.url).origin + '/favicon.ico'
+        } catch {
+          faviconUrl = `${b.url.replace(/\/$/, '')}/favicon.ico`
+        }
+        return {
+          domain: b.url,
+          appName: b.title || b.url,
+          appIconImageUrl: faviconUrl
+        }
+      })
   }, [])
 
   const renderAppItem = ({ item }: { item: BookmarkItem }) => (

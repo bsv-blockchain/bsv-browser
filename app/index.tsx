@@ -192,6 +192,12 @@ function Browser() {
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
   const activeCameraStreams = useRef<Set<string>>(new Set())
+  const historyDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
+    }
+  }, [])
 
   /* -------------------------------- permissions ----------------------------- */
   const domainForUrl = useCallback((u: string): string => {
@@ -590,12 +596,17 @@ function Browser() {
     tabStore.handleNavigationStateChange(activeTab.id, navState)
     if (!addressEditing.current) setAddressText(navState.url)
 
+    // Debounce history push so that rapid onNavigationStateChange events
+    // (which often carry stale titles from the *previous* page) settle before
+    // we commit an entry.  Only the final event's metadata is recorded.
     if (!navState.loading && navState.url !== kNEW_TAB_URL) {
-      pushHistory({
-        title: navState.title || navState.url,
-        url: navState.url,
-        timestamp: Date.now()
-      }).catch(() => {})
+      if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
+      const url = navState.url
+      const title = navState.title || navState.url
+      historyDebounceTimer.current = setTimeout(() => {
+        pushHistory({ title, url, timestamp: Date.now() }).catch(() => {})
+        historyDebounceTimer.current = null
+      }, 500)
     }
   }
 
@@ -836,8 +847,11 @@ function Browser() {
             onHttpError={(e: any) => {
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
             }}
-            onLoadEnd={(navState: any) =>
-              tabStore.handleNavigationStateChange(activeTab.id, { ...navState, loading: false })
+            onLoadEnd={(event: any) =>
+              tabStore.handleNavigationStateChange(activeTab.id, {
+                ...(event.nativeEvent ?? event),
+                loading: false
+              })
             }
             javaScriptEnabled
             domStorageEnabled

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { HistoryEntry } from '@/shared/types/browser'
 import { kNEW_TAB_URL } from '@/shared/constants'
 import { isValidUrl } from '@/utils/generalHelpers'
@@ -19,12 +19,21 @@ export function useHistory(
   }, [getItem])
 
   const [history, setHistory] = useState<HistoryEntry[]>([])
+
+  // Keep a ref in sync with state so that callbacks always read the
+  // latest history array instead of a stale closure snapshot.
+  const historyRef = useRef<HistoryEntry[]>(history)
+  useEffect(() => {
+    historyRef.current = history
+  }, [history])
+
   useEffect(() => {
     loadHistory().then(setHistory)
   }, [loadHistory])
 
   const saveHistory = useCallback(
     async (list: HistoryEntry[]) => {
+      historyRef.current = list
       setHistory(list)
       await setItem(HISTORY_KEY, JSON.stringify(list))
     },
@@ -33,19 +42,20 @@ export function useHistory(
 
   const pushHistory = useCallback(
     async (entry: HistoryEntry) => {
-      if (history.length && history[0].url.replace(/\/$/, '') === entry.url.replace(/\/$/, '')) return
-      const next = [entry, ...history].slice(0, 500)
+      const current = historyRef.current
+      if (current.length && current[0].url.replace(/\/$/, '') === entry.url.replace(/\/$/, '')) return
+      const next = [entry, ...current].slice(0, 500)
       await saveHistory(next)
     },
-    [history, saveHistory]
+    [saveHistory]
   )
 
   const removeHistoryItem = useCallback(
     async (url: string) => {
-      const next = history.filter(h => h.url !== url)
+      const next = historyRef.current.filter(h => h.url !== url)
       await saveHistory(next)
     },
-    [history, saveHistory]
+    [saveHistory]
   )
 
   const clearHistory = useCallback(async () => {
