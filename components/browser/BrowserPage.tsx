@@ -263,7 +263,7 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
       <View style={styles.bottomHalf}>
         {/* Bookmarks */}
         {bookmarks.length > 0 && (
-          <View style={styles.halfSection}>
+          <View style={styles.bookmarksSection}>
             <TouchableOpacity
               style={styles.sectionHeaderRow}
               onPress={() => sheet.push('bookmarks')}
@@ -323,6 +323,9 @@ const styles = StyleSheet.create({
   },
   halfSection: {
     flex: 1
+  },
+  bookmarksSection: {
+    flexShrink: 0
   },
   content: {},
   section: {

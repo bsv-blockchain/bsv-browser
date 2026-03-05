@@ -62,7 +62,7 @@ const HistoryRow = memo(
           </View>
         )}
         onSwipeableOpen={direction => {
-          if (direction === SwipeDirection.RIGHT) onDelete(item.url)
+          if (direction === SwipeDirection.LEFT) onDelete(item.url)
         }}
       >
         <Pressable style={[styles.historyItem, itemStyle]} onPress={() => onSelect(item.url)}>
