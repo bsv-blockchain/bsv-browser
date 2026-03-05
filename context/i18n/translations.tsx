@@ -17,8 +17,9 @@ try {
   } else {
     throw new Error('expo-localization returned no language')
   }
-} catch (localeError) {
-  console.warn('⚠️ expo-localization not available, trying react-native-localize:', localeError.message)
+} catch (localeError: unknown) {
+  const localeErrorMsg = localeError instanceof Error ? localeError.message : String(localeError)
+  console.warn('⚠️ expo-localization not available, trying react-native-localize:', localeErrorMsg)
 
   try {
     // Fallback to react-native-localize
@@ -28,8 +29,9 @@ try {
     console.log('🌍 Device locales detected via react-native-localize:', deviceLocales)
     console.log('🔤 Detected language code:', detectedLanguage)
     console.log('📱 Full locale info:', deviceLocales[0])
-  } catch (rnLocalizeError) {
-    console.warn('⚠️ react-native-localize also not available:', rnLocalizeError.message)
+  } catch (rnLocalizeError: unknown) {
+    const rnLocalizeErrorMsg = rnLocalizeError instanceof Error ? rnLocalizeError.message : String(rnLocalizeError)
+    console.warn('⚠️ react-native-localize also not available:', rnLocalizeErrorMsg)
 
     try {
       // Enhanced fallback to platform-specific detection
@@ -86,8 +88,9 @@ try {
           console.log('🌐 Web locale detected:', navigator.language, '-> extracted:', detectedLanguage)
         }
       }
-    } catch (platformError) {
-      console.warn('⚠️ Platform-specific locale detection failed:', platformError.message)
+    } catch (platformError: unknown) {
+      const platformErrorMsg = platformError instanceof Error ? platformError.message : String(platformError)
+      console.warn('⚠️ Platform-specific locale detection failed:', platformErrorMsg)
       detectedLanguage = 'en'
       console.log('🔧 Using default language: en')
     }
@@ -180,6 +183,7 @@ const resources = {
       amount_bsv: 'Amount (BSV)',
       incoming_payments: 'Incoming Payments',
       no_pending_payments: 'No pending payments',
+      accept_all: 'Accept All',
       payment_note_placeholder: 'Add a note (e.g. "Dinner split")',
       valid_identity_key: 'Valid identity key entered',
       searching: 'Searching...',
@@ -350,6 +354,7 @@ const resources = {
       amount_bsv: '金额 (BSV)',
       incoming_payments: '收款',
       no_pending_payments: '没有待处理的付款',
+      accept_all: '全部接受',
       payment_note_placeholder: '添加备注（例如："晚餐分账"）',
       valid_identity_key: '已输入有效的身份密钥',
       searching: '搜索中...',
@@ -511,6 +516,7 @@ const resources = {
       amount_bsv: 'राशि (BSV)',
       incoming_payments: 'आने वाले भुगतान',
       no_pending_payments: 'कोई लंबित भुगतान नहीं',
+      accept_all: 'सभी स्वीकार करें',
       payment_note_placeholder: 'एक नोट जोड़ें (जैसे "रात के खाने का बंटवारा")',
       valid_identity_key: 'वैध पहचान कुंजी दर्ज की गई',
       searching: 'खोज रहा है...',
@@ -674,6 +680,7 @@ const resources = {
       amount_bsv: 'Monto (BSV)',
       incoming_payments: 'Pagos entrantes',
       no_pending_payments: 'No hay pagos pendientes',
+      accept_all: 'Aceptar todo',
       payment_note_placeholder: 'Añadir una nota (p. ej. "División de cena")',
       valid_identity_key: 'Clave de identidad válida ingresada',
       searching: 'Buscando...',
@@ -839,6 +846,7 @@ const resources = {
       amount_bsv: 'Montant (BSV)',
       incoming_payments: 'Paiements entrants',
       no_pending_payments: 'Aucun paiement en attente',
+      accept_all: 'Tout accepter',
       payment_note_placeholder: 'Ajouter une note (ex. "Partage du dîner")',
       valid_identity_key: "Clé d'identité valide saisie",
       searching: 'Recherche en cours...',
@@ -1004,6 +1012,7 @@ const resources = {
       amount_bsv: 'المبلغ (BSV)',
       incoming_payments: 'المدفوعات الواردة',
       no_pending_payments: 'لا توجد مدفوعات معلقة',
+      accept_all: 'قبول الكل',
       payment_note_placeholder: 'أضف ملاحظة (مثال: "تقسيم العشاء")',
       valid_identity_key: 'تم إدخال مفتاح هوية صالح',
       searching: '...جار البحث',
@@ -1165,6 +1174,7 @@ const resources = {
       amount_bsv: 'Valor (BSV)',
       incoming_payments: 'Pagamentos recebidos',
       no_pending_payments: 'Nenhum pagamento pendente',
+      accept_all: 'Aceitar tudo',
       payment_note_placeholder: 'Adicionar uma nota (ex. "Divisão do jantar")',
       valid_identity_key: 'Chave de identidade válida inserida',
       searching: 'Pesquisando...',
@@ -1330,6 +1340,7 @@ const resources = {
       amount_bsv: 'পরিমাণ (BSV)',
       incoming_payments: 'আসন্ন পেমেন্ট',
       no_pending_payments: 'কোনো মুলতুবি পেমেন্ট নেই',
+      accept_all: 'সব গ্রহণ করুন',
       payment_note_placeholder: 'একটি নোট যোগ করুন (যেমন "ডিনার ভাগ")',
       valid_identity_key: 'বৈধ পরিচয় কী প্রবেশ করা হয়েছে',
       searching: 'খুঁজছি...',
@@ -1493,6 +1504,7 @@ const resources = {
       amount_bsv: 'Сумма (BSV)',
       incoming_payments: 'Входящие платежи',
       no_pending_payments: 'Нет ожидающих платежей',
+      accept_all: 'Принять все',
       payment_note_placeholder: 'Добавьте заметку (например, «Разделить счёт»)',
       valid_identity_key: 'Введён действительный ключ идентификатора',
       searching: 'Поиск...',
@@ -1658,6 +1670,7 @@ const resources = {
       amount_bsv: 'Jumlah (BSV)',
       incoming_payments: 'Pembayaran Masuk',
       no_pending_payments: 'Tidak ada pembayaran tertunda',
+      accept_all: 'Terima Semua',
       payment_note_placeholder: 'Tambahkan catatan (mis. "Bagi tagihan makan malam")',
       valid_identity_key: 'Kunci identitas valid dimasukkan',
       searching: 'Mencari...',

@@ -295,6 +295,7 @@ interface IncomingPaymentsSectionProps {
   readonly payments: IncomingPayment[]
   readonly senderIdentities: Record<string, DisplayableIdentity | null>
   readonly acceptingId: string | null
+  readonly acceptingAll: boolean
   readonly editingNoteId: string | null
   readonly paymentNotes: Record<string, string>
   readonly acceptResult: { type: 'success' | 'error'; message: string } | null
@@ -302,6 +303,7 @@ interface IncomingPaymentsSectionProps {
   readonly t: ReturnType<typeof import('react-i18next').useTranslation>['t']
   readonly onRefresh: () => void
   readonly onAccept: (p: IncomingPayment) => void
+  readonly onAcceptAll: () => void
   readonly onEditNote: (id: string) => void
   readonly onChangeNote: (id: string, text: string) => void
   readonly onSubmitNote: () => void
@@ -313,6 +315,7 @@ function IncomingPaymentsSection({
   payments,
   senderIdentities,
   acceptingId,
+  acceptingAll,
   editingNoteId,
   paymentNotes,
   acceptResult,
@@ -320,6 +323,7 @@ function IncomingPaymentsSection({
   t,
   onRefresh,
   onAccept,
+  onAcceptAll,
   onEditNote,
   onChangeNote,
   onSubmitNote,
@@ -330,9 +334,28 @@ function IncomingPaymentsSection({
     <>
       <View style={styles.incomingSectionHeader}>
         <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t('incoming_payments')}</Text>
-        <TouchableOpacity onPress={onRefresh} disabled={loadingPayments}>
-          <Ionicons name="refresh" size={22} color={loadingPayments ? colors.textQuaternary : colors.accent} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {payments.length > 0 && (
+            <TouchableOpacity
+              onPress={onAcceptAll}
+              disabled={acceptingAll || loadingPayments}
+              style={[styles.acceptAllButton, { opacity: acceptingAll || loadingPayments ? 0.5 : 1 }]}
+            >
+              {acceptingAll ? (
+                <ActivityIndicator size="small" color={colors.accent} />
+              ) : (
+                <Text style={[styles.acceptAllButtonText, { color: colors.accent }]}>{t('accept_all')}</Text>
+              )}
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={onRefresh} disabled={loadingPayments || acceptingAll}>
+            <Ionicons
+              name="refresh"
+              size={22}
+              color={loadingPayments || acceptingAll ? colors.textQuaternary : colors.accent}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
       {loadingPayments && payments.length === 0 && (
         <View style={styles.centeredSmall}>
@@ -732,6 +755,7 @@ export default function PaymentsScreen() {
   const [payments, setPayments] = useState<IncomingPayment[]>([])
   const [loadingPayments, setLoadingPayments] = useState(false)
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
+  const [acceptingAll, setAcceptingAll] = useState(false)
   const [senderIdentities, setSenderIdentities] = useState<Record<string, DisplayableIdentity | null>>({})
   const [paymentNotes, setPaymentNotes] = useState<Record<string, string>>({})
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
@@ -869,6 +893,41 @@ export default function PaymentsScreen() {
     [messageBoxUrl, fetchPayments, internalizePayment, paymentNotes]
   )
 
+  const handleAcceptAll = useCallback(async () => {
+    const client = peerPayClientRef.current
+    if (!client || payments.length === 0) return
+    setAcceptingAll(true)
+    setEditingNoteId(null)
+    let successCount = 0
+    let lastError: string | null = null
+
+    for (const payment of payments) {
+      const id = String(payment.messageId)
+      const description = paymentNotes[id]?.trim() || 'Identity Payment'
+      try {
+        await acceptWithRetry(client, messageBoxUrl, payment, description, internalizePayment)
+        successCount++
+      } catch (error_: any) {
+        lastError = error_?.message || 'unknown error'
+      }
+    }
+
+    if (successCount > 0) {
+      setAcceptResult({
+        type: lastError ? 'error' : 'success',
+        message: lastError
+          ? `Accepted ${successCount} of ${payments.length} payments. Last error: ${lastError}`
+          : `Accepted all ${successCount} payments successfully`
+      })
+      fetchPayments()
+    } else if (lastError) {
+      setAcceptResult({ type: 'error', message: `Failed to accept payments: ${lastError}` })
+    }
+
+    setAcceptingAll(false)
+    setTimeout(() => setAcceptResult(null), 5000)
+  }, [messageBoxUrl, payments, fetchPayments, internalizePayment, paymentNotes])
+
   // --- Send payment ---
   const handleSend = useCallback(async () => {
     const client = peerPayClientRef.current
@@ -898,7 +957,7 @@ export default function PaymentsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('identity_payments')}</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('payments')}</Text>
         <TouchableOpacity
           onPress={() => setShowConfig(v => (messageBoxUrl === 'noMessageBox' ? true : !v))}
           style={styles.headerButton}
@@ -1012,6 +1071,7 @@ export default function PaymentsScreen() {
               payments={payments}
               senderIdentities={senderIdentities}
               acceptingId={acceptingId}
+              acceptingAll={acceptingAll}
               editingNoteId={editingNoteId}
               paymentNotes={paymentNotes}
               acceptResult={acceptResult}
@@ -1019,6 +1079,7 @@ export default function PaymentsScreen() {
               t={t}
               onRefresh={fetchPayments}
               onAccept={handleAcceptPayment}
+              onAcceptAll={handleAcceptAll}
               onEditNote={setEditingNoteId}
               onChangeNote={handleChangeNote}
               onSubmitNote={() => setEditingNoteId(null)}
@@ -1280,6 +1341,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.md
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm
+  },
+  acceptAllButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm
+  },
+  acceptAllButtonText: {
+    ...typography.subhead,
+    fontWeight: '600'
   },
   centeredSmall: {
     alignItems: 'center',
