@@ -6,6 +6,7 @@ import React, { createContext, useCallback, useContext, useState } from 'react'
  */
 export type SheetRoute =
   | 'closed'
+  | 'browser-menu'
   | 'bookmarks'
   | 'history'
   | 'menu'

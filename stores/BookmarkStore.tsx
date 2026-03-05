@@ -40,6 +40,11 @@ export class BookmarkStore {
     this.saveBookmarks()
   }
 
+  clearBookmarks() {
+    this.bookmarks = []
+    this.saveBookmarks()
+  }
+
   openBookmark(url: string) {
     tabStore.newTab(url)
   }

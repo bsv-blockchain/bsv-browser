@@ -16,7 +16,7 @@ import {
 import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
-import { GestureHandlerRootView, GestureDetector } from 'react-native-gesture-handler'
+import { GestureDetector } from 'react-native-gesture-handler'
 import Animated from 'react-native-reanimated'
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
@@ -866,151 +866,149 @@ function Browser() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        enabled={Platform.OS === 'ios' && addressFocused}
-        behavior="padding"
-        keyboardVerticalOffset={0}
-      >
-        <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
-          <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      enabled={Platform.OS === 'ios' && addressFocused}
+      behavior="padding"
+      keyboardVerticalOffset={0}
+    >
+      <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
+        <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
 
-          {/* ---- Main content: WebView lives between the safe-area bars ---- */}
-          {renderMainContent()}
+        {/* ---- Main content: WebView lives between the safe-area bars ---- */}
+        {renderMainContent()}
 
-          {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
-          {!isFullscreen && showAddressBar && (
-            <>
-              <GestureDetector gesture={addressBarPanGesture}>
-                <Animated.View
-                  style={[styles.chromeWrapper, { top: insets.top }, animatedAddressBarStyle]}
-                  pointerEvents="box-none"
-                >
-                  <AddressBar
-                    addressText={addressText}
-                    addressFocused={addressFocused}
-                    isLoading={activeTab?.isLoading || false}
-                    canGoBack={activeTab?.canGoBack || false}
-                    canGoForward={activeTab?.canGoForward || false}
-                    isNewTab={isNewTab}
-                    isHttps={activeTab?.url?.startsWith('https') || false}
-                    menuOpen={menuPopoverOpen}
-                    onMorePress={() => setMenuPopoverOpen(true)}
-                    onChangeText={onChangeAddressText}
-                    onSubmit={onAddressSubmit}
-                    onFocus={() => {
-                      setMenuPopoverOpen(false)
-                      addressEditing.current = true
-                      setAddressFocused(true)
-                      if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
-                      setTimeout(() => {
-                        const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
-                        addressInputRef.current?.setNativeProps({
-                          selection: { start: 0, end: textToSelect.length }
-                        })
-                      }, 0)
-                    }}
-                    onBlur={() => {
-                      addressEditing.current = false
-                      setAddressFocused(false)
-                      setAddressSuggestions([])
-                      setAddressText(activeTab?.url || kNEW_TAB_URL)
-                    }}
-                    onBack={navBack}
-                    onForward={navFwd}
-                    onReloadOrStop={navReloadOrStop}
-                    onClearText={() => setAddressText('')}
-                    inputRef={addressInputRef}
-                  />
-                </Animated.View>
-              </GestureDetector>
-
-              {/* ---- Suggestions ---- */}
-              {addressFocused && (
-                <SuggestionsDropdown
-                  suggestions={addressSuggestions}
-                  colors={colors}
-                  bottomOffset={insets.bottom}
-                  onSelect={url => {
-                    addressInputRef.current?.blur()
-                    Keyboard.dismiss()
+        {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
+        {!isFullscreen && showAddressBar && (
+          <>
+            <GestureDetector gesture={addressBarPanGesture}>
+              <Animated.View
+                style={[styles.chromeWrapper, { top: insets.top }, animatedAddressBarStyle]}
+                pointerEvents="box-none"
+              >
+                <AddressBar
+                  addressText={addressText}
+                  addressFocused={addressFocused}
+                  isLoading={activeTab?.isLoading || false}
+                  canGoBack={activeTab?.canGoBack || false}
+                  canGoForward={activeTab?.canGoForward || false}
+                  isNewTab={isNewTab}
+                  isHttps={activeTab?.url?.startsWith('https') || false}
+                  menuOpen={menuPopoverOpen}
+                  onMorePress={() => setMenuPopoverOpen(true)}
+                  onChangeText={onChangeAddressText}
+                  onSubmit={onAddressSubmit}
+                  onFocus={() => {
+                    setMenuPopoverOpen(false)
+                    addressEditing.current = true
+                    setAddressFocused(true)
+                    if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
+                    setTimeout(() => {
+                      const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
+                      addressInputRef.current?.setNativeProps({
+                        selection: { start: 0, end: textToSelect.length }
+                      })
+                    }, 0)
+                  }}
+                  onBlur={() => {
+                    addressEditing.current = false
                     setAddressFocused(false)
                     setAddressSuggestions([])
-                    setAddressText(url)
-                    updateActiveTab({ url })
-                    addressEditing.current = false
+                    setAddressText(activeTab?.url || kNEW_TAB_URL)
                   }}
+                  onBack={navBack}
+                  onForward={navFwd}
+                  onReloadOrStop={navReloadOrStop}
+                  onClearText={() => setAddressText('')}
+                  inputRef={addressInputRef}
                 />
-              )}
-            </>
-          )}
+              </Animated.View>
+            </GestureDetector>
 
-          {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
-          {menuPopoverOpen && (
-            <Animated.View
-              style={[
-                { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-                animatedMenuPopoverStyle
-              ]}
-            >
-              <MenuPopover
-                isNewTab={isNewTab}
-                canShare={!isNewTab}
+            {/* ---- Suggestions ---- */}
+            {addressFocused && (
+              <SuggestionsDropdown
+                suggestions={addressSuggestions}
+                colors={colors}
                 bottomOffset={insets.bottom}
-                onDismiss={() => setMenuPopoverOpen(false)}
-                onShare={shareCurrent}
-                onAddBookmark={() => {
-                  if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
-                    addBookmark(activeTab.title || t('untitled'), activeTab.url)
-                  }
+                onSelect={url => {
+                  addressInputRef.current?.blur()
+                  Keyboard.dismiss()
+                  setAddressFocused(false)
+                  setAddressSuggestions([])
+                  setAddressText(url)
+                  updateActiveTab({ url })
+                  addressEditing.current = false
                 }}
-                onBookmarks={() => sheet.push('bookmarks')}
-                onTabs={() => setShowTabsView(true)}
-                onNewTab={() => {
-                  skipHomepageOnce.current = true
-                  tabStore.newTab()
-                  setShowTabsView(false)
-                }}
-                onSettings={() => sheet.push('settings')}
-                onEnableWeb3={() => router.push('/auth/mnemonic')}
               />
-            </Animated.View>
-          )}
+            )}
+          </>
+        )}
 
-          {/* ---- Tabs Overview ---- */}
-          {!isFullscreen && showTabsView && (
-            <TabsOverview onDismiss={() => setShowTabsView(false)} setAddressFocused={setAddressFocused} />
-          )}
-
-          {/* ---- Unified Sheet System ---- */}
-          <SheetRouter
-            sheet={sheet}
-            activeTab={activeTab}
-            domainForUrl={domainForUrl}
-            homepageUrl={homepageUrl}
-            updateActiveTab={updateActiveTab}
-            setAddressText={setAddressText}
-            clearHistory={clearHistory}
-            history={history}
-            removeHistoryItem={removeHistoryItem}
-            handlePermissionChange={handlePermissionChange}
-            addBookmark={addBookmark}
-          />
-
-          {/* ---- Permission Modal ---- */}
-          {pendingPermission && pendingDomain && (
-            <PermissionModal
-              key={pendingPermission}
-              visible={permissionModalVisible}
-              domain={pendingDomain}
-              permission={pendingPermission}
-              onDecision={onDecision}
+        {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
+        {menuPopoverOpen && (
+          <Animated.View
+            style={[
+              { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
+              animatedMenuPopoverStyle
+            ]}
+          >
+            <MenuPopover
+              isNewTab={isNewTab}
+              canShare={!isNewTab}
+              bottomOffset={insets.bottom}
+              onDismiss={() => setMenuPopoverOpen(false)}
+              onShare={shareCurrent}
+              onAddBookmark={() => {
+                if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
+                  addBookmark(activeTab.title || t('untitled'), activeTab.url)
+                }
+              }}
+              onBookmarks={() => sheet.push('browser-menu')}
+              onTabs={() => setShowTabsView(true)}
+              onNewTab={() => {
+                skipHomepageOnce.current = true
+                tabStore.newTab()
+                setShowTabsView(false)
+              }}
+              onSettings={() => sheet.push('settings')}
+              onEnableWeb3={() => router.push('/auth/mnemonic')}
             />
-          )}
-        </View>
-      </KeyboardAvoidingView>
-    </GestureHandlerRootView>
+          </Animated.View>
+        )}
+
+        {/* ---- Tabs Overview ---- */}
+        {!isFullscreen && showTabsView && (
+          <TabsOverview onDismiss={() => setShowTabsView(false)} setAddressFocused={setAddressFocused} />
+        )}
+
+        {/* ---- Unified Sheet System ---- */}
+        <SheetRouter
+          sheet={sheet}
+          activeTab={activeTab}
+          domainForUrl={domainForUrl}
+          homepageUrl={homepageUrl}
+          updateActiveTab={updateActiveTab}
+          setAddressText={setAddressText}
+          history={history}
+          clearHistory={clearHistory}
+          removeHistoryItem={removeHistoryItem}
+          handlePermissionChange={handlePermissionChange}
+          addBookmark={addBookmark}
+        />
+
+        {/* ---- Permission Modal ---- */}
+        {pendingPermission && pendingDomain && (
+          <PermissionModal
+            key={pendingPermission}
+            visible={permissionModalVisible}
+            domain={pendingDomain}
+            permission={pendingPermission}
+            onDecision={onDecision}
+          />
+        )}
+      </View>
+    </KeyboardAvoidingView>
   )
 }
 

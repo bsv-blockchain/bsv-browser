@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useCallback } from 'react'
 import { View } from 'react-native'
 import { useTranslation } from 'react-i18next'
 
@@ -9,6 +9,8 @@ import { spacing } from '@/context/theme/tokens'
 import type { SheetContextType } from '@/context/SheetContext'
 
 import { BrowserPage } from '@/components/browser/BrowserPage'
+import { HistoryList } from '@/components/browser/HistoryList'
+import { BookmarkList } from '@/components/browser/BookmarkList'
 import SettingsScreen from '@/app/settings'
 import WalletConfigScreen from '@/app/wallet-config'
 import Sheet from '@/components/ui/Sheet'
@@ -20,8 +22,8 @@ type Props = {
   homepageUrl: string
   updateActiveTab: (patch: Partial<Tab>) => void
   setAddressText: (v: string) => void
-  clearHistory: () => Promise<void>
   history: HistoryEntry[]
+  clearHistory: () => Promise<void>
   removeHistoryItem: (url: string) => Promise<void>
   handlePermissionChange: (permission: PermissionType, state: PermissionState) => Promise<void>
   addBookmark: (title: string, url: string) => void
@@ -34,8 +36,8 @@ export function SheetRouter({
   homepageUrl,
   updateActiveTab,
   setAddressText,
-  clearHistory,
   history,
+  clearHistory,
   removeHistoryItem,
   handlePermissionChange,
   addBookmark
@@ -45,16 +47,21 @@ export function SheetRouter({
 
   const getSheetTitle = (): string | undefined => {
     switch (sheet.route) {
-      case 'bookmarks':
-        return t('browser')
-      case 'settings':
-        return t('wallet')
       case 'wallet-config':
         return t('settings')
       default:
         return undefined
     }
   }
+
+  // Stable callbacks so memoised child components don't re-render needlessly.
+  const navigateAndClose = useCallback(
+    (url: string) => {
+      updateActiveTab({ url })
+      sheet.close()
+    },
+    [updateActiveTab, sheet]
+  )
 
   const canGoBack = sheet.history.length > 0
 
@@ -66,17 +73,25 @@ export function SheetRouter({
       onBack={canGoBack ? sheet.pop : undefined}
       heightPercent={0.85}
     >
+      {sheet.route === 'browser-menu' && (
+        <View style={{ flex: 1, padding: spacing.lg }}>
+          <BrowserPage inSheet onNavigate={navigateAndClose} history={history} removeHistoryItem={removeHistoryItem} />
+        </View>
+      )}
+
       {sheet.route === 'bookmarks' && (
         <View style={{ flex: 1, padding: spacing.lg }}>
-          <BrowserPage
-            inSheet
-            onNavigate={url => {
-              updateActiveTab({ url })
-              sheet.close()
-            }}
-            clearHistory={clearHistory}
+          <BookmarkList onSelect={navigateAndClose} />
+        </View>
+      )}
+
+      {sheet.route === 'history' && (
+        <View style={{ flex: 1, padding: spacing.lg }}>
+          <HistoryList
             history={history}
-            removeHistoryItem={removeHistoryItem}
+            onSelect={navigateAndClose}
+            onDelete={removeHistoryItem}
+            onClear={clearHistory}
           />
         </View>
       )}

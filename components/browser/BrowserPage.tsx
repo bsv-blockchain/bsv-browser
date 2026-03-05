@@ -12,6 +12,7 @@ import bookmarkStore from '@/stores/BookmarkStore'
 import { isValidUrl } from '@/utils/generalHelpers'
 import { HistoryList } from '@/components/browser/HistoryList'
 import { HistoryEntry } from '@/shared/types/browser'
+import { useSheet } from '@/context/SheetContext'
 import packageJson from '@/package.json'
 
 const kNEW_TAB_URL = 'about:blank'
@@ -20,7 +21,6 @@ interface BrowserPageProps {
   onNavigate: (url: string) => void
   history: HistoryEntry[]
   removeHistoryItem: (url: string) => void
-  clearHistory: () => void
   inSheet?: boolean
 }
 
@@ -30,17 +30,12 @@ interface BookmarkItem {
   appIconImageUrl?: string
 }
 
-const BrowserPageBase: React.FC<BrowserPageProps> = ({
-  onNavigate,
-  inSheet = false,
-  history,
-  removeHistoryItem,
-  clearHistory
-}) => {
+const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = false, history, removeHistoryItem }) => {
   const { colors } = useTheme()
   const { t } = useTranslation()
   const insets = useSafeAreaInsets()
   const { getItem, setItem } = useLocalStorage()
+  const sheet = useSheet()
 
   const [homepageUrl, setHomepageUrl] = useState(DEFAULT_HOMEPAGE_URL)
   const [editingHomepage, setEditingHomepage] = useState(false)
@@ -264,12 +259,24 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({
         </View>
       </View>
 
-      {/* Bookmarks and History - 50/50 split */}
+      {/* Bookmarks and History */}
       <View style={styles.bottomHalf}>
-        {/* Bookmarks - 50% */}
+        {/* Bookmarks */}
         {bookmarks.length > 0 && (
           <View style={styles.halfSection}>
-            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('bookmarks') || 'Bookmarks'}</Text>
+            <TouchableOpacity
+              style={styles.sectionHeaderRow}
+              onPress={() => sheet.push('bookmarks')}
+              activeOpacity={0.6}
+            >
+              <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                {t('bookmarks') || 'Bookmarks'}
+              </Text>
+              <View style={styles.seeAllRow}>
+                <Text style={[styles.seeAllText, { color: colors.textTertiary }]}>See All</Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+              </View>
+            </TouchableOpacity>
             <FlatList
               style={{ marginTop: spacing.md }}
               data={bookmarks}
@@ -283,9 +290,18 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({
           </View>
         )}
 
-        {/* History - 50% */}
+        {/* History */}
         {history && history.length > 0 && (
-          <HistoryList history={history} onSelect={onNavigate} onDelete={removeHistoryItem} onClear={clearHistory} />
+          <View style={styles.halfSection}>
+            <TouchableOpacity style={styles.sectionHeaderRow} onPress={() => sheet.push('history')} activeOpacity={0.6}>
+              <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('history')}</Text>
+              <View style={styles.seeAllRow}>
+                <Text style={[styles.seeAllText, { color: colors.textTertiary }]}>See All</Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+              </View>
+            </TouchableOpacity>
+            <HistoryList history={history} onSelect={onNavigate} onDelete={removeHistoryItem} hideTitle />
+          </View>
         )}
       </View>
     </View>
@@ -317,6 +333,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.xs
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.xs
+  },
+  seeAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2
+  },
+  seeAllText: {
+    ...typography.caption1
   },
   sectionTitle: {
     ...typography.footnote,
