@@ -10,6 +10,7 @@ export type SheetRoute =
   | 'history'
   | 'menu'
   | 'settings'
+  | 'wallet-config'
   | 'identity'
   | 'trust'
   | 'permissions'
@@ -32,7 +33,7 @@ const SheetContext = createContext<SheetContextType>({
   push: () => {},
   pop: () => {},
   close: () => {},
-  isOpen: false,
+  isOpen: false
 })
 
 export const useSheet = () => useContext(SheetContext)
@@ -77,7 +78,7 @@ export const SheetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         push,
         pop,
         close,
-        isOpen: route !== 'closed',
+        isOpen: route !== 'closed'
       }}
     >
       {children}

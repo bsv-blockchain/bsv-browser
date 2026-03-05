@@ -136,6 +136,9 @@ const resources = {
       identity: 'Identity',
       settings: 'Settings',
       wallet: 'Wallet',
+      activity: 'Activity',
+      configuration: 'Configuration',
+      data_and_security: 'Data & Security',
       permissions: 'Permissions',
       trust_network: 'Trust Network',
 
@@ -149,8 +152,8 @@ const resources = {
       testnet: 'Testnet',
       teratest: 'Teratest',
       identity_key: 'Identity Key',
-      legacy_payments: 'Legacy Payments',
-      identity_payments: 'Identity Payments',
+      legacy_bridge: 'Legacy Bridge',
+      payments: 'Payments',
       transactions: 'Transactions',
 
       // Transactions screen
@@ -249,7 +252,7 @@ const resources = {
       // Amount input
       send_max: 'Send Max',
       entire_wallet_balance: 'Entire wallet balance',
-      export_data: 'Export Data',
+      export_wallet_data: 'Export Wallet Data',
 
       // Backup shares
       or: 'or',
@@ -306,6 +309,9 @@ const resources = {
       identity: '身份',
       settings: '设置',
       wallet: '钱包',
+      activity: '活动',
+      configuration: '配置',
+      data_and_security: '数据与安全',
       permissions: '权限',
       trust_network: '信任网络',
 
@@ -318,8 +324,8 @@ const resources = {
       testnet: '测试网',
       teratest: 'Teratest',
       identity_key: '身份密钥',
-      legacy_payments: '传统支付',
-      identity_payments: '身份支付',
+      legacy_bridge: '传统桥接',
+      payments: '支付',
       transactions: '交易',
 
       no_transactions: '暂无交易',
@@ -409,7 +415,7 @@ const resources = {
 
       send_max: '发送最大值',
       entire_wallet_balance: '全部钱包余额',
-      export_data: '导出数据',
+      export_wallet_data: '导出钱包数据',
       or: '或',
       print_recovery_shares: '打印恢复份额',
       scan_backup_shares: '扫描备份份额',
@@ -464,6 +470,9 @@ const resources = {
       identity: 'पहचान',
       settings: 'सेटिंग्स',
       wallet: 'वॉलेट',
+      activity: 'गतिविधि',
+      configuration: 'कॉन्फ़िगरेशन',
+      data_and_security: 'डेटा और सुरक्षा',
       permissions: 'अनुमतियां',
       trust_network: 'विश्वास नेटवर्क',
 
@@ -476,8 +485,8 @@ const resources = {
       testnet: 'टेस्टनेट',
       teratest: 'Teratest',
       identity_key: 'पहचान कुंजी',
-      legacy_payments: 'लीगेसी भुगतान',
-      identity_payments: 'पहचान भुगतान',
+      legacy_bridge: 'लीगेसी ब्रिज',
+      payments: 'भुगतान',
       transactions: 'लेनदेन',
 
       no_transactions: 'अभी तक कोई लेनदेन नहीं',
@@ -569,7 +578,7 @@ const resources = {
 
       send_max: 'अधिकतम भेजें',
       entire_wallet_balance: 'पूरी वॉलेट शेष राशि',
-      export_data: 'डेटा निर्यात करें',
+      export_wallet_data: 'वॉलेट डेटा निर्यात करें',
       or: 'या',
       print_recovery_shares: 'रिकवरी शेयर प्रिंट करें',
       scan_backup_shares: 'बैकअप शेयर स्कैन करें',
@@ -624,6 +633,9 @@ const resources = {
       identity: 'Identidad',
       settings: 'Configuración',
       wallet: 'Billetera',
+      activity: 'Actividad',
+      configuration: 'Configuración',
+      data_and_security: 'Datos y seguridad',
       permissions: 'Permisos',
       trust_network: 'Red de Confianza',
 
@@ -636,8 +648,8 @@ const resources = {
       testnet: 'Red de prueba',
       teratest: 'Teratest',
       identity_key: 'Clave de identidad',
-      legacy_payments: 'Pagos heredados',
-      identity_payments: 'Pagos de Identidad',
+      legacy_bridge: 'Puente heredado',
+      payments: 'Pagos',
       transactions: 'Transacciones',
 
       no_transactions: 'No hay transacciones aún',
@@ -730,7 +742,7 @@ const resources = {
 
       send_max: 'Enviar máximo',
       entire_wallet_balance: 'Todo el saldo de la billetera',
-      export_data: 'Exportar datos',
+      export_wallet_data: 'Exportar datos de cartera',
       or: 'o',
       print_recovery_shares: 'Imprimir Partes de Recuperación',
       scan_backup_shares: 'Escanear Partes de Respaldo',
@@ -786,6 +798,9 @@ const resources = {
       identity: 'Identité',
       settings: 'Paramètres',
       wallet: 'Portefeuille',
+      activity: 'Activité',
+      configuration: 'Configuration',
+      data_and_security: 'Données et sécurité',
       permissions: 'Autorisations',
       trust_network: 'Réseau de confiance',
 
@@ -798,8 +813,8 @@ const resources = {
       testnet: 'Réseau de test',
       teratest: 'Teratest',
       identity_key: "Clé d'identité",
-      legacy_payments: 'Paiements hérités',
-      identity_payments: "Paiements d'identité",
+      legacy_bridge: 'Pont hérité',
+      payments: 'Paiements',
       transactions: 'Transactions',
 
       no_transactions: 'Aucune transaction pour le moment',
@@ -892,7 +907,7 @@ const resources = {
 
       send_max: 'Envoyer le maximum',
       entire_wallet_balance: 'Solde total du portefeuille',
-      export_data: 'Exporter les données',
+      export_wallet_data: 'Exporter les données du portefeuille',
       or: 'ou',
       print_recovery_shares: 'Imprimer les Parts de Récupération',
       scan_backup_shares: 'Scanner les Parts de Sauvegarde',
@@ -948,6 +963,9 @@ const resources = {
       identity: 'الهوية',
       settings: 'الإعدادات',
       wallet: 'المحفظة',
+      activity: 'النشاط',
+      configuration: 'التكوين',
+      data_and_security: 'البيانات والأمان',
       permissions: 'الأذونات',
       trust_network: 'شبكة الثقة',
 
@@ -960,8 +978,8 @@ const resources = {
       testnet: 'شبكة الاختبار',
       teratest: 'Teratest',
       identity_key: 'مفتاح الهوية',
-      legacy_payments: 'المدفوعات القديمة',
-      identity_payments: 'مدفوعات الهوية',
+      legacy_bridge: 'الجسر القديم',
+      payments: 'المدفوعات',
       transactions: 'المعاملات',
 
       no_transactions: 'لا توجد معاملات بعد',
@@ -1051,7 +1069,7 @@ const resources = {
 
       send_max: 'إرسال الحد الأقصى',
       entire_wallet_balance: 'رصيد المحفظة بالكامل',
-      export_data: 'تصدير البيانات',
+      export_wallet_data: 'تصدير بيانات المحفظة',
       or: 'أو',
       print_recovery_shares: 'طباعة حصص الاسترداد',
       scan_backup_shares: 'مسح حصص النسخ الاحتياطي',
@@ -1106,6 +1124,9 @@ const resources = {
       identity: 'Identidade',
       settings: 'Configurações',
       wallet: 'Carteira',
+      activity: 'Atividade',
+      configuration: 'Configuração',
+      data_and_security: 'Dados e segurança',
       permissions: 'Permissões',
       trust_network: 'Rede de Confiança',
 
@@ -1118,8 +1139,8 @@ const resources = {
       testnet: 'Rede de teste',
       teratest: 'Teratest',
       identity_key: 'Chave de identidade',
-      legacy_payments: 'Pagamentos legados',
-      identity_payments: 'Pagamentos de Identidade',
+      legacy_bridge: 'Ponte herdada',
+      payments: 'Pagamentos',
       transactions: 'Transações',
 
       no_transactions: 'Nenhuma transação ainda',
@@ -1212,7 +1233,7 @@ const resources = {
 
       send_max: 'Enviar máximo',
       entire_wallet_balance: 'Saldo total da carteira',
-      export_data: 'Exportar dados',
+      export_wallet_data: 'Exportar dados da carteira',
       or: 'ou',
       print_recovery_shares: 'Imprimir Partes de Recuperação',
       scan_backup_shares: 'Escanear Partes de Backup',
@@ -1268,6 +1289,9 @@ const resources = {
       identity: 'পরিচয়',
       settings: 'সেটিংস',
       wallet: 'ওয়ালেট',
+      activity: 'কার্যকলাপ',
+      configuration: 'কনফিগারেশন',
+      data_and_security: 'ডেটা ও নিরাপত্তা',
       permissions: 'অনুমতি',
       trust_network: 'বিশ্বাস নেটওয়ার্ক',
 
@@ -1280,8 +1304,8 @@ const resources = {
       testnet: 'টেস্টনেট',
       teratest: 'Teratest',
       identity_key: 'পরিচয় কী',
-      legacy_payments: 'লিগেসি পেমেন্ট',
-      identity_payments: 'পরিচয় পেমেন্ট',
+      legacy_bridge: 'লিগেসি ব্রিজ',
+      payments: 'পেমেন্ট',
       transactions: 'লেনদেন',
 
       no_transactions: 'এখনো কোনো লেনদেন নেই',
@@ -1373,7 +1397,7 @@ const resources = {
 
       send_max: 'সর্বোচ্চ পাঠান',
       entire_wallet_balance: 'সম্পূর্ণ ওয়ালেট ব্যালেন্স',
-      export_data: 'ডেটা রপ্তানি করুন',
+      export_wallet_data: 'ওয়ালেট ডেটা রপ্তানি করুন',
       or: 'অথবা',
       print_recovery_shares: 'রিকভারি শেয়ার প্রিন্ট করুন',
       scan_backup_shares: 'ব্যাকআপ শেয়ার স্ক্যান করুন',
@@ -1428,6 +1452,9 @@ const resources = {
       identity: 'Идентичность',
       settings: 'Настройки',
       wallet: 'Кошелёк',
+      activity: 'Активность',
+      configuration: 'Конфигурация',
+      data_and_security: 'Данные и безопасность',
       permissions: 'Разрешения',
       trust_network: 'Сеть доверия',
 
@@ -1440,8 +1467,8 @@ const resources = {
       testnet: 'Тестовая сеть',
       teratest: 'Teratest',
       identity_key: 'Ключ идентификатора',
-      legacy_payments: 'Устаревшие платежи',
-      identity_payments: 'Платежи по идентификатору',
+      legacy_bridge: 'Устаревший мост',
+      payments: 'Платежи',
       transactions: 'Транзакции',
 
       no_transactions: 'Транзакций пока нет',
@@ -1534,7 +1561,7 @@ const resources = {
 
       send_max: 'Отправить максимум',
       entire_wallet_balance: 'Весь баланс кошелька',
-      export_data: 'Экспортировать данные',
+      export_wallet_data: 'Экспортировать данные кошелька',
       or: 'или',
       print_recovery_shares: 'Распечатать доли восстановления',
       scan_backup_shares: 'Сканировать резервные доли',
@@ -1590,6 +1617,9 @@ const resources = {
       identity: 'Identitas',
       settings: 'Pengaturan',
       wallet: 'Dompet',
+      activity: 'Aktivitas',
+      configuration: 'Konfigurasi',
+      data_and_security: 'Data & Keamanan',
       permissions: 'Izin',
       trust_network: 'Jaringan Kepercayaan',
 
@@ -1602,8 +1632,8 @@ const resources = {
       testnet: 'Testnet',
       teratest: 'Teratest',
       identity_key: 'Kunci Identitas',
-      legacy_payments: 'Pembayaran Lama',
-      identity_payments: 'Pembayaran Identitas',
+      legacy_bridge: 'Jembatan Warisan',
+      payments: 'Pembayaran',
       transactions: 'Transaksi',
 
       no_transactions: 'Belum ada transaksi',
@@ -1695,7 +1725,7 @@ const resources = {
 
       send_max: 'Kirim Maksimal',
       entire_wallet_balance: 'Seluruh saldo dompet',
-      export_data: 'Ekspor Data',
+      export_wallet_data: 'Ekspor Data Dompet',
       or: 'atau',
       print_recovery_shares: 'Cetak Bagian Pemulihan',
       scan_backup_shares: 'Pindai Bagian Cadangan',

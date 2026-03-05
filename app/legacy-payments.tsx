@@ -1,20 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-  StyleSheet,
-} from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { toast } from 'react-toastify'
 import QRCode from 'react-native-qrcode-svg'
-import { PublicKey, P2PKH, Beef, Utils, PrivateKey, WalletProtocol, InternalizeActionArgs, InternalizeOutput } from '@bsv/sdk'
+import {
+  PublicKey,
+  P2PKH,
+  Beef,
+  Utils,
+  PrivateKey,
+  WalletProtocol,
+  InternalizeActionArgs,
+  InternalizeOutput
+} from '@bsv/sdk'
 
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -51,14 +52,12 @@ export default function LegacyPaymentsScreen() {
   const [copied, setCopied] = useState(false)
   const [infoExpanded, setInfoExpanded] = useState(false)
   const [daysOffset, setDaysOffset] = useState(0)
-  const [derivationPrefix, setDerivationPrefix] = useState(
-    Utils.toBase64(Utils.toArray(getCurrentDate(0), 'utf8'))
-  )
+  const [derivationPrefix, setDerivationPrefix] = useState(Utils.toBase64(Utils.toArray(getCurrentDate(0), 'utf8')))
   const derivationSuffix = Utils.toBase64(Utils.toArray('legacy', 'utf8'))
   const wocConfig = {
-    main:     { apiBase: 'https://api.whatsonchain.com', segment: 'main', network: 'mainnet' as const },
-    test:     { apiBase: 'https://api.whatsonchain.com', segment: 'test', network: 'testnet' as const },
-    teratest: { apiBase: 'https://api.woc-ttn.bsvb.tech', segment: 'test', network: 'testnet' as const },
+    main: { apiBase: 'https://api.whatsonchain.com', segment: 'main', network: 'mainnet' as const },
+    test: { apiBase: 'https://api.whatsonchain.com', segment: 'test', network: 'testnet' as const },
+    teratest: { apiBase: 'https://api.woc-ttn.bsvb.tech', segment: 'test', network: 'testnet' as const }
   }[selectedNetwork]
   const network = wocConfig.network
 
@@ -71,38 +70,48 @@ export default function LegacyPaymentsScreen() {
   const [importResult, setImportResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   // Derive payment address from wallet public key
-  const getPaymentAddress = useCallback(async (prefix: string): Promise<string> => {
-    if (!wallet) throw new Error('Wallet not initialized')
-    const { publicKey } = await wallet.getPublicKey({
-      protocolID: brc29ProtocolID,
-      keyID: prefix + ' ' + derivationSuffix,
-      counterparty: 'anyone',
-      forSelf: true,
-    }, adminOriginator)
-    return PublicKey.fromString(publicKey).toAddress(network)
-  }, [wallet, adminOriginator, derivationSuffix, network])
+  const getPaymentAddress = useCallback(
+    async (prefix: string): Promise<string> => {
+      if (!wallet) throw new Error('Wallet not initialized')
+      const { publicKey } = await wallet.getPublicKey(
+        {
+          protocolID: brc29ProtocolID,
+          keyID: prefix + ' ' + derivationSuffix,
+          counterparty: 'anyone',
+          forSelf: true
+        },
+        adminOriginator
+      )
+      return PublicKey.fromString(publicKey).toAddress(network)
+    },
+    [wallet, adminOriginator, derivationSuffix, network]
+  )
 
   // Fetch UTXOs for address from WhatsOnChain
-  const getUtxosForAddress = useCallback(async (address: string): Promise<Utxo[]> => {
-    const response = await fetch(
-      `${wocConfig.apiBase}/v1/bsv/${wocConfig.segment}/address/${address}/unspent/all`
-    )
-    const rp = await response.json()
-    return rp.result
-      .filter((r: any) => r.isSpentInMempoolTx === false)
-      .map((r: any) => ({ txid: r.tx_hash, vout: r.tx_pos, satoshis: r.value }))
-  }, [wocConfig])
+  const getUtxosForAddress = useCallback(
+    async (address: string): Promise<Utxo[]> => {
+      const response = await fetch(`${wocConfig.apiBase}/v1/bsv/${wocConfig.segment}/address/${address}/unspent/all`)
+      const rp = await response.json()
+      return rp.result
+        .filter((r: any) => r.isSpentInMempoolTx === false)
+        .map((r: any) => ({ txid: r.tx_hash, vout: r.tx_pos, satoshis: r.value }))
+    },
+    [wocConfig]
+  )
 
   // Get internalized UTXOs from transaction history
   const getInternalizedUtxos = useCallback(async (): Promise<Set<string>> => {
     if (!wallet) return new Set()
     try {
-      const response = await wallet.listActions({
-        labels: ['bsvbrowser', 'inbound'],
-        labelQueryMode: 'all',
-        includeInputs: true,
-        limit: 1000,
-      }, adminOriginator)
+      const response = await wallet.listActions(
+        {
+          labels: ['bsvbrowser', 'inbound'],
+          labelQueryMode: 'all',
+          includeInputs: true,
+          limit: 1000
+        },
+        adminOriginator
+      )
       const set = new Set<string>()
       for (const action of response.actions) {
         if (action.inputs) {
@@ -119,32 +128,38 @@ export default function LegacyPaymentsScreen() {
   }, [wallet, adminOriginator])
 
   // Fetch balance for address
-  const fetchBalance = useCallback(async (address: string): Promise<number> => {
-    const allUtxos = await getUtxosForAddress(address)
-    const internalizedUtxos = await getInternalizedUtxos()
-    const available = allUtxos.filter(utxo => {
-      const outpoint = `${utxo.txid}.${utxo.vout}`
-      return !internalizedUtxos.has(outpoint)
-    })
-    return available.reduce((acc, r) => acc + r.satoshis, 0) / 100000000
-  }, [getUtxosForAddress, getInternalizedUtxos])
+  const fetchBalance = useCallback(
+    async (address: string): Promise<number> => {
+      const allUtxos = await getUtxosForAddress(address)
+      const internalizedUtxos = await getInternalizedUtxos()
+      const available = allUtxos.filter(utxo => {
+        const outpoint = `${utxo.txid}.${utxo.vout}`
+        return !internalizedUtxos.has(outpoint)
+      })
+      return available.reduce((acc, r) => acc + r.satoshis, 0) / 100000000
+    },
+    [getUtxosForAddress, getInternalizedUtxos]
+  )
 
   // Show address for a given day offset
-  const handleViewAddress = useCallback(async (offset: number = 0) => {
-    setIsLoadingAddress(true)
-    try {
-      const prefix = Utils.toBase64(Utils.toArray(getCurrentDate(offset), 'utf8'))
-      const address = await getPaymentAddress(prefix)
-      setDaysOffset(offset)
-      setDerivationPrefix(prefix)
-      setPaymentAddress(address)
-      setBalance(-1)
-    } catch (error: any) {
-      toast.error(`Error generating address: ${error.message || 'unknown error'}`)
-    } finally {
-      setIsLoadingAddress(false)
-    }
-  }, [getPaymentAddress])
+  const handleViewAddress = useCallback(
+    async (offset: number = 0) => {
+      setIsLoadingAddress(true)
+      try {
+        const prefix = Utils.toBase64(Utils.toArray(getCurrentDate(offset), 'utf8'))
+        const address = await getPaymentAddress(prefix)
+        setDaysOffset(offset)
+        setDerivationPrefix(prefix)
+        setPaymentAddress(address)
+        setBalance(-1)
+      } catch (error: any) {
+        toast.error(`Error generating address: ${error.message || 'unknown error'}`)
+      } finally {
+        setIsLoadingAddress(false)
+      }
+    },
+    [getPaymentAddress]
+  )
 
   // Auto-show today's address on mount
   useEffect(() => {
@@ -223,37 +238,37 @@ export default function LegacyPaymentsScreen() {
       const beef = new Beef()
       for (const utxo of utxos) {
         if (!beef.findTxid(utxo.txid)) {
-          const resp = await fetch(
-            `${wocConfig.apiBase}/v1/bsv/${wocConfig.segment}/tx/${utxo.txid}/beef`
-          )
+          const resp = await fetch(`${wocConfig.apiBase}/v1/bsv/${wocConfig.segment}/tx/${utxo.txid}/beef`)
           const beefHex = await resp.text()
           beef.mergeBeef(Utils.toArray(beefHex, 'hex'))
         }
       }
 
-      const txs = beef.txs.map(beefTx => {
-        const tx = beef.findAtomicTransaction(beefTx.txid)
-        const relevantUtxos = utxos.filter(o => o.txid === beefTx.txid)
-        if (relevantUtxos.length === 0) return null
+      const txs = beef.txs
+        .map(beefTx => {
+          const tx = beef.findAtomicTransaction(beefTx.txid)
+          const relevantUtxos = utxos.filter(o => o.txid === beefTx.txid)
+          if (relevantUtxos.length === 0) return null
 
-        const outputs: InternalizeOutput[] = relevantUtxos.map(o => ({
-          outputIndex: o.vout,
-          protocol: 'wallet payment' as const,
-          paymentRemittance: {
-            senderIdentityKey: new PrivateKey(1).toPublicKey().toString(),
-            derivationPrefix,
-            derivationSuffix
+          const outputs: InternalizeOutput[] = relevantUtxos.map(o => ({
+            outputIndex: o.vout,
+            protocol: 'wallet payment' as const,
+            paymentRemittance: {
+              senderIdentityKey: new PrivateKey(1).toPublicKey().toString(),
+              derivationPrefix,
+              derivationSuffix
+            }
+          }))
+
+          const args: InternalizeActionArgs = {
+            tx: tx!.toAtomicBEEF(),
+            description: 'Legacy Bridge Payment',
+            outputs,
+            labels: ['legacy', 'inbound', 'bsvbrowser']
           }
-        }))
-
-        const args: InternalizeActionArgs = {
-          tx: tx!.toAtomicBEEF(),
-          description: 'Legacy Bridge Payment',
-          outputs,
-          labels: ['legacy', 'inbound', 'bsvbrowser'],
-        }
-        return args
-      }).filter(Boolean) as InternalizeActionArgs[]
+          return args
+        })
+        .filter(Boolean) as InternalizeActionArgs[]
 
       let successCount = 0
       let failureCount = 0
@@ -298,7 +313,18 @@ export default function LegacyPaymentsScreen() {
     } finally {
       setIsImporting(false)
     }
-  }, [paymentAddress, wallet, balance, getUtxosForAddress, getInternalizedUtxos, wocConfig, derivationPrefix, derivationSuffix, adminOriginator, fetchBalance])
+  }, [
+    paymentAddress,
+    wallet,
+    balance,
+    getUtxosForAddress,
+    getInternalizedUtxos,
+    wocConfig,
+    derivationPrefix,
+    derivationSuffix,
+    adminOriginator,
+    fetchBalance
+  ])
 
   // Send BSV to address
   const handleSendBSV = useCallback(async () => {
@@ -318,15 +344,20 @@ export default function LegacyPaymentsScreen() {
     setIsSending(true)
     try {
       const lockingScript = new P2PKH().lock(recipientAddress).toHex()
-      await wallet.createAction({
-        description: 'Send BSV to address',
-        outputs: [{
-          lockingScript,
-          satoshis: Math.round(amt * 100000000),
-          outputDescription: 'BSV for recipient address',
-        }],
-        labels: ['legacy', 'outbound'],
-      }, adminOriginator)
+      await wallet.createAction(
+        {
+          description: 'Send BSV to address',
+          outputs: [
+            {
+              lockingScript,
+              satoshis: Math.round(amt * 100000000),
+              outputDescription: 'BSV for recipient address'
+            }
+          ],
+          labels: ['legacy', 'outbound']
+        },
+        adminOriginator
+      )
       toast.success(`Sent ${amt} BSV to ${recipientAddress}`)
       setRecipientAddress('')
       setSendAmount('')
@@ -338,19 +369,20 @@ export default function LegacyPaymentsScreen() {
   }, [wallet, recipientAddress, sendAmount, network, adminOriginator])
 
   // Date navigation
-  const handleDateChange = useCallback((offset: number) => {
-    setBalance(-1)
-    handleViewAddress(offset)
-  }, [handleViewAddress])
+  const handleDateChange = useCallback(
+    (offset: number) => {
+      setBalance(-1)
+      handleViewAddress(offset)
+    },
+    [handleViewAddress]
+  )
 
   const renderAddressSection = () => {
     if (isLoadingAddress) {
       return (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-            {t('generating_address')}
-          </Text>
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>{t('generating_address')}</Text>
         </View>
       )
     }
@@ -358,9 +390,7 @@ export default function LegacyPaymentsScreen() {
     if (!paymentAddress) {
       return (
         <View style={styles.centered}>
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-            {t('unable_to_generate_address')}
-          </Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{t('unable_to_generate_address')}</Text>
         </View>
       )
     }
@@ -370,12 +400,7 @@ export default function LegacyPaymentsScreen() {
         {/* QR Code */}
         <View style={styles.qrContainer}>
           <View style={[styles.qrWrapper, { backgroundColor: '#FFFFFF' }]}>
-            <QRCode
-              value={paymentAddress}
-              size={200}
-              color="#000000"
-              backgroundColor="#FFFFFF"
-            />
+            <QRCode value={paymentAddress} size={200} color="#000000" backgroundColor="#FFFFFF" />
           </View>
         </View>
 
@@ -401,9 +426,7 @@ export default function LegacyPaymentsScreen() {
 
         {/* Balance */}
         <View style={styles.balanceSection}>
-          <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>
-            {t('available_balance')}
-          </Text>
+          <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>{t('available_balance')}</Text>
           <Text style={[styles.balanceValue, { color: colors.textPrimary }]}>
             {balance === -1 ? t('not_checked') : `${balance} BSV`}
           </Text>
@@ -411,28 +434,26 @@ export default function LegacyPaymentsScreen() {
 
         {/* Import result banner */}
         {importResult && (
-          <View style={[
-            styles.resultBanner,
-            {
-              backgroundColor: importResult.type === 'success' ? colors.success + '15' : colors.error + '15',
-              borderColor: importResult.type === 'success' ? colors.success : colors.error,
-            }
-          ]}>
+          <View
+            style={[
+              styles.resultBanner,
+              {
+                backgroundColor: importResult.type === 'success' ? colors.success + '15' : colors.error + '15',
+                borderColor: importResult.type === 'success' ? colors.success : colors.error
+              }
+            ]}
+          >
             <Ionicons
               name={importResult.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
               size={20}
               color={importResult.type === 'success' ? colors.success : colors.error}
             />
-            <Text style={[
-              styles.resultText,
-              { color: importResult.type === 'success' ? colors.success : colors.error }
-            ]}>
+            <Text
+              style={[styles.resultText, { color: importResult.type === 'success' ? colors.success : colors.error }]}
+            >
               {importResult.message}
             </Text>
-            <TouchableOpacity
-              onPress={() => setImportResult(null)}
-              style={styles.resultDismiss}
-            >
+            <TouchableOpacity onPress={() => setImportResult(null)} style={styles.resultDismiss}>
               <Ionicons
                 name="close"
                 size={18}
@@ -446,9 +467,7 @@ export default function LegacyPaymentsScreen() {
         {isImporting && (
           <View style={styles.pollingRow}>
             <ActivityIndicator size="small" color={colors.accent} />
-            <Text style={[styles.pollingText, { color: colors.textSecondary }]}>
-              {t('import_funds')}…
-            </Text>
+            <Text style={[styles.pollingText, { color: colors.textSecondary }]}>{t('import_funds')}…</Text>
           </View>
         )}
       </>
@@ -462,14 +481,11 @@ export default function LegacyPaymentsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('legacy_payments')}</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('legacy_bridge')}</Text>
         <View style={styles.backButton} />
       </View>
 
-      <ScrollView
-        style={{ flex: 1, backgroundColor: colors.background }}
-        contentContainerStyle={styles.content}
-      >
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.content}>
         {/* Info banner */}
         <TouchableOpacity
           onPress={() => setInfoExpanded(v => !v)}
@@ -477,24 +493,15 @@ export default function LegacyPaymentsScreen() {
           activeOpacity={0.7}
         >
           <Ionicons name="information-circle" size={20} color={colors.info} style={{ marginRight: spacing.sm }} />
-          {infoExpanded && (
-            <Text style={[styles.infoText, { color: colors.info }]}>
-              {t('legacy_info')}
-            </Text>
-          )}
+          {infoExpanded && <Text style={[styles.infoText, { color: colors.info }]}>{t('legacy_info')}</Text>}
         </TouchableOpacity>
 
         {/* Date navigator */}
         <View style={styles.dateRow}>
-          <TouchableOpacity
-            onPress={() => handleDateChange(daysOffset + 1)}
-            style={styles.dateButton}
-          >
+          <TouchableOpacity onPress={() => handleDateChange(daysOffset + 1)} style={styles.dateButton}>
             <Ionicons name="chevron-back" size={22} color={colors.accent} />
           </TouchableOpacity>
-          <Text style={[styles.dateText, { color: colors.textPrimary }]}>
-            {getCurrentDate(daysOffset)}
-          </Text>
+          <Text style={[styles.dateText, { color: colors.textPrimary }]}>{getCurrentDate(daysOffset)}</Text>
           <TouchableOpacity
             onPress={() => handleDateChange(Math.max(0, daysOffset - 1))}
             style={styles.dateButton}
@@ -513,9 +520,7 @@ export default function LegacyPaymentsScreen() {
 
         {/* Send section */}
         <View style={[styles.sendDivider, { borderTopColor: colors.separator }]} />
-        <Text style={[styles.sendTitle, { color: colors.textPrimary }]}>
-          {t('send_bsv')}
-        </Text>
+        <Text style={[styles.sendTitle, { color: colors.textPrimary }]}>{t('send_bsv')}</Text>
 
         <View style={styles.fieldGroup}>
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('recipient_address')}</Text>
@@ -531,7 +536,7 @@ export default function LegacyPaymentsScreen() {
               {
                 color: colors.textPrimary,
                 backgroundColor: colors.backgroundSecondary,
-                borderColor: colors.separator,
+                borderColor: colors.separator
               }
             ]}
           />
@@ -548,24 +553,29 @@ export default function LegacyPaymentsScreen() {
           style={[
             styles.sendButton,
             {
-              backgroundColor: (recipientAddress && sendAmount) ? colors.accent : colors.backgroundSecondary,
-              opacity: (recipientAddress && sendAmount) ? 1 : 0.5,
+              backgroundColor: recipientAddress && sendAmount ? colors.accent : colors.backgroundSecondary,
+              opacity: recipientAddress && sendAmount ? 1 : 0.5
             }
           ]}
         >
           {isSending ? (
-            <ActivityIndicator size="small" color={(recipientAddress && sendAmount) ? colors.background : colors.textSecondary} />
+            <ActivityIndicator
+              size="small"
+              color={recipientAddress && sendAmount ? colors.background : colors.textSecondary}
+            />
           ) : (
             <>
               <Ionicons
                 name="send"
                 size={18}
-                color={(recipientAddress && sendAmount) ? colors.background : colors.textSecondary}
+                color={recipientAddress && sendAmount ? colors.background : colors.textSecondary}
               />
-              <Text style={[
-                styles.sendButtonText,
-                { color: (recipientAddress && sendAmount) ? colors.background : colors.textSecondary }
-              ]}>
+              <Text
+                style={[
+                  styles.sendButtonText,
+                  { color: recipientAddress && sendAmount ? colors.background : colors.textSecondary }
+                ]}
+              >
                 {t('send_bsv')}
               </Text>
             </>
@@ -580,7 +590,7 @@ export default function LegacyPaymentsScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex: 1
   },
   header: {
     flexDirection: 'row',
@@ -588,136 +598,136 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth
   },
   backButton: {
     width: 44,
     height: 44,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   headerTitle: {
     ...typography.headline,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   content: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
+    paddingTop: spacing.lg
   },
   infoBanner: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'flex-start'
   },
   infoText: {
     ...typography.footnote,
-    flex: 1,
+    flex: 1
   },
   dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.xl,
-    gap: spacing.lg,
+    gap: spacing.lg
   },
   dateButton: {
     width: 36,
     height: 36,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   dateText: {
     ...typography.body,
     fontFamily: 'monospace',
     fontWeight: '500',
     minWidth: 110,
-    textAlign: 'center',
+    textAlign: 'center'
   },
   centered: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.xxxl,
+    paddingVertical: spacing.xxxl
   },
   loadingText: {
     ...typography.subhead,
-    marginTop: spacing.md,
+    marginTop: spacing.md
   },
   qrContainer: {
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: spacing.xl
   },
   qrWrapper: {
     padding: spacing.md,
-    borderRadius: radii.lg,
+    borderRadius: radii.lg
   },
   addressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.md,
     borderRadius: radii.md,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.lg
   },
   addressText: {
     ...typography.footnote,
     fontFamily: 'monospace',
-    flex: 1,
+    flex: 1
   },
   copyButton: {
     width: 36,
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: spacing.sm,
+    marginLeft: spacing.sm
   },
   balanceSection: {
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: spacing.xl
   },
   balanceLabel: {
     ...typography.subhead,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.xs
   },
   balanceValue: {
     fontSize: 28,
-    fontWeight: '700',
+    fontWeight: '700'
   },
   pollingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.lg
   },
   pollingText: {
-    ...typography.subhead,
+    ...typography.subhead
   },
   emptyText: {
-    ...typography.body,
+    ...typography.body
   },
   sendDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
     marginTop: spacing.sm,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.xl
   },
   sendTitle: {
     ...typography.title3,
-    marginBottom: spacing.md,
+    marginBottom: spacing.md
   },
   fieldGroup: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing.lg
   },
   fieldLabel: {
     ...typography.footnote,
     fontWeight: '500',
     marginBottom: spacing.sm,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.5
   },
   textInput: {
     ...typography.body,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: StyleSheet.hairlineWidth
   },
   sendButton: {
     flexDirection: 'row',
@@ -725,11 +735,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing.md,
     borderRadius: radii.md,
-    gap: spacing.sm,
+    gap: spacing.sm
   },
   sendButtonText: {
     ...typography.subhead,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   resultBanner: {
     flexDirection: 'row',
@@ -739,14 +749,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: radii.md,
     borderWidth: 1,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.lg
   },
   resultText: {
     ...typography.subhead,
     fontWeight: '500',
-    flex: 1,
+    flex: 1
   },
   resultDismiss: {
-    padding: spacing.xs,
-  },
+    padding: spacing.xs
+  }
 })

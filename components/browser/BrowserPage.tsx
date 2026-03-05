@@ -1,15 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react'
-import {
-  FlatList,
-  Image,
-  Keyboard,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
-} from 'react-native'
+import { FlatList, Image, Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
@@ -128,13 +118,15 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({
 
   return (
     <View style={[styles.container, { backgroundColor: colors.backgroundSecondary }]}>
-      {/* Homepage - scrollable section */}
-      <ScrollView
-        style={styles.homepageSection}
-        contentContainerStyle={{
-          paddingTop: inSheet ? spacing.sm : insets.top + spacing.xxl,
-          paddingHorizontal: spacing.xs
-        }}
+      {/* Homepage settings */}
+      <View
+        style={[
+          styles.homepageSection,
+          {
+            paddingTop: inSheet ? spacing.sm : insets.top + spacing.xxl,
+            paddingHorizontal: spacing.xs
+          }
+        ]}
       >
         <View style={styles.section}>
           <View style={styles.titleRow}>
@@ -270,7 +262,7 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({
             </View>
           )}
         </View>
-      </ScrollView>
+      </View>
 
       {/* Bookmarks and History - 50/50 split */}
       <View style={styles.bottomHalf}>

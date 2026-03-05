@@ -1,18 +1,16 @@
 import React from 'react'
 import { View } from 'react-native'
 import { useTranslation } from 'react-i18next'
-import { router } from 'expo-router'
 
 import type { Tab, HistoryEntry } from '@/shared/types/browser'
 import { kNEW_TAB_URL } from '@/shared/constants'
-import { isValidUrl } from '@/utils/generalHelpers'
 import { PermissionType, PermissionState } from '@/utils/permissionsManager'
 import { spacing } from '@/context/theme/tokens'
 import type { SheetContextType } from '@/context/SheetContext'
 
 import { BrowserPage } from '@/components/browser/BrowserPage'
-import PermissionsScreen from '@/components/browser/PermissionsScreen'
 import SettingsScreen from '@/app/settings'
+import WalletConfigScreen from '@/app/wallet-config'
 import Sheet from '@/components/ui/Sheet'
 
 type Props = {
@@ -40,7 +38,7 @@ export function SheetRouter({
   history,
   removeHistoryItem,
   handlePermissionChange,
-  addBookmark,
+  addBookmark
 }: Props) {
   const { t } = useTranslation()
   const isNewTab = activeTab?.url === kNEW_TAB_URL
@@ -51,27 +49,47 @@ export function SheetRouter({
         return t('browser')
       case 'settings':
         return t('wallet')
+      case 'wallet-config':
+        return t('settings')
       default:
         return undefined
     }
   }
+
+  const canGoBack = sheet.history.length > 0
 
   return (
     <Sheet
       visible={sheet.isOpen && sheet.route !== 'tabs'}
       onClose={sheet.close}
       title={getSheetTitle()}
+      onBack={canGoBack ? sheet.pop : undefined}
       heightPercent={0.85}
     >
       {sheet.route === 'bookmarks' && (
         <View style={{ flex: 1, padding: spacing.lg }}>
-          <BrowserPage inSheet onNavigate={(url) => { updateActiveTab({ url }); sheet.close() }} clearHistory={clearHistory} history={history} removeHistoryItem={removeHistoryItem} />
+          <BrowserPage
+            inSheet
+            onNavigate={url => {
+              updateActiveTab({ url })
+              sheet.close()
+            }}
+            clearHistory={clearHistory}
+            history={history}
+            removeHistoryItem={removeHistoryItem}
+          />
         </View>
       )}
-      
+
       {sheet.route === 'settings' && (
         <View style={{ flex: 1 }}>
           <SettingsScreen />
+        </View>
+      )}
+
+      {sheet.route === 'wallet-config' && (
+        <View style={{ flex: 1 }}>
+          <WalletConfigScreen />
         </View>
       )}
     </Sheet>

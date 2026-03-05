@@ -64,9 +64,7 @@ export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => 
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-        {t('history')}
-      </Text>
+      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('history')}</Text>
       <TouchableOpacity style={[styles.clearBtn, { backgroundColor: colors.error }]} onPress={onClear}>
         <Ionicons name="trash-outline" size={18} color="#fff" />
         <Text style={styles.clearBtnText}>{t('clear_all')}</Text>
@@ -76,6 +74,7 @@ export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => 
         data={history}
         keyExtractor={i => i.url + i.timestamp}
         renderItem={renderItem}
+        nestedScrollEnabled
         ListFooterComponent={<View style={{ height: 80 }} />}
       />
     </View>
@@ -85,10 +84,10 @@ export const HistoryList = ({ history, onSelect, onDelete, onClear }: Props) => 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    flexDirection: 'column',
+    flexDirection: 'column'
   },
   listContainer: {
-    flex: 1,
+    flex: 1
   },
   sectionTitle: {
     ...typography.footnote,
@@ -96,10 +95,10 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: spacing.md,
-    paddingHorizontal: spacing.xs,
+    paddingHorizontal: spacing.xs
   },
-  historyItem: { 
-    padding: 12,
+  historyItem: {
+    padding: 12
   },
   clearBtn: {
     flexDirection: 'row',
@@ -121,7 +120,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: 60,
-    height: 60,
+    height: 60
   },
   swipeDeleteText: { color: '#fff', fontSize: 24 }
 })
