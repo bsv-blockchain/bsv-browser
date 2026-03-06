@@ -24,7 +24,11 @@
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="../assets/images/favicon.ico">
     <link rel="apple-touch-icon" sizes="192x192" href="../assets/images/android-chrome-192x192.png">
-    
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -56,8 +60,12 @@
                     </div>
                 </div>
                 
-                <div class="hero-image">
-                    <img src="menu_popover.png" alt="BSV Browser App Screenshot" class="phone-mockup">
+                <div class="hero-icon">
+                    <div class="icon-glow"></div>
+                    <svg class="hero-svg" width="450" height="450" viewBox="0 0 450 450" xmlns="http://www.w3.org/2000/svg" aria-label="BSV Browser network icon">
+                        <line x1="405" y1="225" x2="352.279" y2="352.279" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="405" y1="225" x2="225" y2="405" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="405" y1="225" x2="97.721" y2="352.279" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="405" y1="225" x2="97.721" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="405" y1="225" x2="225" y2="45" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="405" y1="225" x2="352.279" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="352.279" y1="352.279" x2="225" y2="405" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="352.279" y1="352.279" x2="97.721" y2="352.279" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="352.279" y1="352.279" x2="45" y2="225" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="352.279" y1="352.279" x2="97.721" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="352.279" y1="352.279" x2="225" y2="45" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="352.279" y1="352.279" x2="352.279" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="225" y1="405" x2="97.721" y2="352.279" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="225" y1="405" x2="45" y2="225" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="225" y1="405" x2="97.721" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="225" y1="405" x2="352.279" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="97.721" y1="352.279" x2="45" y2="225" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="97.721" y1="352.279" x2="97.721" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="97.721" y1="352.279" x2="225" y2="45" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="97.721" y1="352.279" x2="352.279" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="45" y1="225" x2="97.721" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="45" y1="225" x2="225" y2="45" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="45" y1="225" x2="352.279" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="97.721" y1="97.721" x2="225" y2="45" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="97.721" y1="97.721" x2="352.279" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/><line x1="225" y1="45" x2="352.279" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5"/>
+                        <circle cx="405" cy="225" r="6" fill="currentColor"/><circle cx="352.279" cy="352.279" r="6" fill="currentColor"/><circle cx="225" cy="405" r="6" fill="currentColor"/><circle cx="97.721" cy="352.279" r="6" fill="currentColor"/><circle cx="45" cy="225" r="6" fill="currentColor"/><circle cx="97.721" cy="97.721" r="6" fill="currentColor"/><circle cx="225" cy="45" r="6" fill="currentColor"/><circle cx="352.279" cy="97.721" r="6" fill="currentColor"/>
+                    </svg>
                 </div>
             </div>
         </div>
@@ -113,19 +121,13 @@
     <section class="screenshots">
         <div class="container">
             <h2>See It In Action</h2>
-            <p class="section-subtitle">Four screenshots. Four things no other browser can do.</p>
+            <p class="section-subtitle">Three things no other browser can do.</p>
 
             <div class="screenshots-grid">
                 <div class="screenshot-item">
                     <img src="enable_web3_options.png" alt="Enable Web3 with one tap" class="screenshot">
                     <h4>One-Tap Setup</h4>
-                    <p>Create a wallet or import an existing one. You're browsing Web3 in under a minute.</p>
-                </div>
-
-                <div class="screenshot-item">
-                    <img src="certificate_permission_request.png" alt="Approve only the data you want to share" class="screenshot">
-                    <h4>You Choose What to Share</h4>
-                    <p>Sites ask for specific fields. You see exactly what's requested and approve or reject.</p>
+                    <p>Create a wallet or import an existing one. You're browsing Web3 in under 7 seconds.</p>
                 </div>
 
                 <div class="screenshot-item">
