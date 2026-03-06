@@ -41,3 +41,4 @@ expo-env.d.ts
 /BSVBrowser.app
 build-*.tar.gz
 /@bsvb__bsv-browser.jks
+docs/marketing
