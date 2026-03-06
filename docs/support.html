@@ -90,6 +90,95 @@
         color: #1a1a1a;
       }
 
+      /* Burger toggle (hidden checkbox) */
+      .nav-toggle { display: none; }
+      .burger-label { display: none; }
+
+      @media (max-width: 768px) {
+        .burger-label {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          padding: 10px 0;
+          cursor: pointer;
+          color: #555;
+          font-size: 0.9rem;
+          font-weight: 500;
+          gap: 6px;
+          user-select: none;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .burger-icon {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          width: 20px;
+        }
+
+        .burger-icon span {
+          display: block;
+          height: 2px;
+          background: #555;
+          border-radius: 1px;
+          transition: transform 0.25s ease, opacity 0.25s ease;
+        }
+
+        .nav-toggle:checked ~ .burger-label .burger-icon span:nth-child(1) {
+          transform: translateY(6px) rotate(45deg);
+        }
+        .nav-toggle:checked ~ .burger-label .burger-icon span:nth-child(2) {
+          opacity: 0;
+        }
+        .nav-toggle:checked ~ .burger-label .burger-icon span:nth-child(3) {
+          transform: translateY(-6px) rotate(-45deg);
+        }
+
+        .nav-toggle:checked ~ .burger-label .burger-text::after {
+          content: 'Close';
+        }
+        .nav-toggle:not(:checked) ~ .burger-label .burger-text::after {
+          content: 'Sections';
+        }
+
+        .support-nav .container {
+          flex-direction: column;
+          align-items: stretch;
+          gap: 0;
+          padding: 0 15px;
+        }
+
+        .support-nav .nav-links {
+          display: grid;
+          grid-template-rows: 0fr;
+          transition: grid-template-rows 0.3s ease;
+          overflow: hidden;
+        }
+
+        .nav-toggle:checked ~ .nav-links {
+          grid-template-rows: 1fr;
+        }
+
+        .support-nav .nav-links-inner {
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .support-nav a {
+          font-size: 0.9rem;
+          padding: 10px 16px;
+          border-radius: 8px;
+          text-align: left;
+        }
+
+        .support-nav .nav-links-inner a:last-child {
+          margin-bottom: 8px;
+        }
+      }
+
       .guide-section {
         padding: 80px 0;
         border-bottom: 1px solid #eee;
@@ -445,9 +534,8 @@
           text-align: center;
         }
 
-        .support-nav a {
-          font-size: 0.8rem;
-          padding: 6px 12px;
+        .support-nav {
+          padding: 10px 0;
         }
       }
 
@@ -490,16 +578,25 @@
     <!-- Quick Nav -->
     <nav class="support-nav">
       <div class="container">
-        <a href="#what-is-bsv-browser">What is BSV Browser?</a>
-        <a href="#getting-started">Getting Started</a>
-        <a href="#browsing">Browsing the Web</a>
-        <a href="#wallet">Wallet &amp; Payments</a>
-        <a href="#backup">Backup &amp; Recovery</a>
-        <a href="#identity">Identity &amp; Trust</a>
-        <a href="#permissions">Permissions</a>
-        <a href="#tips">Tips &amp; Settings</a>
-        <a href="#faq">FAQ</a>
-        <a href="#contact">Contact Support</a>
+        <input type="checkbox" id="nav-toggle" class="nav-toggle" />
+        <label for="nav-toggle" class="burger-label">
+          <span class="burger-icon"><span></span><span></span><span></span></span>
+          <span class="burger-text"></span>
+        </label>
+        <div class="nav-links">
+          <div class="nav-links-inner">
+            <a href="#what-is-bsv-browser">What is BSV Browser?</a>
+            <a href="#getting-started">Getting Started</a>
+            <a href="#browsing">Browsing the Web</a>
+            <a href="#wallet">Wallet &amp; Payments</a>
+            <a href="#backup">Backup &amp; Recovery</a>
+            <a href="#identity">Identity &amp; Trust</a>
+            <a href="#permissions">Permissions</a>
+            <a href="#tips">Tips &amp; Settings</a>
+            <a href="#faq">FAQ</a>
+            <a href="#contact">Contact Support</a>
+          </div>
+        </div>
       </div>
     </nav>
 
@@ -654,6 +751,30 @@
         </div>
 
         <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Moving the address bar</h3>
+            <p>
+              By default the address bar sits at the bottom of the screen. If it ever covers a button or element at
+              the bottom of a website, you can move it to the top. A swipe upward will move it to the top. A swipe
+              downward will move it back again.
+            </p>
+            <div class="tip-box">
+              <p>
+                <strong>Tip:</strong> Some websites pin navigation or chat buttons to the bottom of the page.
+                Moving the address bar to the top keeps those elements accessible.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img
+              src="top_bar.png"
+              alt="Address bar moved to the top of the screen"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row">
           <div class="guide-text">
             <h3>Tabs</h3>
             <p>
@@ -1457,5 +1578,13 @@
         </div>
       </div>
     </footer>
+    <script>
+      // Close the burger menu when a nav link is tapped
+      document.querySelectorAll('.nav-links-inner a').forEach(function(link) {
+        link.addEventListener('click', function() {
+          document.getElementById('nav-toggle').checked = false;
+        });
+      });
+    </script>
   </body>
 </html>
