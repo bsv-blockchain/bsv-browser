@@ -13,6 +13,7 @@ import { ListRow } from '@/components/ui/ListRow'
 import { router } from 'expo-router'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { exportAllWalletDatabases } from '@/utils/exportDatabases'
+import { importWalletDatabase } from '@/utils/importDatabases'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
 import * as Print from 'expo-print'
@@ -21,7 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 export default function WalletConfigScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  const { managers, adminOriginator, logout, selectedNetwork, switchNetwork, storage } = useWallet()
+  const { managers, adminOriginator, logout, selectedNetwork, switchNetwork, rebuildWallet, storage } = useWallet()
   const { isWeb2Mode } = useBrowserMode()
   const { getMnemonic, getRecoveredKey } = useLocalStorage()
   const insets = useSafeAreaInsets()
@@ -32,6 +33,7 @@ export default function WalletConfigScreen() {
   const [switchingNetwork, setSwitchingNetwork] = useState(false)
   const [networkExpanded, setNetworkExpanded] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
 
   // Fetch identity key (needed for print recovery shares)
   useEffect(() => {
@@ -96,6 +98,22 @@ export default function WalletConfigScreen() {
       console.warn('[WalletConfig] Export failed:', e)
     } finally {
       setIsExporting(false)
+    }
+  }
+
+  const handleImportData = async () => {
+    if (isImporting) return
+    setIsImporting(true)
+    try {
+      const result = await importWalletDatabase(storage)
+      if (result.imported) {
+        Alert.alert(t('import_confirm_title'), t('import_success'))
+        await rebuildWallet()
+      }
+    } catch (e) {
+      console.warn('[WalletConfig] Import failed:', e)
+    } finally {
+      setIsImporting(false)
     }
   }
 
@@ -210,6 +228,14 @@ export default function WalletConfigScreen() {
             onPress={handleExportData}
             showChevron={false}
             trailing={isExporting ? <ActivityIndicator size="small" /> : undefined}
+          />
+          <ListRow
+            label={t('import_wallet_data')}
+            icon="download-outline"
+            iconColor="#30D158"
+            onPress={handleImportData}
+            showChevron={false}
+            trailing={isImporting ? <ActivityIndicator size="small" /> : undefined}
             isLast
           />
         </GroupedSection>

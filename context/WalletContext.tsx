@@ -32,6 +32,8 @@ import { logWithTimestamp } from '@/utils/logging'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from '@/storage'
+import * as SQLite from 'expo-sqlite'
+import { getRegisteredDbs, registerDb, selectLatestDb } from '@/utils/walletDbRegistry'
 import { createBtmsModule } from '@bsv/btms-permission-module'
 import {
   BsvExchangeRate,
@@ -87,6 +89,8 @@ export interface WalletContextValue {
   buildWalletFromMnemonic: (mnemonic?: string) => Promise<void>
   buildWalletFromRecoveredKey: (wif: string) => Promise<void>
   switchNetwork: (network: 'main' | 'test') => Promise<void>
+  /** Tear down the current wallet and re-trigger auto-build (e.g. after DB import). */
+  rebuildWallet: () => Promise<void>
   storage: StorageExpoSQLite | null
   /** Incremented when a transaction status changes via SSE, triggers UI refresh */
   txStatusVersion: number
@@ -122,6 +126,7 @@ export const WalletContext = createContext<WalletContextValue>({
   buildWalletFromMnemonic: async () => {},
   buildWalletFromRecoveredKey: async () => {},
   switchNetwork: async () => {},
+  rebuildWallet: async () => {},
   storage: null,
   txStatusVersion: 0
 })
@@ -186,6 +191,38 @@ export interface WABConfig {
   method: string
   network: 'main' | 'test'
   storageUrl: string
+}
+
+/**
+ * Open a legacy (no-timestamp) wallet DB and check whether it already contains
+ * a settings row.  If so, it's a real database from a previous version.  If
+ * not, the file was freshly created by `openDatabaseAsync` and we clean it up.
+ */
+async function probeForLegacyDb(legacyName: string): Promise<boolean> {
+  let db: SQLite.SQLiteDatabase | undefined
+  try {
+    db = await SQLite.openDatabaseAsync(legacyName)
+    const row = await db.getFirstAsync('SELECT * FROM settings LIMIT 1')
+    if (row) {
+      // Real legacy database — close and report success
+      await db.closeAsync()
+      return true
+    }
+    // Empty / newly-created database — clean up
+    await db.closeAsync()
+    db = undefined
+    await SQLite.deleteDatabaseAsync(legacyName)
+    return false
+  } catch {
+    // Table doesn't exist → file was just created or is invalid
+    try {
+      await db?.closeAsync()
+    } catch {}
+    try {
+      await SQLite.deleteDatabaseAsync(legacyName)
+    } catch {}
+    return false
+  }
 }
 
 interface WalletContextProps {
@@ -802,10 +839,39 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           console.log('[WalletContext] Using local SQLite storage')
 
           const identityKey = keyDeriver.identityKey
+          const keySuffix = identityKey.slice(-8)
+          const chainStr = chain === 'main' ? 'main' : chain === 'test' ? 'test' : 'teratest'
+
+          // ── Select the best database file from the registry ──
+          let knownDbs = await getRegisteredDbs(keySuffix, chainStr)
+
+          if (knownDbs.length === 0) {
+            // First launch after update or fresh user.
+            // Probe for a legacy (no-timestamp) database file.
+            const legacyName = `wallet-${keySuffix}-${chainStr}net.db`
+            const hasLegacy = await probeForLegacyDb(legacyName)
+            if (hasLegacy) {
+              await registerDb(keySuffix, chainStr, legacyName)
+              knownDbs = [legacyName]
+              console.log(`[WalletContext] Registered legacy DB: ${legacyName}`)
+            } else {
+              // Fresh user — create a timestamped database
+              const ts = Math.floor(Date.now() / 1000)
+              const newName = `wallet-${keySuffix}-${chainStr}net-${ts}.db`
+              await registerDb(keySuffix, chainStr, newName)
+              knownDbs = [newName]
+              console.log(`[WalletContext] Created new timestamped DB: ${newName}`)
+            }
+          }
+
+          const selectedDb = selectLatestDb(knownDbs)
+          console.log(`[WalletContext] Selected DB: ${selectedDb} (from ${knownDbs.length} registered)`)
+
           phoneStorage = new StorageExpoSQLite({
             ...StorageProvider.createStorageBaseOptions(chain),
             feeModel: { model: 'sat/kb', value: 100 },
-            identityKey
+            identityKey,
+            databaseName: selectedDb
           })
           phoneStorage.setServices(services)
           await phoneStorage.migrate('bsv-wallet', identityKey)
@@ -1050,6 +1116,41 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     [walletBuilt, configStatus, getSnap, setRecoveredKey, buildWallet]
   )
 
+  // Tear down the current wallet and re-trigger auto-build.
+  // Used after DB import and internally by switchNetwork.
+  const rebuildWallet = useCallback(async () => {
+    logWithTimestamp(F, 'Rebuilding wallet')
+
+    // Stop any running monitor
+    try {
+      const monitor = (window as any).walletMonitor as Monitor | undefined
+      if (monitor) {
+        await monitor.stopTasks()
+        ;(window as any).walletMonitor = undefined
+      }
+    } catch (e) {
+      console.warn('[WalletContext] Failed to stop monitor during rebuild:', e)
+    }
+
+    // Close the current storage connection so the new build can open
+    // whichever DB file the registry selects.
+    if (storage?.db) {
+      try {
+        await storage.destroy()
+      } catch {}
+    }
+
+    // Tear down current wallet state (but keep mnemonic / config)
+    setManagers({})
+    setWalletBuilt(false)
+    setSnapshotLoaded(false)
+
+    // Re-finalize with current config — triggers auto-build effect
+    const config = { wabUrl: 'noWAB', method: 'mnemonic', network: selectedNetwork, storageUrl: 'local' }
+    finalizeConfig(config)
+    logWithTimestamp(F, 'Wallet rebuild triggered')
+  }, [selectedNetwork, storage])
+
   // Switch network: tear down wallet, update config, and rebuild on new chain
   const switchNetwork = useCallback(
     async (network: 'main' | 'test') => {
@@ -1067,6 +1168,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         console.warn('[WalletContext] Failed to stop monitor during network switch:', e)
       }
 
+      // Close the current storage connection
+      if (storage?.db) {
+        try {
+          await storage.destroy()
+        } catch {}
+      }
+
       // Tear down current wallet state (but keep mnemonic)
       setManagers({})
       setWalletBuilt(false)
@@ -1080,7 +1188,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       finalizeConfig(newConfig)
       logWithTimestamp(F, `Network switched to ${network}`)
     },
-    [selectedNetwork, setItem]
+    [selectedNetwork, setItem, storage]
   )
 
   // Auto-build wallet for returning users (mnemonic first, then recovered key)
@@ -1264,6 +1372,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       buildWalletFromMnemonic,
       buildWalletFromRecoveredKey,
       switchNetwork,
+      rebuildWallet,
       storage,
       txStatusVersion
     }),
@@ -1296,6 +1405,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       buildWalletFromMnemonic,
       buildWalletFromRecoveredKey,
       switchNetwork,
+      rebuildWallet,
       storage,
       txStatusVersion
     ]
