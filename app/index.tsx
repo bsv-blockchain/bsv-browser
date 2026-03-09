@@ -86,6 +86,10 @@ function Browser() {
   const { isWeb2Mode } = useBrowserMode()
   const sheet = useSheet()
 
+  // Safe bottom inset: on Android, enforce a minimum to keep UI above OS nav bar
+  // even when safe-area-context reports 0 on some devices
+  const safeBottomInset = Platform.OS === 'android' ? Math.max(insets.bottom, 24) : insets.bottom
+
   useEffect(() => {
     tabStore.initializeTabs()
     cleanupDownloadsCache()
@@ -930,7 +934,7 @@ function Browser() {
               <SuggestionsDropdown
                 suggestions={addressSuggestions}
                 colors={colors}
-                bottomOffset={insets.bottom}
+                bottomOffset={safeBottomInset}
                 onSelect={url => {
                   addressInputRef.current?.blur()
                   Keyboard.dismiss()
@@ -956,7 +960,7 @@ function Browser() {
             <MenuPopover
               isNewTab={isNewTab}
               canShare={!isNewTab}
-              bottomOffset={insets.bottom}
+              bottomOffset={safeBottomInset}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {

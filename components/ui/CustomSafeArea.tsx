@@ -14,11 +14,13 @@ interface CustomSafeAreaProps {
 /**
  * Custom SafeAreaView that respects a minimum top inset for Android devices
  * to properly handle camera notches and provides consistent behavior across platforms.
+ * Also enforces a minimum bottom inset on Android to keep content above OS navigation.
  */
 export default function CustomSafeArea({
   children,
   style,
   minTopInset = 30, // Default minimum top inset for Android
+  minBottomInset = 24, // Default minimum bottom inset for Android
   edges
 }: CustomSafeAreaProps) {
   const insets = useSafeAreaInsets()
@@ -26,6 +28,7 @@ export default function CustomSafeArea({
 
   // Apply minimum insets only on Android
   const appliedTopInset = Platform.OS === 'android' ? Math.max(insets.top, minTopInset) : insets.top
+  const appliedBottomInset = Platform.OS === 'android' ? Math.max(insets.bottom, minBottomInset) : insets.bottom
 
   // If edges are specified, use SafeAreaView with edges
   if (edges) {
@@ -44,7 +47,7 @@ export default function CustomSafeArea({
         {
           backgroundColor: colors.background,
           paddingTop: appliedTopInset,
-          // paddingBottom: appliedBottomInset,
+          paddingBottom: appliedBottomInset,
           paddingLeft: insets.left,
           paddingRight: insets.right
         },
