@@ -216,6 +216,8 @@ const resources = {
       enter_details_hint: 'Enter provider details',
 
       // Legacy payments screen
+      receive: 'Receive',
+      send: 'Send',
       generating_address: 'Generating address...',
       available_balance: 'Available Balance',
       not_checked: 'Not checked',
@@ -283,7 +285,9 @@ const resources = {
       scan_shares_progress: '{{scanned}} of {{needed}} shares scanned',
       scan_shares_remaining: '{{count}} more share needed',
       scan_shares_complete: 'All shares collected!',
-      scan_shares_recovery_failed: 'Recovery failed. Please try scanning again.'
+      scan_shares_recovery_failed: 'Recovery failed. Please try scanning again.',
+      invalid_bsv_address: 'Invalid BSV address',
+      scan_bsv_address_hint: 'Point the camera at a BSV address QR code'
     }
   },
   zh: {
@@ -396,6 +400,8 @@ const resources = {
       enter_domain_hint: '输入提供者域名',
       enter_details_hint: '输入提供者详情',
 
+      receive: '接收',
+      send: '发送',
       generating_address: '生成地址中...',
       available_balance: '可用余额',
       not_checked: '未检查',
@@ -456,7 +462,9 @@ const resources = {
       scan_shares_progress: '已扫描 {{scanned}}/{{needed}} 个份额',
       scan_shares_remaining: '还需要 {{count}} 个份额',
       scan_shares_complete: '所有份额已收集！',
-      scan_shares_recovery_failed: '恢复失败。请重试扫描。'
+      scan_shares_recovery_failed: '恢复失败。请重试扫描。',
+      invalid_bsv_address: '无效的 BSV 地址',
+      scan_bsv_address_hint: '将相机对准 BSV 地址二维码'
     }
   },
   hi: {
@@ -570,6 +578,8 @@ const resources = {
       enter_domain_hint: 'प्रदाता डोमेन दर्ज करें',
       enter_details_hint: 'प्रदाता विवरण दर्ज करें',
 
+      receive: 'प्राप्त करें',
+      send: 'भेजें',
       generating_address: 'पता उत्पन्न हो रहा है...',
       available_balance: 'उपलब्ध शेष राशि',
       not_checked: 'जांच नहीं की गई',
@@ -631,7 +641,9 @@ const resources = {
       scan_shares_progress: '{{scanned}}/{{needed}} शेयर स्कैन किए गए',
       scan_shares_remaining: '{{count}} और शेयर आवश्यक',
       scan_shares_complete: 'सभी शेयर एकत्रित!',
-      scan_shares_recovery_failed: 'पुनर्प्राप्ति विफल। कृपया पुनः स्कैन करें।'
+      scan_shares_recovery_failed: 'पुनर्प्राप्ति विफल। कृपया पुनः स्कैन करें।',
+      invalid_bsv_address: 'अमान्य BSV पता',
+      scan_bsv_address_hint: 'कैमरे को BSV एड्रेस QR कोड पर लगाएं'
     }
   },
   es: {
@@ -745,6 +757,8 @@ const resources = {
       enter_domain_hint: 'Ingresa el dominio del proveedor',
       enter_details_hint: 'Ingresa los detalles del proveedor',
 
+      receive: 'Recibir',
+      send: 'Enviar',
       generating_address: 'Generando dirección...',
       available_balance: 'Saldo disponible',
       not_checked: 'No verificado',
@@ -808,7 +822,9 @@ const resources = {
       scan_shares_progress: '{{scanned}} de {{needed}} partes escaneadas',
       scan_shares_remaining: '{{count}} parte más necesaria',
       scan_shares_complete: '¡Todas las partes recopiladas!',
-      scan_shares_recovery_failed: 'La recuperación falló. Intente escanear de nuevo.'
+      scan_shares_recovery_failed: 'La recuperación falló. Intente escanear de nuevo.',
+      invalid_bsv_address: 'Dirección BSV inválida',
+      scan_bsv_address_hint: 'Apunte la cámara hacia un código QR de dirección BSV'
     }
   },
   fr: {
@@ -922,6 +938,8 @@ const resources = {
       enter_domain_hint: 'Saisissez le domaine du fournisseur',
       enter_details_hint: 'Saisissez les détails du fournisseur',
 
+      receive: 'Recevoir',
+      send: 'Envoyer',
       generating_address: "Génération de l'adresse...",
       available_balance: 'Solde disponible',
       not_checked: 'Non vérifié',
@@ -985,7 +1003,9 @@ const resources = {
       scan_shares_progress: '{{scanned}} sur {{needed}} parts scannées',
       scan_shares_remaining: '{{count}} part supplémentaire nécessaire',
       scan_shares_complete: 'Toutes les parts collectées !',
-      scan_shares_recovery_failed: 'La récupération a échoué. Veuillez réessayer.'
+      scan_shares_recovery_failed: 'La récupération a échoué. Veuillez réessayer.',
+      invalid_bsv_address: 'Adresse BSV invalide',
+      scan_bsv_address_hint: "Pointez la caméra vers un code QR d'adresse BSV"
     }
   },
   ar: {
@@ -1098,6 +1118,8 @@ const resources = {
       enter_domain_hint: 'أدخل نطاق المزود',
       enter_details_hint: 'أدخل تفاصيل المزود',
 
+      receive: 'استقبال',
+      send: 'إرسال',
       generating_address: '...جار إنشاء العنوان',
       available_balance: 'الرصيد المتاح',
       not_checked: 'لم يتم التحقق',
@@ -1158,7 +1180,9 @@ const resources = {
       scan_shares_progress: '{{scanned}} من {{needed}} حصص تم مسحها',
       scan_shares_remaining: 'يلزم {{count}} حصة إضافية',
       scan_shares_complete: 'تم جمع جميع الحصص!',
-      scan_shares_recovery_failed: 'فشل الاسترداد. يرجى المحاولة مرة أخرى.'
+      scan_shares_recovery_failed: 'فشل الاسترداد. يرجى المحاولة مرة أخرى.',
+      invalid_bsv_address: 'عنوان BSV غير صالح',
+      scan_bsv_address_hint: 'وجّه الكاميرا نحو رمز QR لعنوان BSV'
     }
   },
   pt: {
@@ -1272,6 +1296,8 @@ const resources = {
       enter_domain_hint: 'Digite o domínio do provedor',
       enter_details_hint: 'Digite os detalhes do provedor',
 
+      receive: 'Receber',
+      send: 'Enviar',
       generating_address: 'Gerando endereço...',
       available_balance: 'Saldo disponível',
       not_checked: 'Não verificado',
@@ -1335,7 +1361,9 @@ const resources = {
       scan_shares_progress: '{{scanned}} de {{needed}} partes escaneadas',
       scan_shares_remaining: '{{count}} parte a mais necessária',
       scan_shares_complete: 'Todas as partes coletadas!',
-      scan_shares_recovery_failed: 'A recuperação falhou. Tente escanear novamente.'
+      scan_shares_recovery_failed: 'A recuperação falhou. Tente escanear novamente.',
+      invalid_bsv_address: 'Endereço BSV inválido',
+      scan_bsv_address_hint: 'Aponte a câmera para um código QR de endereço BSV'
     }
   },
   bn: {
@@ -1449,6 +1477,8 @@ const resources = {
       enter_domain_hint: 'প্রদানকারীর ডোমেন প্রবেশ করুন',
       enter_details_hint: 'প্রদানকারীর বিবরণ প্রবেশ করুন',
 
+      receive: 'গ্রহণ করুন',
+      send: 'পাঠান',
       generating_address: 'ঠিকানা তৈরি হচ্ছে...',
       available_balance: 'উপলব্ধ ব্যালেন্স',
       not_checked: 'যাচাই করা হয়নি',
@@ -1510,7 +1540,9 @@ const resources = {
       scan_shares_progress: '{{scanned}}/{{needed}} শেয়ার স্ক্যান করা হয়েছে',
       scan_shares_remaining: 'আরও {{count}} শেয়ার প্রয়োজন',
       scan_shares_complete: 'সব শেয়ার সংগৃহীত!',
-      scan_shares_recovery_failed: 'পুনরুদ্ধার ব্যর্থ। পুনরায় স্ক্যান করুন।'
+      scan_shares_recovery_failed: 'পুনরুদ্ধার ব্যর্থ। পুনরায় স্ক্যান করুন।',
+      invalid_bsv_address: 'অবৈধ BSV ঠিকানা',
+      scan_bsv_address_hint: 'BSV ঠিকানার QR কোডে ক্যামেরা তাক করুন'
     }
   },
   ru: {
@@ -1624,6 +1656,8 @@ const resources = {
       enter_domain_hint: 'Введите домен провайдера',
       enter_details_hint: 'Введите данные провайдера',
 
+      receive: 'Получить',
+      send: 'Отправить',
       generating_address: 'Генерация адреса...',
       available_balance: 'Доступный баланс',
       not_checked: 'Не проверено',
@@ -1687,7 +1721,9 @@ const resources = {
       scan_shares_progress: '{{scanned}} из {{needed}} долей отсканировано',
       scan_shares_remaining: 'Требуется ещё {{count}} доля',
       scan_shares_complete: 'Все доли собраны!',
-      scan_shares_recovery_failed: 'Восстановление не удалось. Попробуйте отсканировать снова.'
+      scan_shares_recovery_failed: 'Восстановление не удалось. Попробуйте отсканировать снова.',
+      invalid_bsv_address: 'Недопустимый адрес BSV',
+      scan_bsv_address_hint: 'Направьте камеру на QR-код адреса BSV'
     }
   },
   id: {
@@ -1801,6 +1837,8 @@ const resources = {
       enter_domain_hint: 'Masukkan domain penyedia',
       enter_details_hint: 'Masukkan detail penyedia',
 
+      receive: 'Terima',
+      send: 'Kirim',
       generating_address: 'Membuat alamat...',
       available_balance: 'Saldo Tersedia',
       not_checked: 'Belum diperiksa',
@@ -1862,7 +1900,9 @@ const resources = {
       scan_shares_progress: '{{scanned}} dari {{needed}} bagian dipindai',
       scan_shares_remaining: '{{count}} bagian lagi diperlukan',
       scan_shares_complete: 'Semua bagian terkumpul!',
-      scan_shares_recovery_failed: 'Pemulihan gagal. Silakan coba pindai lagi.'
+      scan_shares_recovery_failed: 'Pemulihan gagal. Silakan coba pindai lagi.',
+      invalid_bsv_address: 'Alamat BSV tidak valid',
+      scan_bsv_address_hint: 'Arahkan kamera ke kode QR alamat BSV'
     }
   }
 }
