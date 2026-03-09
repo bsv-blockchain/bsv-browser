@@ -1,5 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet } from 'react-native'
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform
+} from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -480,116 +490,127 @@ export default function LegacyPaymentsScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={colors.accent} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('legacy_bridge')}</Text>
-        <View style={styles.backButton} />
-      </View>
-
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.content}>
-        {/* Info banner */}
-        <TouchableOpacity
-          onPress={() => setInfoExpanded(v => !v)}
-          style={[styles.infoBanner, { backgroundColor: colors.info + '15' }]}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="information-circle" size={20} color={colors.info} style={{ marginRight: spacing.sm }} />
-          {infoExpanded && <Text style={[styles.infoText, { color: colors.info }]}>{t('legacy_info')}</Text>}
-        </TouchableOpacity>
-
-        {/* Date navigator */}
-        <View style={styles.dateRow}>
-          <TouchableOpacity onPress={() => handleDateChange(daysOffset + 1)} style={styles.dateButton}>
-            <Ionicons name="chevron-back" size={22} color={colors.accent} />
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={0}
+    >
+      <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
+        {/* Header */}
+        <View style={[styles.header, { borderBottomColor: colors.separator }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="chevron-back" size={24} color={colors.accent} />
           </TouchableOpacity>
-          <Text style={[styles.dateText, { color: colors.textPrimary }]}>{getCurrentDate(daysOffset)}</Text>
-          <TouchableOpacity
-            onPress={() => handleDateChange(Math.max(0, daysOffset - 1))}
-            style={styles.dateButton}
-            disabled={daysOffset === 0}
-          >
-            <Ionicons
-              name="chevron-forward"
-              size={22}
-              color={daysOffset === 0 ? colors.textQuaternary : colors.accent}
-            />
-          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('legacy_bridge')}</Text>
+          <View style={styles.backButton} />
         </View>
 
-        {/* Address + QR */}
-        {renderAddressSection()}
+        <ScrollView
+          style={{ flex: 1, backgroundColor: colors.background }}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+        >
+          {/* Info banner */}
+          <TouchableOpacity
+            onPress={() => setInfoExpanded(v => !v)}
+            style={[styles.infoBanner, { backgroundColor: colors.info + '15' }]}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="information-circle" size={20} color={colors.info} style={{ marginRight: spacing.sm }} />
+            {infoExpanded && <Text style={[styles.infoText, { color: colors.info }]}>{t('legacy_info')}</Text>}
+          </TouchableOpacity>
 
-        {/* Send section */}
-        <View style={[styles.sendDivider, { borderTopColor: colors.separator }]} />
-        <Text style={[styles.sendTitle, { color: colors.textPrimary }]}>{t('send_bsv')}</Text>
+          {/* Date navigator */}
+          <View style={styles.dateRow}>
+            <TouchableOpacity onPress={() => handleDateChange(daysOffset + 1)} style={styles.dateButton}>
+              <Ionicons name="chevron-back" size={22} color={colors.accent} />
+            </TouchableOpacity>
+            <Text style={[styles.dateText, { color: colors.textPrimary }]}>{getCurrentDate(daysOffset)}</Text>
+            <TouchableOpacity
+              onPress={() => handleDateChange(Math.max(0, daysOffset - 1))}
+              style={styles.dateButton}
+              disabled={daysOffset === 0}
+            >
+              <Ionicons
+                name="chevron-forward"
+                size={22}
+                color={daysOffset === 0 ? colors.textQuaternary : colors.accent}
+              />
+            </TouchableOpacity>
+          </View>
 
-        <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('recipient_address')}</Text>
-          <TextInput
-            value={recipientAddress}
-            onChangeText={setRecipientAddress}
-            placeholder={t('enter_bsv_address')}
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-            autoCorrect={false}
+          {/* Address + QR */}
+          {renderAddressSection()}
+
+          {/* Send section */}
+          <View style={[styles.sendDivider, { borderTopColor: colors.separator }]} />
+          <Text style={[styles.sendTitle, { color: colors.textPrimary }]}>{t('send_bsv')}</Text>
+
+          <View style={styles.fieldGroup}>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('recipient_address')}</Text>
+            <TextInput
+              value={recipientAddress}
+              onChangeText={setRecipientAddress}
+              placeholder={t('enter_bsv_address')}
+              placeholderTextColor={colors.textTertiary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[
+                styles.textInput,
+                {
+                  color: colors.textPrimary,
+                  backgroundColor: colors.backgroundSecondary,
+                  borderColor: colors.separator
+                }
+              ]}
+            />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_sats')}</Text>
+            <SatsAmountInput value={sendAmount} onChangeText={setSendAmount} />
+          </View>
+
+          <TouchableOpacity
+            onPress={handleSendBSV}
+            disabled={isSending || !recipientAddress || !sendAmount}
             style={[
-              styles.textInput,
+              styles.sendButton,
               {
-                color: colors.textPrimary,
-                backgroundColor: colors.backgroundSecondary,
-                borderColor: colors.separator
+                backgroundColor: recipientAddress && sendAmount ? colors.accent : colors.backgroundSecondary,
+                opacity: recipientAddress && sendAmount ? 1 : 0.5
               }
             ]}
-          />
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_sats')}</Text>
-          <SatsAmountInput value={sendAmount} onChangeText={setSendAmount} />
-        </View>
-
-        <TouchableOpacity
-          onPress={handleSendBSV}
-          disabled={isSending || !recipientAddress || !sendAmount}
-          style={[
-            styles.sendButton,
-            {
-              backgroundColor: recipientAddress && sendAmount ? colors.accent : colors.backgroundSecondary,
-              opacity: recipientAddress && sendAmount ? 1 : 0.5
-            }
-          ]}
-        >
-          {isSending ? (
-            <ActivityIndicator
-              size="small"
-              color={recipientAddress && sendAmount ? colors.background : colors.textSecondary}
-            />
-          ) : (
-            <>
-              <Ionicons
-                name="send"
-                size={18}
+          >
+            {isSending ? (
+              <ActivityIndicator
+                size="small"
                 color={recipientAddress && sendAmount ? colors.background : colors.textSecondary}
               />
-              <Text
-                style={[
-                  styles.sendButtonText,
-                  { color: recipientAddress && sendAmount ? colors.background : colors.textSecondary }
-                ]}
-              >
-                {t('send_bsv')}
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
+            ) : (
+              <>
+                <Ionicons
+                  name="send"
+                  size={18}
+                  color={recipientAddress && sendAmount ? colors.background : colors.textSecondary}
+                />
+                <Text
+                  style={[
+                    styles.sendButtonText,
+                    { color: recipientAddress && sendAmount ? colors.background : colors.textSecondary }
+                  ]}
+                >
+                  {t('send_bsv')}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
 
-        <View style={{ height: insets.bottom + 40 }} />
-      </ScrollView>
-    </View>
+          <View style={{ height: insets.bottom + 40 }} />
+        </ScrollView>
+      </View>
+    </KeyboardAvoidingView>
   )
 }
 
