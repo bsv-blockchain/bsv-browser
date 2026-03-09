@@ -34,6 +34,12 @@
         "EXPO_PUBLIC_ADMIN_ORIGINATOR": "admin.com",
         "EXPO_PUBLIC_DEFAULT_HOMEPAGE": "https://mobile.bsvb.tech/landing.html"
       }
+    },
+    "production-apk": {
+      "extends": "production",
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
   "submit": {
