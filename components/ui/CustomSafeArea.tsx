@@ -2,6 +2,7 @@ import React from 'react'
 import { View, Platform, StyleSheet, StyleProp, ViewStyle } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '@/context/theme/ThemeContext'
+import { ANDROID_MIN_BOTTOM_INSET } from '@/shared/constants'
 
 interface CustomSafeAreaProps {
   children: React.ReactNode
@@ -20,7 +21,7 @@ export default function CustomSafeArea({
   children,
   style,
   minTopInset = 30, // Default minimum top inset for Android
-  minBottomInset = 24, // Default minimum bottom inset for Android
+  minBottomInset = ANDROID_MIN_BOTTOM_INSET, // Default minimum bottom inset for Android
   edges
 }: CustomSafeAreaProps) {
   const insets = useSafeAreaInsets()

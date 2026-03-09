@@ -3,10 +3,7 @@ import { Dimensions, Keyboard, Platform, TextInput } from 'react-native'
 import { Gesture } from 'react-native-gesture-handler'
 import { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
 import type { EdgeInsets } from 'react-native-safe-area-context'
-
-// Minimum bottom inset for Android to keep UI above OS navigation bar
-// even when safe-area-context reports 0 on some devices
-const ANDROID_MIN_BOTTOM_INSET = 24
+import { safeBottomInset } from '@/shared/constants'
 
 export function useAddressBarAnimation(
   insets: EdgeInsets,
@@ -26,8 +23,7 @@ export function useAddressBarAnimation(
   const ADDRESS_BAR_HEIGHT = 60 // paddingTop(4) + pill(44) + paddingBottom(12)
   const computeTravelDistance = (top: number, bottom: number) => {
     const screenHeight = Dimensions.get('window').height
-    const safeBottom = Platform.OS === 'android' ? Math.max(bottom, ANDROID_MIN_BOTTOM_INSET) : bottom
-    return screenHeight - top - safeBottom - ADDRESS_BAR_HEIGHT
+    return screenHeight - top - safeBottomInset(bottom) - ADDRESS_BAR_HEIGHT
   }
   const initialTravelDistance = computeTravelDistance(insets.top, insets.bottom)
   const addressBarTravelDistance = useSharedValue(initialTravelDistance)

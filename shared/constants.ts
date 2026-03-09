@@ -1,7 +1,23 @@
+import { Platform } from 'react-native'
 import { Bookmark } from './types/browser'
 
 export const kNEW_TAB_URL = 'about:blank'
 export const DEFAULT_HOMEPAGE_URL = 'https://mobile.bsvb.tech/landing.html'
+
+/**
+ * Minimum bottom inset (px) for Android devices.
+ * Keeps UI above the OS navigation bar even when safe-area-context reports 0.
+ */
+export const ANDROID_MIN_BOTTOM_INSET = 24
+
+/**
+ * Returns a safe bottom inset that respects a platform-appropriate minimum.
+ * On Android, enforces at least ANDROID_MIN_BOTTOM_INSET to handle devices
+ * where safe-area-context does not report the OS navigation bar height.
+ */
+export function safeBottomInset(bottom: number): number {
+  return Platform.OS === 'android' ? Math.max(bottom, ANDROID_MIN_BOTTOM_INSET) : bottom
+}
 
 export interface SearchEngine {
   id: string

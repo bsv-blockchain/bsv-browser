@@ -29,7 +29,7 @@ import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
 import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'
-import { DEFAULT_HOMEPAGE_URL, kNEW_TAB_URL, SEARCH_ENGINES, DEFAULT_SEARCH_ENGINE_ID } from '@/shared/constants'
+import { DEFAULT_HOMEPAGE_URL, kNEW_TAB_URL, SEARCH_ENGINES, DEFAULT_SEARCH_ENGINE_ID, safeBottomInset } from '@/shared/constants'
 import { isValidUrl } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
@@ -88,7 +88,7 @@ function Browser() {
 
   // Safe bottom inset: on Android, enforce a minimum to keep UI above OS nav bar
   // even when safe-area-context reports 0 on some devices
-  const safeBottomInset = Platform.OS === 'android' ? Math.max(insets.bottom, 24) : insets.bottom
+  const bottomInset = safeBottomInset(insets.bottom)
 
   useEffect(() => {
     tabStore.initializeTabs()
@@ -934,7 +934,7 @@ function Browser() {
               <SuggestionsDropdown
                 suggestions={addressSuggestions}
                 colors={colors}
-                bottomOffset={safeBottomInset}
+                bottomOffset={bottomInset}
                 onSelect={url => {
                   addressInputRef.current?.blur()
                   Keyboard.dismiss()
@@ -960,7 +960,7 @@ function Browser() {
             <MenuPopover
               isNewTab={isNewTab}
               canShare={!isNewTab}
-              bottomOffset={safeBottomInset}
+              bottomOffset={bottomInset}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {
