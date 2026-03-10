@@ -66,8 +66,6 @@ export interface StorageExpoSQLiteOptions extends StorageProviderOptions {
 export class StorageExpoSQLite extends StorageProvider {
   dbName: string
   db?: SQLiteDatabase
-  /** Promise-chain mutex: ensures only one withTransactionAsync runs at a time. */
-  private _txQueue: Promise<any> = Promise.resolve()
 
   constructor(options: StorageExpoSQLiteOptions) {
     super(options)
@@ -84,10 +82,9 @@ export class StorageExpoSQLite extends StorageProvider {
     await createTables(this.db)
 
     // Check/insert settings
-    const existing = await this.db.getFirstAsync(
-      'SELECT * FROM settings WHERE storageIdentityKey = ?',
-      [storageIdentityKey]
-    ) as any
+    const existing = (await this.db.getFirstAsync('SELECT * FROM settings WHERE storageIdentityKey = ?', [
+      storageIdentityKey
+    ])) as any
     if (!existing) {
       const now = new Date().toISOString()
       await this.db.runAsync(
@@ -104,7 +101,7 @@ export class StorageExpoSQLite extends StorageProvider {
 
   async readSettings(_trx?: TrxToken): Promise<TableSettings> {
     const db = this.getDB()
-    const row = await db.getFirstAsync('SELECT * FROM settings LIMIT 1') as any
+    const row = (await db.getFirstAsync('SELECT * FROM settings LIMIT 1')) as any
     if (!row) throw new Error('Settings not found. Call migrate() first.')
     return this.validateEntity({ ...row })
   }
@@ -123,10 +120,9 @@ export class StorageExpoSQLite extends StorageProvider {
 
   async getKeyValue(key: string): Promise<string | undefined> {
     const db = this.getDB()
-    const row = await db.getFirstAsync(
-      'SELECT value FROM key_value_store WHERE key = ?',
-      [key]
-    ) as { value: string } | null
+    const row = (await db.getFirstAsync('SELECT value FROM key_value_store WHERE key = ?', [key])) as {
+      value: string
+    } | null
     return row?.value
   }
 
@@ -146,29 +142,22 @@ export class StorageExpoSQLite extends StorageProvider {
     const db = this.getDB()
     const token: TrxToken = { _inTrx: true } as any
 
-    // Serialize all top-level transactions through a promise queue so that
-    // concurrent callers (e.g. CheckForProofs monitor firing twice) never
-    // attempt to BEGIN a new transaction while one is still active on this
-    // single-writer SQLite connection.
-    let resolve!: () => void
-    const release = new Promise<void>(r => { resolve = r })
-
-    // Grab the tail of the queue, then advance it to include this transaction.
-    const prev = this._txQueue
-    this._txQueue = this._txQueue.then(() => release)
-
-    // Wait for the previous transaction to finish before beginning a new one.
-    await prev
-
-    try {
-      let result!: T
-      await db.withTransactionAsync(async () => {
+    // withExclusiveTransactionAsync opens a dedicated connection for the
+    // transaction so no other async queries can interleave with BEGIN/COMMIT.
+    // All queries executed inside scope() must go through that connection, so
+    // we temporarily replace this.db with the exclusive txn object and restore
+    // it when the scope completes (or throws).
+    let result!: T
+    await db.withExclusiveTransactionAsync(async txn => {
+      const savedDb = this.db
+      this.db = txn as any
+      try {
         result = await scope(token)
-      })
-      return result
-    } finally {
-      resolve()
-    }
+      } finally {
+        this.db = savedDb
+      }
+    })
+    return result
   }
 
   async dropAllData(): Promise<void> {
@@ -255,7 +244,12 @@ export class StorageExpoSQLite extends StorageProvider {
     return v
   }
 
-  async validateEntityForInsert(entity: any, trx?: TrxToken, dateFields?: string[], booleanFields?: string[]): Promise<any> {
+  async validateEntityForInsert(
+    entity: any,
+    trx?: TrxToken,
+    dateFields?: string[],
+    booleanFields?: string[]
+  ): Promise<any> {
     this.verifyReadyForDatabaseAccess(trx)
     const v = { ...entity } as any
     v.created_at = this.validateOptionalEntityDate(v.created_at, true)
@@ -298,9 +292,14 @@ export class StorageExpoSQLite extends StorageProvider {
       if (value !== undefined) {
         conditions.push(`"${key}" = ?`)
         // Convert booleans to 0/1 for SQLite, Dates to strings
-        const v = typeof value === 'boolean' ? (value ? 1 : 0)
-          : value instanceof Date ? this.validateDateForWhere(value)
-          : value
+        const v =
+          typeof value === 'boolean'
+            ? value
+              ? 1
+              : 0
+            : value instanceof Date
+              ? this.validateDateForWhere(value)
+              : value
         params.push(v)
       }
     }
@@ -313,7 +312,13 @@ export class StorageExpoSQLite extends StorageProvider {
 
   private async sqlFind<T>(
     table: string,
-    args: { partial: Record<string, any>; since?: Date; paged?: { limit?: number; offset?: number }; orderDescending?: boolean; trx?: TrxToken },
+    args: {
+      partial: Record<string, any>
+      since?: Date
+      paged?: { limit?: number; offset?: number }
+      orderDescending?: boolean
+      trx?: TrxToken
+    },
     pkCol: string,
     extraClauses?: { conditions: string[]; params: any[] }
   ): Promise<T[]> {
@@ -327,7 +332,7 @@ export class StorageExpoSQLite extends StorageProvider {
     }
     if (extraClauses) {
       for (const c of extraClauses.conditions) {
-        query += `${(whereSql || args.since) ? ' AND' : ' WHERE'} ${c}`
+        query += `${whereSql || args.since ? ' AND' : ' WHERE'} ${c}`
       }
       params.push(...extraClauses.params)
     }
@@ -338,7 +343,7 @@ export class StorageExpoSQLite extends StorageProvider {
         query += ` OFFSET ${args.paged.offset}`
       }
     }
-    return await db.getAllAsync(query, params) as T[]
+    return (await db.getAllAsync(query, params)) as T[]
   }
 
   private async sqlCount(
@@ -356,11 +361,11 @@ export class StorageExpoSQLite extends StorageProvider {
     }
     if (extraClauses) {
       for (const c of extraClauses.conditions) {
-        query += `${(whereSql || args.since) ? ' AND' : ' WHERE'} ${c}`
+        query += `${whereSql || args.since ? ' AND' : ' WHERE'} ${c}`
       }
       params.push(...extraClauses.params)
     }
-    const result = await db.getFirstAsync(query, params) as any
+    const result = (await db.getFirstAsync(query, params)) as any
     return result?.count || 0
   }
 
@@ -386,7 +391,12 @@ export class StorageExpoSQLite extends StorageProvider {
     }
   }
 
-  private async sqlUpdate(table: string, ids: number | number[], update: Record<string, any>, pkCol: string): Promise<number> {
+  private async sqlUpdate(
+    table: string,
+    ids: number | number[],
+    update: Record<string, any>,
+    pkCol: string
+  ): Promise<number> {
     const db = this.getDB()
     const setClauses: string[] = []
     const vals: any[] = []
@@ -407,7 +417,11 @@ export class StorageExpoSQLite extends StorageProvider {
     return result.changes
   }
 
-  private async sqlUpdateComposite(table: string, keyMap: Record<string, any>, update: Record<string, any>): Promise<number> {
+  private async sqlUpdateComposite(
+    table: string,
+    keyMap: Record<string, any>,
+    update: Record<string, any>
+  ): Promise<number> {
     const db = this.getDB()
     const setClauses: string[] = []
     const vals: any[] = []
@@ -578,7 +592,12 @@ export class StorageExpoSQLite extends StorageProvider {
     return await this.sqlUpdate('certificates', id, u as any, 'certificateId')
   }
 
-  async updateCertificateField(certificateId: number, fieldName: string, update: Partial<TableCertificateField>, trx?: TrxToken): Promise<number> {
+  async updateCertificateField(
+    certificateId: number,
+    fieldName: string,
+    update: Partial<TableCertificateField>,
+    trx?: TrxToken
+  ): Promise<number> {
     const u = this.validatePartialForUpdate(update)
     return await this.sqlUpdateComposite('certificate_fields', { certificateId, fieldName }, u as any)
   }
@@ -608,7 +627,12 @@ export class StorageExpoSQLite extends StorageProvider {
     return await this.sqlUpdate('output_tags', id, u as any, 'outputTagId')
   }
 
-  async updateOutputTagMap(outputId: number, tagId: number, update: Partial<TableOutputTagMap>, trx?: TrxToken): Promise<number> {
+  async updateOutputTagMap(
+    outputId: number,
+    tagId: number,
+    update: Partial<TableOutputTagMap>,
+    trx?: TrxToken
+  ): Promise<number> {
     const u = this.validatePartialForUpdate(update, undefined, ['isDeleted'])
     return await this.sqlUpdateComposite('output_tags_map', { outputTagId: tagId, outputId }, u as any)
   }
@@ -628,7 +652,12 @@ export class StorageExpoSQLite extends StorageProvider {
     return await this.sqlUpdate('tx_labels', id, u as any, 'txLabelId')
   }
 
-  async updateTxLabelMap(transactionId: number, txLabelId: number, update: Partial<TableTxLabelMap>, trx?: TrxToken): Promise<number> {
+  async updateTxLabelMap(
+    transactionId: number,
+    txLabelId: number,
+    update: Partial<TableTxLabelMap>,
+    trx?: TrxToken
+  ): Promise<number> {
     const u = this.validatePartialForUpdate(update, undefined, ['isDeleted'])
     return await this.sqlUpdateComposite('tx_labels_map', { txLabelId, transactionId }, u as any)
   }
@@ -661,8 +690,12 @@ export class StorageExpoSQLite extends StorageProvider {
       extraConditions.push(`type IN (${args.types.map(() => '?').join(',')})`)
       extraParams.push(...args.types)
     }
-    const rows = await this.sqlFind<any>('certificates', { ...args, partial }, 'certificateId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    const rows = await this.sqlFind<any>(
+      'certificates',
+      { ...args, partial },
+      'certificateId',
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
     const results = this.validateEntities(rows, undefined, ['isDeleted'])
     if (args.includeFields) {
       for (const c of results) {
@@ -704,7 +737,9 @@ export class StorageExpoSQLite extends StorageProvider {
     // Handle txStatus filter via subquery
     if (args.txStatus && args.txStatus.length > 0) {
       const placeholders = args.txStatus.map(() => '?').join(',')
-      extraConditions.push(`transactionId IN (SELECT transactionId FROM transactions WHERE status IN (${placeholders}))`)
+      extraConditions.push(
+        `transactionId IN (SELECT transactionId FROM transactions WHERE status IN (${placeholders}))`
+      )
       extraParams.push(...args.txStatus)
     }
 
@@ -728,8 +763,12 @@ export class StorageExpoSQLite extends StorageProvider {
       extraParams.push(...tagIds)
     }
 
-    const rows = await this.sqlFind<any>('outputs', { ...args, partial }, 'outputId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    const rows = await this.sqlFind<any>(
+      'outputs',
+      { ...args, partial },
+      'outputId',
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
 
     const results = this.validateEntities(rows, undefined, ['spendable', 'change'])
 
@@ -756,7 +795,11 @@ export class StorageExpoSQLite extends StorageProvider {
     return this.validateEntities(rows, ['when'], ['init'])
   }
 
-  async findTransactions(args: FindTransactionsArgs, labelIds?: number[], isQueryModeAll?: boolean): Promise<TableTransaction[]> {
+  async findTransactions(
+    args: FindTransactionsArgs,
+    labelIds?: number[],
+    isQueryModeAll?: boolean
+  ): Promise<TableTransaction[]> {
     if ((args.partial as any).rawTx) throw new Error('Transactions may not be found by rawTx value.')
     if ((args.partial as any).inputBEEF) throw new Error('Transactions may not be found by inputBEEF value.')
 
@@ -799,8 +842,12 @@ export class StorageExpoSQLite extends StorageProvider {
       extraParams.push(...labelIds)
     }
 
-    const rows = await this.sqlFind<any>('transactions', args, 'transactionId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    const rows = await this.sqlFind<any>(
+      'transactions',
+      args,
+      'transactionId',
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
 
     const results = this.validateEntities(rows, undefined, ['isOutgoing'])
 
@@ -828,8 +875,12 @@ export class StorageExpoSQLite extends StorageProvider {
       extraConditions.push(`outputTagId IN (${args.tagIds.map(() => '?').join(',')})`)
       extraParams.push(...args.tagIds)
     }
-    const rows = await this.sqlFind<any>('output_tags_map', args, 'outputTagId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    const rows = await this.sqlFind<any>(
+      'output_tags_map',
+      args,
+      'outputTagId',
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
     return this.validateEntities(rows, undefined, ['isDeleted'])
   }
 
@@ -847,8 +898,12 @@ export class StorageExpoSQLite extends StorageProvider {
       extraConditions.push(`txid IN (${args.txids.map(() => '?').join(',')})`)
       extraParams.push(...args.txids)
     }
-    const rows = await this.sqlFind<any>('proven_tx_reqs', args, 'provenTxReqId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    const rows = await this.sqlFind<any>(
+      'proven_tx_reqs',
+      args,
+      'provenTxReqId',
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
     return this.validateEntities(rows, undefined, ['notified'])
   }
 
@@ -866,8 +921,12 @@ export class StorageExpoSQLite extends StorageProvider {
       extraConditions.push(`txLabelId IN (${args.labelIds.map(() => '?').join(',')})`)
       extraParams.push(...args.labelIds)
     }
-    const rows = await this.sqlFind<any>('tx_labels_map', args, 'txLabelId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    const rows = await this.sqlFind<any>(
+      'tx_labels_map',
+      args,
+      'txLabelId',
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
     return this.validateEntities(rows, undefined, ['isDeleted'])
   }
 
@@ -875,8 +934,12 @@ export class StorageExpoSQLite extends StorageProvider {
   // COUNT methods (StorageReader: 11, StorageReaderWriter: 4 = 15)
   // ============================================================================
 
-  async countUsers(args: FindUsersArgs): Promise<number> { return this.sqlCount('users', args) }
-  async countCertificateFields(args: FindCertificateFieldsArgs): Promise<number> { return this.sqlCount('certificate_fields', args) }
+  async countUsers(args: FindUsersArgs): Promise<number> {
+    return this.sqlCount('users', args)
+  }
+  async countCertificateFields(args: FindCertificateFieldsArgs): Promise<number> {
+    return this.sqlCount('certificate_fields', args)
+  }
 
   async countCertificates(args: FindCertificatesArgs): Promise<number> {
     const extraConditions: string[] = []
@@ -889,19 +952,31 @@ export class StorageExpoSQLite extends StorageProvider {
       extraConditions.push(`type IN (${args.types.map(() => '?').join(',')})`)
       extraParams.push(...args.types)
     }
-    return this.sqlCount('certificates', args, extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    return this.sqlCount(
+      'certificates',
+      args,
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
   }
 
-  async countCommissions(args: FindCommissionsArgs): Promise<number> { return this.sqlCount('commissions', args) }
-  async countMonitorEvents(args: FindMonitorEventsArgs): Promise<number> { return this.sqlCount('monitor_events', args) }
-  async countOutputBaskets(args: FindOutputBasketsArgs): Promise<number> { return this.sqlCount('output_baskets', args) }
+  async countCommissions(args: FindCommissionsArgs): Promise<number> {
+    return this.sqlCount('commissions', args)
+  }
+  async countMonitorEvents(args: FindMonitorEventsArgs): Promise<number> {
+    return this.sqlCount('monitor_events', args)
+  }
+  async countOutputBaskets(args: FindOutputBasketsArgs): Promise<number> {
+    return this.sqlCount('output_baskets', args)
+  }
 
   async countOutputs(args: FindOutputsArgs, tagIds?: number[], isQueryModeAll?: boolean): Promise<number> {
     const extraConditions: string[] = []
     const extraParams: any[] = []
     if (args.txStatus && args.txStatus.length > 0) {
       const placeholders = args.txStatus.map(() => '?').join(',')
-      extraConditions.push(`transactionId IN (SELECT transactionId FROM transactions WHERE status IN (${placeholders}))`)
+      extraConditions.push(
+        `transactionId IN (SELECT transactionId FROM transactions WHERE status IN (${placeholders}))`
+      )
       extraParams.push(...args.txStatus)
     }
     if (tagIds && tagIds.length > 0) {
@@ -918,11 +993,19 @@ export class StorageExpoSQLite extends StorageProvider {
       }
       extraParams.push(...tagIds)
     }
-    return this.sqlCount('outputs', args, extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    return this.sqlCount(
+      'outputs',
+      args,
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
   }
 
-  async countOutputTags(args: FindOutputTagsArgs): Promise<number> { return this.sqlCount('output_tags', args) }
-  async countSyncStates(args: FindSyncStatesArgs): Promise<number> { return this.sqlCount('sync_states', args) }
+  async countOutputTags(args: FindOutputTagsArgs): Promise<number> {
+    return this.sqlCount('output_tags', args)
+  }
+  async countSyncStates(args: FindSyncStatesArgs): Promise<number> {
+    return this.sqlCount('sync_states', args)
+  }
 
   async countTransactions(args: FindTransactionsArgs, labelIds?: number[], isQueryModeAll?: boolean): Promise<number> {
     const extraConditions: string[] = []
@@ -954,10 +1037,16 @@ export class StorageExpoSQLite extends StorageProvider {
       }
       extraParams.push(...labelIds)
     }
-    return this.sqlCount('transactions', args, extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    return this.sqlCount(
+      'transactions',
+      args,
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
   }
 
-  async countTxLabels(args: FindTxLabelsArgs): Promise<number> { return this.sqlCount('tx_labels', args) }
+  async countTxLabels(args: FindTxLabelsArgs): Promise<number> {
+    return this.sqlCount('tx_labels', args)
+  }
 
   // StorageReaderWriter count methods
   async countOutputTagMaps(args: FindOutputTagMapsArgs): Promise<number> {
@@ -967,7 +1056,11 @@ export class StorageExpoSQLite extends StorageProvider {
       extraConditions.push(`outputTagId IN (${args.tagIds.map(() => '?').join(',')})`)
       extraParams.push(...args.tagIds)
     }
-    return this.sqlCount('output_tags_map', args, extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    return this.sqlCount(
+      'output_tags_map',
+      args,
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
   }
 
   async countProvenTxReqs(args: FindProvenTxReqsArgs): Promise<number> {
@@ -981,10 +1074,16 @@ export class StorageExpoSQLite extends StorageProvider {
       extraConditions.push(`txid IN (${args.txids.map(() => '?').join(',')})`)
       extraParams.push(...args.txids)
     }
-    return this.sqlCount('proven_tx_reqs', args, extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    return this.sqlCount(
+      'proven_tx_reqs',
+      args,
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
   }
 
-  async countProvenTxs(args: FindProvenTxsArgs): Promise<number> { return this.sqlCount('proven_txs', args) }
+  async countProvenTxs(args: FindProvenTxsArgs): Promise<number> {
+    return this.sqlCount('proven_txs', args)
+  }
 
   async countTxLabelMaps(args: FindTxLabelMapsArgs): Promise<number> {
     const extraConditions: string[] = []
@@ -993,7 +1092,11 @@ export class StorageExpoSQLite extends StorageProvider {
       extraConditions.push(`txLabelId IN (${args.labelIds.map(() => '?').join(',')})`)
       extraParams.push(...args.labelIds)
     }
-    return this.sqlCount('tx_labels_map', args, extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined)
+    return this.sqlCount(
+      'tx_labels_map',
+      args,
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+    )
   }
 
   // ============================================================================
@@ -1014,7 +1117,7 @@ export class StorageExpoSQLite extends StorageProvider {
       query += ` LIMIT ${args.paged.limit}`
       if (args.paged.offset) query += ` OFFSET ${args.paged.offset}`
     }
-    const rows = await db.getAllAsync(query, params) as any[]
+    const rows = (await db.getAllAsync(query, params)) as any[]
     return this.validateEntities(rows)
   }
 
@@ -1032,7 +1135,7 @@ export class StorageExpoSQLite extends StorageProvider {
       query += ` LIMIT ${args.paged.limit}`
       if (args.paged.offset) query += ` OFFSET ${args.paged.offset}`
     }
-    const rows = await db.getAllAsync(query, params) as any[]
+    const rows = (await db.getAllAsync(query, params)) as any[]
     return this.validateEntities(rows, undefined, ['notified'])
   }
 
@@ -1050,7 +1153,7 @@ export class StorageExpoSQLite extends StorageProvider {
       query += ` LIMIT ${args.paged.limit}`
       if (args.paged.offset) query += ` OFFSET ${args.paged.offset}`
     }
-    const rows = await db.getAllAsync(query, params) as any[]
+    const rows = (await db.getAllAsync(query, params)) as any[]
     return this.validateEntities(rows, undefined, ['isDeleted'])
   }
 
@@ -1068,7 +1171,7 @@ export class StorageExpoSQLite extends StorageProvider {
       query += ` LIMIT ${args.paged.limit}`
       if (args.paged.offset) query += ` OFFSET ${args.paged.offset}`
     }
-    const rows = await db.getAllAsync(query, params) as any[]
+    const rows = (await db.getAllAsync(query, params)) as any[]
     return this.validateEntities(rows, undefined, ['isDeleted'])
   }
 
@@ -1099,8 +1202,7 @@ export class StorageExpoSQLite extends StorageProvider {
   }
 
   async insertCertificateAuth(auth: AuthId, certificate: TableCertificateX): Promise<number> {
-    if (!auth.userId || (certificate.userId && certificate.userId !== auth.userId))
-      throw new Error('WERR_UNAUTHORIZED')
+    if (!auth.userId || (certificate.userId && certificate.userId !== auth.userId)) throw new Error('WERR_UNAUTHORIZED')
     certificate.userId = auth.userId
     return await this.insertCertificate(certificate)
   }
@@ -1121,7 +1223,12 @@ export class StorageExpoSQLite extends StorageProvider {
     return r
   }
 
-  async getRawTxOfKnownValidTransaction(txid?: string, offset?: number, length?: number, trx?: TrxToken): Promise<number[] | undefined> {
+  async getRawTxOfKnownValidTransaction(
+    txid?: string,
+    offset?: number,
+    length?: number,
+    trx?: TrxToken
+  ): Promise<number[] | undefined> {
     if (!txid) return undefined
     if (!this.isAvailable()) await this.makeAvailable()
     let rawTx: number[] | undefined
@@ -1149,7 +1256,10 @@ export class StorageExpoSQLite extends StorageProvider {
     const maps = await this.findOutputTagMaps({ partial: { outputId, isDeleted: false } as any, trx })
     const tags: any[] = []
     for (const m of maps) {
-      const results = await this.findOutputTags({ partial: { outputTagId: m.outputTagId, isDeleted: false } as any, trx })
+      const results = await this.findOutputTags({
+        partial: { outputTagId: m.outputTagId, isDeleted: false } as any,
+        trx
+      })
       if (results.length > 0) tags.push(results[0])
     }
     return tags
@@ -1170,7 +1280,9 @@ export class StorageExpoSQLite extends StorageProvider {
       partial: { userId, basketId, spendable: true as any },
       txStatus: txStatus as any
     })
-    console.log(`[StorageExpoSQLite] allocateChangeInput: userId=${userId} basketId=${basketId} target=${targetSatoshis} found ${outputs.length} spendable outputs, satoshis: [${outputs.map(o => o.satoshis).join(',')}]`)
+    console.log(
+      `[StorageExpoSQLite] allocateChangeInput: userId=${userId} basketId=${basketId} target=${targetSatoshis} found ${outputs.length} spendable outputs, satoshis: [${outputs.map(o => o.satoshis).join(',')}]`
+    )
     let output: TableOutput | undefined
     let scores: { output: TableOutput; score: number }[] = []
     for (const o of outputs) {
@@ -1233,14 +1345,17 @@ export class StorageExpoSQLite extends StorageProvider {
     console.log('[StorageExpoSQLite] internalizeAction called, userId:', auth.userId)
     try {
       const result = await super.internalizeAction(auth, args)
-      console.log('[StorageExpoSQLite] internalizeAction result:', JSON.stringify({
-        accepted: result.accepted,
-        isMerge: result.isMerge,
-        txid: result.txid,
-        satoshis: result.satoshis,
-        hasSendWithResults: !!result.sendWithResults,
-        hasNotDelayedResults: !!result.notDelayedResults
-      }))
+      console.log(
+        '[StorageExpoSQLite] internalizeAction result:',
+        JSON.stringify({
+          accepted: result.accepted,
+          isMerge: result.isMerge,
+          txid: result.txid,
+          satoshis: result.satoshis,
+          hasSendWithResults: !!result.sendWithResults,
+          hasNotDelayedResults: !!result.notDelayedResults
+        })
+      )
       return result
     } catch (e: any) {
       console.error('[StorageExpoSQLite] internalizeAction ERROR:', e.message, e.stack?.slice(0, 500))
