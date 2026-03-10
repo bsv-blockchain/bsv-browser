@@ -227,8 +227,7 @@ const styles = StyleSheet.create({
   container: {
     // No background — fully transparent, pills float over content
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.md
+    paddingTop: spacing.xs
   },
   row: {
     flexDirection: 'row',

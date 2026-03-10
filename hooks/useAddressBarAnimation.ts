@@ -20,7 +20,7 @@ export function useAddressBarAnimation(
 
   // AddressBar position animation — start at bottom (translateY = travelDistance)
   const addressBarAtTop = useSharedValue(false)
-  const ADDRESS_BAR_HEIGHT = 60 // paddingTop(4) + pill(44) + paddingBottom(12)
+  const ADDRESS_BAR_HEIGHT = 48 // paddingTop(4) + pill(44)
   const computeTravelDistance = (top: number, bottom: number) => {
     const screenHeight = Dimensions.get('window').height
     return screenHeight - top - safeBottomInset(bottom) - ADDRESS_BAR_HEIGHT
@@ -50,7 +50,7 @@ export function useAddressBarAnimation(
       addressBarTranslateY.value = withSpring(travelDistance, {
         mass: 1,
         stiffness: 400,
-        damping: 38,
+        damping: 38
       })
       addressBarAtTop.value = false
     } else {
@@ -58,14 +58,14 @@ export function useAddressBarAnimation(
         addressBarTranslateY.value = withSpring(0, {
           mass: 1,
           stiffness: 400,
-          damping: 38,
+          damping: 38
         })
         addressBarAtTop.value = true
       } else {
         addressBarTranslateY.value = withSpring(travelDistance, {
           mass: 1,
           stiffness: 400,
-          damping: 38,
+          damping: 38
         })
         addressBarAtTop.value = false
       }
@@ -76,7 +76,7 @@ export function useAddressBarAnimation(
   const addressBarPanGesture = Gesture.Pan()
     .activeOffsetY([-10, 10])
     .failOffsetX([-25, 25])
-    .onUpdate((e) => {
+    .onUpdate(e => {
       const travelDistance = addressBarTravelDistance.value
       if (addressBarAtTop.value) {
         addressBarTranslateY.value = Math.max(0, Math.min(travelDistance, e.translationY))
@@ -84,7 +84,7 @@ export function useAddressBarAnimation(
         addressBarTranslateY.value = Math.max(0, Math.min(travelDistance, travelDistance + e.translationY))
       }
     })
-    .onEnd((e) => {
+    .onEnd(e => {
       const travelDistance = addressBarTravelDistance.value
       const threshold = travelDistance / 3
       const shouldMoveToTop = !addressBarAtTop.value && (Math.abs(e.translationY) > threshold || e.velocityY < -800)
@@ -95,7 +95,7 @@ export function useAddressBarAnimation(
           mass: 1,
           stiffness: 400,
           damping: 38,
-          velocity: e.velocityY,
+          velocity: e.velocityY
         })
         addressBarAtTop.value = true
       } else if (shouldMoveToBottom) {
@@ -103,7 +103,7 @@ export function useAddressBarAnimation(
           mass: 1,
           stiffness: 400,
           damping: 38,
-          velocity: e.velocityY,
+          velocity: e.velocityY
         })
         addressBarAtTop.value = false
       } else if (addressBarAtTop.value) {
@@ -117,7 +117,7 @@ export function useAddressBarAnimation(
   const animatedAddressBarStyle = useAnimatedStyle(() => {
     const keyboardOffset = addressBarAtTop.value ? 0 : -keyboardHeight.value
     return {
-      transform: [{ translateY: addressBarTranslateY.value + keyboardOffset }],
+      transform: [{ translateY: addressBarTranslateY.value + keyboardOffset }]
     }
   })
 
@@ -126,11 +126,11 @@ export function useAddressBarAnimation(
     const travelDistance = addressBarTravelDistance.value
     const menuPopoverHeight = 291
 
-    const progress = 1 - (addressBarTranslateY.value / travelDistance)
-    const menuTranslateY = -(travelDistance - addressBarTranslateY.value) + (menuPopoverHeight * progress)
+    const progress = 1 - addressBarTranslateY.value / travelDistance
+    const menuTranslateY = -(travelDistance - addressBarTranslateY.value) + menuPopoverHeight * progress
 
     return {
-      transform: [{ translateY: menuTranslateY }],
+      transform: [{ translateY: menuTranslateY }]
     }
   })
 
@@ -139,13 +139,13 @@ export function useAddressBarAnimation(
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
 
-    const showSub = Keyboard.addListener(showEvent, (e) => {
+    const showSub = Keyboard.addListener(showEvent, e => {
       setKeyboardVisible(true)
       if (Platform.OS === 'ios') iosSoftKeyboardShown.current = true
       keyboardHeight.value = withSpring(e.endCoordinates.height, {
         mass: 1,
         stiffness: 400,
-        damping: 38,
+        damping: 38
       })
     })
     const hideSub = Keyboard.addListener(hideEvent, () => {
@@ -153,7 +153,7 @@ export function useAddressBarAnimation(
       keyboardHeight.value = withSpring(0, {
         mass: 1,
         stiffness: 400,
-        damping: 38,
+        damping: 38
       })
       const shouldHandleHide = Platform.OS === 'ios' ? iosSoftKeyboardShown.current : true
       setTimeout(() => {
@@ -176,6 +176,6 @@ export function useAddressBarAnimation(
     keyboardVisible,
     addressBarPanGesture,
     animatedAddressBarStyle,
-    animatedMenuPopoverStyle,
+    animatedMenuPopoverStyle
   }
 }
