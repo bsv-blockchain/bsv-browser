@@ -131,6 +131,7 @@ const resources = {
       continue: 'Continue',
       go_back: 'Go Back',
       copied: 'Copied',
+      copy: 'Copy',
       copy_to_clipboard: 'Copy to Clipboard',
       details: 'Details',
       hide_details: 'Hide details',
@@ -287,7 +288,8 @@ const resources = {
       scan_shares_complete: 'All shares collected!',
       scan_shares_recovery_failed: 'Recovery failed. Please try scanning again.',
       invalid_bsv_address: 'Invalid BSV address',
-      scan_bsv_address_hint: 'Point the camera at a BSV address QR code'
+      scan_bsv_address_hint: 'Point the camera at a BSV address QR code',
+      scan_identity_key_hint: 'Point the camera at an identity key QR code'
     }
   },
   zh: {
@@ -321,6 +323,7 @@ const resources = {
       continue: '继续',
       go_back: '返回',
       copied: '已复制',
+      copy: '复制',
       copy_to_clipboard: '复制到剪贴板',
       details: '详情',
       hide_details: '隐藏详情',
@@ -464,7 +467,8 @@ const resources = {
       scan_shares_complete: '所有份额已收集！',
       scan_shares_recovery_failed: '恢复失败。请重试扫描。',
       invalid_bsv_address: '无效的 BSV 地址',
-      scan_bsv_address_hint: '将相机对准 BSV 地址二维码'
+      scan_bsv_address_hint: '将相机对准 BSV 地址二维码',
+      scan_identity_key_hint: '将相机对准身份密钥二维码'
     }
   },
   hi: {
@@ -498,6 +502,7 @@ const resources = {
       continue: 'जारी रखें',
       go_back: 'वापस जाएं',
       copied: 'कॉपी किया गया',
+      copy: 'कॉपी',
       copy_to_clipboard: 'क्लिपबोर्ड में कॉपी करें',
       details: 'विवरण',
       hide_details: 'विवरण छुपाएं',
@@ -643,7 +648,8 @@ const resources = {
       scan_shares_complete: 'सभी शेयर एकत्रित!',
       scan_shares_recovery_failed: 'पुनर्प्राप्ति विफल। कृपया पुनः स्कैन करें।',
       invalid_bsv_address: 'अमान्य BSV पता',
-      scan_bsv_address_hint: 'कैमरे को BSV एड्रेस QR कोड पर लगाएं'
+      scan_bsv_address_hint: 'कैमरे को BSV एड्रेस QR कोड पर लगाएं',
+      scan_identity_key_hint: 'कैमरे को आइडेंटिटी की QR कोड पर लगाएं'
     }
   },
   es: {
@@ -677,6 +683,7 @@ const resources = {
       continue: 'Continuar',
       go_back: 'Volver',
       copied: 'Copiado',
+      copy: 'Copiar',
       copy_to_clipboard: 'Copiar al portapapeles',
       details: 'Detalles',
       hide_details: 'Ocultar detalles',
@@ -824,7 +831,8 @@ const resources = {
       scan_shares_complete: '¡Todas las partes recopiladas!',
       scan_shares_recovery_failed: 'La recuperación falló. Intente escanear de nuevo.',
       invalid_bsv_address: 'Dirección BSV inválida',
-      scan_bsv_address_hint: 'Apunte la cámara hacia un código QR de dirección BSV'
+      scan_bsv_address_hint: 'Apunte la cámara hacia un código QR de dirección BSV',
+      scan_identity_key_hint: 'Apunte la cámara hacia un código QR de clave de identidad'
     }
   },
   fr: {
@@ -858,6 +866,7 @@ const resources = {
       continue: 'Continuer',
       go_back: 'Retour',
       copied: 'Copié',
+      copy: 'Copier',
       copy_to_clipboard: 'Copier dans le presse-papiers',
       details: 'Détails',
       hide_details: 'Masquer les détails',
@@ -1005,7 +1014,8 @@ const resources = {
       scan_shares_complete: 'Toutes les parts collectées !',
       scan_shares_recovery_failed: 'La récupération a échoué. Veuillez réessayer.',
       invalid_bsv_address: 'Adresse BSV invalide',
-      scan_bsv_address_hint: "Pointez la caméra vers un code QR d'adresse BSV"
+      scan_bsv_address_hint: "Pointez la caméra vers un code QR d'adresse BSV",
+      scan_identity_key_hint: "Pointez la caméra vers un code QR de clé d'identité"
     }
   },
   ar: {
@@ -1039,6 +1049,7 @@ const resources = {
       continue: 'استمرار',
       go_back: 'العودة',
       copied: 'تم النسخ',
+      copy: 'نسخ',
       copy_to_clipboard: 'نسخ إلى الحافظة',
       details: 'التفاصيل',
       hide_details: 'إخفاء التفاصيل',
@@ -1182,7 +1193,8 @@ const resources = {
       scan_shares_complete: 'تم جمع جميع الحصص!',
       scan_shares_recovery_failed: 'فشل الاسترداد. يرجى المحاولة مرة أخرى.',
       invalid_bsv_address: 'عنوان BSV غير صالح',
-      scan_bsv_address_hint: 'وجّه الكاميرا نحو رمز QR لعنوان BSV'
+      scan_bsv_address_hint: 'وجّه الكاميرا نحو رمز QR لعنوان BSV',
+      scan_identity_key_hint: 'وجّه الكاميرا نحو رمز QR لمفتاح الهوية'
     }
   },
   pt: {
@@ -1216,6 +1228,7 @@ const resources = {
       continue: 'Continuar',
       go_back: 'Voltar',
       copied: 'Copiado',
+      copy: 'Copiar',
       copy_to_clipboard: 'Copiar para área de transferência',
       details: 'Detalhes',
       hide_details: 'Ocultar detalhes',
@@ -1363,7 +1376,8 @@ const resources = {
       scan_shares_complete: 'Todas as partes coletadas!',
       scan_shares_recovery_failed: 'A recuperação falhou. Tente escanear novamente.',
       invalid_bsv_address: 'Endereço BSV inválido',
-      scan_bsv_address_hint: 'Aponte a câmera para um código QR de endereço BSV'
+      scan_bsv_address_hint: 'Aponte a câmera para um código QR de endereço BSV',
+      scan_identity_key_hint: 'Aponte a câmera para um código QR de chave de identidade'
     }
   },
   bn: {
@@ -1397,6 +1411,7 @@ const resources = {
       continue: 'চালিয়ে যান',
       go_back: 'ফিরে যান',
       copied: 'কপি করা হয়েছে',
+      copy: 'কপি',
       copy_to_clipboard: 'ক্লিপবোর্ডে কপি করুন',
       details: 'বিবরণ',
       hide_details: 'বিবরণ লুকান',
@@ -1542,7 +1557,8 @@ const resources = {
       scan_shares_complete: 'সব শেয়ার সংগৃহীত!',
       scan_shares_recovery_failed: 'পুনরুদ্ধার ব্যর্থ। পুনরায় স্ক্যান করুন।',
       invalid_bsv_address: 'অবৈধ BSV ঠিকানা',
-      scan_bsv_address_hint: 'BSV ঠিকানার QR কোডে ক্যামেরা তাক করুন'
+      scan_bsv_address_hint: 'BSV ঠিকানার QR কোডে ক্যামেরা তাক করুন',
+      scan_identity_key_hint: 'পরিচয় কীর QR কোডে ক্যামেরা তাক করুন'
     }
   },
   ru: {
@@ -1576,6 +1592,7 @@ const resources = {
       continue: 'Продолжить',
       go_back: 'Назад',
       copied: 'Скопировано',
+      copy: 'Копировать',
       copy_to_clipboard: 'Скопировать в буфер обмена',
       details: 'Подробности',
       hide_details: 'Скрыть подробности',
@@ -1723,7 +1740,8 @@ const resources = {
       scan_shares_complete: 'Все доли собраны!',
       scan_shares_recovery_failed: 'Восстановление не удалось. Попробуйте отсканировать снова.',
       invalid_bsv_address: 'Недопустимый адрес BSV',
-      scan_bsv_address_hint: 'Направьте камеру на QR-код адреса BSV'
+      scan_bsv_address_hint: 'Направьте камеру на QR-код адреса BSV',
+      scan_identity_key_hint: 'Направьте камеру на QR-код ключа идентификатора'
     }
   },
   id: {
@@ -1757,6 +1775,7 @@ const resources = {
       continue: 'Lanjutkan',
       go_back: 'Kembali',
       copied: 'Tersalin',
+      copy: 'Salin',
       copy_to_clipboard: 'Salin ke Clipboard',
       details: 'Detail',
       hide_details: 'Sembunyikan detail',
@@ -1902,7 +1921,8 @@ const resources = {
       scan_shares_complete: 'Semua bagian terkumpul!',
       scan_shares_recovery_failed: 'Pemulihan gagal. Silakan coba pindai lagi.',
       invalid_bsv_address: 'Alamat BSV tidak valid',
-      scan_bsv_address_hint: 'Arahkan kamera ke kode QR alamat BSV'
+      scan_bsv_address_hint: 'Arahkan kamera ke kode QR alamat BSV',
+      scan_identity_key_hint: 'Arahkan kamera ke kode QR kunci identitas'
     }
   }
 }

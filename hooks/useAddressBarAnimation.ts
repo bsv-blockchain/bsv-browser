@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Dimensions, Keyboard, Platform, TextInput } from 'react-native'
 import { Gesture } from 'react-native-gesture-handler'
-import { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
+import { useSharedValue, useAnimatedStyle, withSpring, useAnimatedReaction, runOnJS } from 'react-native-reanimated'
 import type { EdgeInsets } from 'react-native-safe-area-context'
-import { safeBottomInset } from '@/shared/constants'
+import { safeBottomInset, ADDRESS_BAR_HEIGHT } from '@/shared/constants'
 
 export function useAddressBarAnimation(
   insets: EdgeInsets,
@@ -20,7 +20,9 @@ export function useAddressBarAnimation(
 
   // AddressBar position animation — start at bottom (translateY = travelDistance)
   const addressBarAtTop = useSharedValue(false)
-  const ADDRESS_BAR_HEIGHT = 48 // paddingTop(4) + pill(44)
+  // React-state mirror of addressBarAtTop for prop-driven components (e.g. MenuPopover)
+  const [addressBarIsAtTop, setAddressBarIsAtTop] = useState(false)
+
   const computeTravelDistance = (top: number, bottom: number) => {
     const screenHeight = Dimensions.get('window').height
     return screenHeight - top - safeBottomInset(bottom) - ADDRESS_BAR_HEIGHT
@@ -113,6 +115,16 @@ export function useAddressBarAnimation(
       }
     })
 
+  // Sync addressBarAtTop SharedValue → React state for prop-driven components
+  useAnimatedReaction(
+    () => addressBarAtTop.value,
+    (current, previous) => {
+      if (current !== previous) {
+        runOnJS(setAddressBarIsAtTop)(current)
+      }
+    }
+  )
+
   // Animated style for AddressBar wrapper
   const animatedAddressBarStyle = useAnimatedStyle(() => {
     const keyboardOffset = addressBarAtTop.value ? 0 : -keyboardHeight.value
@@ -121,16 +133,16 @@ export function useAddressBarAnimation(
     }
   })
 
-  // Animated style for MenuPopover
+  // Animated style for MenuPopover wrapper.
+  // progress = 0 when bar is at bottom, 1 when at top.
+  // translateY slides from 0 (bottom) to insets.top (top) so that:
+  //   - bottom position: { bottom: safeBottom } card bottom == bar bottom
+  //   - top position:    { top: 0 }            card top    == bar top
   const animatedMenuPopoverStyle = useAnimatedStyle(() => {
     const travelDistance = addressBarTravelDistance.value
-    const menuPopoverHeight = 291
-
-    const progress = 1 - addressBarTranslateY.value / travelDistance
-    const menuTranslateY = -(travelDistance - addressBarTranslateY.value) + menuPopoverHeight * progress
-
+    const progress = travelDistance > 0 ? 1 - addressBarTranslateY.value / travelDistance : 0
     return {
-      transform: [{ translateY: menuTranslateY }]
+      transform: [{ translateY: insets.top * progress }]
     }
   })
 
@@ -176,6 +188,7 @@ export function useAddressBarAnimation(
     keyboardVisible,
     addressBarPanGesture,
     animatedAddressBarStyle,
-    animatedMenuPopoverStyle
+    animatedMenuPopoverStyle,
+    addressBarIsAtTop
   }
 }

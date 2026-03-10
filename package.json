@@ -21,7 +21,8 @@
     "format:check": "prettier --check .",
     "fix": "npm run format && npm run lint:fix",
     "clean": "rm -rf yarn.lock && rm -rf .expo && rm -rf .expo-shared && rm -rf .vscode && rm -rf .idea && rm -rf ios/Pods && rm -rf android/.gradle && rm -rf android/app/build && rm -rf ./ios",
-    "version": "node scripts/version.mjs"
+    "version": "node scripts/version.mjs",
+    "pdf": "tsx scripts/generate-pdf.ts"
   },
   "dependencies": {
     "@bsv/btms": "^1.0.0",

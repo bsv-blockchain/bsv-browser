@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   View,
   Text,
@@ -18,8 +18,10 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useTranslation } from 'react-i18next'
 import { useWallet } from '@/context/WalletContext'
-import { generateMnemonicWallet, validateMnemonic } from '@/utils/mnemonicWallet'
+import { generateMnemonicWallet, validateMnemonic, recoverMnemonicWallet } from '@/utils/mnemonicWallet'
+import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
 import * as Clipboard from 'expo-clipboard'
+import * as Print from 'expo-print'
 import { Paths, File as ExpoFile } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
@@ -29,7 +31,7 @@ type MnemonicMode = 'choose' | 'generate' | 'import'
 export default function MnemonicScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
-  const { buildWalletFromMnemonic } = useWallet()
+  const { buildWalletFromMnemonic, managers, adminOriginator } = useWallet()
   const { setMnemonic: storeMnemonic } = useLocalStorage()
 
   const [mode, setMode] = useState<MnemonicMode>('choose')
@@ -39,13 +41,29 @@ export default function MnemonicScreen() {
   const [hasAcknowledged, setHasAcknowledged] = useState(false)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [isPrinting, setIsPrinting] = useState(false)
+  const [identityKey, setIdentityKey] = useState('')
 
-  // Generate a new mnemonic
-  const handleGenerateNew = () => {
+  // Fetch identity key (needed for print recovery shares)
+  useEffect(() => {
+    managers?.permissionsManager
+      ?.getPublicKey({ identityKey: true }, adminOriginator)
+      .then(r => r && setIdentityKey(r.publicKey))
+  }, [managers, adminOriginator])
+
+  // Generate a new mnemonic and immediately build the wallet
+  const handleGenerateNew = async () => {
     try {
       const wallet = generateMnemonicWallet()
       setMnemonic(wallet.mnemonic)
       setMode('generate')
+
+      // Store and build the wallet immediately so that managers/identityKey
+      // are available for Print Recovery Shares on the save screen.
+      console.log('[Mnemonic] Building wallet eagerly after mnemonic generation')
+      await storeMnemonic(wallet.mnemonic)
+      await buildWalletFromMnemonic(wallet.mnemonic)
+      console.log('[Mnemonic] Wallet built successfully during generate flow')
     } catch (error: any) {
       console.error('Error generating mnemonic:', error)
       Alert.alert('Error', 'Failed to generate mnemonic. Please try again.')
@@ -84,10 +102,29 @@ export default function MnemonicScreen() {
     }, 3000)
   }
 
+  // Print recovery shares (same as Settings page)
+  const handlePrintRecoveryShares = async () => {
+    if (isPrinting) return
+    setIsPrinting(true)
+    try {
+      const { primaryKey } = recoverMnemonicWallet(mnemonic)
+      const shares = generateBackupShares(primaryKey)
+      const html = await generatePrintHTML(shares, identityKey)
+      await Print.printAsync({ html })
+      setHasAcknowledged(true)
+    } catch (error: any) {
+      console.info('[Mnemonic] Print recovery shares did not complete:', error?.message)
+    } finally {
+      setIsPrinting(false)
+    }
+  }
+
   // Continue with generated mnemonic after acknowledgment
-  const handleContinueWithGenerated = async () => {
+  // Wallet was already built in handleGenerateNew, so just navigate.
+  const handleContinueWithGenerated = () => {
     if (!hasAcknowledged) return
-    await initializeWallet(mnemonic)
+    router.dismissAll()
+    router.push('/')
   }
 
   // Validate and continue with imported mnemonic
@@ -251,34 +288,43 @@ export default function MnemonicScreen() {
 
           {/* Action buttons */}
           <View style={s.generateActions}>
-            <TouchableOpacity
-              style={[s.primaryButton, { backgroundColor: colors.protocolApproval }]}
-              onPress={handleShareMnemonic}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="share-outline" size={20} color={colors.textOnAccent} style={s.btnIcon} />
-              <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>{t('save_recovery_phrase_btn')}</Text>
-            </TouchableOpacity>
+            <View style={s.inlineButtonRow}>
+              <TouchableOpacity
+                style={[s.inlineButton, { backgroundColor: colors.protocolApproval }]}
+                onPress={handleShareMnemonic}
+                activeOpacity={0.75}
+              >
+                <Ionicons name="share-outline" size={20} color={colors.textOnAccent} style={s.btnIcon} />
+                <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>{t('save')}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.inlineButton, { backgroundColor: colors.fillTertiary }]}
+                onPress={handleCopyMnemonic}
+                activeOpacity={0.75}
+              >
+                <Ionicons
+                  name={copied ? 'checkmark' : 'copy-outline'}
+                  size={20}
+                  color={colors.accent}
+                  style={s.btnIcon}
+                />
+                <Text style={[s.btnLabel, { color: colors.accent }]}>{copied ? t('copied') : t('copy')}</Text>
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity
-              style={[
-                s.tertiaryButton,
-                {
-                  backgroundColor: colors.fillTertiary
-                }
-              ]}
-              onPress={handleCopyMnemonic}
+              style={[s.primaryButton, { backgroundColor: '#5856D6' }]}
+              onPress={handlePrintRecoveryShares}
+              disabled={isPrinting}
               activeOpacity={0.75}
             >
-              <Ionicons
-                name={copied ? 'checkmark' : 'copy-outline'}
-                size={20}
-                color={colors.accent}
-                style={s.btnIcon}
-              />
-              <Text style={[s.btnLabel, { color: colors.accent }]}>
-                {copied ? t('copied') : t('copy_to_clipboard')}
-              </Text>
+              {isPrinting ? (
+                <ActivityIndicator color="#FFFFFF" style={s.btnIcon} />
+              ) : (
+                <Ionicons name="print-outline" size={20} color="#FFFFFF" style={s.btnIcon} />
+              )}
+              <Text style={[s.btnLabel, { color: '#FFFFFF' }]}>{t('print_recovery_shares')}</Text>
             </TouchableOpacity>
           </View>
 
@@ -572,6 +618,20 @@ const s = StyleSheet.create({
   generateActions: {
     gap: spacing.sm,
     marginBottom: spacing.xxl
+  },
+  inlineButtonRow: {
+    flexDirection: 'row',
+    gap: spacing.sm
+  },
+  inlineButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    minHeight: 50
   },
   btnIcon: {
     marginRight: spacing.sm

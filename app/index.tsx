@@ -29,7 +29,13 @@ import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
 import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'
-import { DEFAULT_HOMEPAGE_URL, kNEW_TAB_URL, SEARCH_ENGINES, DEFAULT_SEARCH_ENGINE_ID, safeBottomInset } from '@/shared/constants'
+import {
+  DEFAULT_HOMEPAGE_URL,
+  kNEW_TAB_URL,
+  SEARCH_ENGINES,
+  DEFAULT_SEARCH_ENGINE_ID,
+  safeBottomInset
+} from '@/shared/constants'
 import { isValidUrl } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
@@ -180,15 +186,20 @@ function Browser() {
 
   const addressInputRef = useRef<TextInput>(null)
 
-  const { keyboardVisible, addressBarPanGesture, animatedAddressBarStyle, animatedMenuPopoverStyle } =
-    useAddressBarAnimation(
-      insets,
-      addressFocused,
-      addressEditing,
-      addressInputRef,
-      setAddressFocused,
-      setAddressSuggestions
-    )
+  const {
+    keyboardVisible,
+    addressBarPanGesture,
+    animatedAddressBarStyle,
+    animatedMenuPopoverStyle,
+    addressBarIsAtTop
+  } = useAddressBarAnimation(
+    insets,
+    addressFocused,
+    addressEditing,
+    addressInputRef,
+    setAddressFocused,
+    setAddressSuggestions
+  )
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
@@ -960,7 +971,9 @@ function Browser() {
             <MenuPopover
               isNewTab={isNewTab}
               canShare={!isNewTab}
-              bottomOffset={bottomInset}
+              addressBarAtTop={addressBarIsAtTop}
+              topOffset={8}
+              bottomOffset={bottomInset + 4}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {

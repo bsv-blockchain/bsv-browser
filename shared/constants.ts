@@ -11,6 +11,12 @@ export const DEFAULT_HOMEPAGE_URL = 'https://mobile.bsvb.tech/landing.html'
 export const ANDROID_MIN_BOTTOM_INSET = 24
 
 /**
+ * Height of the AddressBar wrapper in pixels.
+ * paddingTop(4) + pill(44) = 48px
+ */
+export const ADDRESS_BAR_HEIGHT = 48
+
+/**
  * Returns a safe bottom inset that respects a platform-appropriate minimum.
  * On Android, enforces at least ANDROID_MIN_BOTTOM_INSET to handle devices
  * where safe-area-context does not report the OS navigation bar height.
