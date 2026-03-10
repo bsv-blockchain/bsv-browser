@@ -3,6 +3,7 @@ import { Dimensions, Keyboard, Platform, TextInput } from 'react-native'
 import { Gesture } from 'react-native-gesture-handler'
 import { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
 import type { EdgeInsets } from 'react-native-safe-area-context'
+import { safeBottomInset } from '@/shared/constants'
 
 export function useAddressBarAnimation(
   insets: EdgeInsets,
@@ -22,7 +23,7 @@ export function useAddressBarAnimation(
   const ADDRESS_BAR_HEIGHT = 60 // paddingTop(4) + pill(44) + paddingBottom(12)
   const computeTravelDistance = (top: number, bottom: number) => {
     const screenHeight = Dimensions.get('window').height
-    return screenHeight - (2 * top) - 12
+    return screenHeight - top - safeBottomInset(bottom) - ADDRESS_BAR_HEIGHT
   }
   const initialTravelDistance = computeTravelDistance(insets.top, insets.bottom)
   const addressBarTravelDistance = useSharedValue(initialTravelDistance)
