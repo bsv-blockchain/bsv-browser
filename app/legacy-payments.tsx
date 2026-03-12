@@ -36,6 +36,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import { SatsAmountInput } from '@/components/wallet/SatsAmountInput'
+import { formatDistanceToNow } from 'date-fns'
 
 const brc29ProtocolID: WalletProtocol = [2, '3241645161d8']
 
@@ -45,6 +46,13 @@ interface Utxo {
   txid: string
   vout: number
   satoshis: number
+}
+
+interface ProcessedTx {
+  txid: string
+  satoshis: number
+  status: string
+  importedAt: Date | null
 }
 
 const getCurrentDate = (daysOffset: number): string => {
@@ -87,7 +95,7 @@ export default function LegacyPaymentsScreen() {
   const [daysOffset, setDaysOffset] = useState(0)
   const [derivationPrefix, setDerivationPrefix] = useState(Utils.toBase64(Utils.toArray(getCurrentDate(0), 'utf8')))
   const derivationSuffix = Utils.toBase64(Utils.toArray('legacy', 'utf8'))
-  const [importLog, setImportLog] = useState<{ sats: number; at: Date }[]>([])
+  const [processedTxs, setProcessedTxs] = useState<ProcessedTx[]>([])
 
   // ── Send state ───────────────────────────────────────────────────────────
   const [recipientAddress, setRecipientAddress] = useState('')
@@ -189,6 +197,39 @@ export default function LegacyPaymentsScreen() {
     [wallet, adminOriginator]
   )
 
+  const getProcessedTransactions = useCallback(
+    async (address: string): Promise<ProcessedTx[]> => {
+      if (!wallet) return []
+      try {
+        const response = await wallet.listActions(
+          { labels: [address], labelQueryMode: 'all', includeLabels: true, includeOutputs: true, limit: 1000 },
+          adminOriginator
+        )
+        return response.actions
+          .map(action => {
+            const totalSats = action.outputs ? action.outputs.reduce((sum, o) => sum + o.satoshis, 0) : action.satoshis
+            const tsLabel = action.labels?.find(l => l.startsWith('ts:'))
+            const importedAt = tsLabel ? new Date(Number(tsLabel.slice(3)) * 1000) : null
+            return {
+              txid: action.txid,
+              satoshis: totalSats,
+              status: action.status,
+              importedAt
+            }
+          })
+          .sort((a, b) => {
+            if (a.importedAt && b.importedAt) return b.importedAt.getTime() - a.importedAt.getTime()
+            if (a.importedAt) return -1
+            if (b.importedAt) return 1
+            return 0
+          })
+      } catch {
+        return []
+      }
+    },
+    [wallet, adminOriginator]
+  )
+
   const fetchBalance = useCallback(
     async (address: string): Promise<number> => {
       const allUtxos = await getUtxosForAddress(address)
@@ -209,6 +250,7 @@ export default function LegacyPaymentsScreen() {
         setDerivationPrefix(prefix)
         setPaymentAddress(address)
         setBalance(-1)
+        setProcessedTxs([])
       } catch (error: any) {
         showSnack(`Error generating address: ${error.message || 'unknown error'}`, 'error')
       } finally {
@@ -267,7 +309,7 @@ export default function LegacyPaymentsScreen() {
             tx: tx!.toAtomicBEEF(),
             description: 'Legacy Bridge Payment',
             outputs,
-            labels: ['legacy', 'inbound', 'bsvbrowser', paymentAddress!]
+            labels: ['legacy', 'inbound', 'bsvbrowser', paymentAddress!, `ts:${Math.floor(Date.now() / 1000)}`]
           }
           return { args, satoshis }
         })
@@ -290,7 +332,6 @@ export default function LegacyPaymentsScreen() {
       }
 
       if (importedSatoshis > 0) {
-        setImportLog(prev => [{ sats: importedSatoshis, at: new Date() }, ...prev])
         showSnack(
           `Successfully imported ${importedSatoshis.toLocaleString()} sats${failureCount > 0 ? ` (${failureCount} failed)` : ''}`,
           'success'
@@ -299,8 +340,12 @@ export default function LegacyPaymentsScreen() {
         showSnack(`Failed to import ${failureCount} transaction${failureCount > 1 ? 's' : ''}`, 'error')
       }
 
-      const newBalance = await fetchBalance(paymentAddress)
+      const [newBalance, processed] = await Promise.all([
+        fetchBalance(paymentAddress),
+        getProcessedTransactions(paymentAddress)
+      ])
       setBalance(newBalance)
+      setProcessedTxs(processed)
     } catch (error: any) {
       showSnack(`Import failed: ${error.message || 'unknown error'}`, 'error')
     } finally {
@@ -330,8 +375,12 @@ export default function LegacyPaymentsScreen() {
       if (!paymentAddress) return
       setIsCheckingBalance(true)
       try {
-        const bal = await fetchBalance(paymentAddress)
+        const [bal, processed] = await Promise.all([
+          fetchBalance(paymentAddress),
+          getProcessedTransactions(paymentAddress)
+        ])
         setBalance(bal)
+        setProcessedTxs(processed)
       } catch {
         // ignore polling errors
       } finally {
@@ -499,51 +548,62 @@ export default function LegacyPaymentsScreen() {
             </View>
           </TouchableOpacity>
 
-          {/* Balance row */}
-          <View style={[styles.balanceRow, { borderTopColor: colors.separator }]}>
-            <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>{t('available_balance')}</Text>
-            <Text style={[styles.balanceValue, { color: colors.textPrimary }]}>
-              {balance === -1 ? '–' : `${balance.toLocaleString()} sats`}
-            </Text>
+          {/* Listening indicator */}
+          <View style={styles.listeningRow}>
+            <Animated.View
+              style={[
+                styles.listeningDot,
+                {
+                  backgroundColor: isImporting ? colors.success : colors.textQuaternary,
+                  opacity: isImporting ? pulseAnim : 1
+                }
+              ]}
+            />
+            <Text style={[styles.listeningText, { color: colors.textTertiary }]}>Listening for transactions…</Text>
           </View>
 
-          {/* Import status */}
-          {isImporting && (
-            <View style={[styles.statusRow, { backgroundColor: colors.info + '12' }]}>
-              <ActivityIndicator size="small" color={colors.info} />
-              <Text style={[styles.statusText, { color: colors.info }]}>{t('import_funds')}…</Text>
-            </View>
-          )}
-
-          {/* Listening indicator */}
-          {!isImporting && (
-            <View style={styles.listeningRow}>
-              <Animated.View style={[styles.listeningDot, { backgroundColor: colors.success, opacity: pulseAnim }]} />
-              <Text style={[styles.listeningText, { color: colors.textTertiary }]}>Listening for transactions…</Text>
-            </View>
-          )}
-
-          {/* Import log */}
-          {importLog.length > 0 && (
-            <View style={[styles.logContainer, { borderColor: colors.separator, marginTop: spacing.xl }]}>
-              {importLog.map((entry, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.logEntry,
-                    i < importLog.length - 1 && {
-                      borderBottomWidth: StyleSheet.hairlineWidth,
-                      borderBottomColor: colors.separator
-                    }
-                  ]}
-                >
-                  <Text style={[styles.logSats, { color: colors.success }]}>+{entry.sats.toLocaleString()} sats</Text>
-                  <Text style={[styles.logTime, { color: colors.textTertiary }]}>
-                    {entry.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </Text>
-                </View>
-              ))}
-            </View>
+          {/* Processed transactions (already imported into wallet) */}
+          {processedTxs.length > 0 && (
+            <>
+              <View style={[styles.balanceRow, { borderTopColor: colors.separator, marginTop: spacing.lg }]}>
+                <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>{t('imported')}</Text>
+                <Text style={[styles.balanceValue, { color: colors.success }]}>
+                  {processedTxs.reduce((sum, tx) => sum + tx.satoshis, 0).toLocaleString()} sats
+                </Text>
+              </View>
+              <View style={[styles.logContainer, { borderColor: colors.separator, marginTop: spacing.md }]}>
+                {processedTxs.map((tx, i) => (
+                  <View
+                    key={tx.txid}
+                    style={[
+                      styles.logEntry,
+                      i < processedTxs.length - 1 && {
+                        borderBottomWidth: StyleSheet.hairlineWidth,
+                        borderBottomColor: colors.separator
+                      }
+                    ]}
+                  >
+                    <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+                    <Text style={[styles.logSats, { color: colors.success }]}>
+                      +{tx.satoshis.toLocaleString()} sats
+                    </Text>
+                    {tx.importedAt ? (
+                      <Text style={[styles.logTime, { color: colors.textTertiary }]}>
+                        {formatDistanceToNow(tx.importedAt, { addSuffix: true })}
+                      </Text>
+                    ) : (
+                      <Text
+                        style={[styles.logAddress, { color: colors.textTertiary }]}
+                        numberOfLines={1}
+                        ellipsizeMode="middle"
+                      >
+                        {tx.txid}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            </>
           )}
         </>
       )}
@@ -644,7 +704,7 @@ export default function LegacyPaymentsScreen() {
                   {entry.address}
                 </Text>
                 <Text style={[styles.logTime, { color: colors.textTertiary }]}>
-                  {entry.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  {formatDistanceToNow(entry.at, { addSuffix: true })}
                 </Text>
               </View>
             ))}
