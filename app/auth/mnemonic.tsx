@@ -18,6 +18,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useTranslation } from 'react-i18next'
 import { useWallet } from '@/context/WalletContext'
+import { PrivateKey } from '@bsv/sdk'
 import { generateMnemonicWallet, validateMnemonic, recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
 import * as Clipboard from 'expo-clipboard'
@@ -31,8 +32,8 @@ type MnemonicMode = 'choose' | 'generate' | 'import'
 export default function MnemonicScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
-  const { buildWalletFromMnemonic, managers, adminOriginator } = useWallet()
-  const { setMnemonic: storeMnemonic } = useLocalStorage()
+  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey, managers, adminOriginator } = useWallet()
+  const { setMnemonic: storeMnemonic, setRecoveredKey } = useLocalStorage()
 
   const [mode, setMode] = useState<MnemonicMode>('choose')
   const [mnemonic, setMnemonic] = useState<string>('')
@@ -127,16 +128,37 @@ export default function MnemonicScreen() {
     router.push('/')
   }
 
-  // Validate and continue with imported mnemonic
+  // Validate and continue with imported mnemonic or hex private key
   const handleContinueWithImported = async () => {
-    const trimmedMnemonic = importedMnemonic.trim()
+    const trimmed = importedMnemonic.trim()
 
-    if (!validateMnemonic(trimmedMnemonic)) {
-      Alert.alert('Invalid Mnemonic', 'Please enter a valid 12, 15, 18, 21, or 24 word mnemonic phrase.')
+    // Detect 64-char hex string as a raw private key
+    if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+      setLoading(true)
+      try {
+        const wif = PrivateKey.fromHex(trimmed).toWif()
+        await setRecoveredKey(wif)
+        await buildWalletFromRecoveredKey(wif)
+        router.dismissAll()
+        router.push('/')
+      } catch (error: any) {
+        console.error('[Mnemonic] Error importing hex key:', error)
+        Alert.alert('Error', `Invalid private key: ${error.message}`)
+      } finally {
+        setLoading(false)
+      }
       return
     }
 
-    await initializeWallet(trimmedMnemonic)
+    if (!validateMnemonic(trimmed)) {
+      Alert.alert(
+        'Invalid Input',
+        'Please enter a valid recovery phrase (12–24 words) or a 64-character hex private key.'
+      )
+      return
+    }
+
+    await initializeWallet(trimmed)
   }
 
   // Initialize wallet with mnemonic

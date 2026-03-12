@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState, useEffect } from 'react'
 import { Platform } from 'react-native'
 import { useLocalSearchParams } from 'expo-router'
 import { useLocalStorage } from './LocalStorageProvider'
@@ -58,6 +58,10 @@ export const BrowserModeProvider: React.FC<BrowserModeProviderProps> = ({ childr
   const { managers } = useWallet()
   const params = useLocalSearchParams()
 
+  // Track whether the init effect has resolved so the auth effect doesn't
+  // race against it on the very first render cycle.
+  const initResolved = useRef(false)
+
   // Check if user is authenticated (logged in with Web3 identity)
   const isAuthenticated = !!managers?.walletManager?.authenticated
 
@@ -72,7 +76,7 @@ export const BrowserModeProvider: React.FC<BrowserModeProviderProps> = ({ childr
     })
   }, [isAuthenticated, managers?.walletManager, managers?.walletManager?.authenticated, isWeb2Mode])
 
-  // Initialize mode from URL params or stored preference
+  // Initialize mode from URL params or stored preference (runs once on mount)
   useEffect(() => {
     const initializeMode = async () => {
       console.log('[BrowserMode] Initializing mode with params:', params.mode)
@@ -81,7 +85,6 @@ export const BrowserModeProvider: React.FC<BrowserModeProviderProps> = ({ childr
       if (params.mode === 'web2') {
         console.log('[BrowserMode] Setting web2 mode from URL params')
         setIsWeb2Mode(true)
-        // Store this preference
         await setItem('browserMode', 'web2')
       } else if (params.mode === 'web3') {
         console.log('[BrowserMode] Setting web3 mode from URL params')
@@ -89,68 +92,101 @@ export const BrowserModeProvider: React.FC<BrowserModeProviderProps> = ({ childr
         await setItem('browserMode', 'web3')
       } else {
         // Load from stored preference
-        try {
-          await getItem('browserMode')
+        const stored = await getItem('browserMode')
+        if (stored === 'web3') {
+          console.log('[BrowserMode] Restoring web3 mode from storage')
           setIsWeb2Mode(false)
-        } catch {
+        } else {
+          // No stored value or stored as 'web2' → default to web2
+          console.log('[BrowserMode] Defaulting to web2 mode (stored:', stored, ')')
           setIsWeb2Mode(true)
         }
       }
+      initResolved.current = true
     }
 
     initializeMode()
   }, [params.mode, getItem, setItem])
 
-  // Auto-switch mode based on authentication state
+  // Auto-switch mode based on authentication state.
+  // When the wallet becomes authenticated, switch to web3 mode.
+  // When the wallet is torn down (logout), switch to web2 mode.
+  // NOTE: isWeb2Mode is intentionally excluded from deps to avoid a
+  // feedback loop where the effect triggers itself.
   useEffect(() => {
+    // Don't race with the init effect on the first mount
+    if (!initResolved.current) return
+
     const updateModeBasedOnAuth = async () => {
       if (isAuthenticated) {
         // User is logged in with Web3 identity, switch to web3 mode
         console.log('[BrowserMode] User authenticated, switching to web3 mode')
         setIsWeb2Mode(false)
         await setItem('browserMode', 'web3')
-      } else if (!isAuthenticated && !isWeb2Mode && managers?.walletManager === undefined) {
-        // User logged out (managers cleared), switch to web2 mode
-        console.log('[BrowserMode] User logged out, switching to web2 mode')
+      } else if (managers?.walletManager === undefined) {
+        // Wallet manager was cleared (logout), switch to web2 mode
+        console.log('[BrowserMode] Wallet manager cleared, switching to web2 mode')
         setIsWeb2Mode(true)
         await setItem('browserMode', 'web2')
       }
     }
 
     updateModeBasedOnAuth()
-  }, [isAuthenticated, setItem, managers, isWeb2Mode])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, setItem, managers])
 
-  const setWeb2Mode = async (enabled: boolean) => {
-    setIsWeb2Mode(enabled)
-    await setItem('browserMode', enabled ? 'web2' : 'web3')
-  }
+  const setWeb2Mode = useCallback(
+    async (enabled: boolean) => {
+      setIsWeb2Mode(enabled)
+      await setItem('browserMode', enabled ? 'web2' : 'web3')
+    },
+    [setItem]
+  )
 
-  const toggleMode = async () => {
-    const newMode = !isWeb2Mode
+  // Keep a ref in sync with isWeb2Mode so toggleMode can read current state
+  const isWeb2ModeRef = useRef(isWeb2Mode)
+  useEffect(() => {
+    isWeb2ModeRef.current = isWeb2Mode
+  }, [isWeb2Mode])
+
+  const toggleMode = useCallback(async () => {
+    const newMode = !isWeb2ModeRef.current
     setIsWeb2Mode(newMode)
     await setItem('browserMode', newMode ? 'web2' : 'web3')
-  }
+  }, [setItem])
 
-  const showWeb3Benefits = (onContinue: () => void, onGoToLogin: () => void) => {
+  const showWeb3Benefits = useCallback((onContinue: () => void, onGoToLogin: () => void) => {
     setWeb3BenefitsCallbacks({ onContinue, onGoToLogin })
     setWeb3BenefitsVisible(true)
-  }
+  }, [])
 
-  const hideWeb3Benefits = () => {
+  const hideWeb3Benefits = useCallback(() => {
     setWeb3BenefitsVisible(false)
     setWeb3BenefitsCallbacks({ onContinue: null, onGoToLogin: null })
-  }
+  }, [])
 
-  const value = {
-    isWeb2Mode,
-    setWeb2Mode,
-    toggleMode,
-    showWeb3Benefits,
-    hideWeb3Benefits,
-    web3BenefitsVisible,
-    web3BenefitsCallbacks,
-    isAuthenticated
-  }
+  const value = useMemo(
+    () => ({
+      isWeb2Mode,
+      setWeb2Mode,
+      toggleMode,
+      showWeb3Benefits,
+      hideWeb3Benefits,
+      web3BenefitsVisible,
+      web3BenefitsCallbacks,
+      isAuthenticated
+    }),
+    [
+      isWeb2Mode,
+      setWeb2Mode,
+      toggleMode,
+      showWeb3Benefits,
+      hideWeb3Benefits,
+      web3BenefitsVisible,
+      web3BenefitsCallbacks,
+      isAuthenticated
+    ]
+  )
 
   return <BrowserModeContext.Provider value={value}>{children}</BrowserModeContext.Provider>
 }

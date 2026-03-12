@@ -238,6 +238,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const adminOriginator = ADMIN_ORIGINATOR
   const [recentApps, setRecentApps] = useState<any[]>([])
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
+  const walletBuildingRef = useRef<boolean>(false)
 
   const {
     getSnap,
@@ -1004,8 +1005,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   const buildWalletFromMnemonic = useCallback(
     async (providedMnemonic?: string) => {
-      // Skip if wallet already built
-      if (walletBuilt) {
+      // Skip if wallet already built or a build is already in progress
+      if (walletBuilt || walletBuildingRef.current) {
         return
       }
 
@@ -1014,6 +1015,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         return
       }
 
+      walletBuildingRef.current = true
       logWithTimestamp(F, 'Checking for noWAB primary key')
 
       try {
@@ -1021,6 +1023,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const mnemonic = providedMnemonic || (await getMnemonic())
         if (!mnemonic) {
           logWithTimestamp(F, 'No noWAB mnemonic found')
+          walletBuildingRef.current = false
           return
         }
 
@@ -1064,19 +1067,21 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         logWithTimestamp(F, 'NoWAB wallet initialization completed')
       } catch (error: any) {
+        walletBuildingRef.current = false
         console.error('[WalletContext] Error initializing noWAB wallet:', error)
         logWithTimestamp(F, 'Error initializing noWAB wallet', error.message)
       }
     },
-    [walletBuilt, configStatus, getMnemonic, getSnap, setMnemonic, buildWallet]
+    [walletBuilt, configStatus, getMnemonic, getSnap, setMnemonic, buildWallet, setWeb2Mode]
   )
 
   // Build wallet from a recovered PrivateKey (WIF) obtained via backup share scanning
   const buildWalletFromRecoveredKey = useCallback(
     async (wif: string) => {
-      if (walletBuilt) return
+      if (walletBuilt || walletBuildingRef.current) return
       if (configStatus !== 'configured') return
 
+      walletBuildingRef.current = true
       logWithTimestamp(F, 'Building wallet from recovered key')
 
       try {
@@ -1109,11 +1114,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         logWithTimestamp(F, 'Recovered key wallet initialization completed')
       } catch (error: any) {
+        walletBuildingRef.current = false
         console.error('[WalletContext] Error initializing wallet from recovered key:', error)
         logWithTimestamp(F, 'Error initializing wallet from recovered key', error.message)
       }
     },
-    [walletBuilt, configStatus, getSnap, setRecoveredKey, buildWallet]
+    [walletBuilt, configStatus, getSnap, setRecoveredKey, buildWallet, setWeb2Mode]
   )
 
   // Tear down the current wallet and re-trigger auto-build.
@@ -1143,6 +1149,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     // Tear down current wallet state (but keep mnemonic / config)
     setManagers({})
     setWalletBuilt(false)
+    walletBuildingRef.current = false
     setSnapshotLoaded(false)
 
     // Re-finalize with current config — triggers auto-build effect
@@ -1178,6 +1185,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       // Tear down current wallet state (but keep mnemonic)
       setManagers({})
       setWalletBuilt(false)
+      walletBuildingRef.current = false
       setSnapshotLoaded(false)
 
       // Persist new config
@@ -1261,6 +1269,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setConfigStatus('initial')
       setSnapshotLoaded(false)
       setWalletBuilt(false)
+      walletBuildingRef.current = false
       deleteMnemonic()
       deleteRecoveredKey()
       logWithTimestamp(F, 'Configuration and state reset')

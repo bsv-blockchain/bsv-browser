@@ -14,6 +14,7 @@ import { router } from 'expo-router'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { exportAllWalletDatabases } from '@/utils/exportDatabases'
 import { importWalletDatabase } from '@/utils/importDatabases'
+import { PrivateKey } from '@bsv/sdk'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
 import * as Print from 'expo-print'
@@ -44,13 +45,19 @@ export default function WalletConfigScreen() {
 
   const handleCopyMnemonic = async () => {
     try {
-      const value = await getMnemonic()
-      if (!value) return
-      Clipboard.setString(value)
+      // Copy mnemonic if available, otherwise fall back to primary key hex
+      const mnemonic = await getMnemonic()
+      if (mnemonic) {
+        Clipboard.setString(mnemonic)
+      } else {
+        const wif = await getRecoveredKey()
+        if (!wif) return
+        Clipboard.setString(PrivateKey.fromWif(wif).toHex())
+      }
       setCopiedMnemonic(true)
       setTimeout(() => setCopiedMnemonic(false), 2000)
     } catch (error) {
-      console.error('Error retrieving mnemonic:', error)
+      console.error('Error retrieving recovery key:', error)
     }
   }
 
@@ -67,7 +74,6 @@ export default function WalletConfigScreen() {
         primaryKeyBytes = primaryKey
       } else {
         // Fall back to recovered key
-        const { PrivateKey } = require('@bsv/sdk')
         const wif = await getRecoveredKey()
         if (wif) {
           primaryKeyBytes = PrivateKey.fromWif(wif).toArray()
