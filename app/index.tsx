@@ -423,11 +423,13 @@ function Browser() {
       if(o instanceof Blob) reg.set(u,o);
       return u;
     };
+    try{Object.defineProperty(URL.createObjectURL,'toString',{value:function(){return'function createObjectURL() { [native code] }'},writable:false,configurable:false});Object.defineProperty(URL.createObjectURL,'name',{value:'createObjectURL',configurable:true})}catch(e){}
     var or=URL.revokeObjectURL;
     URL.revokeObjectURL=function(u){
       setTimeout(function(){reg.delete(u);},30000);
       return or.call(URL,u);
     };
+    try{Object.defineProperty(URL.revokeObjectURL,'toString',{value:function(){return'function revokeObjectURL() { [native code] }'},writable:false,configurable:false});Object.defineProperty(URL.revokeObjectURL,'name',{value:'revokeObjectURL',configurable:true})}catch(e){}
     var origClick=HTMLElement.prototype.click;
     HTMLElement.prototype.click=function(){
       var el=this;
@@ -453,6 +455,7 @@ function Browser() {
       }
       return origClick.call(this);
     };
+    try{Object.defineProperty(HTMLElement.prototype.click,'toString',{value:function(){return'function click() { [native code] }'},writable:false,configurable:false})}catch(e){}
   })();true;`
 
   const routeWebViewMessage = useMemo(

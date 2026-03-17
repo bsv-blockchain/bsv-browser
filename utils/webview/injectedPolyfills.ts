@@ -144,6 +144,14 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         }
         return url
       }
+      // Spoof toString so bot-detection sees native code
+      try {
+        Object.defineProperty(URL.createObjectURL, 'toString', {
+          value: () => 'function createObjectURL() { [native code] }',
+          writable: false, configurable: false
+        })
+        Object.defineProperty(URL.createObjectURL, 'name', { value: 'createObjectURL', configurable: true })
+      } catch {}
 
       URL.revokeObjectURL = function (url: string) {
         console.log('[DL] revokeObjectURL', url, 'inRegistry=', blobRegistry.has(url))
@@ -152,6 +160,13 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         setTimeout(function () { blobRegistry.delete(url) }, 10000)
         return origRevokeObjectURL.call(URL, url)
       }
+      try {
+        Object.defineProperty(URL.revokeObjectURL, 'toString', {
+          value: () => 'function revokeObjectURL() { [native code] }',
+          writable: false, configurable: false
+        })
+        Object.defineProperty(URL.revokeObjectURL, 'name', { value: 'revokeObjectURL', configurable: true })
+      } catch {}
 
       // Helper: read a Blob as base64 and post to React Native
       function sendBlobAsBase64(blob: Blob, filename: string | null, mimeType: string) {
@@ -198,6 +213,13 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         }
         return origAnchorClick.call(this)
       }
+      // Spoof toString so bot-detection sees native code
+      try {
+        Object.defineProperty(HTMLAnchorElement.prototype.click, 'toString', {
+          value: () => 'function click() { [native code] }',
+          writable: false, configurable: false
+        })
+      } catch {}
 
       // Intercept anchor clicks in the capture phase (for attached elements)
       document.addEventListener(
@@ -278,6 +300,14 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         }
         return origOpen?.call(window, url, target, features) || null
       }
+      // Spoof toString so bot-detection sees native code
+      try {
+        Object.defineProperty((window as any).open, 'toString', {
+          value: () => 'function open() { [native code] }',
+          writable: false, configurable: false
+        })
+        Object.defineProperty((window as any).open, 'name', { value: 'open', configurable: true })
+      } catch {}
     } catch (e) {
       // Silently fail — download interception is non-critical
     }
@@ -337,6 +367,14 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
       // Allow audio-only requests through original implementation
       return originalGetUserMedia ? originalGetUserMedia(constraints) : Promise.reject(new Error('Media not supported'))
     }
+    // Spoof toString so bot-detection sees native code
+    try {
+      Object.defineProperty(navigator.mediaDevices.getUserMedia, 'toString', {
+        value: () => 'function getUserMedia() { [native code] }',
+        writable: false, configurable: false
+      })
+      Object.defineProperty(navigator.mediaDevices.getUserMedia, 'name', { value: 'getUserMedia', configurable: true })
+    } catch {}
   })()
 
   // Push Notification API polyfill
@@ -682,6 +720,15 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
           return Promise.reject(new Error('No media constraints specified'))
         }
       }
+
+      // Spoof toString so bot-detection sees native code
+      try {
+        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'toString', {
+          value: () => 'function getUserMedia() { [native code] }',
+          writable: false, configurable: false
+        })
+        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'name', { value: 'getUserMedia', configurable: true })
+      } catch {}
 
       // Also override the deprecated navigator.getUserMedia if it exists
       if ((navigator as any).getUserMedia) {
