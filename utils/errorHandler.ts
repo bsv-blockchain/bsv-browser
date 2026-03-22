@@ -69,10 +69,10 @@ export function installGlobalErrorHandler() {
 export function installPromiseRejectionHandler() {
   // @ts-ignore - global Promise rejection tracking
   if (typeof global.Promise !== 'undefined') {
-    const originalRejectionTracking = global.Promise._unhandledRejectionFn
+    const originalRejectionTracking = (global.Promise as any)._unhandledRejectionFn
 
     // @ts-ignore
-    global.Promise._unhandledRejectionFn = (reason: any) => {
+    ;(global.Promise as any)._unhandledRejectionFn = (reason: any) => {
       console.error('[ErrorHandler] Unhandled Promise Rejection:', reason)
 
       // Call original handler if it exists

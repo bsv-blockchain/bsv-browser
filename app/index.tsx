@@ -120,7 +120,7 @@ function Browser() {
   }, [i18n.language])
 
   /* ----------------------------- wallet context ----------------------------- */
-  const { managers } = useWallet()
+  const { managers, walletBuilding } = useWallet()
   const [wallet, setWallet] = useState<WalletInterface | undefined>()
   useEffect(() => {
     if (!isWeb2Mode && managers?.walletManager?.authenticated) {
@@ -129,6 +129,10 @@ function Browser() {
       setWallet(undefined)
     }
   }, [managers, isWeb2Mode])
+
+  // Queue for CWI messages that arrive while the wallet is still building.
+  // Drained automatically once the wallet becomes available.
+  const pendingCwiQueue = useRef<WebViewMessageEvent[]>([])
 
   /* ---------------------------- storage helpers ----------------------------- */
   const { getItem, setItem } = useLocalStorage()
@@ -534,10 +538,24 @@ function Browser() {
       if (await routeWebViewMessage(msg)) return
 
       if (msg.call && (!wallet || isWeb2Mode)) {
-        if (msg.type === 'CWI' && msg.id) {
-          sendErrorToWebView(msg.id, isWeb2Mode ? 'Wallet is disabled in Web2 mode' : 'Wallet is not authenticated', 1)
+        if (isWeb2Mode) {
+          // Web2 mode: wallet calls are not supported, send error immediately
+          if (msg.type === 'CWI' && msg.id) {
+            sendErrorToWebView(msg.id, 'Wallet is disabled in Web2 mode', 1)
+          }
+          return
         }
-        if (!wallet && !isWeb2Mode) router.push('/auth/mnemonic')
+        if (walletBuilding) {
+          // Wallet is still initializing (biometric auth, async build) —
+          // queue the message and replay it once the wallet is ready.
+          pendingCwiQueue.current.push(event)
+          return
+        }
+        // No wallet, not building, not web2 → user has no wallet configured
+        if (msg.type === 'CWI' && msg.id) {
+          sendErrorToWebView(msg.id, 'Wallet is not authenticated', 1)
+        }
+        router.push('/auth/mnemonic')
         return
       }
 
@@ -584,8 +602,49 @@ function Browser() {
         sendErrorToWebView(msg.id, error?.message || 'unknown error', error?.code || 1)
       }
     },
-    [activeTab, wallet, routeWebViewMessage, isWeb2Mode]
+    [activeTab, wallet, routeWebViewMessage, isWeb2Mode, walletBuilding]
   )
+
+  // Drain queued CWI messages once the wallet finishes building.
+  // handleMessage is a fresh closure each time wallet/walletBuilding change,
+  // so replayed events will flow through the normal (wallet-ready) path.
+  useEffect(() => {
+    if (wallet && !walletBuilding && pendingCwiQueue.current.length > 0) {
+      const queued = pendingCwiQueue.current.splice(0)
+      for (const evt of queued) {
+        handleMessage(evt)
+      }
+    }
+  }, [wallet, walletBuilding, handleMessage])
+
+  // Safety valve: if the wallet build doesn't complete within 50 seconds
+  // (beating the CWI provider's 60s timeout), drain the queue with errors
+  // so webview Promises reject cleanly before the client-side timeout.
+  useEffect(() => {
+    if (!walletBuilding || pendingCwiQueue.current.length === 0) return
+    const timer = setTimeout(() => {
+      if (pendingCwiQueue.current.length === 0) return
+      const stale = pendingCwiQueue.current.splice(0)
+      for (const evt of stale) {
+        try {
+          const msg = JSON.parse(evt.nativeEvent.data)
+          if (msg.type === 'CWI' && msg.id && activeTab?.webviewRef?.current) {
+            activeTab.webviewRef.current.injectJavaScript(
+              getInjectableJSMessage({
+                type: 'CWI',
+                id: msg.id,
+                isInvocation: false,
+                status: 'error',
+                code: 1,
+                description: 'Wallet initialization timed out'
+              })
+            )
+          }
+        } catch {}
+      }
+    }, 50_000)
+    return () => clearTimeout(timer)
+  }, [walletBuilding, activeTab])
 
   /* -------------------------------------------------------------------------- */
   /*                      NAV STATE CHANGE → HISTORY TRACKING                   */

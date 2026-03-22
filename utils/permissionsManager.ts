@@ -46,6 +46,7 @@ export type PermissionType =
   | 'WRITE_CALL_LOG'
   | 'WRITE_CONTACTS'
   | 'WRITE_EXTERNAL_STORAGE'
+  | 'NOTIFICATIONS'
 
 // Platform-specific permission mapping
 const platformPermissionMap: Partial<Record<PermissionType, any>> =

@@ -55,7 +55,7 @@ export const BrowserModeProvider: React.FC<BrowserModeProviderProps> = ({ childr
     onGoToLogin: null
   })
   const { getItem, setItem } = useLocalStorage()
-  const { managers } = useWallet()
+  const { managers, walletBuilding } = useWallet()
   const params = useLocalSearchParams()
 
   // Track whether the init effect has resolved so the auth effect doesn't
@@ -123,8 +123,10 @@ export const BrowserModeProvider: React.FC<BrowserModeProviderProps> = ({ childr
         console.log('[BrowserMode] User authenticated, switching to web3 mode')
         setIsWeb2Mode(false)
         await setItem('browserMode', 'web3')
-      } else if (managers?.walletManager === undefined) {
-        // Wallet manager was cleared (logout), switch to web2 mode
+      } else if (managers?.walletManager === undefined && !walletBuilding) {
+        // Wallet manager was cleared (logout) AND no build is in progress.
+        // If walletBuilding is true, the wallet is still initializing (e.g.
+        // biometric auth pending) — don't flip to web2 prematurely.
         console.log('[BrowserMode] Wallet manager cleared, switching to web2 mode')
         setIsWeb2Mode(true)
         await setItem('browserMode', 'web2')
@@ -133,7 +135,7 @@ export const BrowserModeProvider: React.FC<BrowserModeProviderProps> = ({ childr
 
     updateModeBasedOnAuth()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, setItem, managers])
+  }, [isAuthenticated, setItem, managers, walletBuilding])
 
   const setWeb2Mode = useCallback(
     async (enabled: boolean) => {

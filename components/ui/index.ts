@@ -1,4 +1,3 @@
-export { default as AppChip } from './AppChip'
 export { default as AppLogo } from './AppLogo'
 export { BlurChrome } from './BlurChrome'
 export { default as CustomSafeArea } from './CustomSafeArea'

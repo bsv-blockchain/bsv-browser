@@ -21,6 +21,7 @@ import {
 } from '@bsv/wallet-toolbox-mobile/out/src/WalletSettingsManager'
 import { toast } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
+import type { AppChain } from './config'
 import { DEFAULT_WAB_URL, DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR } from './config'
 import { UserContext } from './UserContext'
 import { useBrowserMode } from './BrowserModeContext'
@@ -84,16 +85,18 @@ export interface WalletContextValue {
   selectedWabUrl: string
   selectedStorageUrl: string
   selectedMethod: string
-  selectedNetwork: 'main' | 'test'
+  selectedNetwork: AppChain
   setWalletBuilt: (current: boolean) => void
   buildWalletFromMnemonic: (mnemonic?: string) => Promise<void>
   buildWalletFromRecoveredKey: (wif: string) => Promise<void>
-  switchNetwork: (network: 'main' | 'test') => Promise<void>
+  switchNetwork: (network: AppChain) => Promise<void>
   /** Tear down the current wallet and re-trigger auto-build (e.g. after DB import). */
   rebuildWallet: () => Promise<void>
   storage: StorageExpoSQLite | null
   /** Incremented when a transaction status changes via SSE, triggers UI refresh */
   txStatusVersion: number
+  /** True while the wallet is being built (biometric auth pending, async build in progress) */
+  walletBuilding: boolean
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -128,7 +131,8 @@ export const WalletContext = createContext<WalletContextValue>({
   switchNetwork: async () => {},
   rebuildWallet: async () => {},
   storage: null,
-  txStatusVersion: 0
+  txStatusVersion: 0,
+  walletBuilding: false
 })
 
 type PermissionType = 'identity' | 'protocol' | 'renewal' | 'basket'
@@ -189,7 +193,7 @@ export interface WABConfig {
   wabUrl: string
   wabInfo?: any // Optional for noWAB (self-custodial) mode
   method: string
-  network: 'main' | 'test'
+  network: AppChain
   storageUrl: string
 }
 
@@ -239,6 +243,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [recentApps, setRecentApps] = useState<any[]>([])
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
   const walletBuildingRef = useRef<boolean>(false)
+  const [walletBuilding, setWalletBuilding] = useState<boolean>(false)
 
   const {
     getSnap,
@@ -623,7 +628,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // ---- WAB + network + storage configuration ----
   const [selectedWabUrl, setSelectedWabUrl] = useState<string>(DEFAULT_WAB_URL)
   const [selectedMethod, setSelectedMethod] = useState<string>('')
-  const [selectedNetwork, setSelectedNetwork] = useState<'main' | 'test'>(DEFAULT_CHAIN) // "test" or "main"
+  const [selectedNetwork, setSelectedNetwork] = useState<AppChain>(DEFAULT_CHAIN)
   const [selectedStorageUrl, setSelectedStorageUrl] = useState<string>(DEFAULT_STORAGE_URL)
 
   // Flag that indicates configuration is complete. For returning users,
@@ -1016,6 +1021,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       }
 
       walletBuildingRef.current = true
+      setWalletBuilding(true)
       logWithTimestamp(F, 'Checking for noWAB primary key')
 
       try {
@@ -1024,6 +1030,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         if (!mnemonic) {
           logWithTimestamp(F, 'No noWAB mnemonic found')
           walletBuildingRef.current = false
+          setWalletBuilding(false)
           return
         }
 
@@ -1068,6 +1075,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         logWithTimestamp(F, 'NoWAB wallet initialization completed')
       } catch (error: any) {
         walletBuildingRef.current = false
+        setWalletBuilding(false)
         console.error('[WalletContext] Error initializing noWAB wallet:', error)
         logWithTimestamp(F, 'Error initializing noWAB wallet', error.message)
       }
@@ -1082,6 +1090,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       if (configStatus !== 'configured') return
 
       walletBuildingRef.current = true
+      setWalletBuilding(true)
       logWithTimestamp(F, 'Building wallet from recovered key')
 
       try {
@@ -1115,6 +1124,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         logWithTimestamp(F, 'Recovered key wallet initialization completed')
       } catch (error: any) {
         walletBuildingRef.current = false
+        setWalletBuilding(false)
         console.error('[WalletContext] Error initializing wallet from recovered key:', error)
         logWithTimestamp(F, 'Error initializing wallet from recovered key', error.message)
       }
@@ -1150,6 +1160,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     setManagers({})
     setWalletBuilt(false)
     walletBuildingRef.current = false
+    setWalletBuilding(false)
     setSnapshotLoaded(false)
 
     // Re-finalize with current config — triggers auto-build effect
@@ -1160,7 +1171,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   // Switch network: tear down wallet, update config, and rebuild on new chain
   const switchNetwork = useCallback(
-    async (network: 'main' | 'test') => {
+    async (network: AppChain) => {
       if (network === selectedNetwork) return
       logWithTimestamp(F, `Switching network from ${selectedNetwork} to ${network}`)
 
@@ -1186,6 +1197,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setManagers({})
       setWalletBuilt(false)
       walletBuildingRef.current = false
+      setWalletBuilding(false)
       setSnapshotLoaded(false)
 
       // Persist new config
@@ -1199,9 +1211,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     [selectedNetwork, setItem, storage]
   )
 
-  // Auto-build wallet for returning users (mnemonic first, then recovered key)
+  // Auto-build wallet for returning users (mnemonic first, then recovered key).
+  // Sets walletBuilding=true eagerly so other parts of the app (BrowserModeContext,
+  // index.tsx navigation) know not to react as if no wallet exists.
   useEffect(() => {
     if (configStatus !== 'configured' || walletBuilt) return
+    // Signal that a build attempt is starting. buildWalletFromMnemonic /
+    // buildWalletFromRecoveredKey will clear this flag on completion or error.
+    setWalletBuilding(true)
     ;(async () => {
       // Try mnemonic-based build first (calls getMnemonic internally)
       await buildWalletFromMnemonic()
@@ -1209,9 +1226,16 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       // We check walletBuilt via a ref-like approach: buildWalletFromMnemonic
       // sets walletBuilt=true synchronously in its body, but the state update
       // won't be visible in this closure. Instead, we read from SecureStore.
-      const recoveredWif = await getRecoveredKey()
-      if (recoveredWif) {
-        await buildWalletFromRecoveredKey(recoveredWif)
+      if (!walletBuildingRef.current) {
+        // buildWalletFromMnemonic finished without building (no mnemonic found).
+        // Try recovered key as a fallback.
+        const recoveredWif = await getRecoveredKey()
+        if (recoveredWif) {
+          await buildWalletFromRecoveredKey(recoveredWif)
+        } else {
+          // No mnemonic and no recovered key — genuinely no wallet to build
+          setWalletBuilding(false)
+        }
       }
     })()
   }, [configStatus, walletBuilt, buildWalletFromMnemonic, buildWalletFromRecoveredKey, getRecoveredKey])
@@ -1270,6 +1294,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setSnapshotLoaded(false)
       setWalletBuilt(false)
       walletBuildingRef.current = false
+      setWalletBuilding(false)
       deleteMnemonic()
       deleteRecoveredKey()
       logWithTimestamp(F, 'Configuration and state reset')
@@ -1383,7 +1408,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       switchNetwork,
       rebuildWallet,
       storage,
-      txStatusVersion
+      txStatusVersion,
+      walletBuilding
     }),
     [
       managers,
@@ -1416,7 +1442,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       switchNetwork,
       rebuildWallet,
       storage,
-      txStatusVersion
+      txStatusVersion,
+      walletBuilding
     ]
   )
 

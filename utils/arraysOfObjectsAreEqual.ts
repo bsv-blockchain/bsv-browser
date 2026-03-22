@@ -1,4 +1,4 @@
-function arraysOfObjectsAreEqual(arr1, arr2): boolean {
+function arraysOfObjectsAreEqual(arr1: Record<string, unknown>[], arr2: Record<string, unknown>[]): boolean {
   if (arr1.length !== arr2.length) {
     return false
   }
