@@ -3,7 +3,7 @@
     "name": "BSV Browser",
     "slug": "bsv-browser",
     "scheme": "bsv-browser",
-    "version": "1.2.6",
+    "version": "1.2.7",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
