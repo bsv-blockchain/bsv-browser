@@ -926,6 +926,8 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
 }
 
 export function buildInjectedJavaScript(acceptLanguage: string, isAndroid: boolean) {
-  // Serialize the function and immediately invoke it with the provided arguments
-  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)}, ${isAndroid});`
+  // Serialize the function and immediately invoke it with the provided arguments.
+  // The trailing `true;` is required by react-native-webview on iOS — without it
+  // the injected script is silently discarded.
+  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)}, ${isAndroid});true;`
 }

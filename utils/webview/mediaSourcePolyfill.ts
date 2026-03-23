@@ -82,8 +82,6 @@ export const mediaSourcePolyfill = `(function() {
   }
 
   /* ---- Prototype-chain descriptor lookup ---- */
-  // Walk *upward* from a real element instance so we find the descriptor
-  // regardless of which prototype level defines it.
   function findDesc(obj, prop) {
     var p = Object.getPrototypeOf(obj);
     while (p) {
@@ -132,8 +130,6 @@ export const mediaSourcePolyfill = `(function() {
     window.Audio = function Audio(src) {
       var el = src !== undefined ? new OrigAudio(src) : new OrigAudio();
       patchInstance(el);
-      // Handle new Audio(blobUrl) where src was set by the native constructor
-      // before our instance-level setter existed.
       if (src && typeof src === 'string' && mseBlobURLs.has(src)) ensureMSEReqs(el);
       return el;
     };
