@@ -150,6 +150,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         })
         Object.defineProperty(URL.createObjectURL, 'name', { value: 'createObjectURL', configurable: true })
       } catch {}
+      try {
+        ;(window as any).__spoofNative?.(URL.createObjectURL, 'createObjectURL')
+      } catch {}
 
       URL.revokeObjectURL = function (url: string) {
         console.log('[DL] revokeObjectURL', url, 'inRegistry=', blobRegistry.has(url))
@@ -167,6 +170,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
           configurable: false
         })
         Object.defineProperty(URL.revokeObjectURL, 'name', { value: 'revokeObjectURL', configurable: true })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(URL.revokeObjectURL, 'revokeObjectURL')
       } catch {}
 
       // Helper: read a Blob as base64 and post to React Native
@@ -224,6 +230,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
           writable: false,
           configurable: false
         })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(HTMLAnchorElement.prototype.click, 'click')
       } catch {}
 
       // Intercept anchor clicks in the capture phase (for attached elements)
@@ -320,6 +329,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         })
         Object.defineProperty((window as any).open, 'name', { value: 'open', configurable: true })
       } catch {}
+      try {
+        ;(window as any).__spoofNative?.((window as any).open, 'open')
+      } catch {}
     } catch (e) {
       // Silently fail — download interception is non-critical
     }
@@ -393,6 +405,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
           value: 'getUserMedia',
           configurable: true
         })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(navigator.mediaDevices.getUserMedia, 'getUserMedia')
       } catch {}
     })()
   }
@@ -753,6 +768,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
           configurable: true
         })
       } catch {}
+      try {
+        ;(window as any).__spoofNative?.(navigator.mediaDevices.getUserMedia, 'getUserMedia')
+      } catch {}
 
       // Also override the deprecated navigator.getUserMedia if it exists
       if ((navigator as any).getUserMedia) {
@@ -853,6 +871,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
       })
       Object.defineProperty(patchedFetch, 'name', { value: 'fetch', configurable: true })
     } catch {}
+    try {
+      ;(window as any).__spoofNative?.(patchedFetch, 'fetch')
+    } catch {}
     ;(window as any).fetch = patchedFetch
 
     // Also intercept XMLHttpRequest for older APIs
@@ -879,6 +900,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         configurable: false
       })
     } catch {}
+    try {
+      ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.open, 'open')
+    } catch {}
 
     XMLHttpRequest.prototype.send = function (this: any, data: any) {
       // Add Accept-Language header if not already set
@@ -894,6 +918,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         writable: false,
         configurable: false
       })
+    } catch {}
+    try {
+      ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.send, 'send')
     } catch {}
   })()
 }

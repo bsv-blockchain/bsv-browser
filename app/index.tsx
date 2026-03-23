@@ -50,7 +50,7 @@ import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
-import { mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
+import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 
 import { AddressBar } from '@/components/browser/AddressBar'
@@ -428,12 +428,14 @@ function Browser() {
       return u;
     };
     try{Object.defineProperty(URL.createObjectURL,'toString',{value:function(){return'function createObjectURL() { [native code] }'},writable:false,configurable:false});Object.defineProperty(URL.createObjectURL,'name',{value:'createObjectURL',configurable:true})}catch(e){}
+    try{window.__spoofNative&&window.__spoofNative(URL.createObjectURL,'createObjectURL')}catch(e){}
     var or=URL.revokeObjectURL;
     URL.revokeObjectURL=function(u){
       setTimeout(function(){reg.delete(u);},30000);
       return or.call(URL,u);
     };
     try{Object.defineProperty(URL.revokeObjectURL,'toString',{value:function(){return'function revokeObjectURL() { [native code] }'},writable:false,configurable:false});Object.defineProperty(URL.revokeObjectURL,'name',{value:'revokeObjectURL',configurable:true})}catch(e){}
+    try{window.__spoofNative&&window.__spoofNative(URL.revokeObjectURL,'revokeObjectURL')}catch(e){}
     var origClick=HTMLElement.prototype.click;
     HTMLElement.prototype.click=function(){
       var el=this;
@@ -460,6 +462,7 @@ function Browser() {
       return origClick.call(this);
     };
     try{Object.defineProperty(HTMLElement.prototype.click,'toString',{value:function(){return'function click() { [native code] }'},writable:false,configurable:false})}catch(e){}
+    try{window.__spoofNative&&window.__spoofNative(HTMLElement.prototype.click,'click')}catch(e){}
   })();true;`
 
   const routeWebViewMessage = useMemo(
@@ -813,6 +816,8 @@ function Browser() {
             onMessage={handleMessage}
             injectedJavaScript={injectedJavaScript}
             injectedJavaScriptBeforeContentLoaded={
+              nativeSpoofSetup +
+              '\n' +
               buildCWIProviderScript() +
               '\n' +
               mediaSourcePolyfill +
