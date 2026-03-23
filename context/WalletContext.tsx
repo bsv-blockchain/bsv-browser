@@ -1065,6 +1065,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           walletManager: swm
         }))
         setWalletBuilt(true)
+        walletBuildingRef.current = false
+        setWalletBuilding(false)
         setWeb2Mode(false)
 
         logWithTimestamp(F, 'walletManager built successfully')
@@ -1116,6 +1118,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           walletManager: swm
         }))
         setWalletBuilt(true)
+        walletBuildingRef.current = false
+        setWalletBuilding(false)
         setWeb2Mode(false)
 
         // Persist the recovered key for future auto-build
