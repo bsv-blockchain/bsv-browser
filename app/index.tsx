@@ -50,7 +50,7 @@ import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
-import { mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
+import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 
 import { AddressBar } from '@/components/browser/AddressBar'
@@ -129,10 +129,6 @@ function Browser() {
       setWallet(undefined)
     }
   }, [managers, isWeb2Mode])
-
-  // Queue for CWI messages that arrive while the wallet is still building.
-  // Drained automatically once the wallet becomes available.
-  const pendingCwiQueue = useRef<WebViewMessageEvent[]>([])
 
   /* ---------------------------- storage helpers ----------------------------- */
   const { getItem, setItem } = useLocalStorage()
@@ -428,12 +424,14 @@ function Browser() {
       return u;
     };
     try{Object.defineProperty(URL.createObjectURL,'toString',{value:function(){return'function createObjectURL() { [native code] }'},writable:false,configurable:false});Object.defineProperty(URL.createObjectURL,'name',{value:'createObjectURL',configurable:true})}catch(e){}
+    try{window.__spoofNative&&window.__spoofNative(URL.createObjectURL,'createObjectURL')}catch(e){}
     var or=URL.revokeObjectURL;
     URL.revokeObjectURL=function(u){
       setTimeout(function(){reg.delete(u);},30000);
       return or.call(URL,u);
     };
     try{Object.defineProperty(URL.revokeObjectURL,'toString',{value:function(){return'function revokeObjectURL() { [native code] }'},writable:false,configurable:false});Object.defineProperty(URL.revokeObjectURL,'name',{value:'revokeObjectURL',configurable:true})}catch(e){}
+    try{window.__spoofNative&&window.__spoofNative(URL.revokeObjectURL,'revokeObjectURL')}catch(e){}
     var origClick=HTMLElement.prototype.click;
     HTMLElement.prototype.click=function(){
       var el=this;
@@ -460,6 +458,7 @@ function Browser() {
       return origClick.call(this);
     };
     try{Object.defineProperty(HTMLElement.prototype.click,'toString',{value:function(){return'function click() { [native code] }'},writable:false,configurable:false})}catch(e){}
+    try{window.__spoofNative&&window.__spoofNative(HTMLElement.prototype.click,'click')}catch(e){}
   })();true;`
 
   const routeWebViewMessage = useMemo(
@@ -549,9 +548,11 @@ function Browser() {
           return
         }
         if (walletBuilding) {
-          // Wallet is still initializing (biometric auth, async build) —
-          // queue the message and replay it once the wallet is ready.
-          pendingCwiQueue.current.push(event)
+          // Should not normally reach here — the WebView loads about:blank
+          // until the wallet is ready.  Guard just in case.
+          if (msg.type === 'CWI' && msg.id) {
+            sendErrorToWebView(msg.id, 'Wallet is still initializing', 1)
+          }
           return
         }
         // No wallet, not building, not web2 → user has no wallet configured
@@ -608,46 +609,18 @@ function Browser() {
     [activeTab, wallet, routeWebViewMessage, isWeb2Mode, walletBuilding]
   )
 
-  // Drain queued CWI messages once the wallet finishes building.
-  // handleMessage is a fresh closure each time wallet/walletBuilding change,
-  // so replayed events will flow through the normal (wallet-ready) path.
+  // Reload the active tab as soon as the wallet becomes available so any
+  // page that loaded before the wallet was ready gets a fresh start with
+  // the CWI provider backed by a ready wallet.
+  const walletBecameReady = useRef(false)
   useEffect(() => {
-    if (wallet && !walletBuilding && pendingCwiQueue.current.length > 0) {
-      const queued = pendingCwiQueue.current.splice(0)
-      for (const evt of queued) {
-        handleMessage(evt)
-      }
+    if (!wallet) return
+    if (walletBecameReady.current) return
+    walletBecameReady.current = true
+    if (activeTab?.url && activeTab.url !== kNEW_TAB_URL) {
+      activeTab.webviewRef?.current?.reload()
     }
-  }, [wallet, walletBuilding, handleMessage])
-
-  // Safety valve: if the wallet build doesn't complete within 50 seconds
-  // (beating the CWI provider's 60s timeout), drain the queue with errors
-  // so webview Promises reject cleanly before the client-side timeout.
-  useEffect(() => {
-    if (!walletBuilding || pendingCwiQueue.current.length === 0) return
-    const timer = setTimeout(() => {
-      if (pendingCwiQueue.current.length === 0) return
-      const stale = pendingCwiQueue.current.splice(0)
-      for (const evt of stale) {
-        try {
-          const msg = JSON.parse(evt.nativeEvent.data)
-          if (msg.type === 'CWI' && msg.id && activeTab?.webviewRef?.current) {
-            activeTab.webviewRef.current.injectJavaScript(
-              getInjectableJSMessage({
-                type: 'CWI',
-                id: msg.id,
-                isInvocation: false,
-                status: 'error',
-                code: 1,
-                description: 'Wallet initialization timed out'
-              })
-            )
-          }
-        } catch {}
-      }
-    }, 50_000)
-    return () => clearTimeout(timer)
-  }, [walletBuilding, activeTab])
+  }, [wallet, activeTab])
 
   /* -------------------------------------------------------------------------- */
   /*                      NAV STATE CHANGE → HISTORY TRACKING                   */
@@ -764,12 +737,25 @@ function Browser() {
     )
   }
 
+  // In web3 mode, don't render the WebView until the wallet has finished
+  // building so the page never issues CWI calls before the wallet can
+  // handle them.
+  const walletReady = isWeb2Mode || !walletBuilding
   const uri = typeof activeTab?.url === 'string' && activeTab.url.length > 0 ? activeTab.url : 'about:blank'
   const isNewTab = activeTab?.url === kNEW_TAB_URL
 
   const renderMainContent = () => {
     if (isNewTab) {
       return <View style={{ flex: 1, backgroundColor: colors.background }} />
+    }
+    // Hold off rendering the WebView until the wallet is ready in web3 mode.
+    // This prevents the page from issuing CWI calls that can't be handled yet.
+    if (!walletReady) {
+      return (
+        <View style={[styles.loaderContainer, { backgroundColor: isDark ? '#000' : '#fff' }]}>
+          <ActivityIndicator size="large" />
+        </View>
+      )
     }
     if (activeTab) {
       return (
@@ -813,6 +799,8 @@ function Browser() {
             onMessage={handleMessage}
             injectedJavaScript={injectedJavaScript}
             injectedJavaScriptBeforeContentLoaded={
+              nativeSpoofSetup +
+              '\n' +
               buildCWIProviderScript() +
               '\n' +
               mediaSourcePolyfill +
