@@ -16,7 +16,7 @@
 
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        background: linear-gradient(135deg, #1a2a3a 0%, #2d5a7b 100%);
+        background: linear-gradient(135deg, #070f1c 0%, #0e2240 50%, #0a1830 100%);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -24,7 +24,56 @@
         overflow: hidden;
       }
 
+      /* ── Network graph background ── */
+      .network-bg {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .network-glow {
+        position: absolute;
+        width: 60vmin;
+        height: 60vmin;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(33, 150, 243, 0.1) 0%, transparent 70%);
+        filter: blur(60px);
+      }
+
+      .network-svg {
+        width: 70vmin;
+        height: 70vmin;
+        max-width: 600px;
+        max-height: 600px;
+        color: #2196f3;
+        opacity: 0.35;
+        animation: network-spin 90s linear infinite;
+        filter: drop-shadow(0 0 30px rgba(33, 150, 243, 0.18));
+      }
+
+      @keyframes network-spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .network-svg {
+          animation: none;
+        }
+      }
+
+      /* ── Foreground content ── */
       .landing-container {
+        position: relative;
+        z-index: 1;
         text-align: center;
         padding: 40px;
         max-width: 800px;
@@ -36,9 +85,63 @@
         font-weight: 300;
         letter-spacing: -1px;
         color: white;
-        margin: 0;
-        line-height: 1.2;
+        margin: 0 0 0.15em;
+        line-height: 1;
         animation: slideUp 0.8s ease-out;
+      }
+
+      /* ── Cycling word ── */
+      .flip-line {
+        display: block;
+        position: relative;
+        height: 1.2em;
+        font-size: clamp(3rem, 10vw, 6rem);
+        line-height: 1.2;
+        letter-spacing: -1px;
+      }
+
+      .flip-word {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #64b5f6;
+        font-weight: 300;
+        opacity: 0;
+        animation: word-fade 9s ease infinite;
+      }
+
+      .flip-word:nth-child(1) {
+        animation-delay: 0s;
+      }
+      .flip-word:nth-child(2) {
+        animation-delay: 3s;
+      }
+      .flip-word:nth-child(3) {
+        animation-delay: 6s;
+      }
+
+      /*
+        9s total, 3 words -> each owns 33.3%.
+        Fade in ~5%, hold ~22%, fade out ~5%.
+      */
+      @keyframes word-fade {
+        0% {
+          opacity: 0;
+        }
+        5% {
+          opacity: 1;
+        }
+        28% {
+          opacity: 1;
+        }
+        33.3% {
+          opacity: 0;
+        }
+        100% {
+          opacity: 0;
+        }
       }
 
       .subtitle {
@@ -114,6 +217,10 @@
           font-size: 2.5rem;
         }
 
+        .flip-wrapper {
+          min-width: 4em;
+        }
+
         .subtitle {
           font-size: 1.1rem;
         }
@@ -157,14 +264,226 @@
     </style>
   </head>
   <body>
+    <!-- Rotating network graph background -->
+    <div class="network-bg">
+      <div class="network-glow"></div>
+      <svg
+        class="network-svg"
+        width="450"
+        height="450"
+        viewBox="0 0 450 450"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <line
+          x1="405"
+          y1="225"
+          x2="352.279"
+          y2="352.279"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line x1="405" y1="225" x2="225" y2="405" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
+        <line
+          x1="405"
+          y1="225"
+          x2="97.721"
+          y2="352.279"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="405"
+          y1="225"
+          x2="97.721"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line x1="405" y1="225" x2="225" y2="45" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
+        <line
+          x1="405"
+          y1="225"
+          x2="352.279"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="352.279"
+          y1="352.279"
+          x2="225"
+          y2="405"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="352.279"
+          y1="352.279"
+          x2="97.721"
+          y2="352.279"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="352.279"
+          y1="352.279"
+          x2="45"
+          y2="225"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="352.279"
+          y1="352.279"
+          x2="97.721"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="352.279"
+          y1="352.279"
+          x2="225"
+          y2="45"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="352.279"
+          y1="352.279"
+          x2="352.279"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="225"
+          y1="405"
+          x2="97.721"
+          y2="352.279"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line x1="225" y1="405" x2="45" y2="225" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
+        <line
+          x1="225"
+          y1="405"
+          x2="97.721"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="225"
+          y1="405"
+          x2="352.279"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="97.721"
+          y1="352.279"
+          x2="45"
+          y2="225"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="97.721"
+          y1="352.279"
+          x2="97.721"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="97.721"
+          y1="352.279"
+          x2="225"
+          y2="45"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="97.721"
+          y1="352.279"
+          x2="352.279"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line x1="45" y1="225" x2="97.721" y2="97.721" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
+        <line x1="45" y1="225" x2="225" y2="45" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
+        <line
+          x1="45"
+          y1="225"
+          x2="352.279"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line x1="97.721" y1="97.721" x2="225" y2="45" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
+        <line
+          x1="97.721"
+          y1="97.721"
+          x2="352.279"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <line
+          x1="225"
+          y1="45"
+          x2="352.279"
+          y2="97.721"
+          stroke="currentColor"
+          stroke-opacity="0.35"
+          stroke-width="1.5"
+        />
+        <circle cx="405" cy="225" r="6" fill="currentColor" />
+        <circle cx="352.279" cy="352.279" r="6" fill="currentColor" />
+        <circle cx="225" cy="405" r="6" fill="currentColor" />
+        <circle cx="97.721" cy="352.279" r="6" fill="currentColor" />
+        <circle cx="45" cy="225" r="6" fill="currentColor" />
+        <circle cx="97.721" cy="97.721" r="6" fill="currentColor" />
+        <circle cx="225" cy="45" r="6" fill="currentColor" />
+        <circle cx="352.279" cy="97.721" r="6" fill="currentColor" />
+      </svg>
+    </div>
+
     <div class="landing-container">
-      <h1>Your Browser. Your Wallet. Your&nbsp;Identity.</h1>
-      <p class="subtitle">Tap the menu to create a wallet and unlock payments, logins, and encryption.</p>
+      <h1>Your</h1>
+      <div class="flip-line">
+        <span class="flip-word">Browser</span>
+        <span class="flip-word">Wallet</span>
+        <span class="flip-word">Identity</span>
+      </div>
     </div>
 
     <div class="arrow-hint" onclick="scrollToNext()">
       <span class="arrow-label">Enable Web3 Here</span>
-      ↘
+      &#x2198;
     </div>
 
     <script>
