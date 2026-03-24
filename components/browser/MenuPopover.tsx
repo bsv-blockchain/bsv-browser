@@ -25,6 +25,7 @@ interface MenuPopoverProps {
   onDismiss: () => void
   onShare: () => void
   onAddBookmark: () => void
+  onFindInPage: () => void
   onBookmarks: () => void
   onTabs: () => void
   onNewTab: () => void
@@ -74,6 +75,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   onDismiss,
   onShare,
   onAddBookmark,
+  onFindInPage,
   onBookmarks,
   onTabs,
   onNewTab,
@@ -94,7 +96,18 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
     <View style={styles.card}>
       {/* Actions group */}
       {!isNewTab && canShare && <Row icon="share-outline" label={t('share')} onPress={dismiss(onShare)} />}
-      {!isNewTab && <Row icon="bookmark-outline" label={t('add_bookmark')} onPress={dismiss(onAddBookmark)} />}
+      {!isNewTab && (
+        <View style={styles.splitRow}>
+          <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onAddBookmark)} activeOpacity={0.6}>
+            <Ionicons name="bookmark-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
+            <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('bookmark')}</Text>
+          </TouchableOpacity>
+          <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
+          <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onFindInPage)} activeOpacity={0.6}>
+            <Ionicons name="search-outline" size={22} color={colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
+      )}
       {/* Browser — split row: Browser label | Desktop mode icon */}
       <View style={styles.splitRow}>
         <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onBookmarks)} activeOpacity={0.6}>

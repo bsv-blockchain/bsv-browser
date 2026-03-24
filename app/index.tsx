@@ -58,6 +58,7 @@ import { MenuPopover } from '@/components/browser/MenuPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
 import { SuggestionsDropdown } from '@/components/browser/SuggestionsDropdown'
 import { SheetRouter } from '@/components/browser/SheetRouter'
+import { FindInPageBar } from '@/components/browser/FindInPageBar'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 
@@ -217,6 +218,12 @@ const Browser = observer(function Browser() {
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
   const desktopModeCooldown = useRef(false)
+
+  /* ------------------------------ find in page ----------------------------- */
+  const [findInPageVisible, setFindInPageVisible] = useState(false)
+  const [findInPageQuery, setFindInPageQuery] = useState('')
+  const [findInPageCurrent, setFindInPageCurrent] = useState(0)
+  const [findInPageTotal, setFindInPageTotal] = useState(0)
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -437,6 +444,139 @@ const Browser = observer(function Browser() {
   }, [])
 
   /* -------------------------------------------------------------------------- */
+  /*                              FIND IN PAGE                                  */
+  /* -------------------------------------------------------------------------- */
+
+  const findInPageScript = useCallback(
+    (query: string) => {
+      if (!activeTab?.webviewRef?.current) return
+      if (!query) {
+        // Clear highlights
+        activeTab.webviewRef.current.injectJavaScript(`(function(){
+          var old=document.querySelectorAll('mark.__bsv_find_hl');
+          old.forEach(function(m){
+            var p=m.parentNode;
+            p.replaceChild(document.createTextNode(m.textContent),m);
+            p.normalize();
+          });
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',current:0,total:0
+          }));
+        })();true;`)
+        return
+      }
+      const escaped = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        // Clear previous highlights
+        var old=document.querySelectorAll('mark.__bsv_find_hl');
+        old.forEach(function(m){
+          var p=m.parentNode;
+          p.replaceChild(document.createTextNode(m.textContent),m);
+          p.normalize();
+        });
+        var query='${escaped}'.toLowerCase();
+        if(!query){
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',current:0,total:0
+          }));
+          return;
+        }
+        var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null,false);
+        var matches=[];
+        while(walker.nextNode()){
+          var node=walker.currentNode;
+          var text=node.textContent.toLowerCase();
+          var idx=0;
+          while((idx=text.indexOf(query,idx))!==-1){
+            matches.push({node:node,index:idx});
+            idx+=query.length;
+          }
+        }
+        // Wrap matches in reverse order to preserve offsets
+        var marks=[];
+        for(var i=matches.length-1;i>=0;i--){
+          var m=matches[i];
+          var range=document.createRange();
+          range.setStart(m.node,m.index);
+          range.setEnd(m.node,m.index+query.length);
+          var mark=document.createElement('mark');
+          mark.className='__bsv_find_hl';
+          mark.style.backgroundColor='rgba(255,210,0,0.4)';
+          mark.style.color='inherit';
+          mark.style.borderRadius='2px';
+          range.surroundContents(mark);
+          marks.unshift(mark);
+        }
+        window.__bsvFindMarks=marks;
+        window.__bsvFindIdx=0;
+        if(marks.length>0){
+          marks[0].style.backgroundColor='rgba(255,150,0,0.6)';
+          marks[0].scrollIntoView({block:'center',behavior:'smooth'});
+        }
+        window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+          type:'FIND_IN_PAGE_RESULT',current:marks.length>0?1:0,total:marks.length
+        }));
+      })();true;`)
+    },
+    [activeTab]
+  )
+
+  const findInPageNavigate = useCallback(
+    (direction: 'next' | 'prev') => {
+      if (!activeTab?.webviewRef?.current) return
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        var marks=window.__bsvFindMarks;
+        if(!marks||marks.length===0)return;
+        var idx=window.__bsvFindIdx||0;
+        marks[idx].style.backgroundColor='rgba(255,210,0,0.4)';
+        idx=${direction === 'next' ? '(idx+1)%marks.length' : '(idx-1+marks.length)%marks.length'};
+        window.__bsvFindIdx=idx;
+        marks[idx].style.backgroundColor='rgba(255,150,0,0.6)';
+        marks[idx].scrollIntoView({block:'center',behavior:'smooth'});
+        window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+          type:'FIND_IN_PAGE_RESULT',current:idx+1,total:marks.length
+        }));
+      })();true;`)
+    },
+    [activeTab]
+  )
+
+  const closeFindInPage = useCallback(() => {
+    setFindInPageVisible(false)
+    setFindInPageQuery('')
+    setFindInPageCurrent(0)
+    setFindInPageTotal(0)
+    // Clear highlights
+    if (activeTab?.webviewRef?.current) {
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        var old=document.querySelectorAll('mark.__bsv_find_hl');
+        old.forEach(function(m){
+          var p=m.parentNode;
+          p.replaceChild(document.createTextNode(m.textContent),m);
+          p.normalize();
+        });
+        window.__bsvFindMarks=null;
+        window.__bsvFindIdx=0;
+      })();true;`)
+    }
+  }, [activeTab])
+
+  const onFindInPageQueryChange = useCallback(
+    (text: string) => {
+      setFindInPageQuery(text)
+      findInPageScript(text)
+    },
+    [findInPageScript]
+  )
+
+  // Close find-in-page when the active tab changes
+  useEffect(() => {
+    if (findInPageVisible) {
+      closeFindInPage()
+    }
+  }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* -------------------------------------------------------------------------- */
   /*                           WEBVIEW MESSAGE HANDLER                          */
   /* -------------------------------------------------------------------------- */
 
@@ -542,6 +682,12 @@ const Browser = observer(function Browser() {
       try {
         msg = JSON.parse(event.nativeEvent.data)
       } catch {
+        return
+      }
+
+      if (msg.type === 'FIND_IN_PAGE_RESULT') {
+        setFindInPageCurrent(msg.current ?? 0)
+        setFindInPageTotal(msg.total ?? 0)
         return
       }
 
@@ -1063,6 +1209,21 @@ const Browser = observer(function Browser() {
           </>
         )}
 
+        {/* ---- Find in Page Bar ---- */}
+        {findInPageVisible && !isFullscreen && (
+          <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 30 }}>
+            <FindInPageBar
+              query={findInPageQuery}
+              currentMatch={findInPageCurrent}
+              totalMatches={findInPageTotal}
+              onChangeQuery={onFindInPageQueryChange}
+              onNext={() => findInPageNavigate('next')}
+              onPrevious={() => findInPageNavigate('prev')}
+              onClose={closeFindInPage}
+            />
+          </View>
+        )}
+
         {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
         {menuPopoverOpen && (
           <Animated.View
@@ -1085,6 +1246,7 @@ const Browser = observer(function Browser() {
                   addBookmark(activeTab.title || t('untitled'), activeTab.url)
                 }
               }}
+              onFindInPage={() => setFindInPageVisible(true)}
               onBookmarks={() => sheet.push('browser-menu')}
               onTabs={() => setShowTabsView(true)}
               onNewTab={() => {
