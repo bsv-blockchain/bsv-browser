@@ -15,10 +15,28 @@ import {
 } from '@bsv/wallet-toolbox-mobile'
 import { Beef, KeyDeriver, PrivateKey, Transaction } from '@bsv/sdk'
 import {
-  DEFAULT_SETTINGS,
+  DEFAULT_SETTINGS as LIB_DEFAULT_SETTINGS,
   WalletSettings,
   WalletSettingsManager
 } from '@bsv/wallet-toolbox-mobile/out/src/WalletSettingsManager'
+
+/** App-level defaults: library defaults + additional certifiers */
+const DEFAULT_SETTINGS: WalletSettings = {
+  ...LIB_DEFAULT_SETTINGS,
+  trustSettings: {
+    ...LIB_DEFAULT_SETTINGS.trustSettings,
+    trustedCertifiers: [
+      ...LIB_DEFAULT_SETTINGS.trustSettings.trustedCertifiers,
+      {
+        name: 'Who I Am',
+        description: 'Certifies email, phone, and X account ownership',
+        iconUrl: 'https://whoiam.bsvblockchain.tech/whoiam.png',
+        identityKey: '02e7eeb3986273db6843b790a1595ed0ff1b2ae8f43ae2e7f1a0c9db4dd3fb9441',
+        trust: 5
+      }
+    ]
+  }
+}
 import { toast } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import type { AppChain } from './config'
