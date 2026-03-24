@@ -110,11 +110,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
           }}
           activeOpacity={0.6}
         >
-          <Ionicons
-            name={isDesktopMode ? 'desktop' : 'desktop-outline'}
-            size={22}
-            color={isDesktopMode ? colors.info : colors.textPrimary}
-          />
+          <Ionicons name={isDesktopMode ? 'desktop' : 'desktop-outline'} size={22} color={colors.textPrimary} />
         </TouchableOpacity>
       </View>
 
