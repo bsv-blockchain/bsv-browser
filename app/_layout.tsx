@@ -7,7 +7,7 @@ if (typeof AbortSignal !== 'undefined' && !AbortSignal.timeout) {
   }
 }
 
-import React from 'react'
+import React, { useEffect } from 'react'
 import { View, useColorScheme } from 'react-native'
 import { Stack } from 'expo-router'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
@@ -25,7 +25,10 @@ import { LanguageProvider } from '@/context/i18n/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/onboarding/Web3BenefitsModalHandler'
 
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+
+export const FIRST_TOUCH_DATE_KEY = 'firstTouchDate'
 
 const nativeHandlers: NativeHandlers = {
   isFocused: async () => false,
@@ -47,6 +50,18 @@ const nativeHandlers: NativeHandlers = {
       return false
     }
   }
+}
+
+// Record the date of first app launch (never overwritten)
+function FirstTouchRecorder() {
+  useEffect(() => {
+    AsyncStorage.getItem(FIRST_TOUCH_DATE_KEY).then(existing => {
+      if (!existing) {
+        AsyncStorage.setItem(FIRST_TOUCH_DATE_KEY, new Date().toISOString())
+      }
+    })
+  }, [])
+  return null
 }
 
 // Deep link handler component
@@ -88,6 +103,7 @@ export default function RootLayout() {
                     <ThemeProvider>
                       <View style={{ flex: 1, backgroundColor }}>
                         {/* <DebuggerDisplay /> */}
+                        <FirstTouchRecorder />
                         <DeepLinkHandler />
                         <Web3BenefitsModalHandler />
                         {/* <TranslationTester /> */}

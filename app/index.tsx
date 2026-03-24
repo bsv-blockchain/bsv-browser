@@ -58,6 +58,7 @@ import { MenuPopover } from '@/components/browser/MenuPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
 import { SuggestionsDropdown } from '@/components/browser/SuggestionsDropdown'
 import { SheetRouter } from '@/components/browser/SheetRouter'
+import { FindInPageBar } from '@/components/browser/FindInPageBar'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 
@@ -81,10 +82,23 @@ function getInjectableJSMessage(message: any = {}) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                               USER AGENTS                                  */
+/* -------------------------------------------------------------------------- */
+
+const MOBILE_UA_IOS =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1'
+const MOBILE_UA_ANDROID =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+const DESKTOP_UA_IOS =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15'
+const DESKTOP_UA_ANDROID =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+/* -------------------------------------------------------------------------- */
 /*                                  BROWSER                                   */
 /* -------------------------------------------------------------------------- */
 
-function Browser() {
+const Browser = observer(function Browser() {
   /* --------------------------- theme / basic hooks -------------------------- */
   const { isDark, colors } = useTheme()
   const insets = useSafeAreaInsets()
@@ -203,6 +217,13 @@ function Browser() {
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
+  const desktopModeCooldown = useRef(false)
+
+  /* ------------------------------ find in page ----------------------------- */
+  const [findInPageVisible, setFindInPageVisible] = useState(false)
+  const [findInPageQuery, setFindInPageQuery] = useState('')
+  const [findInPageCurrent, setFindInPageCurrent] = useState(0)
+  const [findInPageTotal, setFindInPageTotal] = useState(0)
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -251,6 +272,12 @@ function Browser() {
   // When true, the next blank tab will skip homepage navigation (e.g. user explicitly opened new tab)
   const skipHomepageOnce = useRef(false)
 
+  // When true, focus and highlight the address bar after the next homepage navigation
+  const focusAddressBarOnNewTab = useRef(false)
+
+  // The tab ID of a tab opened via the new tab button that can be "cancelled" (closed to go back)
+  const cancelableNewTabId = useRef<number | null>(null)
+
   // Navigate to homepage whenever a blank tab becomes active
   useEffect(() => {
     if (!activeTab || activeTab.url !== kNEW_TAB_URL) return
@@ -258,6 +285,8 @@ function Browser() {
       skipHomepageOnce.current = false
       return
     }
+    const shouldFocusAddressBar = focusAddressBarOnNewTab.current
+    focusAddressBarOnNewTab.current = false
     ;(async () => {
       const stored = await getItem('homepageUrl')
       const url = stored || DEFAULT_HOMEPAGE_URL
@@ -265,6 +294,18 @@ function Browser() {
         tabStore.updateTab(tabStore.activeTabId, { url })
         setAddressText(url)
         setHomepageUrlState(url)
+        if (shouldFocusAddressBar) {
+          setTimeout(() => {
+            addressEditing.current = true
+            setAddressFocused(true)
+            addressInputRef.current?.focus()
+            setTimeout(() => {
+              addressInputRef.current?.setNativeProps({
+                selection: { start: 0, end: url.length }
+              })
+            }, 0)
+          }, 150)
+        }
       }
     })()
   }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -338,6 +379,7 @@ function Browser() {
     if (!isValidUrl(entry)) entry = kNEW_TAB_URL
     updateActiveTab({ url: entry })
     addressEditing.current = false
+    cancelableNewTabId.current = null
   }, [addressText, updateActiveTab])
 
   /* -------------------------------------------------------------------------- */
@@ -400,6 +442,139 @@ function Browser() {
       await Share.share({ message: currentTab.url })
     } catch {}
   }, [])
+
+  /* -------------------------------------------------------------------------- */
+  /*                              FIND IN PAGE                                  */
+  /* -------------------------------------------------------------------------- */
+
+  const findInPageScript = useCallback(
+    (query: string) => {
+      if (!activeTab?.webviewRef?.current) return
+      if (!query) {
+        // Clear highlights
+        activeTab.webviewRef.current.injectJavaScript(`(function(){
+          var old=document.querySelectorAll('mark.__bsv_find_hl');
+          old.forEach(function(m){
+            var p=m.parentNode;
+            p.replaceChild(document.createTextNode(m.textContent),m);
+            p.normalize();
+          });
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',current:0,total:0
+          }));
+        })();true;`)
+        return
+      }
+      const escaped = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        // Clear previous highlights
+        var old=document.querySelectorAll('mark.__bsv_find_hl');
+        old.forEach(function(m){
+          var p=m.parentNode;
+          p.replaceChild(document.createTextNode(m.textContent),m);
+          p.normalize();
+        });
+        var query='${escaped}'.toLowerCase();
+        if(!query){
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',current:0,total:0
+          }));
+          return;
+        }
+        var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null,false);
+        var matches=[];
+        while(walker.nextNode()){
+          var node=walker.currentNode;
+          var text=node.textContent.toLowerCase();
+          var idx=0;
+          while((idx=text.indexOf(query,idx))!==-1){
+            matches.push({node:node,index:idx});
+            idx+=query.length;
+          }
+        }
+        // Wrap matches in reverse order to preserve offsets
+        var marks=[];
+        for(var i=matches.length-1;i>=0;i--){
+          var m=matches[i];
+          var range=document.createRange();
+          range.setStart(m.node,m.index);
+          range.setEnd(m.node,m.index+query.length);
+          var mark=document.createElement('mark');
+          mark.className='__bsv_find_hl';
+          mark.style.backgroundColor='rgba(255,210,0,0.4)';
+          mark.style.color='inherit';
+          mark.style.borderRadius='2px';
+          range.surroundContents(mark);
+          marks.unshift(mark);
+        }
+        window.__bsvFindMarks=marks;
+        window.__bsvFindIdx=0;
+        if(marks.length>0){
+          marks[0].style.backgroundColor='rgba(255,150,0,0.6)';
+          marks[0].scrollIntoView({block:'center',behavior:'smooth'});
+        }
+        window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+          type:'FIND_IN_PAGE_RESULT',current:marks.length>0?1:0,total:marks.length
+        }));
+      })();true;`)
+    },
+    [activeTab]
+  )
+
+  const findInPageNavigate = useCallback(
+    (direction: 'next' | 'prev') => {
+      if (!activeTab?.webviewRef?.current) return
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        var marks=window.__bsvFindMarks;
+        if(!marks||marks.length===0)return;
+        var idx=window.__bsvFindIdx||0;
+        marks[idx].style.backgroundColor='rgba(255,210,0,0.4)';
+        idx=${direction === 'next' ? '(idx+1)%marks.length' : '(idx-1+marks.length)%marks.length'};
+        window.__bsvFindIdx=idx;
+        marks[idx].style.backgroundColor='rgba(255,150,0,0.6)';
+        marks[idx].scrollIntoView({block:'center',behavior:'smooth'});
+        window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+          type:'FIND_IN_PAGE_RESULT',current:idx+1,total:marks.length
+        }));
+      })();true;`)
+    },
+    [activeTab]
+  )
+
+  const closeFindInPage = useCallback(() => {
+    setFindInPageVisible(false)
+    setFindInPageQuery('')
+    setFindInPageCurrent(0)
+    setFindInPageTotal(0)
+    // Clear highlights
+    if (activeTab?.webviewRef?.current) {
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        var old=document.querySelectorAll('mark.__bsv_find_hl');
+        old.forEach(function(m){
+          var p=m.parentNode;
+          p.replaceChild(document.createTextNode(m.textContent),m);
+          p.normalize();
+        });
+        window.__bsvFindMarks=null;
+        window.__bsvFindIdx=0;
+      })();true;`)
+    }
+  }, [activeTab])
+
+  const onFindInPageQueryChange = useCallback(
+    (text: string) => {
+      setFindInPageQuery(text)
+      findInPageScript(text)
+    },
+    [findInPageScript]
+  )
+
+  // Close find-in-page when the active tab changes
+  useEffect(() => {
+    if (findInPageVisible) {
+      closeFindInPage()
+    }
+  }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* -------------------------------------------------------------------------- */
   /*                           WEBVIEW MESSAGE HANDLER                          */
@@ -507,6 +682,12 @@ function Browser() {
       try {
         msg = JSON.parse(event.nativeEvent.data)
       } catch {
+        return
+      }
+
+      if (msg.type === 'FIND_IN_PAGE_RESULT') {
+        setFindInPageCurrent(msg.current ?? 0)
+        setFindInPageTotal(msg.total ?? 0)
         return
       }
 
@@ -790,9 +971,13 @@ function Browser() {
               headers: { 'Accept-Language': getAcceptLanguageHeader() }
             }}
             userAgent={
-              Platform.OS === 'ios'
-                ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1'
-                : 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+              (activeTab?.isDesktopMode ?? false)
+                ? Platform.OS === 'ios'
+                  ? DESKTOP_UA_IOS
+                  : DESKTOP_UA_ANDROID
+                : Platform.OS === 'ios'
+                  ? MOBILE_UA_IOS
+                  : MOBILE_UA_ANDROID
             }
             sharedCookiesEnabled={true}
             originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
@@ -985,6 +1170,19 @@ function Browser() {
                   onForward={navFwd}
                   onReloadOrStop={navReloadOrStop}
                   onClearText={() => setAddressText('')}
+                  onCancelNewTab={
+                    cancelableNewTabId.current === activeTab?.id
+                      ? () => {
+                          const tabId = cancelableNewTabId.current!
+                          cancelableNewTabId.current = null
+                          Keyboard.dismiss()
+                          addressEditing.current = false
+                          setAddressFocused(false)
+                          setAddressSuggestions([])
+                          tabStore.closeTab(tabId)
+                        }
+                      : undefined
+                  }
                   inputRef={addressInputRef}
                 />
               </Animated.View>
@@ -1004,10 +1202,26 @@ function Browser() {
                   setAddressText(url)
                   updateActiveTab({ url })
                   addressEditing.current = false
+                  cancelableNewTabId.current = null
                 }}
               />
             )}
           </>
+        )}
+
+        {/* ---- Find in Page Bar ---- */}
+        {findInPageVisible && !isFullscreen && (
+          <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 30 }}>
+            <FindInPageBar
+              query={findInPageQuery}
+              currentMatch={findInPageCurrent}
+              totalMatches={findInPageTotal}
+              onChangeQuery={onFindInPageQueryChange}
+              onNext={() => findInPageNavigate('next')}
+              onPrevious={() => findInPageNavigate('prev')}
+              onClose={closeFindInPage}
+            />
+          </View>
         )}
 
         {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
@@ -1024,6 +1238,7 @@ function Browser() {
               addressBarAtTop={addressBarIsAtTop}
               topOffset={8}
               bottomOffset={bottomInset + 4}
+              isDesktopMode={activeTab?.isDesktopMode ?? false}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {
@@ -1031,15 +1246,33 @@ function Browser() {
                   addBookmark(activeTab.title || t('untitled'), activeTab.url)
                 }
               }}
+              onFindInPage={() => setFindInPageVisible(true)}
               onBookmarks={() => sheet.push('browser-menu')}
               onTabs={() => setShowTabsView(true)}
               onNewTab={() => {
-                skipHomepageOnce.current = true
+                focusAddressBarOnNewTab.current = true
                 tabStore.newTab()
+                cancelableNewTabId.current = tabStore.activeTabId
                 setShowTabsView(false)
               }}
               onSettings={() => sheet.push('settings')}
               onEnableWeb3={() => router.push('/auth/mnemonic')}
+              onToggleDesktopMode={() => {
+                if (!activeTab || desktopModeCooldown.current) return
+                desktopModeCooldown.current = true
+                setMenuPopoverOpen(false)
+                tabStore.toggleDesktopMode(activeTab.id)
+                // The native layer sets customUserAgent but does not reload automatically,
+                // so we must trigger a reload explicitly after the state update propagates.
+                if (activeTab.url !== kNEW_TAB_URL) {
+                  setTimeout(() => {
+                    activeTab.webviewRef.current?.reload()
+                  }, 50)
+                }
+                setTimeout(() => {
+                  desktopModeCooldown.current = false
+                }, 1500)
+              }}
             />
           </Animated.View>
         )}
@@ -1077,7 +1310,7 @@ function Browser() {
       </View>
     </KeyboardAvoidingView>
   )
-}
+})
 
 /* -------------------------------------------------------------------------- */
 /*                                   EXPORT                                   */
