@@ -601,6 +601,7 @@
             <a href="#browsing">Browsing the Web</a>
             <a href="#wallet">Wallet &amp; Payments</a>
             <a href="#backup">Backup &amp; Recovery</a>
+            <a href="#export-import">Export &amp; Import</a>
             <a href="#identity">Identity &amp; Trust</a>
             <a href="#permissions">Permissions</a>
             <a href="#tips">Tips &amp; Settings</a>
@@ -935,8 +936,12 @@
                 Recovery below).
               </li>
               <li>
-                <strong>Export Wallet Data</strong> &mdash; export your wallet database files via the system share
-                sheet.
+                <strong>Export Wallet Data</strong> &mdash; export your wallet database as a <code>.db</code> backup
+                file via the system share sheet (see <a href="#export-import">Exporting &amp; Importing</a>).
+              </li>
+              <li>
+                <strong>Import Wallet Data</strong> &mdash; restore a previously exported <code>.db</code> backup via
+                the system document picker (see <a href="#export-import">Exporting &amp; Importing</a>).
               </li>
               <li><strong>Logout</strong> &mdash; clear all wallet data and return to Web2 mode.</li>
             </ul>
@@ -1189,6 +1194,127 @@
       </div>
     </section>
 
+    <!-- SECTION: Export & Import Wallet Data -->
+    <section id="export-import" class="guide-section">
+      <div class="container">
+        <h2>Exporting &amp; Importing Wallet Data</h2>
+        <p class="section-intro">
+          BSV Browser lets you export your full wallet database as a backup file and import it again on the same or a
+          different device. This is distinct from the recovery phrase: exporting the database preserves your complete
+          transaction history, UTXOs, and certificate data, not just the root key.
+        </p>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Exporting wallet data</h3>
+            <p>
+              Go to <strong>Wallet &gt; Settings &gt; Export Wallet Data</strong>. The app bundles your active wallet
+              database into a single <code>.db</code> file and opens the system share sheet so you can send it to
+              wherever you keep your backups &mdash; iCloud Drive, Google Drive, AirDrop, email, and so on.
+            </p>
+            <p>The exported filename follows the pattern:</p>
+            <p>
+              <code>wallet-&lt;key-suffix&gt;-&lt;network&gt;net-&lt;timestamp&gt;.db</code>
+            </p>
+            <p>
+              For example: <code>wallet-a1b2c3d4-mainnet-1741305600.db</code>. The timestamp tells the app which copy is
+              the most recent when multiple backups exist, so it is worth exporting regularly.
+            </p>
+            <div class="tip-box">
+              <p>
+                <strong>Tip:</strong> Export after any significant activity &mdash; a batch of payments or a new
+                certificate &mdash; so your backup reflects the latest state of your wallet.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img
+              src="wallet_config_screen.png"
+              alt="Wallet configuration screen with Export Wallet Data highlighted"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3>Importing wallet data</h3>
+            <p>
+              Go to <strong>Wallet &gt; Settings &gt; Import Wallet Data</strong>. The system document picker opens so
+              you can locate the <code>.db</code> backup file you previously exported. The app validates the filename
+              before doing anything else.
+            </p>
+            <p>What happens next depends on whether a matching database already exists:</p>
+            <ul>
+              <li>
+                <strong>No existing database</strong> &mdash; the file is imported immediately and the wallet restarts
+                on the imported data.
+              </li>
+              <li>
+                <strong>Existing database is newer</strong> &mdash; you will see a warning that your current data is
+                more recent than the file you are importing. You can cancel to keep your current data, or proceed to
+                overwrite it with the backup.
+              </li>
+              <li>
+                <strong>Imported file is newer</strong> &mdash; the app asks you to confirm before replacing the
+                existing database with the newer backup.
+              </li>
+            </ul>
+            <p>After a successful import, the wallet restarts automatically on the new data.</p>
+            <div class="warning-box">
+              <p>
+                <strong>Important:</strong> Only import <code>.db</code> files that were exported by BSV Browser. Files
+                must be named in the <code>wallet-&lt;key-suffix&gt;-&lt;network&gt;net[-&lt;timestamp&gt;].db</code>
+                format. Any other file will be rejected.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img
+              src="wallet_config_screen.png"
+              alt="Wallet configuration screen with Import Wallet Data highlighted"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3>Export vs. recovery phrase: what to use when</h3>
+            <p>The two backup methods serve different purposes. Use both for the most complete protection.</p>
+            <ul>
+              <li>
+                <strong>Recovery phrase / backup shares</strong> &mdash; restores your root key only. Without a database
+                export, your transaction history, UTXOs, and certificates cannot be recovered. There is no
+                chain-scanning or derivation-path recovery process. Use this as your offline safeguard against losing
+                access to your keys entirely.
+              </li>
+              <li>
+                <strong>Exported database</strong> &mdash; a complete snapshot of your wallet at a point in time,
+                including transaction history, UTXOs, and certificate data. This is the only way to recover your wallet
+                state after data loss. Best suited for moving to a new device or recovering from accidental app data
+                deletion.
+              </li>
+            </ul>
+            <div class="tip-box">
+              <p>
+                <strong>Tip:</strong> For the most resilient setup, keep your recovery phrase stored securely offline
+                <em>and</em> keep a regularly-updated exported database in cloud storage. The phrase protects you if you
+                lose your keys; the database protects you if you lose your wallet data.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img
+              src="recovery_phrase_file_export.png"
+              alt="Recovery phrase screen alongside wallet settings"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- SECTION: Identity & Trust -->
     <section id="identity" class="guide-section">
       <div class="container">
@@ -1400,11 +1526,13 @@
           </div>
 
           <div class="faq-item">
-            <h3>Export your wallet data</h3>
+            <h3>Export and import wallet data</h3>
             <p>
-              In Wallet &gt; Settings, tap <strong>Export Wallet Data</strong> to save a backup of your wallet database
-              files. This uses the system share dialog so you can send the files to cloud storage, email, or any other
-              location.
+              In Wallet &gt; Settings, tap <strong>Export Wallet Data</strong> to save a full snapshot of your wallet
+              database (transaction history, UTXOs, certificates) as a <code>.db</code> file. The system share sheet
+              lets you send it to cloud storage, email, or any other location. To restore, tap
+              <strong>Import Wallet Data</strong> in the same settings screen and pick the file from the document
+              picker. See the <a href="#export-import">Exporting &amp; Importing</a> section for full details.
             </p>
           </div>
 
@@ -1455,6 +1583,18 @@
               BSV Browser is self-custodial. Your keys are stored only on your device. If you lose your device and have
               not saved your recovery phrase (or printed backup shares), your wallet cannot be recovered. Always back up
               using at least one of the methods described in the Backup &amp; Recovery section.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3>What is the difference between exporting wallet data and saving a recovery phrase?</h3>
+            <p>
+              They protect different things. Your <strong>recovery phrase</strong> (or backup shares) restores your root
+              key only &mdash; there is no chain-scanning or gap-limit derivation process that can reconstruct your
+              transaction history or UTXOs from the blockchain. An <strong>exported wallet database</strong> is a full
+              snapshot including all transaction history, UTXOs, and certificates, and is the only way to recover that
+              data after loss. For the strongest protection, keep both: a recovery phrase stored safely offline and a
+              regularly-updated database export in cloud storage.
             </p>
           </div>
 
