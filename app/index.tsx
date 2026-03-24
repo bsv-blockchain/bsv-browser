@@ -81,10 +81,23 @@ function getInjectableJSMessage(message: any = {}) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                               USER AGENTS                                  */
+/* -------------------------------------------------------------------------- */
+
+const MOBILE_UA_IOS =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1'
+const MOBILE_UA_ANDROID =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+const DESKTOP_UA_IOS =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15'
+const DESKTOP_UA_ANDROID =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+/* -------------------------------------------------------------------------- */
 /*                                  BROWSER                                   */
 /* -------------------------------------------------------------------------- */
 
-function Browser() {
+const Browser = observer(function Browser() {
   /* --------------------------- theme / basic hooks -------------------------- */
   const { isDark, colors } = useTheme()
   const insets = useSafeAreaInsets()
@@ -203,6 +216,7 @@ function Browser() {
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
+  const desktopModeCooldown = useRef(false)
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -790,9 +804,13 @@ function Browser() {
               headers: { 'Accept-Language': getAcceptLanguageHeader() }
             }}
             userAgent={
-              Platform.OS === 'ios'
-                ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1'
-                : 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+              (activeTab?.isDesktopMode ?? false)
+                ? Platform.OS === 'ios'
+                  ? DESKTOP_UA_IOS
+                  : DESKTOP_UA_ANDROID
+                : Platform.OS === 'ios'
+                  ? MOBILE_UA_IOS
+                  : MOBILE_UA_ANDROID
             }
             sharedCookiesEnabled={true}
             originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
@@ -1024,6 +1042,7 @@ function Browser() {
               addressBarAtTop={addressBarIsAtTop}
               topOffset={8}
               bottomOffset={bottomInset + 4}
+              isDesktopMode={activeTab?.isDesktopMode ?? false}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {
@@ -1040,6 +1059,22 @@ function Browser() {
               }}
               onSettings={() => sheet.push('settings')}
               onEnableWeb3={() => router.push('/auth/mnemonic')}
+              onToggleDesktopMode={() => {
+                if (!activeTab || desktopModeCooldown.current) return
+                desktopModeCooldown.current = true
+                setMenuPopoverOpen(false)
+                tabStore.toggleDesktopMode(activeTab.id)
+                // The native layer sets customUserAgent but does not reload automatically,
+                // so we must trigger a reload explicitly after the state update propagates.
+                if (activeTab.url !== kNEW_TAB_URL) {
+                  setTimeout(() => {
+                    activeTab.webviewRef.current?.reload()
+                  }, 50)
+                }
+                setTimeout(() => {
+                  desktopModeCooldown.current = false
+                }, 1500)
+              }}
             />
           </Animated.View>
         )}
@@ -1077,7 +1112,7 @@ function Browser() {
       </View>
     </KeyboardAvoidingView>
   )
-}
+})
 
 /* -------------------------------------------------------------------------- */
 /*                                   EXPORT                                   */
