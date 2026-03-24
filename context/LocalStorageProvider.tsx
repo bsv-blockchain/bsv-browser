@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
+import React, { createContext, useCallback, useContext, useMemo, useRef } from 'react'
 import * as SecureStore from 'expo-secure-store'
 import * as LocalAuthentication from 'expo-local-authentication'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -59,7 +59,7 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
   /* --------------------------------- SECURE -------------------------------- */
 
   // keep “am I already biometrically unlocked?” in memory for this session
-  const [authenticated, setAuthenticated] = useState(false)
+  const authenticatedRef = useRef(false)
   const authInProgress = useRef<Promise<boolean> | null>(null)
 
   const ensureAuth = useCallback(async (): Promise<boolean> => {
@@ -68,7 +68,8 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
     if (authInProgress.current) return authInProgress.current
 
     const doAuth = async () => {
-      if (authenticated) return true
+      // Use ref so the check is always up-to-date, even before React re-renders.
+      if (authenticatedRef.current) return true
 
       const { success } = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Decrypt wallet keys',
@@ -76,14 +77,14 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
         disableDeviceFallback: false
       })
 
-      setAuthenticated(success)
+      authenticatedRef.current = success
       authInProgress.current = null // reset latch
       return success
     }
 
     authInProgress.current = doAuth()
     return authInProgress.current
-  }, [authenticated])
+  }, [])
 
   /* ------------------------------- non-secure ------------------------------ */
 

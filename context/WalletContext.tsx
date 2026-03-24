@@ -671,11 +671,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           const config = JSON.parse(storedConfig)
           finalizeConfig(config)
           logWithTimestamp(F, 'Auto-loaded stored configuration')
-          // If mnemonic exists, auto-build wallet
-          const mnemonic = await getMnemonic()
-          if (mnemonic) {
-            logWithTimestamp(F, 'Mnemonic found, will auto-build wallet')
-          }
         } catch {
           logWithTimestamp(F, 'Failed to parse stored config, using defaults')
           finalizeConfig({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' })
