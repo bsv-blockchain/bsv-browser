@@ -265,6 +265,12 @@ const Browser = observer(function Browser() {
   // When true, the next blank tab will skip homepage navigation (e.g. user explicitly opened new tab)
   const skipHomepageOnce = useRef(false)
 
+  // When true, focus and highlight the address bar after the next homepage navigation
+  const focusAddressBarOnNewTab = useRef(false)
+
+  // The tab ID of a tab opened via the new tab button that can be "cancelled" (closed to go back)
+  const cancelableNewTabId = useRef<number | null>(null)
+
   // Navigate to homepage whenever a blank tab becomes active
   useEffect(() => {
     if (!activeTab || activeTab.url !== kNEW_TAB_URL) return
@@ -272,6 +278,8 @@ const Browser = observer(function Browser() {
       skipHomepageOnce.current = false
       return
     }
+    const shouldFocusAddressBar = focusAddressBarOnNewTab.current
+    focusAddressBarOnNewTab.current = false
     ;(async () => {
       const stored = await getItem('homepageUrl')
       const url = stored || DEFAULT_HOMEPAGE_URL
@@ -279,6 +287,18 @@ const Browser = observer(function Browser() {
         tabStore.updateTab(tabStore.activeTabId, { url })
         setAddressText(url)
         setHomepageUrlState(url)
+        if (shouldFocusAddressBar) {
+          setTimeout(() => {
+            addressEditing.current = true
+            setAddressFocused(true)
+            addressInputRef.current?.focus()
+            setTimeout(() => {
+              addressInputRef.current?.setNativeProps({
+                selection: { start: 0, end: url.length }
+              })
+            }, 0)
+          }, 150)
+        }
       }
     })()
   }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -352,6 +372,7 @@ const Browser = observer(function Browser() {
     if (!isValidUrl(entry)) entry = kNEW_TAB_URL
     updateActiveTab({ url: entry })
     addressEditing.current = false
+    cancelableNewTabId.current = null
   }, [addressText, updateActiveTab])
 
   /* -------------------------------------------------------------------------- */
@@ -1003,6 +1024,19 @@ const Browser = observer(function Browser() {
                   onForward={navFwd}
                   onReloadOrStop={navReloadOrStop}
                   onClearText={() => setAddressText('')}
+                  onCancelNewTab={
+                    cancelableNewTabId.current === activeTab?.id
+                      ? () => {
+                          const tabId = cancelableNewTabId.current!
+                          cancelableNewTabId.current = null
+                          Keyboard.dismiss()
+                          addressEditing.current = false
+                          setAddressFocused(false)
+                          setAddressSuggestions([])
+                          tabStore.closeTab(tabId)
+                        }
+                      : undefined
+                  }
                   inputRef={addressInputRef}
                 />
               </Animated.View>
@@ -1022,6 +1056,7 @@ const Browser = observer(function Browser() {
                   setAddressText(url)
                   updateActiveTab({ url })
                   addressEditing.current = false
+                  cancelableNewTabId.current = null
                 }}
               />
             )}
@@ -1053,8 +1088,9 @@ const Browser = observer(function Browser() {
               onBookmarks={() => sheet.push('browser-menu')}
               onTabs={() => setShowTabsView(true)}
               onNewTab={() => {
-                skipHomepageOnce.current = true
+                focusAddressBarOnNewTab.current = true
                 tabStore.newTab()
+                cancelableNewTabId.current = tabStore.activeTabId
                 setShowTabsView(false)
               }}
               onSettings={() => sheet.push('settings')}

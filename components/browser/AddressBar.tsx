@@ -34,6 +34,7 @@ interface AddressBarProps {
   onForward: () => void
   onReloadOrStop: () => void
   onClearText: () => void
+  onCancelNewTab?: () => void
   inputRef: React.RefObject<TextInput | null>
 }
 
@@ -95,6 +96,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   onForward,
   onReloadOrStop,
   onClearText,
+  onCancelNewTab,
   inputRef
 }) => {
   const { t } = useTranslation()
@@ -200,8 +202,12 @@ export const AddressBar: React.FC<AddressBarProps> = ({
           <GlassPill style={styles.morePill}>
             <TouchableOpacity
               onPress={() => {
-                inputRef.current?.blur()
-                Keyboard.dismiss()
+                if (onCancelNewTab) {
+                  onCancelNewTab()
+                } else {
+                  inputRef.current?.blur()
+                  Keyboard.dismiss()
+                }
               }}
               style={styles.moreButton}
               activeOpacity={0.6}
