@@ -1,5 +1,5 @@
 import React from 'react'
-import { Keyboard, PlatformColor, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
+import { Keyboard, Platform, PlatformColor, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -167,6 +167,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
             onSubmitEditing={onSubmit}
             autoCapitalize="none"
             autoCorrect={false}
+            keyboardType={Platform.select({ ios: 'web-search', default: 'url' })}
             returnKeyType="go"
             style={[
               styles.urlInput,

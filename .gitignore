@@ -42,3 +42,4 @@ expo-env.d.ts
 build-*.tar.gz
 /@bsvb__bsv-browser.jks
 docs/marketing
+marketing.html
