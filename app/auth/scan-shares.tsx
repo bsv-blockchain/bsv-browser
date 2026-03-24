@@ -91,10 +91,30 @@ export default function ScanSharesScreen() {
       const recoveredKey = recoverKeyFromShares(shareStrings)
       const wif = recoveredKey.toWif()
 
-      setRecovered(true)
-
       // Store the recovered key and build the wallet
-      await setRecoveredKey(wif)
+      const stored = await setRecoveredKey(wif)
+      if (!stored) {
+        Alert.alert(
+          'Biometric Access Required',
+          'Biometric access is needed to protect your wallet keys. Please try again.',
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () => {
+                setScannedShares([])
+                setThreshold(null)
+                lastScannedRef.current = ''
+                scanLockRef.current = false
+              }
+            },
+            { text: 'Try Again', onPress: () => handleRecovery(shareStrings) }
+          ]
+        )
+        return
+      }
+
+      setRecovered(true)
       await buildWalletFromRecoveredKey(wif)
 
       // Navigate to the browser
