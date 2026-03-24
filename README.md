@@ -5,10 +5,18 @@ A mobile browser that brings identity, micropayments, and BSV-powered websites t
 **Key capabilities:**
 
 - Self-custodial BSV wallet (BIP-39 mnemonic) with local SQLite storage
+- Web2/Web3 dual mode -- browse normally or with wallet identity and payments
+- CWI (Crypto Wallet Interface) provider for web apps (BRC-100 compliant)
 - Permission-gated access for web apps requesting wallet operations
-- Trust and identity management
+- Peer-to-peer payments via MessageBox with identity resolution
+- Legacy Bridge for sending/receiving via traditional P2PKH addresses
+- Trust and identity management (BRC-68 certifiers)
+- Shamir's Secret Sharing backup -- split your key into printable QR shares
+- Database import/export for full wallet backup and migration
 - Multi-network support (mainnet, testnet, teratest)
+- Background transaction monitoring via ARC SSE (Server-Sent Events)
 - Deep linking for `http` / `https` URLs
+- 10 languages supported
 
 ## Table of Contents
 
@@ -54,13 +62,13 @@ npm install
 npm start                    # opens Expo dev-client menu
 ```
 
-On first launch the app will ask you to:
+On first launch the app starts in **Web2 mode** -- a normal browser with no wallet. To enable Web3 features:
 
-1. Choose a network (mainnet / testnet)
-2. Enter a phone number, verification code, and password -- or restore from a mnemonic / recovery shares
-3. Save your recovery key
+1. Open the menu and tap **Create New Wallet** or **Import Existing Wallet**
+2. If creating: the app generates a 12-word BIP-39 mnemonic -- back it up securely
+3. If importing: paste an existing mnemonic phrase, a 64-character hex private key, or scan Shamir backup shares via QR code
 
-After that, BSV-enabled web apps will work inside the browser.
+Once a wallet is active the app switches to **Web3 mode** and BSV-enabled web apps will work inside the browser.
 
 > **Note:** The app uses a **development build** (Expo dev-client), not Expo Go.
 > You must create a dev build first -- see [Building for Devices](#building-for-devices).
@@ -99,7 +107,8 @@ bsv-browser/
 │   ├── _layout.tsx         #   Root layout -- context providers + Stack navigator
 │   ├── index.tsx           #   Home / browser screen
 │   ├── auth/               #   Mnemonic & recovery-share auth flows
-│   ├── payments.tsx        #   Payments view
+│   ├── payments.tsx        #   Peer-to-peer payments (send/receive via MessageBox)
+│   ├── legacy-payments.tsx #   Legacy Bridge (P2PKH receive addresses + send to address)
 │   ├── transactions.tsx    #   Transaction history
 │   ├── settings.tsx        #   Settings screen
 │   ├── trust.tsx           #   Trust management
@@ -113,9 +122,11 @@ bsv-browser/
 │   ├── config.tsx          #   Default configuration constants
 │   ├── i18n/               #   Translations (10 languages)
 │   ├── theme/              #   Theme tokens and context
-│   ├── WalletContext.tsx   #   Wallet initialization and state
+│   ├── WalletContext.tsx   #   Wallet initialization, permissions, SSE monitor
 │   ├── UserContext.tsx     #   User / auth state
-│   └── ...                 #   Exchange rate, browser mode, sheets, local storage
+│   ├── BrowserModeContext.tsx # Web2/Web3 mode toggle (auto-switches on auth)
+│   ├── ExchangeRateContext.tsx # BSV/fiat exchange rates
+│   └── ...                 #   Sheets, local storage
 ├── hooks/                  # Custom React hooks (deep linking, history, permissions, etc.)
 ├── stores/                 # MobX stores (bookmarks, tabs)
 ├── storage/                # SQLite-backed wallet storage adapter
@@ -124,7 +135,11 @@ bsv-browser/
 ├── wallet/                 # Wallet integration layer
 ├── shared/                 # Shared constants and types (search engines, default bookmarks)
 ├── utils/                  # Helpers -- crypto, permissions, logging, webview injection
-│   └── webview/            #   Injected polyfills, message router, download handler
+│   ├── webview/            #   Injected polyfills, message router, CWI provider, download handler
+│   ├── backupShares.ts     #   Shamir Secret Sharing for printable key recovery
+│   ├── mnemonicWallet.ts   #   BIP-39/32 mnemonic key derivation
+│   ├── importDatabases.ts  #   Import wallet database from file
+│   └── exportDatabases.ts  #   Export wallet database for backup
 ├── types/                  # Global TypeScript declarations
 ├── scripts/                # Shell / Node helper scripts (configure, version)
 ├── credentials/            # Signing keystores (Android)
@@ -153,9 +168,17 @@ GestureHandlerRootView
 
 **State management** uses MobX for browser-level state (tabs, bookmarks) and React Context for wallet, user, and UI state.
 
+**Wallet** is fully self-custodial. Keys are derived from a BIP-39 mnemonic at path `m/0'/0'` (hardened). The mnemonic is stored in `expo-secure-store`. The wallet is built using `@bsv/wallet-toolbox-mobile`'s `SimpleWalletManager`.
+
 **Wallet storage** is backed by `expo-sqlite` with a schema defined in `storage/schema/createTables.ts`. See `storage/README.md` for detailed documentation.
 
-**WebView communication** happens via injected polyfills (`utils/webview/`) that bridge web-app wallet requests to the native wallet layer through a message router.
+**CWI Provider** (`utils/webview/cwiProvider.ts`) exposes `window.CWI` to web apps inside the browser. This implements the BRC-100 wallet interface, including `createAction`, `signAction`, `listActions`, `getPublicKey`, `encrypt`/`decrypt`, `createSignature`/`verifySignature`, `acquireCertificate`/`listCertificates`, and identity discovery methods. All operations go through a permission system with user-facing approval modals.
+
+**WebView communication** happens via injected polyfills (`utils/webview/`) that bridge web-app wallet requests to the native wallet layer through a message router. Custom user-agent spoofing and media polyfills ensure compatibility with sites that use bot detection or advanced media APIs.
+
+**Background monitoring** -- a `Monitor` instance subscribes to ARC SSE (Server-Sent Events) for real-time transaction status updates. Missed events are fetched when the app returns from the background.
+
+**Web2/Web3 dual mode** -- the app starts in Web2 mode (a plain browser). Creating or importing a wallet automatically switches to Web3 mode, enabling the CWI provider, payments, and identity features. Users can toggle modes manually.
 
 **Metro** is configured with crypto polyfills (`react-native-quick-crypto`, `stream-browserify`, `buffer`) and special COOP/COEP headers for SharedArrayBuffer support (required by `expo-sqlite` on web).
 
@@ -165,8 +188,8 @@ Create a `.env.local` file in the project root. The app reads `EXPO_PUBLIC_*` va
 
 | Variable                             | Purpose                                  | Default                              |
 | ------------------------------------ | ---------------------------------------- | ------------------------------------ |
-| `EXPO_PUBLIC_DEFAULT_WAB_URL`        | Wallet Authentication Base URL           | `noWAB` (self-custodial)             |
-| `EXPO_PUBLIC_DEFAULT_STORAGE_URL`    | Remote storage URL                       | `local`                              |
+| `EXPO_PUBLIC_DEFAULT_WAB_URL`        | Reserved for future WAB support          | `noWAB` (self-custodial, hardcoded)  |
+| `EXPO_PUBLIC_DEFAULT_STORAGE_URL`    | Reserved for future remote storage       | `local` (local-only, hardcoded)      |
 | `EXPO_PUBLIC_DEFAULT_MESSAGEBOX_URL` | MessageBox service URL                   | `https://messagebox.babbage.systems` |
 | `EXPO_PUBLIC_DEFAULT_CHAIN`          | Network: `main`, `test`, or `teratest`   | `main`                               |
 | `EXPO_PUBLIC_DEFAULT_HOMEPAGE`       | Default browser homepage URL             | --                                   |
@@ -222,8 +245,13 @@ refactor tab store to use async initialization
 | Adding a new screen      | `app/` -- add a new `.tsx` file; Expo Router picks it up automatically  |
 | Modifying browser chrome | `components/browser/`                                                   |
 | Wallet logic             | `context/WalletContext.tsx`, `utils/simpleWalletBuilder.ts`, `storage/` |
+| Auth / mnemonic          | `app/auth/mnemonic.tsx`, `utils/mnemonicWallet.ts`                      |
+| CWI provider             | `utils/webview/cwiProvider.ts`                                          |
 | WebView bridge           | `utils/webview/messageRouter.ts`, `utils/webview/injectedPolyfills.ts`  |
 | Permissions              | `utils/permissionsManager.ts`, `hooks/usePermissions.ts`                |
+| Payments                 | `app/payments.tsx` (P2P), `app/legacy-payments.tsx` (Legacy Bridge)     |
+| Backup / recovery        | `utils/backupShares.ts`, `app/auth/scan-shares.tsx`                     |
+| DB import/export         | `utils/importDatabases.ts`, `utils/exportDatabases.ts`                  |
 | Translations             | `context/i18n/translations.tsx` -- add your language code to the table  |
 | Theming                  | `context/theme/tokens.ts`, `context/theme/ThemeContext.tsx`             |
 | State (tabs/bookmarks)   | `stores/TabStore.tsx`, `stores/BookmarkStore.tsx`                       |
@@ -330,8 +358,6 @@ Edit the `production` env block in `eas.json` to point to your own infrastructur
 ```jsonc
 // eas.json → build → production → env
 {
-  "EXPO_PUBLIC_DEFAULT_WAB_URL": "https://your-wab-instance.example.com",
-  "EXPO_PUBLIC_DEFAULT_STORAGE_URL": "https://your-storage.example.com",
   "EXPO_PUBLIC_DEFAULT_MESSAGEBOX_URL": "https://your-messagebox.example.com",
   "EXPO_PUBLIC_DEFAULT_CHAIN": "main",
   "EXPO_PUBLIC_ADMIN_ORIGINATOR": "yourdomain.com",
@@ -358,7 +384,7 @@ The `eas submit` commands will prompt you for your App Store Connect / Google Pl
 | File        | Fields to change                                                                                    |
 | ----------- | --------------------------------------------------------------------------------------------------- |
 | `app.json`  | `name`, `slug`, `scheme`, `owner`, `extra.eas.projectId`, `android.package`, `ios.bundleIdentifier` |
-| `eas.json`  | `production.env.*` values to point to your own services                                             |
+| `eas.json`  | `production.env.*` values (messagebox URL, chain, homepage, etc.)                                   |
 | Credentials | Run `eas credentials` for both platforms -- do **not** reuse the included keystore                  |
 
 ## Supported Languages
