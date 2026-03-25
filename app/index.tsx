@@ -224,6 +224,7 @@ const Browser = observer(function Browser() {
   const [findInPageQuery, setFindInPageQuery] = useState('')
   const [findInPageCurrent, setFindInPageCurrent] = useState(0)
   const [findInPageTotal, setFindInPageTotal] = useState(0)
+  const [findInPageCapped, setFindInPageCapped] = useState(false)
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -447,75 +448,134 @@ const Browser = observer(function Browser() {
   /*                              FIND IN PAGE                                  */
   /* -------------------------------------------------------------------------- */
 
+  /**
+   * Find-in-page uses the CSS Custom Highlight API when available (iOS 17.2+,
+   * Android WebView 105+). This paints highlights at the rendering layer
+   * without modifying the DOM — zero layout shifts, zero style conflicts.
+   *
+   * The state stored on window:
+   *   __bsvFindRanges : Range[]   – every match range
+   *   __bsvFindIdx    : number    – index of the active match
+   */
+
+  /** Clear all find highlights (CSS Highlight API). */
+  const CLEAR_FIND_JS = `
+    if(typeof CSS!=='undefined'&&CSS.highlights){
+      CSS.highlights.delete('__bsv_find');
+      CSS.highlights.delete('__bsv_find_active');
+    }
+    window.__bsvFindRanges=null;
+    window.__bsvFindIdx=0;
+    if(window.__bsvFindSheet){
+      var idx=document.adoptedStyleSheets.indexOf(window.__bsvFindSheet);
+      if(idx>=0){var a=Array.from(document.adoptedStyleSheets);a.splice(idx,1);document.adoptedStyleSheets=a;}
+      window.__bsvFindSheet=null;
+    }`
+
   const findInPageScript = useCallback(
     (query: string) => {
       if (!activeTab?.webviewRef?.current) return
       if (!query) {
-        // Clear highlights
         activeTab.webviewRef.current.injectJavaScript(`(function(){
-          var old=document.querySelectorAll('mark.__bsv_find_hl');
-          old.forEach(function(m){
-            var p=m.parentNode;
-            p.replaceChild(document.createTextNode(m.textContent),m);
-            p.normalize();
-          });
+          ${CLEAR_FIND_JS}
           window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
             type:'FIND_IN_PAGE_RESULT',current:0,total:0
           }));
         })();true;`)
         return
       }
-      const escaped = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')
+      const escaped = query
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029')
       activeTab.webviewRef.current.injectJavaScript(`(function(){
-        // Clear previous highlights
-        var old=document.querySelectorAll('mark.__bsv_find_hl');
-        old.forEach(function(m){
-          var p=m.parentNode;
-          p.replaceChild(document.createTextNode(m.textContent),m);
-          p.normalize();
-        });
-        var query='${escaped}'.toLowerCase();
-        if(!query){
-          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-            type:'FIND_IN_PAGE_RESULT',current:0,total:0
-          }));
-          return;
-        }
-        var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null,false);
-        var matches=[];
-        while(walker.nextNode()){
-          var node=walker.currentNode;
-          var text=node.textContent.toLowerCase();
-          var idx=0;
-          while((idx=text.indexOf(query,idx))!==-1){
-            matches.push({node:node,index:idx});
-            idx+=query.length;
+        try{
+          ${CLEAR_FIND_JS}
+
+          // Check for CSS Custom Highlight API support
+          var hasHighlightAPI=typeof CSS!=='undefined'&&typeof CSS.highlights!=='undefined'&&typeof Highlight!=='undefined';
+          if(!hasHighlightAPI){
+            window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+              type:'FIND_IN_PAGE_RESULT',current:0,total:0,error:'no_highlight_api'
+            }));
+            return;
           }
+
+          // Inject styles via adoptedStyleSheets (bypasses CSP)
+          if(!window.__bsvFindSheet){
+            var sheet=new CSSStyleSheet();
+            sheet.replaceSync('::highlight(__bsv_find){background-color:rgba(255,210,0,0.4);}::highlight(__bsv_find_active){background-color:rgba(255,150,0,0.6);}');
+            window.__bsvFindSheet=sheet;
+            document.adoptedStyleSheets=[].concat(Array.from(document.adoptedStyleSheets),[sheet]);
+          }
+
+          var MAX_MATCHES=1000;
+          var query='${escaped}'.toLowerCase();
+          if(!query){
+            window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+              type:'FIND_IN_PAGE_RESULT',current:0,total:0
+            }));
+            return;
+          }
+          var qLen=query.length;
+
+          // Walk text nodes and collect Range objects — no DOM modification
+          var ranges=[];
+          var capped=false;
+          var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{
+            acceptNode:function(n){
+              var tag=n.parentElement&&n.parentElement.tagName;
+              if(tag==='SCRIPT'||tag==='STYLE'||tag==='NOSCRIPT')return NodeFilter.FILTER_REJECT;
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          },false);
+          while(walker.nextNode()){
+            var node=walker.currentNode;
+            var text=(node.textContent||'').toLowerCase();
+            var pos=0;
+            while((pos=text.indexOf(query,pos))!==-1){
+              var r=new Range();
+              r.setStart(node,pos);
+              r.setEnd(node,pos+qLen);
+              ranges.push(r);
+              pos+=qLen;
+              if(ranges.length>=MAX_MATCHES){capped=true;break;}
+            }
+            if(capped)break;
+          }
+
+          window.__bsvFindRanges=ranges;
+          window.__bsvFindIdx=0;
+
+          if(ranges.length>0){
+            CSS.highlights.set('__bsv_find',new Highlight(...ranges));
+            CSS.highlights.set('__bsv_find_active',new Highlight(ranges[0]));
+            // Scroll to first match using Selection (no DOM modification)
+            var sel=window.getSelection();
+            sel.removeAllRanges();
+            var scrollRange=ranges[0].cloneRange();
+            scrollRange.collapse(true);
+            sel.addRange(scrollRange);
+            var active=document.activeElement;
+            if(active&&active.blur)active.blur();
+            sel.removeAllRanges();
+          }
+
+          var total=capped?MAX_MATCHES:ranges.length;
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',
+            current:ranges.length>0?1:0,
+            total:total,
+            capped:capped
+          }));
+        }catch(e){
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',current:0,total:0,error:e.message
+          }));
         }
-        // Wrap matches in reverse order to preserve offsets
-        var marks=[];
-        for(var i=matches.length-1;i>=0;i--){
-          var m=matches[i];
-          var range=document.createRange();
-          range.setStart(m.node,m.index);
-          range.setEnd(m.node,m.index+query.length);
-          var mark=document.createElement('mark');
-          mark.className='__bsv_find_hl';
-          mark.style.backgroundColor='rgba(255,210,0,0.4)';
-          mark.style.color='inherit';
-          mark.style.borderRadius='2px';
-          range.surroundContents(mark);
-          marks.unshift(mark);
-        }
-        window.__bsvFindMarks=marks;
-        window.__bsvFindIdx=0;
-        if(marks.length>0){
-          marks[0].style.backgroundColor='rgba(255,150,0,0.6)';
-          marks[0].scrollIntoView({block:'center',behavior:'smooth'});
-        }
-        window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-          type:'FIND_IN_PAGE_RESULT',current:marks.length>0?1:0,total:marks.length
-        }));
       })();true;`)
     },
     [activeTab]
@@ -525,54 +585,71 @@ const Browser = observer(function Browser() {
     (direction: 'next' | 'prev') => {
       if (!activeTab?.webviewRef?.current) return
       activeTab.webviewRef.current.injectJavaScript(`(function(){
-        var marks=window.__bsvFindMarks;
-        if(!marks||marks.length===0)return;
+        var ranges=window.__bsvFindRanges;
+        if(!ranges||ranges.length===0||typeof CSS==='undefined'||!CSS.highlights)return;
         var idx=window.__bsvFindIdx||0;
-        marks[idx].style.backgroundColor='rgba(255,210,0,0.4)';
-        idx=${direction === 'next' ? '(idx+1)%marks.length' : '(idx-1+marks.length)%marks.length'};
+        idx=${direction === 'next' ? '(idx+1)%ranges.length' : '(idx-1+ranges.length)%ranges.length'};
         window.__bsvFindIdx=idx;
-        marks[idx].style.backgroundColor='rgba(255,150,0,0.6)';
-        marks[idx].scrollIntoView({block:'center',behavior:'smooth'});
+        CSS.highlights.set('__bsv_find_active',new Highlight(ranges[idx]));
+        // Scroll into view using Selection API (no DOM modification)
+        try{
+          var sel=window.getSelection();
+          sel.removeAllRanges();
+          var scrollRange=ranges[idx].cloneRange();
+          scrollRange.collapse(true);
+          sel.addRange(scrollRange);
+          var el=document.createElement('span');
+          scrollRange.insertNode(el);
+          el.scrollIntoView({block:'center'});
+          el.parentNode.removeChild(el);
+          sel.removeAllRanges();
+        }catch(e){}
         window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-          type:'FIND_IN_PAGE_RESULT',current:idx+1,total:marks.length
+          type:'FIND_IN_PAGE_RESULT',current:idx+1,total:ranges.length
         }));
       })();true;`)
     },
     [activeTab]
   )
 
+  const closeFindInPageRef = useRef<() => void>(() => {})
+
   const closeFindInPage = useCallback(() => {
     setFindInPageVisible(false)
     setFindInPageQuery('')
     setFindInPageCurrent(0)
     setFindInPageTotal(0)
-    // Clear highlights
+    setFindInPageCapped(false)
     if (activeTab?.webviewRef?.current) {
       activeTab.webviewRef.current.injectJavaScript(`(function(){
-        var old=document.querySelectorAll('mark.__bsv_find_hl');
-        old.forEach(function(m){
-          var p=m.parentNode;
-          p.replaceChild(document.createTextNode(m.textContent),m);
-          p.normalize();
-        });
-        window.__bsvFindMarks=null;
-        window.__bsvFindIdx=0;
+        ${CLEAR_FIND_JS}
       })();true;`)
     }
   }, [activeTab])
 
+  closeFindInPageRef.current = closeFindInPage
+
+  const findInPageVisibleRef = useRef(false)
+  findInPageVisibleRef.current = findInPageVisible
+
+  /** Debounce timer for find-in-page queries */
+  const findDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const onFindInPageQueryChange = useCallback(
     (text: string) => {
       setFindInPageQuery(text)
-      findInPageScript(text)
+      if (findDebounceRef.current) clearTimeout(findDebounceRef.current)
+      findDebounceRef.current = setTimeout(() => {
+        findInPageScript(text)
+      }, 250)
     },
     [findInPageScript]
   )
 
   // Close find-in-page when the active tab changes
   useEffect(() => {
-    if (findInPageVisible) {
-      closeFindInPage()
+    if (findInPageVisibleRef.current) {
+      closeFindInPageRef.current()
     }
   }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -688,6 +765,7 @@ const Browser = observer(function Browser() {
       if (msg.type === 'FIND_IN_PAGE_RESULT') {
         setFindInPageCurrent(msg.current ?? 0)
         setFindInPageTotal(msg.total ?? 0)
+        setFindInPageCapped(!!msg.capped)
         return
       }
 
@@ -1216,6 +1294,7 @@ const Browser = observer(function Browser() {
               query={findInPageQuery}
               currentMatch={findInPageCurrent}
               totalMatches={findInPageTotal}
+              capped={findInPageCapped}
               onChangeQuery={onFindInPageQueryChange}
               onNext={() => findInPageNavigate('next')}
               onPrevious={() => findInPageNavigate('prev')}

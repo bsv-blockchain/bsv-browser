@@ -18,6 +18,7 @@ interface FindInPageBarProps {
   query: string
   currentMatch: number
   totalMatches: number
+  capped?: boolean
   onChangeQuery: (text: string) => void
   onNext: () => void
   onPrevious: () => void
@@ -28,6 +29,7 @@ export const FindInPageBar: React.FC<FindInPageBarProps> = ({
   query,
   currentMatch,
   totalMatches,
+  capped,
   onChangeQuery,
   onNext,
   onPrevious,
@@ -46,9 +48,10 @@ export const FindInPageBar: React.FC<FindInPageBarProps> = ({
   const hasQuery = query.length > 0
   const hasMatches = totalMatches > 0
 
+  const totalLabel = capped ? `${totalMatches}+` : String(totalMatches)
   const matchLabel = hasQuery
     ? hasMatches
-      ? t('find_in_page_matches', { current: currentMatch, total: totalMatches })
+      ? t('find_in_page_matches', { current: currentMatch, total: totalLabel })
       : t('find_in_page_no_matches')
     : ''
 
