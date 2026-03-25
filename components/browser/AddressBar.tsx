@@ -21,17 +21,17 @@ interface AddressBarProps {
   addressFocused: boolean
   isLoading: boolean
   canGoBack: boolean
-  canGoForward: boolean
   isNewTab: boolean
   isHttps: boolean
   menuOpen: boolean
+  historyPopoverOpen: boolean
   onMorePress: () => void
   onChangeText: (text: string) => void
   onSubmit: () => void
   onFocus: () => void
   onBlur: () => void
   onBack: () => void
-  onForward: () => void
+  onBackLongPress: () => void
   onReloadOrStop: () => void
   onClearText: () => void
   onCancelNewTab?: () => void
@@ -83,17 +83,17 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   addressFocused,
   isLoading,
   canGoBack,
-  canGoForward,
   isNewTab,
   isHttps,
   menuOpen,
+  historyPopoverOpen,
   onMorePress,
   onChangeText,
   onSubmit,
   onFocus,
   onBlur,
   onBack,
-  onForward,
+  onBackLongPress,
   onReloadOrStop,
   onClearText,
   onCancelNewTab,
@@ -118,36 +118,30 @@ export const AddressBar: React.FC<AddressBarProps> = ({
 
   const displayText = addressFocused ? addressText : domainFromUrl(addressText)
   const isBackDisabled = !canGoBack || isNewTab
-  const isForwardDisabled = !canGoForward || isNewTab
 
   return (
     <View style={styles.container}>
       <View style={styles.row}>
-        {/* Back / Forward — hidden while editing */}
-        {!addressFocused && (
+        {/* Back button — hidden while editing; long-press opens history popover */}
+        {!addressFocused && !historyPopoverOpen && (
           <GlassPill style={styles.navPill}>
-            <TouchableOpacity onPress={onBack} disabled={isBackDisabled} style={styles.navButton} activeOpacity={0.6}>
+            <TouchableOpacity
+              onPress={isBackDisabled ? undefined : onBack}
+              onLongPress={onBackLongPress}
+              delayLongPress={350}
+              style={styles.navButton}
+              activeOpacity={0.6}
+            >
               <Ionicons
                 name="chevron-back"
                 size={22}
                 color={isBackDisabled ? (gc?.quaternary ?? colors.textQuaternary) : (gc?.accent ?? colors.accent)}
               />
             </TouchableOpacity>
-            <View style={[styles.navDivider, { backgroundColor: gc?.separator ?? colors.separator }]} />
-            <TouchableOpacity
-              onPress={onForward}
-              disabled={isForwardDisabled}
-              style={styles.navButton}
-              activeOpacity={0.6}
-            >
-              <Ionicons
-                name="chevron-forward"
-                size={22}
-                color={isForwardDisabled ? (gc?.quaternary ?? colors.textQuaternary) : (gc?.accent ?? colors.accent)}
-              />
-            </TouchableOpacity>
           </GlassPill>
         )}
+        {/* Placeholder so the URL pill doesn't reflow when history popover opens */}
+        {!addressFocused && historyPopoverOpen && <View style={styles.navPlaceholder} />}
 
         {/* URL pill */}
         <GlassPill flex={1} style={styles.urlPill}>
@@ -249,18 +243,17 @@ const styles = StyleSheet.create({
   navPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.xs,
-    width: 88
+    justifyContent: 'center',
+    width: 44
   },
   navButton: {
-    flex: 1,
+    width: 44,
     height: 44,
     alignItems: 'center',
     justifyContent: 'center'
   },
-  navDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 20
+  navPlaceholder: {
+    width: 44
   },
   urlPill: {
     flexDirection: 'row',

@@ -55,6 +55,7 @@ import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
+import { HistoryPopover } from '@/components/browser/HistoryPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
 import { SuggestionsDropdown } from '@/components/browser/SuggestionsDropdown'
 import { SheetRouter } from '@/components/browser/SheetRouter'
@@ -217,6 +218,7 @@ const Browser = observer(function Browser() {
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
+  const [historyPopoverOpen, setHistoryPopoverOpen] = useState(false)
   const desktopModeCooldown = useRef(false)
 
   /* ------------------------------ find in page ----------------------------- */
@@ -421,9 +423,14 @@ const Browser = observer(function Browser() {
     if (currentTab?.canGoBack) tabStore.goBack(currentTab.id)
   }, [])
 
-  const navFwd = useCallback(() => {
+  const navBackLongPress = useCallback(() => {
+    setHistoryPopoverOpen(true)
+  }, [])
+
+  const onSelectHistoryEntry = useCallback((index: number) => {
     const currentTab = tabStore.activeTab
-    if (currentTab?.canGoForward) tabStore.goForward(currentTab.id)
+    if (currentTab) tabStore.navigateToHistoryIndex(currentTab.id, index)
+    setHistoryPopoverOpen(false)
   }, [])
 
   const navReloadOrStop = useCallback(() => {
@@ -1219,15 +1226,19 @@ const Browser = observer(function Browser() {
                   addressFocused={addressFocused}
                   isLoading={activeTab?.isLoading || false}
                   canGoBack={activeTab?.canGoBack || false}
-                  canGoForward={activeTab?.canGoForward || false}
                   isNewTab={isNewTab}
                   isHttps={activeTab?.url?.startsWith('https') || false}
                   menuOpen={menuPopoverOpen}
-                  onMorePress={() => setMenuPopoverOpen(true)}
+                  historyPopoverOpen={historyPopoverOpen}
+                  onMorePress={() => {
+                    setHistoryPopoverOpen(false)
+                    setMenuPopoverOpen(true)
+                  }}
                   onChangeText={onChangeAddressText}
                   onSubmit={onAddressSubmit}
                   onFocus={() => {
                     setMenuPopoverOpen(false)
+                    setHistoryPopoverOpen(false)
                     addressEditing.current = true
                     setAddressFocused(true)
                     if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
@@ -1245,7 +1256,7 @@ const Browser = observer(function Browser() {
                     setAddressText(activeTab?.url || kNEW_TAB_URL)
                   }}
                   onBack={navBack}
-                  onForward={navFwd}
+                  onBackLongPress={navBackLongPress}
                   onReloadOrStop={navReloadOrStop}
                   onClearText={() => setAddressText('')}
                   onCancelNewTab={
@@ -1355,6 +1366,31 @@ const Browser = observer(function Browser() {
             />
           </Animated.View>
         )}
+
+        {/* ---- History Popover (full-screen layer, anchored left) ---- */}
+        {historyPopoverOpen &&
+          activeTab &&
+          (() => {
+            const { entries, currentIndex } = tabStore.getNavigationHistory(activeTab.id)
+            return (
+              <Animated.View
+                style={[
+                  { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
+                  animatedMenuPopoverStyle
+                ]}
+              >
+                <HistoryPopover
+                  entries={entries}
+                  currentIndex={currentIndex}
+                  addressBarAtTop={addressBarIsAtTop}
+                  topOffset={8}
+                  bottomOffset={bottomInset + 4}
+                  onDismiss={() => setHistoryPopoverOpen(false)}
+                  onSelectEntry={onSelectHistoryEntry}
+                />
+              </Animated.View>
+            )
+          })()}
 
         {/* ---- Tabs Overview ---- */}
         {!isFullscreen && showTabsView && (

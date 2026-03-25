@@ -16,7 +16,7 @@ export class TabStore {
   showTabsView = false
   isInitialized = false // Add initialization flag
   private nextId = 1
-  private tabNavigationHistories: { [tabId: number]: string[] } = {} // Track navigation history per tab
+  private tabNavigationHistories: { [tabId: number]: { url: string; title: string }[] } = {} // Track navigation history per tab
   private tabHistoryIndexes: { [tabId: number]: number } = {} // Track current position in history per tab
   constructor() {
     console.log('TabStore constructor called')
@@ -74,11 +74,14 @@ export class TabStore {
       isValidUrl(safeInitialUrl)
     ) {
       // Start with new tab page, then add the initial URL
-      this.tabNavigationHistories[newTab.id] = [kNEW_TAB_URL, safeInitialUrl]
+      this.tabNavigationHistories[newTab.id] = [
+        { url: kNEW_TAB_URL, title: 'New Tab' },
+        { url: safeInitialUrl, title: safeInitialUrl }
+      ]
       this.tabHistoryIndexes[newTab.id] = 1 // Currently on the initial URL
     } else {
       // For new tabs, start with new tab page in history
-      this.tabNavigationHistories[newTab.id] = [kNEW_TAB_URL]
+      this.tabNavigationHistories[newTab.id] = [{ url: kNEW_TAB_URL, title: 'New Tab' }]
       this.tabHistoryIndexes[newTab.id] = 0 // Currently on new tab page
     }
 
@@ -170,7 +173,8 @@ export class TabStore {
     if (history.length > 1 && currentIndex > 0) {
       // Use custom history navigation for new tab page scenarios
       const newIndex = currentIndex - 1
-      const url = history[newIndex]
+      const entry = history[newIndex]
+      const url = entry.url
 
       console.log(`🔙 [TAB_STORE] Using custom history navigation to: ${url} (index ${newIndex})`)
 
@@ -182,7 +186,7 @@ export class TabStore {
 
       // Navigate to the URL
       tab.url = url
-      tab.title = url
+      tab.title = entry.title || url
 
       try {
         if (url === kNEW_TAB_URL) {
@@ -234,15 +238,15 @@ export class TabStore {
       currentIndex,
       canGoForward: tab.canGoForward,
       currentUrl: tab.url,
-      history: history.map((h, i) => `${i === currentIndex ? '→' : ' '} ${(h as any)?.url || h}`)
+      history: history.map((h, i) => `${i === currentIndex ? '→' : ' '} ${h.url}`)
     })
 
     // Use custom history navigation if we have meaningful history
     if (history.length > 1 && currentIndex < history.length - 1) {
       console.log(`🔜 [TAB_STORE] Using custom history navigation`)
       const newIndex = currentIndex + 1
-      const targetEntry = history[newIndex]
-      const url = (targetEntry as any)?.url || targetEntry
+      const entry = history[newIndex]
+      const url = entry.url
 
       console.log(`🔜 [TAB_STORE] Navigating forward to index ${newIndex}: ${url}`)
 
@@ -277,6 +281,52 @@ export class TabStore {
         currentIndex
       })
     }
+  }
+
+  /** Returns the navigation history and current index for a given tab (used by HistoryPopover). */
+  getNavigationHistory(tabId: number): { entries: { url: string; title: string }[]; currentIndex: number } {
+    return {
+      entries: this.tabNavigationHistories[tabId] || [],
+      currentIndex: this.tabHistoryIndexes[tabId] ?? -1
+    }
+  }
+
+  /** Jump directly to a specific index in the tab's navigation history. */
+  navigateToHistoryIndex(tabId: number, index: number) {
+    const tab = this.tabs.find(t => t.id === tabId)
+    const history = this.tabNavigationHistories[tabId] || []
+
+    if (!tab || !tab.webviewRef.current || index < 0 || index >= history.length) {
+      console.log(`🎯 [TAB_STORE] navigateToHistoryIndex(): invalid state`, {
+        tabId,
+        index,
+        historyLength: history.length
+      })
+      return
+    }
+
+    const entry = history[index]
+    const url = entry.url
+
+    console.log(`🎯 [TAB_STORE] navigateToHistoryIndex(): tabId=${tabId}, index=${index}, url=${url}`)
+
+    this.tabHistoryIndexes[tabId] = index
+    tab.canGoBack = index > 0
+    tab.canGoForward = index < history.length - 1
+    tab.url = url
+    tab.title = entry.title || url
+
+    try {
+      if (url === kNEW_TAB_URL) {
+        tab.webviewRef.current.injectJavaScript(`window.location.href = "about:blank";`)
+      } else {
+        tab.webviewRef.current.injectJavaScript(`window.location.href = "${url}";`)
+      }
+    } catch (error) {
+      console.error(`🎯 [TAB_STORE] Error navigating to history index ${index}:`, error)
+    }
+
+    this.saveTabs()
   }
 
   toggleDesktopMode(tabId: number) {
@@ -353,26 +403,28 @@ export class TabStore {
         if (currentUrl !== 'about:blank') {
           const history = this.tabNavigationHistories[tabId] || []
           const currentIndex = this.tabHistoryIndexes[tabId] ?? -1
+          const currentTitle = navState.title && navState.title.trim() !== '' ? navState.title : currentUrl
 
           // Check if this URL is already at our current position
-          if (currentUrl !== history[currentIndex]) {
+          if (currentUrl !== history[currentIndex]?.url) {
             console.log(`📝 Adding URL to history: ${currentUrl}`)
 
             // For new tab page, ensure it's always the first entry
             if (currentUrl === kNEW_TAB_URL) {
               // If navigating back to new tab page, update index but don't add duplicate
-              const newTabIndex = history.indexOf(kNEW_TAB_URL)
+              const newTabIndex = history.findIndex(e => e.url === kNEW_TAB_URL)
               if (newTabIndex >= 0) {
                 this.tabHistoryIndexes[tabId] = newTabIndex
               } else {
                 // This shouldn't happen with our new initialization, but handle it gracefully
-                history.unshift(kNEW_TAB_URL)
+                history.unshift({ url: kNEW_TAB_URL, title: 'New Tab' })
                 this.tabHistoryIndexes[tabId] = 0
               }
             } else {
               // For regular URLs, remove any forward history and add the new URL
-              const newHistory = currentIndex >= 0 ? history.slice(0, currentIndex + 1) : [kNEW_TAB_URL]
-              newHistory.push(currentUrl)
+              const newHistory =
+                currentIndex >= 0 ? history.slice(0, currentIndex + 1) : [{ url: kNEW_TAB_URL, title: 'New Tab' }]
+              newHistory.push({ url: currentUrl, title: currentTitle })
               this.tabNavigationHistories[tabId] = newHistory
               this.tabHistoryIndexes[tabId] = newHistory.length - 1
             }
@@ -380,6 +432,12 @@ export class TabStore {
             console.log(
               `🧭 Navigation updated: canGoBack=${tab.canGoBack}, canGoForward=${tab.canGoForward}, historyIndex=${this.tabHistoryIndexes[tabId]}/${history.length - 1}`
             )
+          } else if (history[currentIndex]) {
+            // URL matches but title may have updated — keep the title fresh
+            const freshTitle = navState.title && navState.title.trim() !== '' ? navState.title : undefined
+            if (freshTitle && freshTitle !== history[currentIndex].title) {
+              history[currentIndex].title = freshTitle
+            }
           }
         }
 
