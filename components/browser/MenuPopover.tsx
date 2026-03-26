@@ -36,6 +36,7 @@ interface MenuPopoverProps {
   onNewTab: () => void
   onSettings: () => void
   onEnableWeb3: () => void
+  onConnections: () => void
 }
 
 interface RowProps {
@@ -85,6 +86,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   onNewTab,
   onSettings,
   onEnableWeb3,
+  onConnections,
 }) => {
   const { t } = useTranslation()
   const { isDark, colors } = useTheme()
@@ -112,6 +114,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       ) : (
         <>
           <Row icon="wallet-outline" label={t('wallet')} onPress={dismiss(onSettings)} />
+          <Row icon="link-outline" label="Connections" onPress={dismiss(onConnections)} />
         </>
       )}
 

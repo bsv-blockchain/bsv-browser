@@ -24,6 +24,8 @@ import DefaultBrowserPrompt from '@/components/onboarding/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/context/i18n/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/onboarding/Web3BenefitsModalHandler'
+import { WalletConnectionProvider, useWalletConnection } from '@/context/WalletConnectionContext'
+import { RpcApprovalModal } from '@/components/RpcApprovalModal'
 
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 
@@ -53,6 +55,19 @@ const nativeHandlers: NativeHandlers = {
 function DeepLinkHandler() {
   useDeepLinking()
   return null
+}
+
+// Renders the RPC approval modal from layout so it persists across screen navigation
+function WalletApprovalHandler() {
+  const { currentApproval, sessionMeta, approveCurrentRpc, rejectCurrentRpc } = useWalletConnection()
+  return (
+    <RpcApprovalModal
+      pending={currentApproval}
+      origin={sessionMeta?.origin ?? ''}
+      onApprove={approveCurrentRpc}
+      onReject={rejectCurrentRpc}
+    />
+  )
 }
 
 // const DebuggerDisplay = () => {
@@ -86,10 +101,12 @@ export default function RootLayout() {
                 <WalletContextProvider>
                   <BrowserModeProvider>
                     <ThemeProvider>
+                      <WalletConnectionProvider>
                       <View style={{ flex: 1, backgroundColor }}>
                         {/* <DebuggerDisplay /> */}
                         <DeepLinkHandler />
                         <Web3BenefitsModalHandler />
+                        <WalletApprovalHandler />
                         {/* <TranslationTester /> */}
                         <DefaultBrowserPrompt />
                         <PermissionSheet />
@@ -107,9 +124,12 @@ export default function RootLayout() {
                           <Stack.Screen name="wallet-config" />
                           <Stack.Screen name="legacy-payments" />
                           <Stack.Screen name="payments" />
+                          <Stack.Screen name="connections" />
+                          <Stack.Screen name="pair" />
                           <Stack.Screen name="not-found" />
                         </Stack>
                       </View>
+                      </WalletConnectionProvider>
                     </ThemeProvider>
                   </BrowserModeProvider>
                 </WalletContextProvider>

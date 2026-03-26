@@ -1040,6 +1040,7 @@ function Browser() {
               }}
               onSettings={() => sheet.push('settings')}
               onEnableWeb3={() => router.push('/auth/mnemonic')}
+              onConnections={() => router.push('/connections')}
             />
           </Animated.View>
         )}
