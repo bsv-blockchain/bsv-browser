@@ -1,5 +1,5 @@
 import React from 'react'
-import { Keyboard, PlatformColor, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
+import { Keyboard, Platform, PlatformColor, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -34,6 +34,7 @@ interface AddressBarProps {
   onForward: () => void
   onReloadOrStop: () => void
   onClearText: () => void
+  onCancelNewTab?: () => void
   inputRef: React.RefObject<TextInput | null>
 }
 
@@ -95,6 +96,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   onForward,
   onReloadOrStop,
   onClearText,
+  onCancelNewTab,
   inputRef
 }) => {
   const { t } = useTranslation()
@@ -167,6 +169,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
             onSubmitEditing={onSubmit}
             autoCapitalize="none"
             autoCorrect={false}
+            keyboardType={Platform.select({ ios: 'web-search', default: 'url' })}
             returnKeyType="go"
             style={[
               styles.urlInput,
@@ -199,8 +202,12 @@ export const AddressBar: React.FC<AddressBarProps> = ({
           <GlassPill style={styles.morePill}>
             <TouchableOpacity
               onPress={() => {
-                inputRef.current?.blur()
-                Keyboard.dismiss()
+                if (onCancelNewTab) {
+                  onCancelNewTab()
+                } else {
+                  inputRef.current?.blur()
+                  Keyboard.dismiss()
+                }
               }}
               style={styles.moreButton}
               activeOpacity={0.6}

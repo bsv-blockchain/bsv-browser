@@ -6,7 +6,7 @@ A mobile browser that brings identity, micropayments, and BSV-powered websites t
 
 - Self-custodial BSV wallet (BIP-39 mnemonic) with local SQLite storage
 - Web2/Web3 dual mode -- browse normally or with wallet identity and payments
-- CWI (Crypto Wallet Interface) provider for web apps (BRC-100 compliant)
+- CWI (Computing With Integrity) provider for web apps (BRC-100 compliant)
 - Permission-gated access for web apps requesting wallet operations
 - Peer-to-peer payments via MessageBox with identity resolution
 - Legacy Bridge for sending/receiving via traditional P2PKH addresses

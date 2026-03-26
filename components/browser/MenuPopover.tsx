@@ -1,12 +1,5 @@
 import React from 'react'
-import {
-  Linking,
-  Pressable,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native'
+import { Linking, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { useTranslation } from 'react-i18next'
@@ -28,15 +21,18 @@ interface MenuPopoverProps {
   bottomOffset: number
   addressBarAtTop?: boolean
   topOffset?: number
+  isDesktopMode: boolean
   onDismiss: () => void
   onShare: () => void
   onAddBookmark: () => void
+  onFindInPage: () => void
   onBookmarks: () => void
   onTabs: () => void
   onNewTab: () => void
   onSettings: () => void
   onEnableWeb3: () => void
   onConnections: () => void
+  onToggleDesktopMode: () => void
 }
 
 interface RowProps {
@@ -56,9 +52,7 @@ const Row: React.FC<RowProps> = ({ icon, label, onPress, destructive }) => {
         color={destructive ? colors.error : colors.textPrimary}
         style={styles.rowIcon}
       />
-      <Text style={[styles.rowLabel, { color: destructive ? colors.error : colors.textPrimary }]}>
-        {label}
-      </Text>
+      <Text style={[styles.rowLabel, { color: destructive ? colors.error : colors.textPrimary }]}>{label}</Text>
     </TouchableOpacity>
   )
 }
@@ -78,37 +72,71 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   bottomOffset,
   addressBarAtTop = false,
   topOffset = 0,
+  isDesktopMode,
   onDismiss,
   onShare,
   onAddBookmark,
+  onFindInPage,
   onBookmarks,
   onTabs,
   onNewTab,
   onSettings,
   onEnableWeb3,
   onConnections,
+  onToggleDesktopMode
 }) => {
   const { t } = useTranslation()
   const { isDark, colors } = useTheme()
   const { isWeb2Mode } = useBrowserMode()
 
-  const dismiss = (fn: () => void) => () => { onDismiss(); fn() }
+  const dismiss = (fn: () => void) => () => {
+    onDismiss()
+    fn()
+  }
 
   const cardContent = (
     <View style={styles.card}>
       {/* Actions group */}
-      {!isNewTab && canShare && (
-        <Row icon="share-outline" label={t('share')} onPress={dismiss(onShare)} />
-      )}
+      {!isNewTab && canShare && <Row icon="share-outline" label={t('share')} onPress={dismiss(onShare)} />}
       {!isNewTab && (
-        <Row icon="bookmark-outline" label={t('add_bookmark')} onPress={dismiss(onAddBookmark)} />
+        <View style={styles.splitRow}>
+          <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onAddBookmark)} activeOpacity={0.6}>
+            <Ionicons name="bookmark-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
+            <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('bookmark')}</Text>
+          </TouchableOpacity>
+          <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
+          <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onFindInPage)} activeOpacity={0.6}>
+            <Ionicons name="search-outline" size={22} color={colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
       )}
-      <Row icon="globe-outline" label={t('browser')} onPress={dismiss(onBookmarks)} />
+      {/* Browser — split row: Browser label | Desktop mode icon */}
+      <View style={styles.splitRow}>
+        <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onBookmarks)} activeOpacity={0.6}>
+          <Ionicons name="globe-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
+          <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('browser')}</Text>
+        </TouchableOpacity>
+        <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
+        <TouchableOpacity
+          style={styles.splitRowAction}
+          onPress={() => {
+            onDismiss()
+            onToggleDesktopMode()
+          }}
+          activeOpacity={0.6}
+        >
+          <Ionicons name={isDesktopMode ? 'desktop' : 'desktop-outline'} size={22} color={colors.textPrimary} />
+        </TouchableOpacity>
+      </View>
 
       <Divider />
 
       {/* Web3 / Settings group */}
-      <Row icon="bug-outline" label={t('bug_report')} onPress={dismiss(() => Linking.openURL('https://github.com/bsv-blockchain/bsv-browser/issues'))} />
+      <Row
+        icon="bug-outline"
+        label={t('bug_report')}
+        onPress={dismiss(() => Linking.openURL('https://github.com/bsv-blockchain/bsv-browser/issues'))}
+      />
       {isWeb2Mode ? (
         <Row icon="flash-outline" label={t('enable_web3')} onPress={dismiss(onEnableWeb3)} />
       ) : (
@@ -140,10 +168,10 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} />
 
       {/* Popover card anchored bottom-right or top-right based on AddressBar position */}
-      <View style={[
-        styles.anchor,
-        addressBarAtTop ? { top: topOffset } : { bottom: bottomOffset }
-      ]} pointerEvents="box-none">
+      <View
+        style={[styles.anchor, addressBarAtTop ? { top: topOffset } : { bottom: bottomOffset }]}
+        pointerEvents="box-none"
+      >
         {isLiquidGlassSupported && LiquidGlassView ? (
           <LiquidGlassView
             effect="regular"
@@ -166,8 +194,8 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
                 shadowOffset: { width: 0, height: 8 },
                 shadowOpacity: isDark ? 0.5 : 0.18,
                 shadowRadius: 24,
-                elevation: 16,
-              },
+                elevation: 16
+              }
             ]}
           >
             {cardContent}
@@ -181,59 +209,59 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 50,
+    zIndex: 50
   },
   anchor: {
     position: 'absolute',
     right: spacing.md,
     width: 280,
-    alignItems: 'flex-end',
+    alignItems: 'flex-end'
   },
   glassCard: {
     width: 222,
-    overflow: 'hidden',
+    overflow: 'hidden'
   },
   card: {
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.xs
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md + 2,
+    paddingVertical: spacing.md + 2
   },
   rowIcon: {
     width: 28,
-    marginRight: spacing.md,
+    marginRight: spacing.md
   },
   rowLabel: {
-    ...typography.body,
+    ...typography.body
   },
   divider: {
     height: StyleSheet.hairlineWidth,
     marginHorizontal: spacing.lg,
-    marginVertical: spacing.xs,
+    marginVertical: spacing.xs
   },
   splitRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'center'
   },
   splitRowMain: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md + 2,
+    paddingVertical: spacing.md + 2
   },
   splitDivider: {
     width: StyleSheet.hairlineWidth,
     alignSelf: 'stretch',
-    marginVertical: spacing.xs,
+    marginVertical: spacing.xs
   },
   splitRowAction: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md + 2,
     justifyContent: 'center',
-    alignItems: 'center',
-  },
+    alignItems: 'center'
+  }
 })

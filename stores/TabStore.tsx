@@ -50,7 +50,8 @@ export class TabStore {
       webviewRef: createRef<WebView>(),
       canGoBack: false,
       canGoForward: false,
-      isLoading: false
+      isLoading: false,
+      isDesktopMode: false
     }
   }
 
@@ -275,6 +276,14 @@ export class TabStore {
         historyLength: history.length,
         currentIndex
       })
+    }
+  }
+
+  toggleDesktopMode(tabId: number) {
+    const tab = this.tabs.find(t => t.id === tabId)
+    if (tab) {
+      tab.isDesktopMode = !tab.isDesktopMode
+      this.saveTabs()
     }
   }
 

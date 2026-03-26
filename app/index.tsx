@@ -58,6 +58,7 @@ import { MenuPopover } from '@/components/browser/MenuPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
 import { SuggestionsDropdown } from '@/components/browser/SuggestionsDropdown'
 import { SheetRouter } from '@/components/browser/SheetRouter'
+import { FindInPageBar } from '@/components/browser/FindInPageBar'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 
@@ -81,10 +82,23 @@ function getInjectableJSMessage(message: any = {}) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                               USER AGENTS                                  */
+/* -------------------------------------------------------------------------- */
+
+const MOBILE_UA_IOS =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1'
+const MOBILE_UA_ANDROID =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+const DESKTOP_UA_IOS =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15'
+const DESKTOP_UA_ANDROID =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+/* -------------------------------------------------------------------------- */
 /*                                  BROWSER                                   */
 /* -------------------------------------------------------------------------- */
 
-function Browser() {
+const Browser = observer(function Browser() {
   /* --------------------------- theme / basic hooks -------------------------- */
   const { isDark, colors } = useTheme()
   const insets = useSafeAreaInsets()
@@ -203,6 +217,14 @@ function Browser() {
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
+  const desktopModeCooldown = useRef(false)
+
+  /* ------------------------------ find in page ----------------------------- */
+  const [findInPageVisible, setFindInPageVisible] = useState(false)
+  const [findInPageQuery, setFindInPageQuery] = useState('')
+  const [findInPageCurrent, setFindInPageCurrent] = useState(0)
+  const [findInPageTotal, setFindInPageTotal] = useState(0)
+  const [findInPageCapped, setFindInPageCapped] = useState(false)
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -251,6 +273,12 @@ function Browser() {
   // When true, the next blank tab will skip homepage navigation (e.g. user explicitly opened new tab)
   const skipHomepageOnce = useRef(false)
 
+  // When true, focus and highlight the address bar after the next homepage navigation
+  const focusAddressBarOnNewTab = useRef(false)
+
+  // The tab ID of a tab opened via the new tab button that can be "cancelled" (closed to go back)
+  const cancelableNewTabId = useRef<number | null>(null)
+
   // Navigate to homepage whenever a blank tab becomes active
   useEffect(() => {
     if (!activeTab || activeTab.url !== kNEW_TAB_URL) return
@@ -258,6 +286,8 @@ function Browser() {
       skipHomepageOnce.current = false
       return
     }
+    const shouldFocusAddressBar = focusAddressBarOnNewTab.current
+    focusAddressBarOnNewTab.current = false
     ;(async () => {
       const stored = await getItem('homepageUrl')
       const url = stored || DEFAULT_HOMEPAGE_URL
@@ -265,6 +295,18 @@ function Browser() {
         tabStore.updateTab(tabStore.activeTabId, { url })
         setAddressText(url)
         setHomepageUrlState(url)
+        if (shouldFocusAddressBar) {
+          setTimeout(() => {
+            addressEditing.current = true
+            setAddressFocused(true)
+            addressInputRef.current?.focus()
+            setTimeout(() => {
+              addressInputRef.current?.setNativeProps({
+                selection: { start: 0, end: url.length }
+              })
+            }, 0)
+          }, 150)
+        }
       }
     })()
   }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -338,6 +380,7 @@ function Browser() {
     if (!isValidUrl(entry)) entry = kNEW_TAB_URL
     updateActiveTab({ url: entry })
     addressEditing.current = false
+    cancelableNewTabId.current = null
   }, [addressText, updateActiveTab])
 
   /* -------------------------------------------------------------------------- */
@@ -400,6 +443,215 @@ function Browser() {
       await Share.share({ message: currentTab.url })
     } catch {}
   }, [])
+
+  /* -------------------------------------------------------------------------- */
+  /*                              FIND IN PAGE                                  */
+  /* -------------------------------------------------------------------------- */
+
+  /**
+   * Find-in-page uses the CSS Custom Highlight API when available (iOS 17.2+,
+   * Android WebView 105+). This paints highlights at the rendering layer
+   * without modifying the DOM — zero layout shifts, zero style conflicts.
+   *
+   * The state stored on window:
+   *   __bsvFindRanges : Range[]   – every match range
+   *   __bsvFindIdx    : number    – index of the active match
+   */
+
+  /** Clear all find highlights (CSS Highlight API). */
+  const CLEAR_FIND_JS = `
+    if(typeof CSS!=='undefined'&&CSS.highlights){
+      CSS.highlights.delete('__bsv_find');
+      CSS.highlights.delete('__bsv_find_active');
+    }
+    window.__bsvFindRanges=null;
+    window.__bsvFindIdx=0;
+    if(window.__bsvFindSheet){
+      var idx=document.adoptedStyleSheets.indexOf(window.__bsvFindSheet);
+      if(idx>=0){var a=Array.from(document.adoptedStyleSheets);a.splice(idx,1);document.adoptedStyleSheets=a;}
+      window.__bsvFindSheet=null;
+    }`
+
+  const findInPageScript = useCallback(
+    (query: string) => {
+      if (!activeTab?.webviewRef?.current) return
+      if (!query) {
+        activeTab.webviewRef.current.injectJavaScript(`(function(){
+          ${CLEAR_FIND_JS}
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',current:0,total:0
+          }));
+        })();true;`)
+        return
+      }
+      const escaped = query
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029')
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        try{
+          ${CLEAR_FIND_JS}
+
+          // Check for CSS Custom Highlight API support
+          var hasHighlightAPI=typeof CSS!=='undefined'&&typeof CSS.highlights!=='undefined'&&typeof Highlight!=='undefined';
+          if(!hasHighlightAPI){
+            window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+              type:'FIND_IN_PAGE_RESULT',current:0,total:0,error:'no_highlight_api'
+            }));
+            return;
+          }
+
+          // Inject styles via adoptedStyleSheets (bypasses CSP)
+          if(!window.__bsvFindSheet){
+            var sheet=new CSSStyleSheet();
+            sheet.replaceSync('::highlight(__bsv_find){background-color:rgba(255,210,0,0.4);}::highlight(__bsv_find_active){background-color:rgba(255,150,0,0.6);}');
+            window.__bsvFindSheet=sheet;
+            document.adoptedStyleSheets=[].concat(Array.from(document.adoptedStyleSheets),[sheet]);
+          }
+
+          var MAX_MATCHES=1000;
+          var query='${escaped}'.toLowerCase();
+          if(!query){
+            window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+              type:'FIND_IN_PAGE_RESULT',current:0,total:0
+            }));
+            return;
+          }
+          var qLen=query.length;
+
+          // Walk text nodes and collect Range objects — no DOM modification
+          var ranges=[];
+          var capped=false;
+          var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{
+            acceptNode:function(n){
+              var tag=n.parentElement&&n.parentElement.tagName;
+              if(tag==='SCRIPT'||tag==='STYLE'||tag==='NOSCRIPT')return NodeFilter.FILTER_REJECT;
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          },false);
+          while(walker.nextNode()){
+            var node=walker.currentNode;
+            var text=(node.textContent||'').toLowerCase();
+            var pos=0;
+            while((pos=text.indexOf(query,pos))!==-1){
+              var r=new Range();
+              r.setStart(node,pos);
+              r.setEnd(node,pos+qLen);
+              ranges.push(r);
+              pos+=qLen;
+              if(ranges.length>=MAX_MATCHES){capped=true;break;}
+            }
+            if(capped)break;
+          }
+
+          window.__bsvFindRanges=ranges;
+          window.__bsvFindIdx=0;
+
+          if(ranges.length>0){
+            CSS.highlights.set('__bsv_find',new Highlight(...ranges));
+            CSS.highlights.set('__bsv_find_active',new Highlight(ranges[0]));
+            // Scroll to first match using Selection (no DOM modification)
+            var sel=window.getSelection();
+            sel.removeAllRanges();
+            var scrollRange=ranges[0].cloneRange();
+            scrollRange.collapse(true);
+            sel.addRange(scrollRange);
+            var active=document.activeElement;
+            if(active&&active.blur)active.blur();
+            sel.removeAllRanges();
+          }
+
+          var total=capped?MAX_MATCHES:ranges.length;
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',
+            current:ranges.length>0?1:0,
+            total:total,
+            capped:capped
+          }));
+        }catch(e){
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',current:0,total:0,error:e.message
+          }));
+        }
+      })();true;`)
+    },
+    [activeTab]
+  )
+
+  const findInPageNavigate = useCallback(
+    (direction: 'next' | 'prev') => {
+      if (!activeTab?.webviewRef?.current) return
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        var ranges=window.__bsvFindRanges;
+        if(!ranges||ranges.length===0||typeof CSS==='undefined'||!CSS.highlights)return;
+        var idx=window.__bsvFindIdx||0;
+        idx=${direction === 'next' ? '(idx+1)%ranges.length' : '(idx-1+ranges.length)%ranges.length'};
+        window.__bsvFindIdx=idx;
+        CSS.highlights.set('__bsv_find_active',new Highlight(ranges[idx]));
+        // Scroll into view using Selection API (no DOM modification)
+        try{
+          var sel=window.getSelection();
+          sel.removeAllRanges();
+          var scrollRange=ranges[idx].cloneRange();
+          scrollRange.collapse(true);
+          sel.addRange(scrollRange);
+          var el=document.createElement('span');
+          scrollRange.insertNode(el);
+          el.scrollIntoView({block:'center'});
+          el.parentNode.removeChild(el);
+          sel.removeAllRanges();
+        }catch(e){}
+        window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+          type:'FIND_IN_PAGE_RESULT',current:idx+1,total:ranges.length
+        }));
+      })();true;`)
+    },
+    [activeTab]
+  )
+
+  const closeFindInPageRef = useRef<() => void>(() => {})
+
+  const closeFindInPage = useCallback(() => {
+    setFindInPageVisible(false)
+    setFindInPageQuery('')
+    setFindInPageCurrent(0)
+    setFindInPageTotal(0)
+    setFindInPageCapped(false)
+    if (activeTab?.webviewRef?.current) {
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        ${CLEAR_FIND_JS}
+      })();true;`)
+    }
+  }, [activeTab])
+
+  closeFindInPageRef.current = closeFindInPage
+
+  const findInPageVisibleRef = useRef(false)
+  findInPageVisibleRef.current = findInPageVisible
+
+  /** Debounce timer for find-in-page queries */
+  const findDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const onFindInPageQueryChange = useCallback(
+    (text: string) => {
+      setFindInPageQuery(text)
+      if (findDebounceRef.current) clearTimeout(findDebounceRef.current)
+      findDebounceRef.current = setTimeout(() => {
+        findInPageScript(text)
+      }, 250)
+    },
+    [findInPageScript]
+  )
+
+  // Close find-in-page when the active tab changes
+  useEffect(() => {
+    if (findInPageVisibleRef.current) {
+      closeFindInPageRef.current()
+    }
+  }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* -------------------------------------------------------------------------- */
   /*                           WEBVIEW MESSAGE HANDLER                          */
@@ -507,6 +759,13 @@ function Browser() {
       try {
         msg = JSON.parse(event.nativeEvent.data)
       } catch {
+        return
+      }
+
+      if (msg.type === 'FIND_IN_PAGE_RESULT') {
+        setFindInPageCurrent(msg.current ?? 0)
+        setFindInPageTotal(msg.total ?? 0)
+        setFindInPageCapped(!!msg.capped)
         return
       }
 
@@ -790,9 +1049,13 @@ function Browser() {
               headers: { 'Accept-Language': getAcceptLanguageHeader() }
             }}
             userAgent={
-              Platform.OS === 'ios'
-                ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1'
-                : 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+              (activeTab?.isDesktopMode ?? false)
+                ? Platform.OS === 'ios'
+                  ? DESKTOP_UA_IOS
+                  : DESKTOP_UA_ANDROID
+                : Platform.OS === 'ios'
+                  ? MOBILE_UA_IOS
+                  : MOBILE_UA_ANDROID
             }
             sharedCookiesEnabled={true}
             originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
@@ -985,6 +1248,19 @@ function Browser() {
                   onForward={navFwd}
                   onReloadOrStop={navReloadOrStop}
                   onClearText={() => setAddressText('')}
+                  onCancelNewTab={
+                    cancelableNewTabId.current === activeTab?.id
+                      ? () => {
+                          const tabId = cancelableNewTabId.current!
+                          cancelableNewTabId.current = null
+                          Keyboard.dismiss()
+                          addressEditing.current = false
+                          setAddressFocused(false)
+                          setAddressSuggestions([])
+                          tabStore.closeTab(tabId)
+                        }
+                      : undefined
+                  }
                   inputRef={addressInputRef}
                 />
               </Animated.View>
@@ -1004,10 +1280,27 @@ function Browser() {
                   setAddressText(url)
                   updateActiveTab({ url })
                   addressEditing.current = false
+                  cancelableNewTabId.current = null
                 }}
               />
             )}
           </>
+        )}
+
+        {/* ---- Find in Page Bar ---- */}
+        {findInPageVisible && !isFullscreen && (
+          <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 30 }}>
+            <FindInPageBar
+              query={findInPageQuery}
+              currentMatch={findInPageCurrent}
+              totalMatches={findInPageTotal}
+              capped={findInPageCapped}
+              onChangeQuery={onFindInPageQueryChange}
+              onNext={() => findInPageNavigate('next')}
+              onPrevious={() => findInPageNavigate('prev')}
+              onClose={closeFindInPage}
+            />
+          </View>
         )}
 
         {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
@@ -1024,6 +1317,7 @@ function Browser() {
               addressBarAtTop={addressBarIsAtTop}
               topOffset={8}
               bottomOffset={bottomInset + 4}
+              isDesktopMode={activeTab?.isDesktopMode ?? false}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {
@@ -1031,16 +1325,34 @@ function Browser() {
                   addBookmark(activeTab.title || t('untitled'), activeTab.url)
                 }
               }}
+              onFindInPage={() => setFindInPageVisible(true)}
               onBookmarks={() => sheet.push('browser-menu')}
               onTabs={() => setShowTabsView(true)}
               onNewTab={() => {
-                skipHomepageOnce.current = true
+                focusAddressBarOnNewTab.current = true
                 tabStore.newTab()
+                cancelableNewTabId.current = tabStore.activeTabId
                 setShowTabsView(false)
               }}
               onSettings={() => sheet.push('settings')}
               onEnableWeb3={() => router.push('/auth/mnemonic')}
               onConnections={() => router.push('/connections')}
+              onToggleDesktopMode={() => {
+                if (!activeTab || desktopModeCooldown.current) return
+                desktopModeCooldown.current = true
+                setMenuPopoverOpen(false)
+                tabStore.toggleDesktopMode(activeTab.id)
+                // The native layer sets customUserAgent but does not reload automatically,
+                // so we must trigger a reload explicitly after the state update propagates.
+                if (activeTab.url !== kNEW_TAB_URL) {
+                  setTimeout(() => {
+                    activeTab.webviewRef.current?.reload()
+                  }, 50)
+                }
+                setTimeout(() => {
+                  desktopModeCooldown.current = false
+                }, 1500)
+              }}
             />
           </Animated.View>
         )}
@@ -1078,7 +1390,7 @@ function Browser() {
       </View>
     </KeyboardAvoidingView>
   )
-}
+})
 
 /* -------------------------------------------------------------------------- */
 /*                                   EXPORT                                   */
