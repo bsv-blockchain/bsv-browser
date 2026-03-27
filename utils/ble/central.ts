@@ -185,11 +185,17 @@ export async function connectAndTransfer(
   const chunks = chunkPayload(serialized)
   log('info', `Chunked into ${chunks.length} writes (1 metadata + ${chunks.length - 1} data)`)
 
-  // 5. Send each chunk and wait for ACK
+  // 5. Send each chunk with pacing
+  // Note: The peripheral currently cannot send ACK notifications back because
+  // munim-bluetooth lacks a "updateCharacteristicValue" API for peripheral mode.
+  // Instead of strict per-chunk ACK waiting, we use paced writes with a small
+  // delay between chunks. The receiver reassembles and verifies via CRC32.
+  // When ACK support is added, the waitForAck() calls can be re-enabled.
+  const INTER_CHUNK_DELAY_MS = 50 // Allow receiver time to process each chunk
+
   for (let i = 0; i < chunks.length; i++) {
     const chunkHex = uint8ArrayToHex(chunks[i])
     const isMetadata = i === 0
-    const isFinal = i === chunks.length - 1
 
     log('tx', `Chunk ${i}/${chunks.length - 1} (${chunks[i].length}B)`)
 
@@ -201,23 +207,22 @@ export async function connectAndTransfer(
       'writeWithoutResponse'
     )
 
-    // Wait for ACK
-    const ack = await waitForAck()
-
-    if (ack.type === 'error') {
-      throw new Error(`Transfer rejected by receiver: ${ack.message}`)
+    // Pace writes so the receiver can process each chunk
+    if (i < chunks.length - 1) {
+      await sleep(INTER_CHUNK_DELAY_MS)
     }
 
-    log('rx', `ACK opcode=0x${ack.opcode.toString(16)}${ack.seq !== undefined ? ` seq=${ack.seq}` : ''}`)
-
     // Update progress (skip metadata chunk in progress calculation)
-    if (!isMetadata) {
+    if (!isMetadata && chunks.length > 1) {
       const progress = Math.round((i / (chunks.length - 1)) * 100)
       onProgress(progress)
     }
   }
 
-  log('info', 'All chunks sent and ACKed — transfer complete')
+  // Small delay after final write to let receiver finish reassembly
+  await sleep(500)
+
+  log('info', 'All chunks sent — transfer complete')
 }
 
 /**

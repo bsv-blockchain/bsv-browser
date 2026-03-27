@@ -9,6 +9,7 @@
     "start": "expo start --dev-client",
     "android-dev-build": "eas build --profile development --platform android --local --verbose-logs --build-logger-level trace",
     "android-apk": "eas build --profile preview-apk --platform android --local --verbose-logs --build-logger-level trace",
+    "android-dev-physical": "eas build --profile dev-physical --platform android --local --verbose-logs --build-logger-level trace",
     "android": "expo start --dev-client --android",
     "android-build-for-play-store": "eas build --profile production --platform android --local --verbose-logs --build-logger-level trace",
     "ios-dev-build": "eas build --profile development --platform ios --local --verbose-logs --build-logger-level trace",
@@ -23,7 +24,8 @@
     "fix": "npm run format && npm run lint:fix",
     "clean": "rm -rf yarn.lock && rm -rf .expo && rm -rf .expo-shared && rm -rf .vscode && rm -rf .idea && rm -rf ios/Pods && rm -rf android/.gradle && rm -rf android/app/build && rm -rf ./ios",
     "version": "node scripts/version.mjs",
-    "pdf": "tsx scripts/generate-pdf.ts"
+    "pdf": "tsx scripts/generate-pdf.ts",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@bsv/btms": "^1.0.1",
@@ -115,6 +117,7 @@
     "@types/react": "~19.1.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "patch-package": "^8.0.1",
     "typescript": "~5.9.2"
   },
   "overrides": {

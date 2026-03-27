@@ -31,7 +31,7 @@ import {
   handleAckNotification
 } from '@/utils/ble/central'
 
-import { NOTIFY_CHARACTERISTIC_UUID, SCAN_TIMEOUT_MS } from '@/utils/ble/constants'
+import { NOTIFY_CHARACTERISTIC_UUID, WRITE_CHARACTERISTIC_UUID, SCAN_TIMEOUT_MS } from '@/utils/ble/constants'
 import type {
   TransferState,
   TransferPhase,
@@ -177,25 +177,24 @@ export function useBLETransfer() {
         setupAndAdvertise(identityKey)
         log('info', 'Advertising started')
 
-        // Listen for incoming write requests on our GATT characteristic.
-        // munim-bluetooth emits 'characteristicWriteRequest' when a central writes
-        // to our peripheral's writable characteristic.
-        const removeWriteListener = addEventListener('characteristicWriteRequest', (data: any) => {
-          log(
-            'rx',
-            `Write request received: ${typeof data === 'object' ? JSON.stringify(data).substring(0, 80) : data}`
-          )
+        // Listen for incoming writes on our GATT write characteristic.
+        // Our patch to munim-bluetooth emits 'characteristicValueChanged' when
+        // a central writes to any peripheral characteristic. We filter by the
+        // WRITE_CHARACTERISTIC_UUID to only handle payment data writes.
+        const removeWriteListener = addEventListener('characteristicValueChanged', (data: any) => {
+          // Filter: only process writes to our write characteristic
+          const charUUID = (data?.characteristicUUID ?? '').toUpperCase()
+          const writeUUID = WRITE_CHARACTERISTIC_UUID.toUpperCase()
+          if (!charUUID.includes(writeUUID.substring(0, 8))) return
 
-          // Extract the hex value from the event data
-          const hexValue = typeof data === 'string' ? data : (data?.value ?? data?.data ?? '')
+          const hexValue = typeof data === 'string' ? data : (data?.value ?? '')
           if (!hexValue) return
 
-          // If this is the first write, we're now connected
+          log('rx', `Write received: ${hexValue.length / 2} bytes`)
+
+          // If this is the first write, transition from advertising → connected → transferring
           safeSetState(prev => {
             if (prev.phase === 'advertising') {
-              return { ...prev, phase: 'connected', statusText: 'Connected — receiving payment...' }
-            }
-            if (prev.phase === 'connected') {
               return { ...prev, phase: 'transferring', statusText: 'Receiving...' }
             }
             return prev
@@ -227,20 +226,14 @@ export function useBLETransfer() {
             onLog: addLog
           })
 
-          // The ACK needs to be sent back via the notify characteristic.
-          // With munim-bluetooth's peripheral mode, updating the characteristic
-          // value triggers a notification to subscribed centrals.
-          // We update the notify characteristic value to send the ACK.
-          try {
-            const { setServices } = require('munim-bluetooth')
-            // Update the notify characteristic value with the ACK
-            // Note: In munim-bluetooth, updating the service re-sets the value
-            // which triggers notification to subscribed centrals.
-            // For a more efficient approach in production, you'd want a dedicated
-            // "updateCharacteristicValue" API if available.
-          } catch {
-            log('error', 'Failed to send ACK notification')
-          }
+          // Note: ACK sending requires updating the notify characteristic value.
+          // munim-bluetooth doesn't yet expose a "updateCharacteristicValue" API
+          // for peripheral mode. The sender currently uses writeWithoutResponse
+          // which doesn't strictly require ACKs per-chunk. The final ACK_COMPLETE
+          // can be verified by the sender via a short timeout after the last write.
+          // TODO: Once munim-bluetooth adds characteristic value update support,
+          // wire ACK responses here via the notify characteristic.
+          log('info', `ACK generated: ${ackHex.substring(0, 8)}...`)
         })
         cleanupRefs.current.push(removeWriteListener)
 
