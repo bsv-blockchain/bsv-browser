@@ -113,10 +113,11 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
   const currentApproval = approvalQueue[0] ?? null
 
   // Internal refs — changes here don't trigger re-renders
-  const wsRef            = useRef<WebSocket | null>(null)
-  const lastSeqRef       = useRef(0)
-  const navTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const appStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wsRef              = useRef<WebSocket | null>(null)
+  const lastSeqRef         = useRef(0)
+  const navTimerRef        = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const appStateTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const intentionalCloseRef = useRef(false)
   // Snapshot of sessionMeta for use inside async WS callbacks
   const sessionMetaRef   = useRef<SessionMeta | null>(null)
   useEffect(() => { sessionMetaRef.current = sessionMeta }, [sessionMeta])
@@ -124,9 +125,15 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
   // ── Disconnect ─────────────────────────────────────────────────────────────
 
   const disconnect = useCallback(() => {
-    wsRef.current?.close()
-    wsRef.current  = null
-    lastSeqRef.current = 0
+    const topic = sessionMetaRef.current?.topic
+    if (topic) {
+      void SecureStore.setItemAsync(lastSeqKey(topic), String(lastSeqRef.current))
+      connectionStore.setStatus(topic, 'disconnected')
+    }
+    intentionalCloseRef.current = true
+    const ws = wsRef.current
+    wsRef.current = null
+    ws?.close()
     if (navTimerRef.current)      { clearTimeout(navTimerRef.current);      navTimerRef.current      = null }
     if (appStateTimerRef.current) { clearTimeout(appStateTimerRef.current); appStateTimerRef.current = null }
     setApprovalQueue(prev => {
@@ -294,11 +301,18 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
     }
 
     ws.onclose = () => {
-      const topic = sessionMetaRef.current?.topic
-      if (topic) {
-        void SecureStore.setItemAsync(lastSeqKey(topic), String(lastSeqRef.current))
-        connectionStore.setStatus(topic, 'disconnected')
+      if (!intentionalCloseRef.current) {
+        const topic = sessionMetaRef.current?.topic
+        if (topic) {
+          void SecureStore.setItemAsync(lastSeqKey(topic), String(lastSeqRef.current))
+          connectionStore.setStatus(topic, 'disconnected')
+        }
       }
+      intentionalCloseRef.current = false
+      wsRef.current = null
+      lastSeqRef.current = 0
+      if (navTimerRef.current)      { clearTimeout(navTimerRef.current);      navTimerRef.current      = null }
+      if (appStateTimerRef.current) { clearTimeout(appStateTimerRef.current); appStateTimerRef.current = null }
       setApprovalQueue(prev => {
         prev.forEach(item => item.reject(new Error('Session disconnected')))
         return []
