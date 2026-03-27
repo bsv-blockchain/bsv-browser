@@ -117,34 +117,35 @@ export default function RootLayout() {
                   <BrowserModeProvider>
                     <ThemeProvider>
                       <WalletConnectionProvider>
-                      <View style={{ flex: 1, backgroundColor }}>
-                        {/* <DebuggerDisplay /> */}
-                        <FirstTouchRecorder />
-                        <DeepLinkHandler />
-                        <Web3BenefitsModalHandler />
-                        <WalletApprovalHandler />
-                        {/* <TranslationTester /> */}
-                        <DefaultBrowserPrompt />
-                        <PermissionSheet />
-                        <Stack
-                          screenOptions={{
-                            animation: 'slide_from_right',
-                            headerShown: false,
-                            contentStyle: { backgroundColor }
-                          }}
-                        >
-                          <Stack.Screen name="index" />
-                          <Stack.Screen name="config" />
-                          <Stack.Screen name="auth/mnemonic" />
-                          <Stack.Screen name="transactions" />
-                          <Stack.Screen name="wallet-config" />
-                          <Stack.Screen name="legacy-payments" />
-                          <Stack.Screen name="payments" />
-                          <Stack.Screen name="connections" />
-                          <Stack.Screen name="pair" />
-                          <Stack.Screen name="not-found" />
-                        </Stack>
-                      </View>
+                        <View style={{ flex: 1, backgroundColor }}>
+                          {/* <DebuggerDisplay /> */}
+                          <FirstTouchRecorder />
+                          <DeepLinkHandler />
+                          <Web3BenefitsModalHandler />
+                          <WalletApprovalHandler />
+                          {/* <TranslationTester /> */}
+                          <DefaultBrowserPrompt />
+                          <PermissionSheet />
+                          <Stack
+                            screenOptions={{
+                              animation: 'slide_from_right',
+                              headerShown: false,
+                              contentStyle: { backgroundColor }
+                            }}
+                          >
+                            <Stack.Screen name="index" />
+                            <Stack.Screen name="config" />
+                            <Stack.Screen name="auth/mnemonic" />
+                            <Stack.Screen name="transactions" />
+                            <Stack.Screen name="wallet-config" />
+                            <Stack.Screen name="legacy-payments" />
+                            <Stack.Screen name="payments" />
+                            <Stack.Screen name="local-payments" />
+                            <Stack.Screen name="connections" />
+                            <Stack.Screen name="pair" />
+                            <Stack.Screen name="not-found" />
+                          </Stack>
+                        </View>
                       </WalletConnectionProvider>
                     </ThemeProvider>
                   </BrowserModeProvider>
