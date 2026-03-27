@@ -14,6 +14,7 @@ import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { WalletClient } from '@bsv/sdk'
 import type { WalletProtocol } from '@bsv/sdk'
+import * as SecureStore from 'expo-secure-store'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
@@ -148,9 +149,12 @@ export default observer(function ConnectionsScreen() {
 
       ws.onopen = async () => {
         try {
+          // Use lastSeq + 1 so this message isn't dropped by replay protection
+          const storedSeq = await SecureStore.getItemAsync(`wallet_pairing_lastseq_${conn.sessionId}`)
+          const seq = storedSeq ? Number(storedSeq) + 1 : 1
           const payload = JSON.stringify({
             id: crypto.randomUUID(),
-            seq: Date.now(),
+            seq,
             method: 'session_revoke',
             params: {},
           })

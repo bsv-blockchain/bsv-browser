@@ -211,8 +211,8 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
           wallet, meta.protocolID, meta.keyID, meta.backendIdentityKey, JSON.stringify(response),
         )
         ws.send(JSON.stringify({ topic: meta.topic, ciphertext } satisfies WireEnvelope))
-      } catch {
-        // ws may have closed between approval and send — drop silently
+      } catch (err) {
+        console.warn('[WalletConnection] sendResponse failed:', err)
       }
     }
 
@@ -275,10 +275,16 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
           plaintext = await decryptPayload(
             wallet, meta.protocolID, meta.keyID, meta.backendIdentityKey, envelope.ciphertext,
           )
-        } catch { return }  // tampered / wrong key — drop
+        } catch (err) {
+          console.warn('[WalletConnection] decryptPayload failed:', err)
+          return
+        }
 
         const msg = JSON.parse(plaintext) as RpcRequest | RpcResponse
-        if (typeof msg.seq !== 'number' || msg.seq <= lastSeqRef.current) return
+        if (typeof msg.seq !== 'number' || msg.seq <= lastSeqRef.current) {
+          console.warn('[WalletConnection] dropping message: seq', msg.seq, '<= lastSeq', lastSeqRef.current)
+          return
+        }
         lastSeqRef.current = msg.seq
 
         if (!firstMessageFired) {
@@ -301,14 +307,25 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
     }
 
     ws.onclose = () => {
-      if (!intentionalCloseRef.current) {
+      const wasIntentional = intentionalCloseRef.current
+      intentionalCloseRef.current = false
+
+      // Don't change the state if this is not the current ws
+      if (!wasIntentional && wsRef.current !== null && wsRef.current !== ws) {
+        setApprovalQueue(prev => {
+          prev.forEach(item => item.reject(new Error('Session disconnected')))
+          return []
+        })
+        return
+      }
+
+      if (!wasIntentional) {
         const topic = sessionMetaRef.current?.topic
         if (topic) {
           void SecureStore.setItemAsync(lastSeqKey(topic), String(lastSeqRef.current))
           connectionStore.setStatus(topic, 'disconnected')
         }
       }
-      intentionalCloseRef.current = false
       wsRef.current = null
       lastSeqRef.current = 0
       if (navTimerRef.current)      { clearTimeout(navTimerRef.current);      navTimerRef.current      = null }
@@ -318,12 +335,15 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
         return []
       })
       setSessionMeta(null)
-      if (firstMessageFired) {
-        setErrorMsg('Connection closed — the desktop session ended')
-        setStatus('disconnected')
-      } else {
-        setErrorMsg('Could not reach the desktop — check that the browser tab is still open')
-        setStatus('error')
+      // Don't override the 'idle' status that disconnect() already set
+      if (!wasIntentional) {
+        if (firstMessageFired) {
+          setErrorMsg('Connection closed — the desktop session ended')
+          setStatus('disconnected')
+        } else {
+          setErrorMsg('Could not reach the desktop — check that the browser tab is still open')
+          setStatus('error')
+        }
       }
     }
   }
