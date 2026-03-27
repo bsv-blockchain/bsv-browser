@@ -12,6 +12,7 @@
     "android": "expo start --dev-client --android",
     "android-build-for-play-store": "eas build --profile production --platform android --local --verbose-logs --build-logger-level trace",
     "ios-dev-build": "eas build --profile development --platform ios --local --verbose-logs --build-logger-level trace",
+    "ios-dev-physical": "eas build --profile dev-physical --platform ios --local --verbose-logs --build-logger-level trace",
     "ios": "expo start --dev-client --ios",
     "ios-build-for-app-store": "eas build --profile production --platform ios --local --verbose-logs --build-logger-level trace",
     "web": "expo start --web",

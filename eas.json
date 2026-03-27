@@ -12,7 +12,8 @@
         "simulator": true
       }
     },
-    "preview": {
+    "dev-physical": {
+      "developmentClient": true,
       "distribution": "internal"
     },
     "preview-apk": {
