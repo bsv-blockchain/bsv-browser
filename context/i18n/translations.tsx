@@ -296,6 +296,8 @@ const resources = {
       invalid_bsv_address: 'Invalid BSV address',
       scan_bsv_address_hint: 'Point the camera at a BSV address QR code',
       scan_identity_key_hint: 'Point the camera at an identity key QR code',
+      scan_qr_default_hint: 'Point the camera at a QR code',
+      scan_wallet_qr_hint: 'Point the camera at a wallet pairing QR code',
 
       // Biometric prompts
       biometric_store_wallet: 'Securely Store Your Wallet',
@@ -485,6 +487,8 @@ const resources = {
       invalid_bsv_address: '无效的 BSV 地址',
       scan_bsv_address_hint: '将相机对准 BSV 地址二维码',
       scan_identity_key_hint: '将相机对准身份密钥二维码',
+      scan_qr_default_hint: '将相机对准二维码',
+      scan_wallet_qr_hint: '将相机对准钱包配对二维码',
 
       biometric_store_wallet: '安全存储您的钱包',
       biometric_load_wallet: '安全加载您的钱包'
@@ -675,6 +679,8 @@ const resources = {
       invalid_bsv_address: 'अमान्य BSV पता',
       scan_bsv_address_hint: 'कैमरे को BSV एड्रेस QR कोड पर लगाएं',
       scan_identity_key_hint: 'कैमरे को आइडेंटिटी की QR कोड पर लगाएं',
+      scan_qr_default_hint: 'कैमरे को QR कोड पर लगाएं',
+      scan_wallet_qr_hint: 'कैमरे को वॉलेट पेयरिंग QR कोड पर लगाएं',
 
       biometric_store_wallet: 'अपने वॉलेट को सुरक्षित रूप से संग्रहित करें',
       biometric_load_wallet: 'अपने वॉलेट को सुरक्षित रूप से लोड करें'
@@ -867,6 +873,8 @@ const resources = {
       invalid_bsv_address: 'Dirección BSV inválida',
       scan_bsv_address_hint: 'Apunte la cámara hacia un código QR de dirección BSV',
       scan_identity_key_hint: 'Apunte la cámara hacia un código QR de clave de identidad',
+      scan_qr_default_hint: 'Apunte la cámara hacia un código QR',
+      scan_wallet_qr_hint: 'Apunte la cámara hacia un código QR de emparejamiento',
 
       biometric_store_wallet: 'Almacene su billetera de forma segura',
       biometric_load_wallet: 'Cargue su billetera de forma segura'
@@ -1059,6 +1067,8 @@ const resources = {
       invalid_bsv_address: 'Adresse BSV invalide',
       scan_bsv_address_hint: "Pointez la caméra vers un code QR d'adresse BSV",
       scan_identity_key_hint: "Pointez la caméra vers un code QR de clé d'identité",
+      scan_qr_default_hint: 'Pointez la caméra vers un code QR',
+      scan_wallet_qr_hint: "Pointez la caméra vers un code QR d'appariement",
 
       biometric_store_wallet: 'Stocker votre portefeuille en toute sécurité',
       biometric_load_wallet: 'Charger votre portefeuille en toute sécurité'
@@ -1248,6 +1258,8 @@ const resources = {
       invalid_bsv_address: 'عنوان BSV غير صالح',
       scan_bsv_address_hint: 'وجّه الكاميرا نحو رمز QR لعنوان BSV',
       scan_identity_key_hint: 'وجّه الكاميرا نحو رمز QR لمفتاح الهوية',
+      scan_qr_default_hint: 'وجّه الكاميرا نحو رمز QR',
+      scan_wallet_qr_hint: 'وجّه الكاميرا نحو رمز QR لإقران المحفظة',
 
       biometric_store_wallet: 'تخزين محفظتك بأمان',
       biometric_load_wallet: 'تحميل محفظتك بأمان'
@@ -1440,6 +1452,8 @@ const resources = {
       invalid_bsv_address: 'Endereço BSV inválido',
       scan_bsv_address_hint: 'Aponte a câmera para um código QR de endereço BSV',
       scan_identity_key_hint: 'Aponte a câmera para um código QR de chave de identidade',
+      scan_qr_default_hint: 'Aponte a câmera para um código QR',
+      scan_wallet_qr_hint: 'Aponte a câmera para um código QR de emparelhamento',
 
       biometric_store_wallet: 'Armazene sua carteira com segurança',
       biometric_load_wallet: 'Carregue sua carteira com segurança'
@@ -1630,6 +1644,8 @@ const resources = {
       invalid_bsv_address: 'অবৈধ BSV ঠিকানা',
       scan_bsv_address_hint: 'BSV ঠিকানার QR কোডে ক্যামেরা তাক করুন',
       scan_identity_key_hint: 'পরিচয় কীর QR কোডে ক্যামেরা তাক করুন',
+      scan_qr_default_hint: 'QR কোডে ক্যামেরা তাক করুন',
+      scan_wallet_qr_hint: 'ওয়ালেট পেয়ারিং QR কোডে ক্যামেরা তাক করুন',
 
       biometric_store_wallet: 'আপনার ওয়ালেট নিরাপদে সংরক্ষণ করুন',
       biometric_load_wallet: 'আপনার ওয়ালেট নিরাপদে লোড করুন'
@@ -1822,6 +1838,8 @@ const resources = {
       invalid_bsv_address: 'Недопустимый адрес BSV',
       scan_bsv_address_hint: 'Направьте камеру на QR-код адреса BSV',
       scan_identity_key_hint: 'Направьте камеру на QR-код ключа идентификатора',
+      scan_qr_default_hint: 'Направьте камеру на QR-код',
+      scan_wallet_qr_hint: 'Направьте камеру на QR-код сопряжения кошелька',
 
       biometric_store_wallet: 'Безопасно сохранить ваш кошелёк',
       biometric_load_wallet: 'Безопасно загрузить ваш кошелёк'
@@ -2012,6 +2030,8 @@ const resources = {
       invalid_bsv_address: 'Alamat BSV tidak valid',
       scan_bsv_address_hint: 'Arahkan kamera ke kode QR alamat BSV',
       scan_identity_key_hint: 'Arahkan kamera ke kode QR kunci identitas',
+      scan_qr_default_hint: 'Arahkan kamera ke kode QR',
+      scan_wallet_qr_hint: 'Arahkan kamera ke kode QR pemasangan dompet',
 
       biometric_store_wallet: 'Simpan dompet Anda dengan aman',
       biometric_load_wallet: 'Muat dompet Anda dengan aman'

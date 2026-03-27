@@ -1,14 +1,5 @@
 import React, { useState } from 'react'
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-  Modal,
-  ScrollView,
-  Alert,
-} from 'react-native'
+import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Modal, ScrollView, Alert } from 'react-native'
 import { observer } from 'mobx-react-lite'
 import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
@@ -16,6 +7,7 @@ import { WalletClient } from '@bsv/sdk'
 import type { WalletProtocol } from '@bsv/sdk'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '@/context/theme/ThemeContext'
+import { useTranslation } from 'react-i18next'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { useWallet } from '@/context/WalletContext'
@@ -24,7 +16,7 @@ import QRScanner from '@/components/QRScanner'
 import { useWalletConnection } from '@/context/WalletConnectionContext'
 
 interface PairingParams {
-  [key: string]: string  // required by Expo Router's UnknownInputParams
+  [key: string]: string // required by Expo Router's UnknownInputParams
   topic: string
   relay: string
   backendIdentityKey: string
@@ -34,9 +26,7 @@ interface PairingParams {
   expiry: string
 }
 
-type ParseResult =
-  | { params: PairingParams; error: null }
-  | { params: null; error: string }
+type ParseResult = { params: PairingParams; error: null } | { params: null; error: string }
 
 function parsePairingUri(raw: string): ParseResult {
   try {
@@ -64,14 +54,22 @@ function parsePairingUri(raw: string): ParseResult {
 
     // relay must be ws:// or wss://
     let relayUrl: URL
-    try { relayUrl = new URL(relay) } catch { return { params: null, error: 'Relay URL is not valid' } }
+    try {
+      relayUrl = new URL(relay)
+    } catch {
+      return { params: null, error: 'Relay URL is not valid' }
+    }
     if (relayUrl.protocol !== 'ws:' && relayUrl.protocol !== 'wss:') {
       return { params: null, error: 'Relay must use ws:// or wss://' }
     }
 
     // origin must be http:// or https://
     let originUrl: URL
-    try { originUrl = new URL(origin) } catch { return { params: null, error: 'Origin URL is not valid' } }
+    try {
+      originUrl = new URL(origin)
+    } catch {
+      return { params: null, error: 'Origin URL is not valid' }
+    }
     if (originUrl.protocol !== 'http:' && originUrl.protocol !== 'https:') {
       return { params: null, error: 'Origin must use http:// or https://' }
     }
@@ -83,7 +81,7 @@ function parsePairingUri(raw: string): ParseResult {
     if (relayUrl.protocol === 'wss:' && relayUrl.hostname !== originUrl.hostname) {
       return {
         params: null,
-        error: `Relay host "${relayUrl.hostname}" doesn't match origin host "${originUrl.hostname}" — this QR may be malicious`,
+        error: `Relay host "${relayUrl.hostname}" doesn't match origin host "${originUrl.hostname}" — this QR may be malicious`
       }
     }
 
@@ -94,13 +92,12 @@ function parsePairingUri(raw: string): ParseResult {
 
     // protocolID must parse as [number, string]
     let proto: unknown
-    try { proto = JSON.parse(protocolID) } catch { return { params: null, error: 'protocolID is not valid JSON' } }
-    if (
-      !Array.isArray(proto) ||
-      proto.length !== 2 ||
-      typeof proto[0] !== 'number' ||
-      typeof proto[1] !== 'string'
-    ) {
+    try {
+      proto = JSON.parse(protocolID)
+    } catch {
+      return { params: null, error: 'protocolID is not valid JSON' }
+    }
+    if (!Array.isArray(proto) || proto.length !== 2 || typeof proto[0] !== 'number' || typeof proto[1] !== 'string') {
       return { params: null, error: 'protocolID must be a [number, string] tuple' }
     }
 
@@ -116,11 +113,16 @@ function parsePairingUri(raw: string): ParseResult {
 }
 
 function domainFromOrigin(origin: string): string {
-  try { return new URL(origin).hostname } catch { return origin }
+  try {
+    return new URL(origin).hostname
+  } catch {
+    return origin
+  }
 }
 
 export default observer(function ConnectionsScreen() {
   const { colors } = useTheme()
+  const { t } = useTranslation()
   const { managers } = useWallet()
   const { reconnect } = useWalletConnection()
   const insets = useSafeAreaInsets()
@@ -152,19 +154,21 @@ export default observer(function ConnectionsScreen() {
             id: crypto.randomUUID(),
             seq: Date.now(),
             method: 'session_revoke',
-            params: {},
+            params: {}
           })
           const plaintext = Array.from(new TextEncoder().encode(payload))
           const { ciphertext } = await wallet.encrypt({
             protocolID,
             keyID: conn.keyID,
             counterparty: conn.backendIdentityKey,
-            plaintext,
+            plaintext
           })
-          ws.send(JSON.stringify({
-            topic: conn.sessionId,
-            ciphertext: Buffer.from(ciphertext).toString('base64url'),
-          }))
+          ws.send(
+            JSON.stringify({
+              topic: conn.sessionId,
+              ciphertext: Buffer.from(ciphertext).toString('base64url')
+            })
+          )
         } finally {
           ws.close()
         }
@@ -208,11 +212,7 @@ export default observer(function ConnectionsScreen() {
             {active.length > 0 && (
               <GroupedSection header="Active">
                 {active.map(item => (
-                  <ConnectionCard
-                    key={item.sessionId}
-                    item={item}
-                    onDisconnect={() => void handleDisconnect(item)}
-                  />
+                  <ConnectionCard key={item.sessionId} item={item} onDisconnect={() => void handleDisconnect(item)} />
                 ))}
               </GroupedSection>
             )}
@@ -233,17 +233,14 @@ export default observer(function ConnectionsScreen() {
       </ScrollView>
 
       <View style={[styles.footer, { borderTopColor: colors.separator }]}>
-        <TouchableOpacity
-          style={[styles.scanBtn, { backgroundColor: colors.info }]}
-          onPress={() => setScanning(true)}
-        >
+        <TouchableOpacity style={[styles.scanBtn, { backgroundColor: colors.info }]} onPress={() => setScanning(true)}>
           <Ionicons name="qr-code-outline" size={20} color={colors.textOnAccent} style={{ marginRight: spacing.sm }} />
           <Text style={[styles.scanBtnText, { color: colors.textOnAccent }]}>Scan QR Code</Text>
         </TouchableOpacity>
       </View>
 
       <Modal visible={scanning} animationType="slide" onRequestClose={() => setScanning(false)}>
-        <QRScanner onScan={handleScan} onClose={() => setScanning(false)} />
+        <QRScanner onScan={handleScan} onClose={() => setScanning(false)} hintText={t('scan_wallet_qr_hint')} />
       </Modal>
     </SafeAreaView>
   )
@@ -255,7 +252,7 @@ function ConnectionCard({
   item,
   onDisconnect,
   onReconnect,
-  onRemove,
+  onRemove
 }: {
   item: Connection
   onDisconnect?: () => void
@@ -265,7 +262,9 @@ function ConnectionCard({
   const { colors } = useTheme()
   const isActive = item.status === 'active'
   const dateStr = new Date(item.connectedAt).toLocaleDateString(undefined, {
-    month: 'short', day: 'numeric', year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
   })
 
   return (
@@ -308,7 +307,12 @@ function ConnectionCard({
               onPress={onRemove}
               activeOpacity={0.6}
             >
-              <Ionicons name="trash-outline" size={15} color={colors.textSecondary} style={{ marginRight: spacing.xs }} />
+              <Ionicons
+                name="trash-outline"
+                size={15}
+                color={colors.textSecondary}
+                style={{ marginRight: spacing.xs }}
+              />
               <Text style={[styles.actionBtnText, { color: colors.textSecondary }]}>Remove</Text>
             </TouchableOpacity>
           </>
@@ -322,7 +326,7 @@ function ConnectionCard({
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex: 1
   },
   header: {
     flexDirection: 'row',
@@ -330,92 +334,92 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth
   },
   title: {
-    ...typography.headline,
+    ...typography.headline
   },
   closeBtn: {
-    padding: spacing.xs,
+    padding: spacing.xs
   },
   scrollContent: {
     paddingTop: spacing.xxl,
     paddingBottom: spacing.xxxl,
-    flexGrow: 1,
+    flexGrow: 1
   },
   empty: {
     alignItems: 'center',
     paddingTop: 80,
-    paddingHorizontal: spacing.xxxl,
+    paddingHorizontal: spacing.xxxl
   },
   emptyTitle: {
     ...typography.headline,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.sm
   },
   emptySubtitle: {
     ...typography.subhead,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 20
   },
   footer: {
     padding: spacing.xl,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: StyleSheet.hairlineWidth
   },
   scanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: spacing.lg,
-    borderRadius: radii.lg,
+    borderRadius: radii.lg
   },
   scanBtnText: {
     ...typography.callout,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   // Card
   card: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth
   },
   cardTop: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.md
   },
   statusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginRight: spacing.md,
+    marginRight: spacing.md
   },
   cardInfo: {
-    flex: 1,
+    flex: 1
   },
   cardOrigin: {
     ...typography.subhead,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   cardMeta: {
     ...typography.caption1,
-    marginTop: 2,
+    marginTop: 2
   },
   cardActions: {
     flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: StyleSheet.hairlineWidth
   },
   actionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.md
   },
   actionBtnText: {
     ...typography.footnote,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   actionDivider: {
     width: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch',
-  },
+    alignSelf: 'stretch'
+  }
 })
