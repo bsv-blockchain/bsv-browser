@@ -1318,11 +1318,17 @@ const Browser = observer(function Browser() {
               topOffset={8}
               bottomOffset={bottomInset + 4}
               isDesktopMode={activeTab?.isDesktopMode ?? false}
+              isBookmarked={!!activeTab && bookmarkStore.bookmarks.some(b => b.url === activeTab.url)}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {
                 if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
                   addBookmark(activeTab.title || t('untitled'), activeTab.url)
+                }
+              }}
+              onRemoveBookmark={() => {
+                if (activeTab) {
+                  bookmarkStore.removeBookmark(activeTab.url)
                 }
               }}
               onFindInPage={() => setFindInPageVisible(true)}
