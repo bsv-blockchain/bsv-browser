@@ -1,8 +1,16 @@
 diff --git a/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt b/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
-index 5575600..ef3dfe7 100755
+index 5575600..53c0c5d 100755
 --- a/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
 +++ b/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
-@@ -522,6 +522,19 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+@@ -216,7 +216,6 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+                     .setServiceUuid(ParcelUuid.fromString(uuid))
+                     .build()
+             }
+-            ?: emptyList()
+ 
+         val scanMode = when (options?.scanMode) {
+             ScanMode.LOWPOWER -> ScanSettings.SCAN_MODE_LOW_POWER
+@@ -522,6 +521,19 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
                  if (responseNeeded) {
                      gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
                  }

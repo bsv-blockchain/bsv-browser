@@ -26,6 +26,7 @@ import {
   WRITE_CHARACTERISTIC_UUID,
   NOTIFY_CHARACTERISTIC_UUID,
   MANUFACTURER_ID_HEX,
+  LOCAL_NAME_PREFIX,
   ACK_METADATA,
   ACK_CHUNK,
   ACK_COMPLETE,
@@ -97,10 +98,38 @@ function waitForAck(): Promise<AckResult> {
 // ── Scanning ──
 
 /**
- * Extract the receiver's identity key from advertising manufacturer data.
- * Format: MANUFACTURER_ID_HEX (4 hex chars) + identity key hex (66 chars)
+ * Extract the receiver's identity key from a discovered BLE device.
+ *
+ * Checks two sources (in order):
+ * 1. localName — "BSV:<66-char-hex-key>" (works on iOS + Android)
+ *    iOS CoreBluetooth doesn't allow manufacturerData in peripheral ads,
+ *    so we encode the identity key in the localName.
+ * 2. manufacturerData — MANUFACTURER_ID_HEX + identity key hex (Android only)
  */
-export function extractIdentityKey(manufacturerDataHex: string | undefined): string | null {
+export function extractIdentityKeyFromDevice(device: {
+  name?: string | null
+  advertisingData?: { manufacturerData?: string; completeLocalName?: string; shortenedLocalName?: string } | null
+}): string | null {
+  // Try localName first (works on both platforms)
+  const names = [device.name, device.advertisingData?.completeLocalName, device.advertisingData?.shortenedLocalName]
+  for (const name of names) {
+    if (name && name.startsWith(LOCAL_NAME_PREFIX)) {
+      const keyHex = name.substring(LOCAL_NAME_PREFIX.length)
+      if (keyHex.length >= 66) {
+        return keyHex.substring(0, 66)
+      }
+    }
+  }
+
+  // Fallback: try manufacturer data (Android)
+  return extractIdentityKeyFromMfgData(device.advertisingData?.manufacturerData)
+}
+
+/**
+ * Extract identity key from manufacturer data hex string.
+ * Format: MANUFACTURER_ID_HEX (4 chars) + identity key hex (66 chars)
+ */
+export function extractIdentityKeyFromMfgData(manufacturerDataHex: string | undefined): string | null {
   if (!manufacturerDataHex) return null
 
   const prefixUpper = MANUFACTURER_ID_HEX.toUpperCase()
@@ -108,7 +137,6 @@ export function extractIdentityKey(manufacturerDataHex: string | undefined): str
 
   if (dataUpper.startsWith(prefixUpper)) {
     const keyHex = manufacturerDataHex.substring(MANUFACTURER_ID_HEX.length)
-    // Compressed public key = 33 bytes = 66 hex chars
     if (keyHex.length >= 66) {
       return keyHex.substring(0, 66)
     }

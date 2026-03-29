@@ -11,6 +11,9 @@
 export const BSV_PAYMENT_SERVICE_UUID = 'B5A1E000-7374-4F6E-8E2D-425356504159'
 
 // ── Characteristic UUIDs ──
+// Identity characteristic: readable, contains the receiver's identity key hex.
+// The sender reads this after connecting to show the user who they're paying.
+export const IDENTITY_CHARACTERISTIC_UUID = 'B5A1E003-7374-4F6E-8E2D-425356504159'
 // Write characteristic: sender writes chunked payment data here.
 export const WRITE_CHARACTERISTIC_UUID = 'B5A1E001-7374-4F6E-8E2D-425356504159'
 // Notify characteristic: receiver sends ACK/NAK/progress via notifications.
@@ -54,6 +57,13 @@ export const TRANSFER_TIMEOUT_MS = 60_000 // Max total transfer time
 // 2-byte "company ID" (0xBSV = 0x0B5V → we use 0x0B5A) followed by identity key bytes.
 // The scanner parses this to extract the advertiser's identity key before connecting.
 export const MANUFACTURER_ID_HEX = '0B5A'
+
+// ── Local Name Prefix ──
+// iOS CoreBluetooth does NOT allow manufacturerData in peripheral advertising.
+// Only localName and serviceUUIDs are permitted. So on iOS we encode the
+// identity key in the localName with a recognizable prefix.
+// Format: "BSV:<66-char-hex-identity-key>"
+export const LOCAL_NAME_PREFIX = 'BSV:'
 
 // ── PeerPay-compatible protocol constants ──
 export const PEERPAY_PROTOCOL_ID: [number, string] = [2, '3241645161d8']

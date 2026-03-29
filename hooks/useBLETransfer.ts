@@ -12,20 +12,21 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Platform, PermissionsAndroid } from 'react-native'
 import {
   isBluetoothEnabled,
   requestBluetoothPermission,
   addEventListener,
   addDeviceFoundListener
 } from 'munim-bluetooth'
-import type { BLEDevice, CharacteristicValue } from 'munim-bluetooth'
+import type { BLEDevice } from 'munim-bluetooth'
 
 import { setupAndAdvertise, processIncomingChunk, teardownPeripheral } from '@/utils/ble/peripheral'
 
 import {
   startScanning,
   stopScanning,
-  extractIdentityKey,
+  extractIdentityKeyFromDevice,
   connectAndTransfer,
   teardownCentral,
   handleAckNotification
@@ -94,15 +95,54 @@ export function useBLETransfer() {
     log('info', 'Checking Bluetooth permissions...')
 
     try {
-      const granted = await requestBluetoothPermission()
-      if (!granted) {
-        safeSetState({
-          phase: 'permission_denied',
-          statusText: 'Bluetooth permission denied',
-          errorMessage: 'Bluetooth permission is required for local payments.'
-        })
-        log('error', 'Bluetooth permission denied')
-        return false
+      // On Android 12+ (API 31+), BLUETOOTH_SCAN, BLUETOOTH_CONNECT, and
+      // BLUETOOTH_ADVERTISE must be requested at runtime before any BLE
+      // operations. The munim-bluetooth requestBluetoothPermission() may not
+      // cover all three, so we request them explicitly here.
+      if (Platform.OS === 'android' && Platform.Version >= 31) {
+        const permissions = [
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE
+        ]
+        const results = await PermissionsAndroid.requestMultiple(permissions)
+        const allGranted = Object.values(results).every(r => r === PermissionsAndroid.RESULTS.GRANTED)
+        if (!allGranted) {
+          log('error', `Android BLE permissions: ${JSON.stringify(results)}`)
+          safeSetState({
+            phase: 'permission_denied',
+            statusText: 'Bluetooth permission denied',
+            errorMessage:
+              'Bluetooth permissions are required for local payments. Please grant all Bluetooth permissions in Settings.'
+          })
+          return false
+        }
+        log('info', 'Android BLE permissions granted')
+      } else if (Platform.OS === 'android') {
+        // Android < 12: need location permission for BLE scanning
+        const locGranted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION)
+        if (locGranted !== PermissionsAndroid.RESULTS.GRANTED) {
+          safeSetState({
+            phase: 'permission_denied',
+            statusText: 'Location permission denied',
+            errorMessage: 'Location permission is required for Bluetooth scanning on this Android version.'
+          })
+          return false
+        }
+      }
+
+      // iOS + fallback: use munim-bluetooth's built-in permission check
+      if (Platform.OS === 'ios') {
+        const granted = await requestBluetoothPermission()
+        if (!granted) {
+          safeSetState({
+            phase: 'permission_denied',
+            statusText: 'Bluetooth permission denied',
+            errorMessage: 'Bluetooth permission is required for local payments.'
+          })
+          log('error', 'iOS Bluetooth permission denied')
+          return false
+        }
       }
 
       const enabled = await isBluetoothEnabled()
@@ -283,9 +323,8 @@ export function useBLETransfer() {
         const removeDeviceListener = addDeviceFoundListener((device: BLEDevice) => {
           log('info', `Device found: ${device.name ?? device.id} (RSSI: ${device.rssi ?? '?'})`)
 
-          // Extract identity key from manufacturer data in advertising
-          const mfgData = device.advertisingData?.manufacturerData
-          const identityKey = extractIdentityKey(mfgData)
+          // Extract identity key from localName (iOS) or manufacturer data (Android)
+          const identityKey = extractIdentityKeyFromDevice(device)
 
           if (identityKey) {
             log('info', `Receiver identity: ${identityKey.substring(0, 12)}...`)

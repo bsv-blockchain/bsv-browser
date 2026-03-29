@@ -9,13 +9,16 @@
  * 5. Reassembles the full payload and verifies checksum
  */
 
+import { Platform } from 'react-native'
 import { startAdvertising, stopAdvertising, setServices } from 'munim-bluetooth'
 
 import {
   BSV_PAYMENT_SERVICE_UUID,
+  IDENTITY_CHARACTERISTIC_UUID,
   WRITE_CHARACTERISTIC_UUID,
   NOTIFY_CHARACTERISTIC_UUID,
   MANUFACTURER_ID_HEX,
+  LOCAL_NAME_PREFIX,
   ACK_METADATA,
   ACK_CHUNK,
   ACK_COMPLETE,
@@ -54,11 +57,20 @@ let isAdvertising = false
 export function setupAndAdvertise(identityKey: string): void {
   reassembler.reset()
 
-  // Set up the GATT service with two characteristics
+  // Set up the GATT service with three characteristics:
+  // 1. Identity (readable) — contains the receiver's identity key hex so the
+  //    sender can read it after connecting and show who they're paying
+  // 2. Write — sender writes chunked payment data here
+  // 3. Notify — receiver sends ACKs (future use)
   setServices([
     {
       uuid: BSV_PAYMENT_SERVICE_UUID,
       characteristics: [
+        {
+          uuid: IDENTITY_CHARACTERISTIC_UUID,
+          properties: ['read'],
+          value: identityKey
+        },
         {
           uuid: WRITE_CHARACTERISTIC_UUID,
           properties: ['write', 'writeWithoutResponse'],
@@ -73,13 +85,20 @@ export function setupAndAdvertise(identityKey: string): void {
     }
   ])
 
-  // Start advertising with identity key in manufacturer data
-  // Format: MANUFACTURER_ID_HEX (4 hex chars) + identityKey (66 hex chars)
+  // Start advertising with identity key.
+  //
+  // iOS CoreBluetooth only allows localName + serviceUUIDs in peripheral ads.
+  // manufacturerData is silently dropped. So we encode the identity key in
+  // the localName on iOS: "BSV:<66-char-hex-key>"
+  //
+  // Android supports manufacturerData, so we use both for maximum compatibility.
+  // The scanner checks localName first (works on both), then falls back to mfg data (Android).
+  const localName = LOCAL_NAME_PREFIX + identityKey
   const manufacturerDataHex = MANUFACTURER_ID_HEX + identityKey
 
   startAdvertising({
     serviceUUIDs: [BSV_PAYMENT_SERVICE_UUID],
-    localName: 'BSV Pay',
+    localName,
     manufacturerData: manufacturerDataHex
   })
 
