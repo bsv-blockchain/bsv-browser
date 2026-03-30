@@ -784,7 +784,10 @@ export default function LocalPaymentsScreen() {
 
       if (Platform.OS === 'android') {
         // ── Android transfer: munim-bluetooth ──
-        // Uses writeCharacteristic with hex values and writeWithoutResponse mode.
+        // Uses writeCharacteristic with write-with-response ('write') so that
+        // iOS peripheral.respond() fires an ATT Write Response, which reliably
+        // triggers onCharacteristicWrite on Android — clearing mDeviceBusy and
+        // resolving the Promise. This provides natural per-chunk backpressure.
         // MTU is auto-negotiated by our patch after connect; we wait for the
         // 'mtuChanged' event to learn the actual negotiated value.
         const {
@@ -828,13 +831,13 @@ export default function LocalPaymentsScreen() {
           // munim-bluetooth writeCharacteristic takes hex strings
           const hexChunk = uint8ArrayToHex(chunks[i])
           try {
-            await mbWriteChar(
-              deviceId,
-              BSV_PAYMENT_SERVICE_UUID,
-              WRITE_CHARACTERISTIC_UUID,
-              hexChunk,
-              'writeWithoutResponse'
-            )
+            // write-with-response: iOS peripheral.respond() sends ATT Write Response,
+            // which fires onCharacteristicWrite reliably — clearing mDeviceBusy and
+            // resolving the Promise. This provides natural per-chunk backpressure
+            // without an artificial pacing delay. write-without-response is avoided
+            // because onCharacteristicWrite is unreliable for large packets on Android,
+            // leaving mDeviceBusy set and causing subsequent writes to fail.
+            await mbWriteChar(deviceId, BSV_PAYMENT_SERVICE_UUID, WRITE_CHARACTERISTIC_UUID, hexChunk, 'write')
           } catch (writeErr: any) {
             dlog(`Write error on chunk ${i}: ${writeErr.message}`)
             throw writeErr
@@ -842,8 +845,6 @@ export default function LocalPaymentsScreen() {
           const pct = chunks.length > 1 ? Math.round((i / (chunks.length - 1)) * 100) : 100
           setProgress(pct)
           if (i % 10 === 0) dlog(`Sent chunk ${i + 1}/${chunks.length}`)
-          // 100ms pacing for write-without-response — prevents peripheral buffer overflow
-          await new Promise(r => setTimeout(r, 100))
         }
 
         await new Promise(r => setTimeout(r, 500))
@@ -1086,15 +1087,8 @@ export default function LocalPaymentsScreen() {
         await mbConnect(foundDevice.id)
         await mbDiscoverServices(foundDevice.id)
         dlog(`[+${Date.now() - t0}ms] Connected + discovered`)
-        await mbWriteChar(
-          foundDevice.id,
-          BSV_PAYMENT_SERVICE_UUID,
-          WRITE_CHARACTERISTIC_UUID,
-          knownHex,
-          'writeWithoutResponse'
-        )
+        await mbWriteChar(foundDevice.id, BSV_PAYMENT_SERVICE_UUID, WRITE_CHARACTERISTIC_UUID, knownHex, 'write')
         dlog(`[+${Date.now() - t0}ms] Wrote 16 bytes`)
-        await new Promise(r => setTimeout(r, 200))
         try {
           mbDisconnect(foundDevice.id)
         } catch {
@@ -1207,9 +1201,8 @@ export default function LocalPaymentsScreen() {
             BSV_PAYMENT_SERVICE_UUID,
             WRITE_CHARACTERISTIC_UUID,
             uint8ArrayToHex(chunks[i]),
-            'writeWithoutResponse'
+            'write'
           )
-          await new Promise(r => setTimeout(r, 100))
         }
         await new Promise(r => setTimeout(r, 500))
         try {
