@@ -84,16 +84,19 @@ export function readUint32BE(arr: Uint8Array, offset: number): number {
  * Subsequent chunks contain data with proper sequencing and flags.
  *
  * @param payload - The full serialized payload as Uint8Array
+ * @param payloadSizePerChunk - Max data bytes per chunk (default CHUNK_PAYLOAD_SIZE).
+ *   Pass a smaller value when the negotiated BLE MTU is below the default.
+ *   Effective data per write = MTU - 3 (ATT header) - CHUNK_HEADER_SIZE.
  * @returns Array of chunk buffers to write in order
  * @throws If payload exceeds MAX_PAYLOAD_SIZE
  */
-export function chunkPayload(payload: Uint8Array): Uint8Array[] {
+export function chunkPayload(payload: Uint8Array, payloadSizePerChunk: number = CHUNK_PAYLOAD_SIZE): Uint8Array[] {
   if (payload.length > MAX_PAYLOAD_SIZE) {
     throw new Error(`Payload too large: ${payload.length} bytes exceeds ${MAX_PAYLOAD_SIZE} byte limit`)
   }
 
   const checksum = crc32(payload)
-  const totalDataChunks = Math.ceil(payload.length / CHUNK_PAYLOAD_SIZE)
+  const totalDataChunks = Math.ceil(payload.length / payloadSizePerChunk)
   const chunks: Uint8Array[] = []
 
   // Metadata chunk (seq=0, flags=FLAG_METADATA)
@@ -110,8 +113,8 @@ export function chunkPayload(payload: Uint8Array): Uint8Array[] {
 
   // Data chunks (seq=1..N)
   for (let i = 0; i < totalDataChunks; i++) {
-    const start = i * CHUNK_PAYLOAD_SIZE
-    const end = Math.min(start + CHUNK_PAYLOAD_SIZE, payload.length)
+    const start = i * payloadSizePerChunk
+    const end = Math.min(start + payloadSizePerChunk, payload.length)
     const slice = payload.slice(start, end)
     const isLast = i === totalDataChunks - 1
 

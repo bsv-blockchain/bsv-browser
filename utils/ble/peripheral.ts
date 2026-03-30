@@ -10,7 +10,23 @@
  */
 
 import { Platform } from 'react-native'
-import { startAdvertising, stopAdvertising, setServices } from 'munim-bluetooth'
+
+// Lazy-loaded munim-bluetooth — do NOT import at the top level.
+// A static import causes munim-bluetooth to call NitroModules.createHybridObject()
+// at module-load time, which on Android/Hermes can crash the module graph before
+// @bsv/sdk classes finish initialising, producing "Cannot read property 'prototype'
+// of undefined" when the sender tries to build a transaction.
+// We defer the require to the first peripheral API call instead.
+function getMunimBT() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require('munim-bluetooth') as {
+    startAdvertising: (opts: { serviceUUIDs: string[]; localName?: string; manufacturerData?: string }) => void
+    stopAdvertising: () => void
+    setServices: (
+      services: Array<{ uuid: string; characteristics: Array<{ uuid: string; properties: string[]; value: string }> }>
+    ) => void
+  }
+}
 
 import {
   BSV_PAYMENT_SERVICE_UUID,
@@ -62,7 +78,7 @@ export function setupAndAdvertise(identityKey: string): void {
   //    sender can read it after connecting and show who they're paying
   // 2. Write — sender writes chunked payment data here
   // 3. Notify — receiver sends ACKs (future use)
-  setServices([
+  getMunimBT().setServices([
     {
       uuid: BSV_PAYMENT_SERVICE_UUID,
       characteristics: [
@@ -96,7 +112,7 @@ export function setupAndAdvertise(identityKey: string): void {
   const localName = LOCAL_NAME_PREFIX + identityKey
   const manufacturerDataHex = MANUFACTURER_ID_HEX + identityKey
 
-  startAdvertising({
+  getMunimBT().startAdvertising({
     serviceUUIDs: [BSV_PAYMENT_SERVICE_UUID],
     localName,
     manufacturerData: manufacturerDataHex
@@ -171,7 +187,7 @@ export function processIncomingChunk(hexValue: string, callbacks: PeripheralCall
 export function teardownPeripheral(): void {
   if (isAdvertising) {
     try {
-      stopAdvertising()
+      getMunimBT().stopAdvertising()
     } catch {
       // Ignore cleanup errors
     }

@@ -62,6 +62,8 @@ import {
 } from '@bsv/wallet-toolbox-mobile/out/src/sdk'
 import { AppState, AppStateStatus } from 'react-native'
 import RNEventSource from 'react-native-sse'
+import NetInfo from '@react-native-community/netinfo'
+import { processPendingPayments } from '@/utils/ble/pendingPayments'
 
 // -----
 // Context Types
@@ -115,6 +117,14 @@ export interface WalletContextValue {
   txStatusVersion: number
   /** True while the wallet is being built (biometric auth pending, async build in progress) */
   walletBuilding: boolean
+  /**
+   * Notification from background BLE payment processing.
+   * Set when pending payments are internalized in the background (e.g. on
+   * wallet build or when connectivity is restored). Cleared by the UI after
+   * display. null = no pending notification.
+   */
+  bleNotification: { message: string; type: 'success' | 'error' | 'info' } | null
+  clearBleNotification: () => void
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -150,7 +160,9 @@ export const WalletContext = createContext<WalletContextValue>({
   rebuildWallet: async () => {},
   storage: null,
   txStatusVersion: 0,
-  walletBuilding: false
+  walletBuilding: false,
+  bleNotification: null,
+  clearBleNotification: () => {}
 })
 
 type PermissionType = 'identity' | 'protocol' | 'renewal' | 'basket'
@@ -262,6 +274,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
   const walletBuildingRef = useRef<boolean>(false)
   const [walletBuilding, setWalletBuilding] = useState<boolean>(false)
+  const [bleNotification, setBleNotification] = useState<{
+    message: string
+    type: 'success' | 'error' | 'info'
+  } | null>(null)
+  const clearBleNotification = useCallback(() => setBleNotification(null), [])
 
   const {
     getSnap,
@@ -1276,6 +1293,44 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     loadSettings()
   }, [managers])
 
+  // ── Background BLE pending payment processing ──
+  // After wallet build completes, attempt to internalize any BLE payments that
+  // were received while offline. A NetInfo listener then re-triggers whenever
+  // the device comes back online so the queue drains automatically.
+  useEffect(() => {
+    if (!walletBuilt || !managers.permissionsManager || !storage) return
+
+    const tryProcess = async () => {
+      try {
+        const netState = await NetInfo.fetch()
+        if (!netState.isConnected || netState.isInternetReachable === false) return
+        const results = await processPendingPayments(managers.permissionsManager as any, storage, adminOriginator)
+        const successes = results.filter(r => r.success)
+        if (successes.length > 0) {
+          const msg =
+            successes.length === 1
+              ? 'A local payment was added to your wallet'
+              : `${successes.length} local payments were added to your wallet`
+          setBleNotification({ message: msg, type: 'success' })
+        }
+      } catch {
+        // Best-effort — failures are recorded per-entry in the queue
+      }
+    }
+
+    // Run immediately after wallet build
+    tryProcess()
+
+    // Also run when connectivity is restored
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected && state.isInternetReachable !== false) {
+        tryProcess()
+      }
+    })
+
+    return () => unsubscribe()
+  }, [walletBuilt, managers.permissionsManager, storage, adminOriginator])
+
   // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
@@ -1426,7 +1481,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       rebuildWallet,
       storage,
       txStatusVersion,
-      walletBuilding
+      walletBuilding,
+      bleNotification,
+      clearBleNotification
     }),
     [
       managers,
@@ -1460,7 +1517,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       rebuildWallet,
       storage,
       txStatusVersion,
-      walletBuilding
+      walletBuilding,
+      bleNotification,
+      clearBleNotification
     ]
   )
 

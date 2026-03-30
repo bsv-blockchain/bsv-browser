@@ -68,4 +68,4 @@ export const LOCAL_NAME_PREFIX = 'BSV:'
 // ── PeerPay-compatible protocol constants ──
 export const PEERPAY_PROTOCOL_ID: [number, string] = [2, '3241645161d8']
 export const PEERPAY_LABEL = 'peerpay'
-export const PEERPAY_DESCRIPTION = 'Local BLE Payment'
+export const PEERPAY_DESCRIPTION = 'Local Payment'

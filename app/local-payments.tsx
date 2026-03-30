@@ -34,6 +34,7 @@ import { SatsAmountInput } from '@/components/wallet/SatsAmountInput'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { IdentityClient, createNonce, PublicKey, P2PKH } from '@bsv/sdk'
 
+import NetInfo from '@react-native-community/netinfo'
 import type { BLEPaymentPayload, PeerDisplayIdentity } from '@/utils/ble/types'
 import {
   BSV_PAYMENT_SERVICE_UUID,
@@ -53,10 +54,12 @@ import {
   deserializePayload
 } from '@/utils/ble/chunking'
 import { processIncomingChunk, teardownPeripheral } from '@/utils/ble/peripheral'
+import { savePendingPayment, processPendingPayments } from '@/utils/ble/pendingPayments'
 
 // ── Types ──
 
 type ScreenPhase =
+  | 'permission_gate'
   | 'role_select'
   | 'receiving_wait'
   | 'receiving_progress'
@@ -149,13 +152,14 @@ export default function LocalPaymentsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator } = useWallet()
+  const { managers, adminOriginator, storage } = useWallet()
   const wallet = managers?.permissionsManager
 
   // Core state
-  const [phase, setPhase] = useState<ScreenPhase>('role_select')
+  const [phase, setPhase] = useState<ScreenPhase>('permission_gate')
   const [identityKey, setIdentityKey] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+  const [blePermissionGranted, setBlePermissionGranted] = useState(false)
 
   // Sender state
   const [discoveredReceivers, setDiscoveredReceivers] = useState<DiscoveredReceiver[]>([])
@@ -172,6 +176,9 @@ export default function LocalPaymentsScreen() {
   const [showDebug, setShowDebug] = useState(false)
   const [debugLogs, setDebugLogs] = useState<string[]>([])
 
+  // Snackbar — persists for the current session (no auto-dismiss) so the user
+  // always has a visible record of successfully processed payments.
+  const [snack, setSnack] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
   // Refs
   const bleManagerRef = useRef<any>(null)
   const identityClientRef = useRef<IdentityClient | null>(null)
@@ -180,6 +187,25 @@ export default function LocalPaymentsScreen() {
   const dlog = useCallback((msg: string) => {
     const ts = new Date().toLocaleTimeString('en-US', { hour12: false })
     setDebugLogs(prev => [...prev.slice(-100), `[${ts}] ${msg}`])
+  }, [])
+
+  // ── Permission Helper ──
+  // Defined early so the on-mount effect can reference it.
+
+  const ensurePermissions = useCallback(async (): Promise<boolean> => {
+    if (Platform.OS === 'android' && Platform.Version >= 31) {
+      const r = await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE
+      ])
+      return Object.values(r).every(v => v === PermissionsAndroid.RESULTS.GRANTED)
+    }
+    if (Platform.OS === 'ios') {
+      const { requestBluetoothPermission } = await import('munim-bluetooth')
+      return requestBluetoothPermission()
+    }
+    return true
   }, [])
 
   // ── Init ──
@@ -198,6 +224,22 @@ export default function LocalPaymentsScreen() {
     } catch {}
   }, [wallet, adminOriginator])
 
+  // Request BLE permissions once on screen open — this is the only place the
+  // system permission dialog is triggered.  Once granted, the flag persists for
+  // the lifetime of the component so individual actions never re-prompt.
+  useEffect(() => {
+    ;(async () => {
+      const granted = await ensurePermissions()
+      setBlePermissionGranted(granted)
+      if (granted) {
+        setPhase('role_select')
+      } else {
+        setPhase('error')
+        setErrorMsg('Bluetooth permissions are required for local payments')
+      }
+    })()
+  }, [ensurePermissions])
+
   // ── BLE Manager (ble-plx, for central) ──
 
   const getBleManager = useCallback(async () => {
@@ -208,23 +250,35 @@ export default function LocalPaymentsScreen() {
     return bleManagerRef.current
   }, [])
 
-  // ── Permission Helper ──
-
-  const ensurePermissions = useCallback(async (): Promise<boolean> => {
-    if (Platform.OS === 'android' && Platform.Version >= 31) {
-      const r = await PermissionsAndroid.requestMultiple([
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE
-      ])
-      return Object.values(r).every(v => v === PermissionsAndroid.RESULTS.GRANTED)
-    }
-    if (Platform.OS === 'ios') {
-      const { requestBluetoothPermission } = await import('munim-bluetooth')
-      return requestBluetoothPermission()
-    }
-    return true
-  }, [])
+  // Wait until the BLE adapter reaches PoweredOn before scanning.
+  // BleManager starts in 'Unknown' state; calling startDeviceScan() while
+  // Unknown silently fails (error code 103) — this is why the first scan
+  // attempt never finds anything.
+  const waitForBLEPoweredOn = useCallback(
+    async (mgr: any): Promise<void> => {
+      const state = await mgr.state()
+      if (state === 'PoweredOn') return
+      dlog(`BLE state: ${state}, waiting for PoweredOn...`)
+      return new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Bluetooth not available (timeout)'))
+        }, 6000)
+        const sub = mgr.onStateChange((newState: string) => {
+          dlog(`BLE state changed: ${newState}`)
+          if (newState === 'PoweredOn') {
+            sub.remove()
+            clearTimeout(timeout)
+            resolve()
+          } else if (newState === 'PoweredOff' || newState === 'Unauthorized') {
+            sub.remove()
+            clearTimeout(timeout)
+            reject(new Error(`Bluetooth is ${newState}`))
+          }
+        }, true) // emitCurrentState = true
+      })
+    },
+    [dlog]
+  )
 
   // ── Cleanup ──
 
@@ -269,23 +323,83 @@ export default function LocalPaymentsScreen() {
     [dlog]
   )
 
+  // ── Show snackbar helper ──
+
+  const showSnack = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setSnack({ message, type })
+  }, [])
+
+  // ── Auto-internalize on BLE receive ──
+  // Called as soon as a complete payload is reassembled. Persists first, then
+  // tries to internalize immediately. If offline or wallet unavailable, the
+  // pending entry stays for background retry.
+
+  const handlePayloadReceived = useCallback(
+    async (payload: BLEPaymentPayload) => {
+      dlog(`Payment received: ${payload.token.amount} sats`)
+      setReceivedPayload(payload)
+      setCompletedAmount(payload.token.amount)
+      setCompletedRole('receiver')
+      setPhase('complete')
+      teardownPeripheral()
+
+      // Persist first so the payment survives regardless of what happens next
+      if (storage) {
+        try {
+          await savePendingPayment(storage, payload)
+          dlog('Payment persisted to queue')
+        } catch (e: any) {
+          dlog(`Persist error: ${e.message}`)
+        }
+      }
+
+      // Attempt immediate internalization
+      const netState = await NetInfo.fetch()
+      const isOnline = netState.isConnected && netState.isInternetReachable !== false
+
+      if (isOnline && wallet && storage) {
+        const results = await processPendingPayments(wallet as any, storage, adminOriginator)
+        const successes = results.filter(r => r.success)
+        if (successes.length > 0) {
+          showSnack(`Payment of ${payload.token.amount} sats received and added to wallet`, 'success')
+        } else {
+          showSnack('Payment saved — will be added to wallet automatically', 'info')
+        }
+      } else {
+        showSnack('Payment saved — will be added to wallet when back online', 'info')
+      }
+    },
+    [wallet, storage, adminOriginator, dlog, showSnack]
+  )
+
   // ════════════════════════════════════════════════
   // RECEIVE FLOW
   // ════════════════════════════════════════════════
 
   const startReceiving = useCallback(async () => {
     if (!identityKey) return
-    const ok = await ensurePermissions()
-    if (!ok) {
-      showError('Bluetooth permissions required')
-      return
-    }
 
     dlog('Starting receiver (peripheral mode)...')
     setPhase('receiving_wait')
 
     try {
-      const { setServices, startAdvertising, addEventListener } = await import('munim-bluetooth')
+      const { setServices, startAdvertising, addEventListener, isBluetoothEnabled } = await import('munim-bluetooth')
+
+      // Wait for Bluetooth to be powered on before setting up the GATT server.
+      // On iOS, CBPeripheralManager throws if BT state is 0 (unknown/resetting).
+      let btReady = await isBluetoothEnabled()
+      if (!btReady) {
+        dlog('Bluetooth not ready, waiting...')
+        for (let attempt = 0; attempt < 10; attempt++) {
+          await new Promise(r => setTimeout(r, 500))
+          btReady = await isBluetoothEnabled()
+          if (btReady) break
+        }
+        if (!btReady) {
+          showError('Bluetooth is not enabled')
+          return
+        }
+      }
 
       // Set up GATT service with identity + write + notify characteristics
       setServices([
@@ -313,12 +427,7 @@ export default function LocalPaymentsScreen() {
         processIncomingChunk(hexValue, {
           onProgress: pct => setProgress(pct),
           onPayloadReceived: payload => {
-            dlog(`Payment received: ${payload.token.amount} sats`)
-            setReceivedPayload(payload)
-            setCompletedAmount(payload.token.amount)
-            setCompletedRole('receiver')
-            setPhase('complete')
-            teardownPeripheral()
+            handlePayloadReceived(payload)
           },
           onError: err => showError(err.message),
           onLog: entry => dlog(`${entry.direction}: ${entry.message}`)
@@ -328,19 +437,13 @@ export default function LocalPaymentsScreen() {
     } catch (e: any) {
       showError(`Failed to start receiving: ${e.message}`)
     }
-  }, [identityKey, ensurePermissions, dlog, showError])
+  }, [identityKey, dlog, showError, handlePayloadReceived])
 
   // ════════════════════════════════════════════════
   // SEND FLOW — Step 1: Scan for receivers
   // ════════════════════════════════════════════════
 
   const startScanning = useCallback(async () => {
-    const ok = await ensurePermissions()
-    if (!ok) {
-      showError('Bluetooth permissions required')
-      return
-    }
-
     setPhase('sending_scan')
     setDiscoveredReceivers([])
     dlog('Scanning for nearby receivers...')
@@ -348,20 +451,32 @@ export default function LocalPaymentsScreen() {
     try {
       const mgr = await getBleManager()
 
-      const seenDevices = new Set<string>()
+      // Wait for Bluetooth to be ready — first scan after BleManager creation
+      // fires while state is still 'Unknown', which silently fails (error 103).
+      await waitForBLEPoweredOn(mgr)
+
+      // seenDeviceIds: prevents re-processing the same device.id during one scan.
+      // seenIdentityKeys: prevents duplicate entries when iOS re-advertises the
+      // same physical device with a different CBPeripheral UUID after a
+      // connect/disconnect cycle (which happens because we connect briefly to
+      // read the identity characteristic, then disconnect, and the device keeps
+      // advertising).
+      const seenDeviceIds = new Set<string>()
+      const seenIdentityKeys = new Set<string>()
 
       mgr.startDeviceScan([BSV_PAYMENT_SERVICE_UUID], { allowDuplicates: false }, async (error: any, device: any) => {
         if (error) {
           dlog(`Scan error: ${error.message}`)
           return
         }
-        if (!device || seenDevices.has(device.id)) return
-        seenDevices.add(device.id)
+        if (!device || seenDeviceIds.has(device.id)) return
+        seenDeviceIds.add(device.id)
 
         const name = device.localName || device.name || '(unknown)'
         dlog(`Found BSV device: ${name} (${device.id.substring(0, 12)}...)`)
 
-        // Add placeholder
+        // Add placeholder entry — we'll remove it if identity read fails or is
+        // a duplicate
         const entry: DiscoveredReceiver = {
           deviceId: device.id,
           identityKey: '',
@@ -372,12 +487,13 @@ export default function LocalPaymentsScreen() {
         }
         setDiscoveredReceivers(prev => [...prev, entry])
 
-        // Connect briefly to read identity
+        // Connect briefly to read identity characteristic
         try {
           const connected = await mgr.connectToDevice(device.id)
           await connected.discoverAllServicesAndCharacteristics()
 
-          // Find identity char across all service instances
+          // Find identity char across all service instances (Android can
+          // register duplicate GATT service instances)
           const services = await connected.services()
           let identityHex = ''
           for (const svc of services) {
@@ -402,6 +518,16 @@ export default function LocalPaymentsScreen() {
           await connected.cancelConnection()
 
           if (identityHex.length === 66) {
+            // Deduplicate by identity key — same physical device re-discovered
+            // after connect/disconnect gets a new device.id on iOS but the same
+            // identity key. Drop the duplicate.
+            if (seenIdentityKeys.has(identityHex)) {
+              dlog(`Duplicate identity (skipping): ${identityHex.substring(0, 16)}...`)
+              setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
+              return
+            }
+            seenIdentityKeys.add(identityHex)
+
             dlog(`Identity: ${identityHex.substring(0, 16)}...`)
             setDiscoveredReceivers(prev =>
               prev.map(r => (r.deviceId === device.id ? { ...r, identityKey: identityHex, resolving: true } : r))
@@ -434,7 +560,7 @@ export default function LocalPaymentsScreen() {
     } catch (e: any) {
       showError(`Scan failed: ${e.message}`)
     }
-  }, [ensurePermissions, getBleManager, dlog, showError])
+  }, [getBleManager, dlog, showError])
 
   // ════════════════════════════════════════════════
   // SEND FLOW — Step 2: Select receiver
@@ -474,31 +600,60 @@ export default function LocalPaymentsScreen() {
       )
       dlog(`TX built: ${payload.token.transaction.length} bytes`)
 
-      // Serialize and chunk
-      const serialized = serializePayload(payload)
-      const chunks = chunkPayload(serialized)
-      dlog(`Chunked: ${chunks.length} writes (${serialized.length} bytes)`)
-
-      // Connect via ble-plx
+      // Connect via ble-plx — need MTU before chunking
       const mgr = await getBleManager()
       dlog(`Connecting to ${selectedReceiver.name ?? selectedReceiver.deviceId}...`)
       const device = await mgr.connectToDevice(selectedReceiver.deviceId)
       await device.discoverAllServicesAndCharacteristics()
+
+      // Negotiate MTU — request 512 (Android explicit, iOS auto-negotiates).
+      // The effective write payload = MTU - 3 (ATT header) - CHUNK_HEADER_SIZE.
+      let mtu = 23 // BLE default
+      try {
+        if (Platform.OS === 'android') {
+          const updated = await device.requestMTU(512)
+          mtu = updated.mtu ?? 23
+        } else {
+          // iOS: mtu is available on the device object after connection
+          mtu = device.mtu ?? 185 // iOS typically negotiates 185+
+        }
+      } catch {
+        dlog('MTU negotiation failed, using default')
+      }
+      const maxWriteBytes = mtu - 3 // ATT header overhead
+      const effectivePayloadSize = Math.max(maxWriteBytes - 3, 17) // minus CHUNK_HEADER_SIZE, floor 17
+      dlog(`MTU: ${mtu}, effective payload per chunk: ${effectivePayloadSize} bytes`)
+
+      // Serialize and chunk using the negotiated size
+      const serialized = serializePayload(payload)
+      const chunks = chunkPayload(serialized, effectivePayloadSize)
+      dlog(`Chunked: ${chunks.length} writes (${serialized.length} bytes)`)
       dlog('Connected, sending chunks...')
 
       // Send each chunk with pacing
       for (let i = 0; i < chunks.length; i++) {
-        const chunkHex = uint8ArrayToHex(chunks[i])
-        // ble-plx uses base64 for write values
-        const chunkB64 = btoa(String.fromCharCode(...chunks[i]))
-        await device.writeCharacteristicWithoutResponseForService(
-          BSV_PAYMENT_SERVICE_UUID,
-          WRITE_CHARACTERISTIC_UUID,
-          chunkB64
-        )
-        if (i > 0 && chunks.length > 1) {
-          setProgress(Math.round((i / (chunks.length - 1)) * 100))
+        // ble-plx uses base64 for write values — avoid spread operator for large arrays
+        let chunkB64 = ''
+        const bytes = chunks[i]
+        let binary = ''
+        for (let j = 0; j < bytes.length; j++) {
+          binary += String.fromCharCode(bytes[j])
         }
+        chunkB64 = btoa(binary)
+
+        try {
+          await device.writeCharacteristicWithResponseForService(
+            BSV_PAYMENT_SERVICE_UUID,
+            WRITE_CHARACTERISTIC_UUID,
+            chunkB64
+          )
+        } catch (writeErr: any) {
+          dlog(`Write error on chunk ${i}: ${writeErr.message}`)
+          throw writeErr
+        }
+        const pct = chunks.length > 1 ? Math.round((i / (chunks.length - 1)) * 100) : 100
+        setProgress(pct)
+        if (i % 10 === 0) dlog(`Sent chunk ${i + 1}/${chunks.length}`)
         // Small delay between chunks
         if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 50))
       }
@@ -516,36 +671,6 @@ export default function LocalPaymentsScreen() {
       showError(`Transfer failed: ${e.message}`)
     }
   }, [wallet, identityKey, selectedReceiver, sendAmount, adminOriginator, getBleManager, dlog, showError])
-
-  // ── Internalize received payment ──
-
-  const acceptPayment = useCallback(async () => {
-    if (!wallet || !receivedPayload) return
-    try {
-      await wallet.internalizeAction(
-        {
-          tx: receivedPayload.token.transaction,
-          outputs: [
-            {
-              paymentRemittance: {
-                derivationPrefix: receivedPayload.token.customInstructions.derivationPrefix,
-                derivationSuffix: receivedPayload.token.customInstructions.derivationSuffix,
-                senderIdentityKey: receivedPayload.senderIdentityKey
-              },
-              outputIndex: receivedPayload.token.outputIndex ?? 0,
-              protocol: 'wallet payment'
-            }
-          ],
-          labels: [PEERPAY_LABEL],
-          description: PEERPAY_DESCRIPTION
-        },
-        adminOriginator
-      )
-      dlog('Payment internalized to wallet')
-    } catch (e: any) {
-      dlog(`Internalize error: ${e.message}`)
-    }
-  }, [wallet, receivedPayload, adminOriginator, dlog])
 
   // ════════════════════════════════════════════════
   // RENDER
@@ -575,6 +700,14 @@ export default function LocalPaymentsScreen() {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
+        {/* ══ Permission Gate ══ */}
+        {phase === 'permission_gate' && (
+          <View style={styles.center}>
+            <ActivityIndicator size="large" color={colors.info} style={{ marginBottom: spacing.lg }} />
+            <Text style={[styles.phaseSub, { color: colors.textSecondary }]}>Requesting Bluetooth access...</Text>
+          </View>
+        )}
+
         {/* ══ Role Select ══ */}
         {phase === 'role_select' && (
           <>
@@ -735,18 +868,17 @@ export default function LocalPaymentsScreen() {
               </Text>
             )}
 
-            {completedRole === 'receiver' && receivedPayload && (
-              <TouchableOpacity
-                style={[styles.bigBtn, { backgroundColor: colors.success, marginBottom: spacing.sm }]}
-                onPress={acceptPayment}
+            {completedRole === 'receiver' && (
+              <View
+                style={[
+                  styles.autoNote,
+                  { backgroundColor: colors.success + '15', borderColor: colors.success + '40' }
+                ]}
               >
-                <Ionicons name="wallet-outline" size={20} color="#fff" />
-                <Text style={[styles.bigBtnText, { color: '#fff' }]}>{t('accept_to_wallet')}</Text>
-              </TouchableOpacity>
+                <Ionicons name="wallet-outline" size={16} color={colors.success} />
+                <Text style={[styles.autoNoteText, { color: colors.success }]}>{t('payment_auto_internalized')}</Text>
+              </View>
             )}
-            <TouchableOpacity style={[styles.bigBtn, { backgroundColor: colors.accent }]} onPress={resetToStart}>
-              <Text style={[styles.bigBtnText, { color: colors.background }]}>{t('done')}</Text>
-            </TouchableOpacity>
           </View>
         )}
 
@@ -807,6 +939,35 @@ export default function LocalPaymentsScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* ══ Snackbar ══ */}
+      {snack && (
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => setSnack(null)}
+          style={[
+            styles.snack,
+            {
+              backgroundColor: colors.backgroundElevated,
+              borderColor:
+                snack.type === 'success' ? colors.success : snack.type === 'error' ? colors.error : colors.separator
+            }
+          ]}
+        >
+          <Ionicons
+            name={
+              snack.type === 'success'
+                ? 'checkmark-circle'
+                : snack.type === 'error'
+                  ? 'alert-circle'
+                  : 'information-circle'
+            }
+            size={18}
+            color={snack.type === 'success' ? colors.success : snack.type === 'error' ? colors.error : colors.info}
+          />
+          <Text style={[styles.snackText, { color: colors.textPrimary }]}>{snack.message}</Text>
+        </TouchableOpacity>
+      )}
     </View>
   )
 }
@@ -902,6 +1063,7 @@ const styles = StyleSheet.create({
   cancelBtn: {
     alignItems: 'center',
     paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
     borderRadius: radii.md,
     borderWidth: 1,
     marginTop: spacing.xl
@@ -947,5 +1109,42 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     lineHeight: 15,
     marginBottom: 1
+  },
+
+  // Auto-internalization note on the complete screen
+  autoNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    marginBottom: spacing.lg,
+    alignSelf: 'stretch'
+  },
+  autoNoteText: { ...typography.subhead, flex: 1 },
+
+  // Snackbar — positioned at bottom of screen, persists until tapped
+  snack: {
+    position: 'absolute',
+    bottom: 32,
+    left: spacing.lg,
+    right: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6
+  },
+  snackText: {
+    ...typography.subhead,
+    flex: 1
   }
 })
