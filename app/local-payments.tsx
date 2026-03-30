@@ -500,18 +500,54 @@ export default function LocalPaymentsScreen() {
           dlog(`Connecting to ${device.id}...`)
           const connected = await mgr.connectToDevice(device.id)
           dlog('Connected, discovering services...')
-          await connected.discoverAllServicesAndCharacteristics()
-          dlog('Discovery complete')
 
-          // Find identity char across all service instances
-          const services = await connected.services()
-          dlog(`Found ${services.length} services`)
+          // Try service discovery with a timeout — on Android→iOS this can hang
+          let discoveryOk = false
+          try {
+            await Promise.race([
+              connected.discoverAllServicesAndCharacteristics(),
+              new Promise<never>((_, rej) => setTimeout(() => rej(new Error('discovery timeout')), 8000))
+            ])
+            discoveryOk = true
+            dlog('Discovery complete')
+          } catch (discErr: any) {
+            dlog(`Discovery issue: ${discErr.message}, trying direct read...`)
+          }
+
           let identityHex = ''
-          for (const svc of services) {
-            const chars = await svc.characteristics()
-            const idChar = chars.find((c: any) => c.uuid.toLowerCase().includes('b5a1e003') && c.isReadable)
-            if (idChar) {
-              const result = await idChar.read()
+
+          if (discoveryOk) {
+            // Standard path: iterate discovered services
+            const services = await connected.services()
+            dlog(`Found ${services.length} services`)
+            for (const svc of services) {
+              const chars = await svc.characteristics()
+              const idChar = chars.find((c: any) => c.uuid.toLowerCase().includes('b5a1e003') && c.isReadable)
+              if (idChar) {
+                const result = await idChar.read()
+                if (result.value) {
+                  const raw = atob(result.value)
+                  if (raw.length === 33) {
+                    identityHex = Array.from(raw)
+                      .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
+                      .join('')
+                  } else if (raw.length >= 66) {
+                    identityHex = raw.substring(0, 66)
+                  }
+                }
+                break
+              }
+            }
+          } else {
+            // Fallback: try reading characteristic directly by known UUIDs.
+            // ble-plx may handle this even without prior discoverAll on some
+            // Android versions / peripheral configurations.
+            try {
+              const result = await mgr.readCharacteristicForDevice(
+                device.id,
+                BSV_PAYMENT_SERVICE_UUID,
+                IDENTITY_CHARACTERISTIC_UUID
+              )
               if (result.value) {
                 const raw = atob(result.value)
                 if (raw.length === 33) {
@@ -521,12 +557,18 @@ export default function LocalPaymentsScreen() {
                 } else if (raw.length >= 66) {
                   identityHex = raw.substring(0, 66)
                 }
+                dlog(`Direct read succeeded: ${identityHex.substring(0, 16)}...`)
               }
-              break
+            } catch (readErr: any) {
+              dlog(`Direct read also failed: ${readErr.message}`)
             }
           }
 
-          await connected.cancelConnection()
+          try {
+            await connected.cancelConnection()
+          } catch {
+            /* already disconnected */
+          }
 
           if (identityHex.length === 66) {
             // Deduplicate by identity key
@@ -626,11 +668,14 @@ export default function LocalPaymentsScreen() {
           const updated = await device.requestMTU(512)
           mtu = updated.mtu ?? 23
         } else {
-          // iOS: mtu is available on the device object after connection
-          mtu = device.mtu ?? 185 // iOS typically negotiates 185+
+          // iOS: ble-plx device.mtu may return the raw negotiated value.
+          // If unavailable or still at default, use a safe known iOS minimum.
+          const rawMtu = device.mtu
+          dlog(`iOS raw device.mtu = ${rawMtu}`)
+          mtu = rawMtu && rawMtu > 23 ? rawMtu : 185
         }
-      } catch {
-        dlog('MTU negotiation failed, using default')
+      } catch (e: any) {
+        dlog(`MTU negotiation failed: ${e.message}`)
       }
       const maxWriteBytes = mtu - 3 // ATT header overhead
       const effectivePayloadSize = Math.max(maxWriteBytes - 3, 17) // minus CHUNK_HEADER_SIZE, floor 17
