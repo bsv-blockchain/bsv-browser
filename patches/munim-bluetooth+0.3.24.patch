@@ -1,5 +1,5 @@
 diff --git a/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt b/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
-index 5575600..de232d2 100755
+index 5575600..1398c40 100755
 --- a/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
 +++ b/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
 @@ -74,6 +74,7 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
@@ -68,20 +68,21 @@ index 5575600..de232d2 100755
              }
          }
      }
-@@ -542,6 +572,12 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+@@ -542,6 +572,13 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
                          connectedDevices[deviceId] = gatt
                          pendingConnections.remove(deviceId)?.resolve(Unit)
                          eventEmitter.emit("deviceConnected", mapOf("deviceId" to deviceId))
-+                        // Automatically negotiate a larger MTU after connecting.
-+                        // Android defaults to 23 bytes (20 usable) which is far too small
-+                        // for chunked BLE payment transfers. Requesting 512 triggers
-+                        // onMtuChanged with the actual negotiated value, which we emit
-+                        // as a "mtuChanged" event so the JS sender can size chunks.
-+                        gatt.requestMtu(512)
++                        // NOTE: Do NOT call gatt.requestMtu() here. It sets mDeviceBusy=true
++                        // internally, and if onMtuChanged never fires (e.g. iOS peripheral
++                        // doesn't respond to the MTU exchange), mDeviceBusy stays true
++                        // permanently — blocking ALL subsequent GATT operations (discover,
++                        // read, write). JS should use default MTU (23) and size chunks
++                        // accordingly. MTU negotiation can be added later as an explicit
++                        // JS-callable function with proper timeout handling.
                      }
  
                      BluetoothProfile.STATE_DISCONNECTED -> {
-@@ -666,6 +702,26 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+@@ -666,6 +703,26 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
                      )
                  }
              }
@@ -108,7 +109,7 @@ index 5575600..de232d2 100755
          }
      }
  
-@@ -678,6 +734,7 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+@@ -678,6 +735,7 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
              .forEach { key -> pendingWrites.remove(key)?.reject(error) }
          pendingServiceDiscoveries.remove(deviceId)?.reject(error)
          pendingRssiReads.remove(deviceId)?.reject(error)

@@ -784,10 +784,10 @@ export default function LocalPaymentsScreen() {
 
       if (Platform.OS === 'android') {
         // ── Android transfer: munim-bluetooth ──
-        // Uses writeCharacteristic with write-with-response ('write') so that
-        // iOS peripheral.respond() fires an ATT Write Response, which reliably
-        // triggers onCharacteristicWrite on Android — clearing mDeviceBusy and
-        // resolving the Promise. This provides natural per-chunk backpressure.
+        // Uses writeWithoutResponse + retry loop. The native patch resolves
+        // Promises immediately for writeWithoutResponse (no onCharacteristicWrite
+        // callback needed). If gatt.writeCharacteristic() returns false due to
+        // Android's mDeviceBusy flag, the retry loop backs off and retries.
         // MTU is auto-negotiated by our patch after connect; we wait for the
         // 'mtuChanged' event to learn the actual negotiated value.
         const {
@@ -800,51 +800,47 @@ export default function LocalPaymentsScreen() {
         const deviceId = selectedReceiver.deviceId
         dlog(`[Android] Connecting to ${deviceId.substring(0, 12)}...`)
 
-        // Capture negotiated MTU from event emitted after connect
-        let mtu = 23
-        const mtuPromise = new Promise<number>(resolve => {
-          const timeout = setTimeout(() => {
-            removeMtuListener()
-            resolve(23)
-          }, 5000)
-          const removeMtuListener = mbAddListener('mtuChanged', (data: any) => {
-            if (data?.deviceId === deviceId) {
-              clearTimeout(timeout)
-              removeMtuListener()
-              resolve(typeof data.mtu === 'number' ? data.mtu : 23)
-            }
-          })
-        })
-
         await mbConnect(deviceId)
-        mtu = await mtuPromise
-        dlog(`[Android] Connected, MTU: ${mtu}`)
+        dlog(`[Android] Connected`)
 
-        const maxWriteBytes = mtu - 3 // ATT header
-        const effectivePayloadSize = Math.max(maxWriteBytes - 3, 17) // minus chunk header (3B)
+        // Android default MTU is 23 (20 usable after ATT header, 17 after chunk header).
+        // Auto-MTU negotiation is disabled because gatt.requestMtu() sets mDeviceBusy
+        // internally, and if onMtuChanged never fires the connection is permanently
+        // bricked. 17 bytes/chunk is slower but reliable across all device pairs.
+        const effectivePayloadSize = 17
         dlog(`Effective payload per chunk: ${effectivePayloadSize} bytes`)
 
         const chunks = chunkPayload(serialized, effectivePayloadSize)
         dlog(`Chunked: ${chunks.length} writes (${serialized.length} bytes)`)
 
         for (let i = 0; i < chunks.length; i++) {
-          // munim-bluetooth writeCharacteristic takes hex strings
           const hexChunk = uint8ArrayToHex(chunks[i])
-          try {
-            // write-with-response: iOS peripheral.respond() sends ATT Write Response,
-            // which fires onCharacteristicWrite reliably — clearing mDeviceBusy and
-            // resolving the Promise. This provides natural per-chunk backpressure
-            // without an artificial pacing delay. write-without-response is avoided
-            // because onCharacteristicWrite is unreliable for large packets on Android,
-            // leaving mDeviceBusy set and causing subsequent writes to fail.
-            await mbWriteChar(deviceId, BSV_PAYMENT_SERVICE_UUID, WRITE_CHARACTERISTIC_UUID, hexChunk, 'write')
-          } catch (writeErr: any) {
-            dlog(`Write error on chunk ${i}: ${writeErr.message}`)
-            throw writeErr
+          // writeWithoutResponse + retry: Android's BluetoothGatt has a shared
+          // mDeviceBusy flag. If a preceding op (MTU, discovery) hasn't cleared
+          // it, gatt.writeCharacteristic() returns false. Retry with backoff.
+          for (let attempt = 0; attempt < 6; attempt++) {
+            try {
+              await mbWriteChar(
+                deviceId,
+                BSV_PAYMENT_SERVICE_UUID,
+                WRITE_CHARACTERISTIC_UUID,
+                hexChunk,
+                'writeWithoutResponse'
+              )
+              break
+            } catch (writeErr: any) {
+              if (attempt < 5 && writeErr.message?.includes('Failed to queue')) {
+                dlog(`Chunk ${i} busy, retry ${attempt + 1}...`)
+                await new Promise(r => setTimeout(r, 20 * Math.pow(2, attempt)))
+              } else {
+                throw writeErr
+              }
+            }
           }
           const pct = chunks.length > 1 ? Math.round((i / (chunks.length - 1)) * 100) : 100
           setProgress(pct)
           if (i % 10 === 0) dlog(`Sent chunk ${i + 1}/${chunks.length}`)
+          await new Promise(r => setTimeout(r, 50))
         }
 
         await new Promise(r => setTimeout(r, 500))
@@ -856,14 +852,11 @@ export default function LocalPaymentsScreen() {
         }
       } else {
         // ── iOS transfer: ble-plx ──
-        // Uses writeCharacteristicWithResponseForService (acknowledged writes).
-        // ble-plx returns/accepts base64 values.
         const mgr = await getBleManager()
         dlog(`[iOS] Connecting to ${selectedReceiver.name ?? selectedReceiver.deviceId}...`)
         const device = await mgr.connectToDevice(selectedReceiver.deviceId)
         await device.discoverAllServicesAndCharacteristics()
 
-        // iOS MTU is auto-negotiated. Read device.mtu from ble-plx.
         const rawMtu = device.mtu
         dlog(`iOS raw device.mtu = ${rawMtu}`)
         const mtu = rawMtu && rawMtu > 23 ? rawMtu : 185
@@ -875,7 +868,6 @@ export default function LocalPaymentsScreen() {
         dlog(`Chunked: ${chunks.length} writes (${serialized.length} bytes)`)
 
         for (let i = 0; i < chunks.length; i++) {
-          // ble-plx uses base64
           const bytes = chunks[i]
           let binary = ''
           for (let j = 0; j < bytes.length; j++) binary += String.fromCharCode(bytes[j])
@@ -915,14 +907,12 @@ export default function LocalPaymentsScreen() {
   // ════════════════════════════════════════════════
 
   // Test A: identity-only — scan → connect → read 33-byte identity char → display raw hex.
-  // No wallet code. Validates the critical GATT read path in isolation.
   const runIdentityTest = useCallback(async () => {
     if (testRunning) return
     setTestRunning(true)
     setTestResult(null)
     dlog('=== TEST A: Identity Read ===')
     const t0 = Date.now()
-
     try {
       if (Platform.OS === 'android') {
         const {
@@ -950,13 +940,10 @@ export default function LocalPaymentsScreen() {
           mbStartScan({ serviceUUIDs: [BSV_PAYMENT_SERVICE_UUID] })
         })
         dlog(`[+${Date.now() - t0}ms] Found: ${foundDevice.localName || foundDevice.name || foundDevice.id}`)
-
         await mbConnect(foundDevice.id)
         dlog(`[+${Date.now() - t0}ms] Connected`)
-
         const services = await mbDiscoverServices(foundDevice.id)
         dlog(`[+${Date.now() - t0}ms] discoverServices: ${services.length} services`)
-
         let hexResult = ''
         for (const svc of services) {
           if (!svc.uuid.toLowerCase().includes('b5a1e000')) continue
@@ -969,24 +956,18 @@ export default function LocalPaymentsScreen() {
           }
           if (hexResult) break
         }
-
         try {
           mbDisconnect(foundDevice.id)
         } catch {
           /* ignore */
         }
-
-        if (hexResult.length === 66) {
-          const msg = `PASS: 33 bytes = ${hexResult.substring(0, 16)}...`
-          dlog(`TEST A ${msg}`)
-          setTestResult(msg)
-        } else {
-          const msg = `FAIL: got ${hexResult.length / 2} bytes: ${hexResult.substring(0, 20)}`
-          dlog(`TEST A ${msg}`)
-          setTestResult(msg)
-        }
+        const msg =
+          hexResult.length === 66
+            ? `PASS: 33 bytes = ${hexResult.substring(0, 16)}...`
+            : `FAIL: got ${hexResult.length / 2} bytes: ${hexResult.substring(0, 20)}`
+        dlog(`TEST A ${msg}`)
+        setTestResult(msg)
       } else {
-        // iOS: use ble-plx
         const mgr = await getBleManager()
         const foundDevice = await new Promise<any>((resolve, reject) => {
           const timeout = setTimeout(() => {
@@ -1001,11 +982,9 @@ export default function LocalPaymentsScreen() {
           })
         })
         dlog(`[+${Date.now() - t0}ms] Found: ${foundDevice.name ?? foundDevice.id}`)
-
         const connected = await foundDevice.connect()
         await connected.discoverAllServicesAndCharacteristics()
         dlog(`[+${Date.now() - t0}ms] Discovery complete`)
-
         let hexResult = ''
         const services = await connected.services()
         for (const svc of services) {
@@ -1027,16 +1006,12 @@ export default function LocalPaymentsScreen() {
         } catch {
           /* ignore */
         }
-
-        if (hexResult.length === 66) {
-          const msg = `PASS: 33 bytes = ${hexResult.substring(0, 16)}...`
-          dlog(`TEST A ${msg}`)
-          setTestResult(msg)
-        } else {
-          const msg = `FAIL: got ${hexResult.length / 2} bytes`
-          dlog(`TEST A ${msg}`)
-          setTestResult(msg)
-        }
+        const msg =
+          hexResult.length === 66
+            ? `PASS: 33 bytes = ${hexResult.substring(0, 16)}...`
+            : `FAIL: got ${hexResult.length / 2} bytes`
+        dlog(`TEST A ${msg}`)
+        setTestResult(msg)
       }
     } catch (e: any) {
       const msg = `ERROR: ${e.message}`
@@ -1048,14 +1023,12 @@ export default function LocalPaymentsScreen() {
   }, [testRunning, getBleManager, dlog])
 
   // Test B: tiny write — scan → connect → write 16 known bytes → disconnect.
-  // Validates that writes reach the peripheral. The receiver logs the raw hex;
-  // compare manually against '000102030405060708090a0b0c0d0e0f'.
   const runTinyWriteTest = useCallback(async () => {
     if (testRunning) return
     setTestRunning(true)
     setTestResult(null)
     dlog('=== TEST B: Tiny Write (16 bytes) ===')
-    const knownHex = '000102030405060708090a0b0c0d0e0f' // 16 deterministic bytes
+    const knownHex = '000102030405060708090a0b0c0d0e0f'
     const t0 = Date.now()
     try {
       if (Platform.OS === 'android') {
@@ -1068,7 +1041,6 @@ export default function LocalPaymentsScreen() {
           writeCharacteristic: mbWriteChar,
           addEventListener: mbAddListener
         } = await import('munim-bluetooth')
-
         const foundDevice = await new Promise<any>((resolve, reject) => {
           const timeout = setTimeout(() => {
             removeLst()
@@ -1087,7 +1059,24 @@ export default function LocalPaymentsScreen() {
         await mbConnect(foundDevice.id)
         await mbDiscoverServices(foundDevice.id)
         dlog(`[+${Date.now() - t0}ms] Connected + discovered`)
-        await mbWriteChar(foundDevice.id, BSV_PAYMENT_SERVICE_UUID, WRITE_CHARACTERISTIC_UUID, knownHex, 'write')
+        for (let attempt = 0; attempt < 6; attempt++) {
+          try {
+            await mbWriteChar(
+              foundDevice.id,
+              BSV_PAYMENT_SERVICE_UUID,
+              WRITE_CHARACTERISTIC_UUID,
+              knownHex,
+              'writeWithoutResponse'
+            )
+            break
+          } catch (e: any) {
+            if (attempt < 5 && e.message?.includes('Failed to queue')) {
+              await new Promise(r => setTimeout(r, 20 * Math.pow(2, attempt)))
+            } else {
+              throw e
+            }
+          }
+        }
         dlog(`[+${Date.now() - t0}ms] Wrote 16 bytes`)
         try {
           mbDisconnect(foundDevice.id)
@@ -1176,33 +1165,46 @@ export default function LocalPaymentsScreen() {
           mbStartScan({ serviceUUIDs: [BSV_PAYMENT_SERVICE_UUID] })
         })
         await mbConnect(foundDevice.id)
-        // Get MTU from event
-        const mtu = await new Promise<number>(resolve => {
-          const timer = setTimeout(() => {
-            removeMtu()
-            resolve(23)
-          }, 3000)
-          const removeMtu = mbAddListener('mtuChanged', (d: any) => {
-            if (d?.deviceId === foundDevice.id) {
-              clearTimeout(timer)
-              removeMtu()
-              resolve(d.mtu || 23)
-            }
-          })
-        })
-        dlog(`[+${Date.now() - t0}ms] MTU=${mtu}`)
+        dlog(`[+${Date.now() - t0}ms] Connected`)
         await mbDiscoverServices(foundDevice.id)
-        const payloadSize = Math.max(mtu - 6, 17)
+        dlog(`[+${Date.now() - t0}ms] Services discovered`)
+        // Default MTU=23 → 17 bytes payload per chunk. No MTU negotiation.
+        const payloadSize = 17
         const chunks = chunkPayload(testPayload, payloadSize)
-        dlog(`Sending ${chunks.length} chunks of ${payloadSize}B...`)
+
+        dlog(`Sending ${chunks.length} chunks of ${payloadSize}B (v2)...`)
         for (let i = 0; i < chunks.length; i++) {
-          await mbWriteChar(
-            foundDevice.id,
-            BSV_PAYMENT_SERVICE_UUID,
-            WRITE_CHARACTERISTIC_UUID,
-            uint8ArrayToHex(chunks[i]),
-            'write'
-          )
+          const hexData = uint8ArrayToHex(chunks[i])
+          dlog(`chunk[${i}] ${hexData.length / 2}B, calling writeChar...`)
+
+          // Wrap each write in a 5s timeout to catch native-level hangs
+          const writeWithTimeout = () =>
+            Promise.race([
+              mbWriteChar(
+                foundDevice.id,
+                BSV_PAYMENT_SERVICE_UUID,
+                WRITE_CHARACTERISTIC_UUID,
+                hexData,
+                'writeWithoutResponse'
+              ),
+              new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`write timeout chunk ${i}`)), 5000))
+            ])
+
+          for (let attempt = 0; attempt < 6; attempt++) {
+            try {
+              await writeWithTimeout()
+              dlog(`chunk[${i}] written OK`)
+              break
+            } catch (e: any) {
+              dlog(`chunk[${i}] attempt ${attempt}: ${e.message}`)
+              if (attempt < 5 && (e.message?.includes('Failed to queue') || e.message?.includes('write timeout'))) {
+                await new Promise(r => setTimeout(r, 100 * (attempt + 1)))
+              } else {
+                throw e
+              }
+            }
+          }
+          await new Promise(r => setTimeout(r, 50))
         }
         await new Promise(r => setTimeout(r, 500))
         try {
