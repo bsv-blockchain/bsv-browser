@@ -36,7 +36,7 @@ import {
   DEFAULT_SEARCH_ENGINE_ID,
   safeBottomInset
 } from '@/shared/constants'
-import { isValidUrl } from '@/utils/generalHelpers'
+import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
 import { useTranslation } from 'react-i18next'
@@ -888,7 +888,10 @@ const Browser = observer(function Browser() {
     if (!activeTab) return
     if (navState.url?.includes('favicon.ico') && activeTab.url === kNEW_TAB_URL) return
 
-    if (navState.url !== activeTab.url && activeCameraStreams.current.has(activeTab.id.toString())) {
+    if (
+      normalizeUrlForHistory(navState.url) !== activeTab.url &&
+      activeCameraStreams.current.has(activeTab.id.toString())
+    ) {
       activeCameraStreams.current.delete(activeTab.id.toString())
       activeTab.webviewRef?.current?.injectJavaScript(`
         (function() {
@@ -903,15 +906,17 @@ const Browser = observer(function Browser() {
     }
 
     tabStore.handleNavigationStateChange(activeTab.id, navState)
-    if (!addressEditing.current) setAddressText(navState.url)
+    // Show the clean URL (without transient challenge tokens) in the address bar
+    const cleanUrl = normalizeUrlForHistory(navState.url)
+    if (!addressEditing.current) setAddressText(cleanUrl)
 
     // Debounce history push so that rapid onNavigationStateChange events
     // (which often carry stale titles from the *previous* page) settle before
     // we commit an entry.  Only the final event's metadata is recorded.
-    if (!navState.loading && navState.url !== kNEW_TAB_URL) {
+    if (!navState.loading && cleanUrl !== kNEW_TAB_URL) {
       if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
-      const url = navState.url
-      const title = navState.title || navState.url
+      const url = cleanUrl
+      const title = navState.title || cleanUrl
       historyDebounceTimer.current = setTimeout(() => {
         pushHistory({ title, url, timestamp: Date.now() }).catch(() => {})
         historyDebounceTimer.current = null

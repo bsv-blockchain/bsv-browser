@@ -5,7 +5,7 @@ import { WebView } from 'react-native-webview'
 import { LayoutAnimation } from 'react-native'
 import { Tab } from '@/shared/types/browser'
 import { kNEW_TAB_URL } from '@/shared/constants'
-import { isValidUrl } from '@/utils/generalHelpers'
+import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
 const STORAGE_KEYS = { TABS: 'tabs', ACTIVE: 'activeTabId' }
@@ -331,7 +331,10 @@ export class TabStore {
     // Note: Navigation state will be calculated after history updates to ensure accuracy
 
     // Only update URL and history when navigation completes and we have a valid URL
-    const currentUrl = navState.url || kNEW_TAB_URL
+    const rawUrl = navState.url || kNEW_TAB_URL
+    // Normalize the URL to strip transient challenge parameters (e.g. Cloudflare __cf_chl_tk)
+    // that would otherwise cause redirect loops to be treated as distinct navigations.
+    const currentUrl = normalizeUrlForHistory(rawUrl)
 
     if (!navState.loading && currentUrl && isValidUrl(currentUrl)) {
       // Always update title when navigation completes, even if URL hasn't changed.
