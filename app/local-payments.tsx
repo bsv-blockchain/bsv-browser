@@ -793,6 +793,7 @@ export default function LocalPaymentsScreen() {
         const {
           connect: mbConnect,
           disconnect: mbDisconnect,
+          discoverServices: mbDiscoverServices,
           writeCharacteristic: mbWriteChar,
           addEventListener: mbAddListener
         } = await import('munim-bluetooth')
@@ -802,6 +803,11 @@ export default function LocalPaymentsScreen() {
 
         await mbConnect(deviceId)
         dlog(`[Android] Connected`)
+
+        // Must discover services on this new connection — the scan phase
+        // disconnected after reading identity, so the GATT cache is empty.
+        await mbDiscoverServices(deviceId)
+        dlog(`[Android] Services discovered`)
 
         // Android default MTU is 23 (20 usable after ATT header, 17 after chunk header).
         // Auto-MTU negotiation is disabled because gatt.requestMtu() sets mDeviceBusy
