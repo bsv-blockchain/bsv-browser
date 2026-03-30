@@ -128,11 +128,13 @@ async function createBLEPaymentToken(
 
 async function resolveIdentity(idClient: IdentityClient, identityKey: string): Promise<PeerDisplayIdentity | null> {
   try {
+    const TIMEOUT = Symbol('timeout')
     const result = await Promise.race([
       idClient.resolveByIdentityKey({ identityKey, seekPermission: false }),
-      new Promise<null>(resolve => setTimeout(() => resolve(null), 5000))
+      new Promise<typeof TIMEOUT>(resolve => setTimeout(() => resolve(TIMEOUT), 5000))
     ])
-    if (result && Array.isArray(result) && result.length > 0) {
+    if (result === TIMEOUT) return null
+    if (Array.isArray(result) && result.length > 0) {
       const r = result[0]
       return {
         name: r.name,
@@ -457,18 +459,14 @@ export default function LocalPaymentsScreen() {
     try {
       const mgr = await getBleManager()
 
-      // Wait for Bluetooth to be ready — first scan after BleManager creation
-      // fires while state is still 'Unknown', which silently fails (error 103).
-      await waitForBLEPoweredOn(mgr)
-
       // seenDeviceIds: prevents re-processing the same device.id during one scan.
       // seenIdentityKeys: prevents duplicate entries when iOS re-advertises the
       // same physical device with a different CBPeripheral UUID after a
-      // connect/disconnect cycle (which happens because we connect briefly to
-      // read the identity characteristic, then disconnect, and the device keeps
-      // advertising).
+      // connect/disconnect cycle.
+      // busyConnecting: prevents concurrent connect attempts — only one at a time.
       const seenDeviceIds = new Set<string>()
       const seenIdentityKeys = new Set<string>()
+      let busyConnecting = false
 
       mgr.startDeviceScan([BSV_PAYMENT_SERVICE_UUID], { allowDuplicates: false }, async (error: any, device: any) => {
         if (error) {
@@ -477,6 +475,10 @@ export default function LocalPaymentsScreen() {
         }
         if (!device || seenDeviceIds.has(device.id)) return
         seenDeviceIds.add(device.id)
+
+        // Skip if we're already connecting to / resolving another device
+        if (busyConnecting) return
+        busyConnecting = true
 
         const name = device.localName || device.name || '(unknown)'
         dlog(`Found BSV device: ${name} (${device.id.substring(0, 12)}...)`)
@@ -493,14 +495,17 @@ export default function LocalPaymentsScreen() {
         }
         setDiscoveredReceivers(prev => [...prev, entry])
 
-        // Connect briefly to read identity characteristic
+        // Connect briefly to read identity
         try {
+          dlog(`Connecting to ${device.id}...`)
           const connected = await mgr.connectToDevice(device.id)
+          dlog('Connected, discovering services...')
           await connected.discoverAllServicesAndCharacteristics()
+          dlog('Discovery complete')
 
-          // Find identity char across all service instances (Android can
-          // register duplicate GATT service instances)
+          // Find identity char across all service instances
           const services = await connected.services()
+          dlog(`Found ${services.length} services`)
           let identityHex = ''
           for (const svc of services) {
             const chars = await svc.characteristics()
@@ -524,12 +529,11 @@ export default function LocalPaymentsScreen() {
           await connected.cancelConnection()
 
           if (identityHex.length === 66) {
-            // Deduplicate by identity key — same physical device re-discovered
-            // after connect/disconnect gets a new device.id on iOS but the same
-            // identity key. Drop the duplicate.
+            // Deduplicate by identity key
             if (seenIdentityKeys.has(identityHex)) {
               dlog(`Duplicate identity (skipping): ${identityHex.substring(0, 16)}...`)
               setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
+              busyConnecting = false
               return
             }
             seenIdentityKeys.add(identityHex)
@@ -545,6 +549,7 @@ export default function LocalPaymentsScreen() {
                 prev.map(r => (r.deviceId === device.id ? { ...r, identity, resolving: false } : r))
               )
               if (identity) dlog(`Resolved: ${identity.name}`)
+              else dlog('Identity resolution timed out or returned empty')
             } else {
               setDiscoveredReceivers(prev => prev.map(r => (r.deviceId === device.id ? { ...r, resolving: false } : r)))
             }
@@ -556,6 +561,7 @@ export default function LocalPaymentsScreen() {
           dlog(`Failed to read identity from ${name}: ${e.message}`)
           setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
         }
+        busyConnecting = false
       })
 
       // Auto-stop after 20s
