@@ -128,9 +128,12 @@ async function createBLEPaymentToken(
 
 async function resolveIdentity(idClient: IdentityClient, identityKey: string): Promise<PeerDisplayIdentity | null> {
   try {
-    const results = await idClient.resolveByIdentityKey({ identityKey, seekPermission: false })
-    if (results.length > 0) {
-      const r = results[0]
+    const result = await Promise.race([
+      idClient.resolveByIdentityKey({ identityKey, seekPermission: false }),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 5000))
+    ])
+    if (result && Array.isArray(result) && result.length > 0) {
+      const r = result[0]
       return {
         name: r.name,
         avatarURL: r.avatarURL,
@@ -296,7 +299,10 @@ export default function LocalPaymentsScreen() {
   useEffect(
     () => () => {
       cleanupAll()
-      bleManagerRef.current?.destroy()
+      if (bleManagerRef.current) {
+        bleManagerRef.current.destroy()
+        bleManagerRef.current = null
+      }
     },
     []
   )
@@ -642,11 +648,23 @@ export default function LocalPaymentsScreen() {
         chunkB64 = btoa(binary)
 
         try {
-          await device.writeCharacteristicWithResponseForService(
-            BSV_PAYMENT_SERVICE_UUID,
-            WRITE_CHARACTERISTIC_UUID,
-            chunkB64
-          )
+          // Use write-with-response on iOS (reliable, peripheral ACKs each write).
+          // Use write-without-response on Android (avoids Promise hang issues with
+          // ble-plx on some Android BLE stacks where write-with-response to an iOS
+          // peripheral never resolves).
+          if (Platform.OS === 'ios') {
+            await device.writeCharacteristicWithResponseForService(
+              BSV_PAYMENT_SERVICE_UUID,
+              WRITE_CHARACTERISTIC_UUID,
+              chunkB64
+            )
+          } else {
+            await device.writeCharacteristicWithoutResponseForService(
+              BSV_PAYMENT_SERVICE_UUID,
+              WRITE_CHARACTERISTIC_UUID,
+              chunkB64
+            )
+          }
         } catch (writeErr: any) {
           dlog(`Write error on chunk ${i}: ${writeErr.message}`)
           throw writeErr
@@ -654,8 +672,9 @@ export default function LocalPaymentsScreen() {
         const pct = chunks.length > 1 ? Math.round((i / (chunks.length - 1)) * 100) : 100
         setProgress(pct)
         if (i % 10 === 0) dlog(`Sent chunk ${i + 1}/${chunks.length}`)
-        // Small delay between chunks
-        if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 50))
+        // Pacing delay — prevents BLE buffer overflow on write-without-response
+        // and gives the peripheral time to process each chunk.
+        await new Promise(r => setTimeout(r, Platform.OS === 'android' ? 100 : 30))
       }
 
       // Wait for receiver to process
@@ -1040,6 +1059,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'stretch',
     gap: spacing.sm,
     paddingVertical: 14,
     borderRadius: radii.md
@@ -1062,6 +1082,7 @@ const styles = StyleSheet.create({
 
   cancelBtn: {
     alignItems: 'center',
+    alignSelf: 'stretch',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
     borderRadius: radii.md,
