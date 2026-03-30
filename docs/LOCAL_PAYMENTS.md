@@ -15,46 +15,27 @@ The feature is accessible from **Settings > Local Payments** in the wallet drawe
 - **Global snackbar notifications**: Background-processed payments show a notification regardless of which screen the user is on.
 - **BLE permissions**: Requested once on screen open (permission gate phase), not repeatedly per action.
 - **Lazy native module loading**: `munim-bluetooth` is loaded via `require()` at first use, preventing Android/Hermes module graph crashes.
-- **MTU negotiation**: Sender negotiates MTU after connecting. On Android, explicit `requestMTU(512)`. On iOS, reads `device.mtu` with a 185-byte floor. Chunk sizes adapt to the negotiated MTU.
+- **MTU negotiation**: On Android, auto-negotiated to 512 in munim-bluetooth after connect, emitted as `mtuChanged` event. On iOS, reads `device.mtu` from ble-plx with a 185-byte floor. Chunk sizes adapt to the negotiated MTU.
 
-### Broken — Android Sender → iOS Receiver
+### Android Sender → iOS Receiver — Implemented Fixes (Needs Testing)
 
-**Symptom**: Android finds the iOS peripheral via BLE scan, connects successfully, but `discoverAllServicesAndCharacteristics()` from `react-native-ble-plx` hangs indefinitely. After ~13 seconds the iOS peripheral drops the connection (BLE supervision timeout) or ble-plx reports "Operation timed out".
+Three root-cause fixes have been implemented. A rebuild and test is required to confirm.
 
-**Current mitigation**: An 8-second timeout on `discoverAllServicesAndCharacteristics` triggers a fallback path that attempts `readCharacteristicForDevice` directly by known UUIDs. This fallback has not yet been confirmed working.
+**Fix 1: Service-add race condition** — iOS `CBPeripheralManager.add(_:)` is asynchronous. Previously `startAdvertising()` was called immediately after `setServices()`, before `didAddService` fired. Android centrals connecting during this window found an empty GATT database. The fix: JS now waits for the `serviceAdded` event (emitted from `handlePeripheralManagerDidAddService`) before calling `startAdvertising()`, plus a 500ms stabilization delay.
 
-**What's been tried** (none of these fixed the Android→iOS service discovery hang):
+**Fix 2: Dynamic identity characteristic** — Previously the identity characteristic was created with `CBMutableCharacteristic(value: data)` (static). Some Android OEM BLE stacks require an active peripheral response even for static reads. The fix: `characteristicValueCache` stores the identity key natively; the characteristic is now created with `value=nil`; all reads are served explicitly through `didReceiveRead` from the cache.
 
-- `refreshGatt: 'OnConnected'` connection option on Android
-- Stopping the scan before connecting (to free the BLE radio)
-- Retrying the connection after failure
-- Timeout + fallback to direct characteristic read
-- Various combinations of the above
+**Fix 3: Android central library switch** — `react-native-ble-plx`'s `discoverAllServicesAndCharacteristics()` hangs indefinitely on Android when connecting to an iOS peripheral. The fix: Android now uses `munim-bluetooth` for ALL central operations (scan, connect, discoverServices, readCharacteristic, writeCharacteristic). ble-plx is iOS-only.
 
-**What hasn't been tried yet**:
+**To verify**: Run with Xcode console open (filter `[BLE-DIAG]`). The event timeline should show:
 
-- Checking the `[BLE-DIAG]` native iOS logs (Xcode console) to see if the iOS side even sees the connection and service discovery request from Android
-- Using `munim-bluetooth` for central mode on Android instead of `react-native-ble-plx` (munim-bluetooth's Android central implementation does work)
-- Testing with a different Android device to rule out device-specific BLE stack bugs
-- Adding a `didReceiveRead` delegate to the `PeripheralManagerDelegateProxy` (this was added in the latest diagnostic patch but hasn't been tested yet — it may fix the issue if iOS needs an explicit read handler for the identity characteristic)
-
-**Root cause hypothesis**: The iOS `CBPeripheralManager` GATT server may not be responding to Android's service discovery requests. This could be because:
-
-1. The GATT service wasn't fully registered by the time Android connects (race condition between `setServices` + `startAdvertising` and Android's scan + connect)
-2. A `CBPeripheralManager` configuration issue prevents iOS from responding to the Android BLE stack's specific service discovery format
-3. The identity characteristic's static value (set via `CBMutableCharacteristic(value: data)`) may not be accessible to Android centrals without an explicit `didReceiveRead` delegate handler
-
-The diagnostic patch (`[BLE-DIAG]` log prefix) is currently active and includes:
-
-- Detailed logging for all `PeripheralManagerDelegateProxy` callbacks
-- A `didReceiveRead` handler that explicitly serves reads from cached characteristic values
-- Logging for service addition success/failure
-- Logging for advertising state
-- Central subscribe/unsubscribe events with MTU info
+1. `[BLE-DIAG] AddService SUCCESS` before `[BLE-DIAG] PeripheralManager didStartAdvertising`
+2. `[BLE-DIAG] PeripheralManager didReceiveRead` firing when Android connects
 
 ### Untested
 
-- **Receiver-side `internalizeAction`**: The auto-internalization flow is wired up but hasn't completed successfully end-to-end because the Android→iOS transfer path is blocked.
+- **Android→iOS full transfer** (see above — fixes implemented, needs native rebuild + test)
+- **Receiver-side `internalizeAction`**: The auto-internalization flow is wired up but hasn't completed successfully end-to-end.
 - **Offline receive + background retry**: The `NetInfo` listener and wallet-build retry in `WalletContext.tsx` are implemented but untested.
 
 ## Architecture
@@ -63,16 +44,17 @@ The diagnostic patch (`[BLE-DIAG]` log prefix) is currently active and includes:
 
 No single React Native BLE library supports both central and peripheral roles on both platforms. We use two libraries:
 
-| Library                    | Role            | Used for                                                                 |
-| -------------------------- | --------------- | ------------------------------------------------------------------------ |
-| **`munim-bluetooth`**      | Peripheral only | Advertising, GATT server, receiving characteristic writes                |
-| **`react-native-ble-plx`** | Central only    | Scanning, connecting, service discovery, reading/writing characteristics |
+| Library                    | Platform | Role       | Used for                                                                  |
+| -------------------------- | -------- | ---------- | ------------------------------------------------------------------------- |
+| **`munim-bluetooth`**      | Both     | Peripheral | Advertising, GATT server, receiving characteristic writes                 |
+| **`munim-bluetooth`**      | Android  | Central    | Scanning, connecting, service discovery, reading identity, writing chunks |
+| **`react-native-ble-plx`** | iOS only | Central    | Scanning, connecting, service discovery, reading identity, writing chunks |
 
-**Why not one library?**
+**Why two central libraries?**
 
-- `react-native-ble-plx` and `react-native-ble-manager` are both central-only — neither supports peripheral/advertising mode.
-- `munim-bluetooth` supports both roles, but its iOS central implementation is severely incomplete (`discoverServices` resolves immediately with `[]`, `readCharacteristic` returns "Not implemented").
-- On Android, `munim-bluetooth` central mode works but has scanning bugs (empty `serviceUUIDs` used `emptyList()` instead of `null`).
+- `react-native-ble-plx`'s `discoverAllServicesAndCharacteristics()` hangs indefinitely on Android when the peripheral is iOS `CBPeripheralManager`. munim-bluetooth uses the native `BluetoothGatt` API directly and does not have this issue.
+- `munim-bluetooth`'s iOS central implementation is stubs (`discoverServices` resolves with `[]`, `readCharacteristic` rejects "Not implemented"). ble-plx is retained for iOS central.
+- On Android, `munim-bluetooth` central mode required two patches: scan filter fix (`emptyList()` → `null`) and auto-MTU negotiation after connect.
 
 We patched `munim-bluetooth` via `patch-package` for the peripheral-mode gaps. The patches live in `patches/munim-bluetooth+0.3.24.patch`.
 
@@ -130,10 +112,15 @@ The serialised payload is split into chunks sized to the negotiated BLE MTU:
 
 The sender uses platform-specific write modes:
 
-- **iOS sender**: `writeCharacteristicWithResponseForService` (acknowledged writes, 30ms pacing)
-- **Android sender**: `writeCharacteristicWithoutResponseForService` (unacknowledged writes, 100ms pacing)
+- **iOS sender** (ble-plx): `writeCharacteristicWithResponseForService` (acknowledged writes, 30ms pacing)
+- **Android sender** (munim-bluetooth): `writeCharacteristic` with `writeWithoutResponse` (unacknowledged writes, 100ms pacing)
 
-Android's `writeWithResponse` to an iOS peripheral hangs on some BLE stacks — the ble-plx Promise never resolves. `writeWithoutResponse` with pacing delays works reliably.
+Android's write-with-response to an iOS peripheral hangs on some BLE stacks. `writeWithoutResponse` with 100ms pacing is reliable.
+
+### MTU Negotiation
+
+- **Android**: munim-bluetooth auto-requests MTU 512 in `onConnectionStateChange` after connect. The negotiated value is emitted as a `mtuChanged` event. The JS sender awaits this event (5s timeout, falls back to 23) to determine chunk payload size.
+- **iOS**: ble-plx `device.mtu` is read after `discoverAllServicesAndCharacteristics`. Floor is 185 bytes.
 
 ## UX Flow
 
@@ -254,22 +241,25 @@ The patch (`patches/munim-bluetooth+0.3.24.patch`) modifies both iOS and Android
 **`PeripheralManagerDelegateProxy`** — added delegate methods:
 
 - `peripheralManager(_:didReceiveWrite:)` → forwards to `handlePeripheralManagerDidReceiveWrite`
-- `peripheralManager(_:didReceiveRead:)` → serves reads from characteristic's cached value (diagnostic build)
-- `peripheralManager(_:central:didSubscribeTo:)` → logs subscription + central MTU (diagnostic build)
+- `peripheralManager(_:didReceiveRead:)` → serves reads from `owner.characteristicValueCache` first, then falls back to `characteristic.value`
+- `peripheralManager(_:central:didSubscribeTo:)` → logs subscription + central MTU
+- All methods log with `[BLE-DIAG]` prefix
 
-**`handlePeripheralManagerDidReceiveWrite`**: Processes write requests, converts data to hex, emits `characteristicValueChanged` event to JS. Updates `mutableChar.value` and responds to each request with `.success`.
+**`characteristicValueCache: [CBUUID: Data]`**: Class property on `HybridMunimBluetooth`. Populated by `setServices` for read-only characteristics. `setServices` creates `CBMutableCharacteristic` with `value=nil` for all read-only chars so that CoreBluetooth routes all reads through `didReceiveRead`. The cache entry provides the actual identity bytes.
 
-**`handlePeripheralDidUpdateValue`**: Emits `characteristicValueChanged` event for central-mode characteristic notifications.
+**`handlePeripheralManagerDidAddService`**: Emits `serviceAdded` JS event when service registration succeeds. JS receiver waits for this event before calling `startAdvertising()`.
 
-**`MunimBluetoothEventEmitter`**: Added `emitCharacteristicValueChanged` method.
+**`handlePeripheralManagerDidReceiveWrite`**: Processes write requests, converts data to hex, emits `characteristicValueChanged` event to JS. Updates `mutableChar.value` and responds with `.success`.
 
-**Diagnostic logging** (current build): All `PeripheralManagerDelegateProxy` methods log with `[BLE-DIAG]` prefix. `setServices` logs characteristic details. Service addition success/failure logged.
+**`MunimBluetoothEventEmitter`**: Added `emitCharacteristicValueChanged` and `emitServiceAdded` methods. `"serviceAdded"` added to `supportedEvents()`.
 
 ### Android Changes
 
 **Scan filter fix**: `startScan()` with empty `serviceUUIDs` now passes `null` instead of `emptyList()`. Android requires `null` for unfiltered scans.
 
 **Write event emission**: `onCharacteristicWriteRequest` callback emits `characteristicValueChanged` event with hex-encoded value, service UUID, characteristic UUID, and device address.
+
+**Auto-MTU negotiation**: After `onConnectionStateChange` → `STATE_CONNECTED`, automatically calls `gatt.requestMtu(512)`. The `onMtuChanged` callback emits a `mtuChanged` event with `{ deviceId, mtu }`. JS listens for this event to get the negotiated MTU value for chunk sizing. `pendingMtuRequests` map handles cleanup on disconnect.
 
 ### Important Notes on the Patch
 
@@ -309,9 +299,11 @@ The patch (`patches/munim-bluetooth+0.3.24.patch`) modifies both iOS and Android
 
 ## Next Steps
 
-1. **Diagnose Android→iOS with native logs**: Run with the diagnostic patch and check Xcode console for `[BLE-DIAG]` lines when Android connects. This will reveal whether iOS sees the connection at all, whether service discovery requests arrive, and whether the `didReceiveRead` handler fires.
-2. **Test `didReceiveRead` handler**: The diagnostic patch added an explicit read handler. If the identity characteristic was being created with `value: nil` (despite the code intending to set it), this handler will serve the read and may fix the issue.
-3. **Consider `munim-bluetooth` for Android central**: Since `munim-bluetooth`'s Android central implementation works (unlike iOS), it could replace `react-native-ble-plx` on Android for the identity read step. This would bypass the ble-plx service discovery hang entirely.
-4. **Remove diagnostic logging**: Once the Android→iOS issue is resolved, strip `[BLE-DIAG]` logging and regenerate the patch for production.
-5. **End-to-end internalization test**: Verify the full receive → persist → internalize → snackbar flow works in both directions.
-6. **Clean up unused code**: Remove `hooks/useBLETransfer.ts` and `utils/ble/central.ts` if confirmed unused.
+1. **Native rebuild + test Android→iOS**: `npx expo prebuild --clean && npx expo run:ios --device && npx expo run:android --device`. Check Xcode console `[BLE-DIAG]` logs when Android connects. The event order `AddService SUCCESS` → `startAdvertising` → `didReceiveRead` should now be observed.
+2. **Run Transport Test A** (identity-only): Tap the debug icon (top-right), then `A: Identity Read`. This exercises only the GATT read path without wallet code. Should return a 33-byte identity hex.
+3. **Run Transport Test B+C**: Once A passes, run `B: Write 16B` and `C: 1KB Chunked` to validate the full transfer path.
+4. **End-to-end internalization test**: Verify the full receive → persist → internalize → snackbar flow works in both directions.
+5. **Remove diagnostic logging**: Once Android→iOS is confirmed stable, strip `[BLE-DIAG]` logging from the patch for production.
+6. **Implement notify ACK/NAK protocol**: Use the reserved notify characteristic for receiver-side acknowledgements (ACK_RECEIVED / ACK_PERSISTED / NAK_CRC). This turns the transfer from fire-and-forget to a proper transport.
+7. **QR identity bootstrap fallback**: If GATT identity read remains flaky on certain device combinations, add a QR code fallback — receiver shows QR with identity key, sender scans it, then uses BLE only for payload transfer.
+8. **Clean up unused code**: Remove `hooks/useBLETransfer.ts` and `utils/ble/central.ts` if confirmed unused.

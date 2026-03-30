@@ -180,6 +180,8 @@ export default function LocalPaymentsScreen() {
   // Debug
   const [showDebug, setShowDebug] = useState(false)
   const [debugLogs, setDebugLogs] = useState<string[]>([])
+  const [testRunning, setTestRunning] = useState(false)
+  const [testResult, setTestResult] = useState<string | null>(null)
 
   // Snackbar — persists for the current session (no auto-dismiss) so the user
   // always has a visible record of successfully processed payments.
@@ -294,7 +296,18 @@ export default function LocalPaymentsScreen() {
       } catch {}
     }
     cleanupRef.current = []
-    bleManagerRef.current?.stopDeviceScan()
+    // Stop platform-appropriate scan
+    if (Platform.OS === 'android') {
+      import('munim-bluetooth').then(({ stopScan }) => {
+        try {
+          stopScan()
+        } catch {
+          /* ignore */
+        }
+      })
+    } else {
+      bleManagerRef.current?.stopDeviceScan()
+    }
     teardownPeripheral()
   }, [])
 
@@ -391,7 +404,8 @@ export default function LocalPaymentsScreen() {
     setPhase('receiving_wait')
 
     try {
-      const { setServices, startAdvertising, addEventListener, isBluetoothEnabled } = await import('munim-bluetooth')
+      const { setServices, startAdvertising, stopAdvertising, addEventListener, isBluetoothEnabled } =
+        await import('munim-bluetooth')
 
       // Wait for Bluetooth to be powered on before setting up the GATT server.
       // On iOS, CBPeripheralManager throws if BT state is 0 (unknown/resetting).
@@ -409,11 +423,33 @@ export default function LocalPaymentsScreen() {
         }
       }
 
-      // Set up GATT service with identity + write + notify characteristics
+      // Full teardown of any previous session before re-registering services.
+      try {
+        stopAdvertising()
+      } catch {
+        /* ignore — may not be advertising */
+      }
+
+      // Set up GATT service with identity + write + notify characteristics.
+      //
+      // IMPORTANT: IDENTITY_CHARACTERISTIC_UUID is passed with value: '' (empty).
+      // The native layer (munim-bluetooth patch) stores the actual identity key
+      // in characteristicValueCache and creates the characteristic with value=nil
+      // (dynamic). All reads are served explicitly through didReceiveRead from the
+      // cache. This forces CoreBluetooth to respond to Android's read requests,
+      // bypassing the ambiguous static-value semantics that cause silent failures
+      // on some Android OEM BLE stacks.
+      //
+      // The identity key is passed via identityKeyForCache so the patch can
+      // pick it up. We encode it as the 'value' field of the identity char;
+      // the native setServices implementation stores it in the cache if non-empty.
+      dlog(`[${Date.now()}] setServices() called`)
       setServices([
         {
           uuid: BSV_PAYMENT_SERVICE_UUID,
           characteristics: [
+            // value: identityKey — the native patch stores this in characteristicValueCache
+            // and creates the CBMutableCharacteristic with value=nil for explicit reads.
             { uuid: IDENTITY_CHARACTERISTIC_UUID, properties: ['read'], value: identityKey },
             { uuid: WRITE_CHARACTERISTIC_UUID, properties: ['write', 'writeWithoutResponse'], value: '' },
             { uuid: NOTIFY_CHARACTERISTIC_UUID, properties: ['read', 'notify'], value: '' }
@@ -421,6 +457,32 @@ export default function LocalPaymentsScreen() {
         }
       ])
 
+      // On iOS, wait for the CBPeripheralManager didAddService callback before
+      // advertising. If we advertise immediately, Android centrals can connect
+      // to an empty GATT database and discoverAllServicesAndCharacteristics()
+      // hangs indefinitely (the service isn't registered yet).
+      // The munim-bluetooth patch emits a 'serviceAdded' event when didAddService
+      // fires. We wait up to 3s; if the event never comes, proceed anyway.
+      if (Platform.OS === 'ios') {
+        await new Promise<void>(resolve => {
+          const timeout = setTimeout(() => {
+            dlog(`[${Date.now()}] serviceAdded timeout — proceeding anyway`)
+            removeListener()
+            resolve()
+          }, 3000)
+          const removeListener = addEventListener('serviceAdded', (data: any) => {
+            dlog(`[${Date.now()}] serviceAdded: ${data?.serviceUUID ?? '?'}`)
+            clearTimeout(timeout)
+            removeListener()
+            resolve()
+          })
+        })
+        // Brief stabilization delay after service registration — gives the iOS
+        // GATT database time to settle before we begin advertising.
+        await new Promise(r => setTimeout(r, 500))
+      }
+
+      dlog(`[${Date.now()}] startAdvertising() called`)
       startAdvertising({ serviceUUIDs: [BSV_PAYMENT_SERVICE_UUID], localName: 'BSV Pay' })
       dlog('Advertising started')
 
@@ -456,76 +518,170 @@ export default function LocalPaymentsScreen() {
     setDiscoveredReceivers([])
     dlog('Scanning for nearby receivers...')
 
+    // Common helper: resolve and store identity for a found device
+    const resolveAndStore = async (deviceId: string, identityHex: string, name: string | null) => {
+      dlog(`Identity read OK: ${identityHex.substring(0, 16)}...`)
+      setDiscoveredReceivers(prev =>
+        prev.map(r => (r.deviceId === deviceId ? { ...r, identityKey: identityHex, resolving: true } : r))
+      )
+      if (identityClientRef.current) {
+        const identity = await resolveIdentity(identityClientRef.current, identityHex)
+        setDiscoveredReceivers(prev =>
+          prev.map(r => (r.deviceId === deviceId ? { ...r, identity, resolving: false } : r))
+        )
+        if (identity) dlog(`Resolved: ${identity.name}`)
+        else dlog('Identity resolution timed out or returned empty')
+      } else {
+        setDiscoveredReceivers(prev => prev.map(r => (r.deviceId === deviceId ? { ...r, resolving: false } : r)))
+      }
+    }
+
     try {
-      const mgr = await getBleManager()
+      if (Platform.OS === 'android') {
+        // ── Android central: use munim-bluetooth (avoids ble-plx discovery hang) ──
+        // munim-bluetooth's Android central (connect/discoverServices/readCharacteristic)
+        // uses the native BluetoothGatt API directly, bypassing the ble-plx discovery
+        // path that hangs indefinitely when connecting to an iOS peripheral.
+        const {
+          startScan: mbStartScan,
+          stopScan: mbStopScan,
+          connect: mbConnect,
+          disconnect: mbDisconnect,
+          discoverServices: mbDiscoverServices,
+          readCharacteristic: mbReadChar,
+          addEventListener: mbAddListener
+        } = await import('munim-bluetooth')
 
-      // seenDeviceIds: prevents re-processing the same device.id during one scan.
-      // seenIdentityKeys: prevents duplicate entries when iOS re-advertises the
-      // same physical device with a different CBPeripheral UUID after a
-      // connect/disconnect cycle.
-      // busyConnecting: prevents concurrent connect attempts — only one at a time.
-      const seenDeviceIds = new Set<string>()
-      const seenIdentityKeys = new Set<string>()
-      let busyConnecting = false
+        const seenDeviceIds = new Set<string>()
+        const seenIdentityKeys = new Set<string>()
+        let busyConnecting = false
 
-      mgr.startDeviceScan([BSV_PAYMENT_SERVICE_UUID], { allowDuplicates: false }, async (error: any, device: any) => {
-        if (error) {
-          dlog(`Scan error: ${error.message}`)
-          return
-        }
-        if (!device || seenDeviceIds.has(device.id)) return
-        seenDeviceIds.add(device.id)
+        const removeDeviceListener = mbAddListener('deviceFound', async (device: any) => {
+          if (!device?.id || seenDeviceIds.has(device.id)) return
+          seenDeviceIds.add(device.id)
 
-        // Skip if we're already connecting to / resolving another device
-        if (busyConnecting) return
-        busyConnecting = true
+          if (busyConnecting) return
+          busyConnecting = true
 
-        const name = device.localName || device.name || '(unknown)'
-        dlog(`Found BSV device: ${name} (${device.id.substring(0, 12)}...)`)
+          const name: string = device.localName || device.name || '(unknown)'
+          dlog(`Found BSV device: ${name} (${device.id.substring(0, 12)}...)`)
+          setDiscoveredReceivers(prev => [
+            ...prev,
+            { deviceId: device.id, identityKey: '', name, rssi: device.rssi ?? null, identity: null, resolving: true }
+          ])
 
-        // Add placeholder entry — we'll remove it if identity read fails or is
-        // a duplicate
-        const entry: DiscoveredReceiver = {
-          deviceId: device.id,
-          identityKey: '',
-          name,
-          rssi: device.rssi ?? null,
-          identity: null,
-          resolving: true
-        }
-        setDiscoveredReceivers(prev => [...prev, entry])
-
-        // Connect briefly to read identity
-        try {
-          dlog(`Connecting to ${device.id}...`)
-          const connected = await mgr.connectToDevice(device.id)
-          dlog('Connected, discovering services...')
-
-          // Try service discovery with a timeout — on Android→iOS this can hang
-          let discoveryOk = false
+          const t0 = Date.now()
           try {
-            await Promise.race([
-              connected.discoverAllServicesAndCharacteristics(),
-              new Promise<never>((_, rej) => setTimeout(() => rej(new Error('discovery timeout')), 8000))
-            ])
-            discoveryOk = true
-            dlog('Discovery complete')
-          } catch (discErr: any) {
-            dlog(`Discovery issue: ${discErr.message}, trying direct read...`)
+            dlog(`[+0ms] connect → ${device.id.substring(0, 12)}...`)
+            await mbConnect(device.id)
+            dlog(`[+${Date.now() - t0}ms] connected, discovering services...`)
+
+            const services = await mbDiscoverServices(device.id)
+            dlog(`[+${Date.now() - t0}ms] discoverServices OK: ${services.length} services`)
+
+            // Find our known identity characteristic by UUID suffix
+            let identityHex = ''
+            for (const svc of services) {
+              if (!svc.uuid.toLowerCase().includes('b5a1e000')) continue
+              for (const char of svc.characteristics) {
+                if (!char.uuid.toLowerCase().includes('b5a1e003')) continue
+                dlog(`[+${Date.now() - t0}ms] reading identity char...`)
+                const result = await mbReadChar(device.id, svc.uuid, char.uuid)
+                // munim-bluetooth returns hex strings (not base64)
+                const hex = (result.value ?? '').toLowerCase().replace(/[^0-9a-f]/g, '')
+                dlog(`[+${Date.now() - t0}ms] read result: ${hex.length} hex chars`)
+                if (hex.length === 66) {
+                  identityHex = hex
+                }
+                break
+              }
+              if (identityHex) break
+            }
+
+            try {
+              mbDisconnect(device.id)
+            } catch {
+              /* ignore */
+            }
+
+            if (identityHex.length === 66) {
+              if (seenIdentityKeys.has(identityHex)) {
+                dlog(`Duplicate identity (skipping): ${identityHex.substring(0, 16)}...`)
+                setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
+              } else {
+                seenIdentityKeys.add(identityHex)
+                await resolveAndStore(device.id, identityHex, name)
+              }
+            } else {
+              dlog(`No valid identity from ${name} (got ${identityHex.length / 2} bytes)`)
+              setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
+            }
+          } catch (e: any) {
+            dlog(`[+${Date.now() - t0}ms] ERROR reading identity from ${name}: ${e.message}`)
+            try {
+              mbDisconnect(device.id)
+            } catch {
+              /* ignore */
+            }
+            setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
           }
+          busyConnecting = false
+        })
 
-          let identityHex = ''
+        cleanupRef.current.push(removeDeviceListener, () => mbStopScan())
+        mbStartScan({ serviceUUIDs: [BSV_PAYMENT_SERVICE_UUID] })
 
-          if (discoveryOk) {
-            // Standard path: iterate discovered services
+        // Auto-stop after 20s
+        setTimeout(() => {
+          mbStopScan()
+          dlog('Android scan complete')
+        }, 20_000)
+      } else {
+        // ── iOS central: use ble-plx (writeWithResponse is reliable for iOS sender) ──
+        const mgr = await getBleManager()
+
+        const seenDeviceIds = new Set<string>()
+        const seenIdentityKeys = new Set<string>()
+        let busyConnecting = false
+
+        mgr.startDeviceScan([BSV_PAYMENT_SERVICE_UUID], { allowDuplicates: false }, async (error: any, device: any) => {
+          if (error) {
+            dlog(`Scan error: ${error.message}`)
+            return
+          }
+          if (!device || seenDeviceIds.has(device.id)) return
+          seenDeviceIds.add(device.id)
+
+          if (busyConnecting) return
+          busyConnecting = true
+
+          const name = device.localName || device.name || '(unknown)'
+          dlog(`Found BSV device: ${name} (${device.id.substring(0, 12)}...)`)
+          setDiscoveredReceivers(prev => [
+            ...prev,
+            { deviceId: device.id, identityKey: '', name, rssi: device.rssi ?? null, identity: null, resolving: true }
+          ])
+
+          const t0 = Date.now()
+          try {
+            dlog(`[+0ms] connect → ${device.id.substring(0, 12)}...`)
+            const connected = await mgr.connectToDevice(device.id)
+            dlog(`[+${Date.now() - t0}ms] connected, discovering services...`)
+
+            await connected.discoverAllServicesAndCharacteristics()
+            dlog(`[+${Date.now() - t0}ms] discovery complete`)
+
+            let identityHex = ''
             const services = await connected.services()
-            dlog(`Found ${services.length} services`)
+            dlog(`[+${Date.now() - t0}ms] ${services.length} services found`)
             for (const svc of services) {
               const chars = await svc.characteristics()
               const idChar = chars.find((c: any) => c.uuid.toLowerCase().includes('b5a1e003') && c.isReadable)
               if (idChar) {
                 const result = await idChar.read()
+                dlog(`[+${Date.now() - t0}ms] identity char read`)
                 if (result.value) {
+                  // ble-plx returns base64
                   const raw = atob(result.value)
                   if (raw.length === 33) {
                     identityHex = Array.from(raw)
@@ -538,79 +694,38 @@ export default function LocalPaymentsScreen() {
                 break
               }
             }
-          } else {
-            // Fallback: try reading characteristic directly by known UUIDs.
-            // ble-plx may handle this even without prior discoverAll on some
-            // Android versions / peripheral configurations.
+
             try {
-              const result = await mgr.readCharacteristicForDevice(
-                device.id,
-                BSV_PAYMENT_SERVICE_UUID,
-                IDENTITY_CHARACTERISTIC_UUID
-              )
-              if (result.value) {
-                const raw = atob(result.value)
-                if (raw.length === 33) {
-                  identityHex = Array.from(raw)
-                    .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
-                    .join('')
-                } else if (raw.length >= 66) {
-                  identityHex = raw.substring(0, 66)
-                }
-                dlog(`Direct read succeeded: ${identityHex.substring(0, 16)}...`)
+              await connected.cancelConnection()
+            } catch {
+              /* already disconnected */
+            }
+
+            if (identityHex.length === 66) {
+              if (seenIdentityKeys.has(identityHex)) {
+                dlog(`Duplicate identity (skipping)`)
+                setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
+              } else {
+                seenIdentityKeys.add(identityHex)
+                await resolveAndStore(device.id, identityHex, name)
               }
-            } catch (readErr: any) {
-              dlog(`Direct read also failed: ${readErr.message}`)
-            }
-          }
-
-          try {
-            await connected.cancelConnection()
-          } catch {
-            /* already disconnected */
-          }
-
-          if (identityHex.length === 66) {
-            // Deduplicate by identity key
-            if (seenIdentityKeys.has(identityHex)) {
-              dlog(`Duplicate identity (skipping): ${identityHex.substring(0, 16)}...`)
-              setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
-              busyConnecting = false
-              return
-            }
-            seenIdentityKeys.add(identityHex)
-
-            dlog(`Identity: ${identityHex.substring(0, 16)}...`)
-            setDiscoveredReceivers(prev =>
-              prev.map(r => (r.deviceId === device.id ? { ...r, identityKey: identityHex, resolving: true } : r))
-            )
-            // Resolve display identity
-            if (identityClientRef.current) {
-              const identity = await resolveIdentity(identityClientRef.current, identityHex)
-              setDiscoveredReceivers(prev =>
-                prev.map(r => (r.deviceId === device.id ? { ...r, identity, resolving: false } : r))
-              )
-              if (identity) dlog(`Resolved: ${identity.name}`)
-              else dlog('Identity resolution timed out or returned empty')
             } else {
-              setDiscoveredReceivers(prev => prev.map(r => (r.deviceId === device.id ? { ...r, resolving: false } : r)))
+              dlog(`No valid identity from ${name}`)
+              setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
             }
-          } else {
-            dlog(`No valid identity from ${name}`)
+          } catch (e: any) {
+            dlog(`[+${Date.now() - t0}ms] ERROR reading identity from ${name}: ${e.message}`)
             setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
           }
-        } catch (e: any) {
-          dlog(`Failed to read identity from ${name}: ${e.message}`)
-          setDiscoveredReceivers(prev => prev.filter(r => r.deviceId !== device.id))
-        }
-        busyConnecting = false
-      })
+          busyConnecting = false
+        })
 
-      // Auto-stop after 20s
-      setTimeout(() => {
-        mgr.stopDeviceScan()
-        dlog('Scan complete')
-      }, 20_000)
+        // Auto-stop after 20s
+        setTimeout(() => {
+          mgr.stopDeviceScan()
+          dlog('iOS scan complete')
+        }, 20_000)
+      }
     } catch (e: any) {
       showError(`Scan failed: ${e.message}`)
     }
@@ -622,7 +737,18 @@ export default function LocalPaymentsScreen() {
 
   const selectReceiver = useCallback(
     (receiver: DiscoveredReceiver) => {
-      bleManagerRef.current?.stopDeviceScan()
+      // Stop scanning — platform-aware
+      if (Platform.OS === 'android') {
+        import('munim-bluetooth').then(({ stopScan }) => {
+          try {
+            stopScan()
+          } catch {
+            /* ignore */
+          }
+        })
+      } else {
+        bleManagerRef.current?.stopDeviceScan()
+      }
       setSelectedReceiver(receiver)
       setPhase('sending_amount')
       dlog(`Selected: ${receiver.identity?.name ?? receiver.identityKey.substring(0, 16)}...`)
@@ -654,85 +780,126 @@ export default function LocalPaymentsScreen() {
       )
       dlog(`TX built: ${payload.token.transaction.length} bytes`)
 
-      // Connect via ble-plx — need MTU before chunking
-      const mgr = await getBleManager()
-      dlog(`Connecting to ${selectedReceiver.name ?? selectedReceiver.deviceId}...`)
-      const device = await mgr.connectToDevice(selectedReceiver.deviceId)
-      await device.discoverAllServicesAndCharacteristics()
-
-      // Negotiate MTU — request 512 (Android explicit, iOS auto-negotiates).
-      // The effective write payload = MTU - 3 (ATT header) - CHUNK_HEADER_SIZE.
-      let mtu = 23 // BLE default
-      try {
-        if (Platform.OS === 'android') {
-          const updated = await device.requestMTU(512)
-          mtu = updated.mtu ?? 23
-        } else {
-          // iOS: ble-plx device.mtu may return the raw negotiated value.
-          // If unavailable or still at default, use a safe known iOS minimum.
-          const rawMtu = device.mtu
-          dlog(`iOS raw device.mtu = ${rawMtu}`)
-          mtu = rawMtu && rawMtu > 23 ? rawMtu : 185
-        }
-      } catch (e: any) {
-        dlog(`MTU negotiation failed: ${e.message}`)
-      }
-      const maxWriteBytes = mtu - 3 // ATT header overhead
-      const effectivePayloadSize = Math.max(maxWriteBytes - 3, 17) // minus CHUNK_HEADER_SIZE, floor 17
-      dlog(`MTU: ${mtu}, effective payload per chunk: ${effectivePayloadSize} bytes`)
-
-      // Serialize and chunk using the negotiated size
       const serialized = serializePayload(payload)
-      const chunks = chunkPayload(serialized, effectivePayloadSize)
-      dlog(`Chunked: ${chunks.length} writes (${serialized.length} bytes)`)
-      dlog('Connected, sending chunks...')
 
-      // Send each chunk with pacing
-      for (let i = 0; i < chunks.length; i++) {
-        // ble-plx uses base64 for write values — avoid spread operator for large arrays
-        let chunkB64 = ''
-        const bytes = chunks[i]
-        let binary = ''
-        for (let j = 0; j < bytes.length; j++) {
-          binary += String.fromCharCode(bytes[j])
+      if (Platform.OS === 'android') {
+        // ── Android transfer: munim-bluetooth ──
+        // Uses writeCharacteristic with hex values and writeWithoutResponse mode.
+        // MTU is auto-negotiated by our patch after connect; we wait for the
+        // 'mtuChanged' event to learn the actual negotiated value.
+        const {
+          connect: mbConnect,
+          disconnect: mbDisconnect,
+          writeCharacteristic: mbWriteChar,
+          addEventListener: mbAddListener
+        } = await import('munim-bluetooth')
+
+        const deviceId = selectedReceiver.deviceId
+        dlog(`[Android] Connecting to ${deviceId.substring(0, 12)}...`)
+
+        // Capture negotiated MTU from event emitted after connect
+        let mtu = 23
+        const mtuPromise = new Promise<number>(resolve => {
+          const timeout = setTimeout(() => {
+            removeMtuListener()
+            resolve(23)
+          }, 5000)
+          const removeMtuListener = mbAddListener('mtuChanged', (data: any) => {
+            if (data?.deviceId === deviceId) {
+              clearTimeout(timeout)
+              removeMtuListener()
+              resolve(typeof data.mtu === 'number' ? data.mtu : 23)
+            }
+          })
+        })
+
+        await mbConnect(deviceId)
+        mtu = await mtuPromise
+        dlog(`[Android] Connected, MTU: ${mtu}`)
+
+        const maxWriteBytes = mtu - 3 // ATT header
+        const effectivePayloadSize = Math.max(maxWriteBytes - 3, 17) // minus chunk header (3B)
+        dlog(`Effective payload per chunk: ${effectivePayloadSize} bytes`)
+
+        const chunks = chunkPayload(serialized, effectivePayloadSize)
+        dlog(`Chunked: ${chunks.length} writes (${serialized.length} bytes)`)
+
+        for (let i = 0; i < chunks.length; i++) {
+          // munim-bluetooth writeCharacteristic takes hex strings
+          const hexChunk = uint8ArrayToHex(chunks[i])
+          try {
+            await mbWriteChar(
+              deviceId,
+              BSV_PAYMENT_SERVICE_UUID,
+              WRITE_CHARACTERISTIC_UUID,
+              hexChunk,
+              'writeWithoutResponse'
+            )
+          } catch (writeErr: any) {
+            dlog(`Write error on chunk ${i}: ${writeErr.message}`)
+            throw writeErr
+          }
+          const pct = chunks.length > 1 ? Math.round((i / (chunks.length - 1)) * 100) : 100
+          setProgress(pct)
+          if (i % 10 === 0) dlog(`Sent chunk ${i + 1}/${chunks.length}`)
+          // 100ms pacing for write-without-response — prevents peripheral buffer overflow
+          await new Promise(r => setTimeout(r, 100))
         }
-        chunkB64 = btoa(binary)
 
+        await new Promise(r => setTimeout(r, 500))
+        dlog('[Android] Transfer complete!')
         try {
-          // Use write-with-response on iOS (reliable, peripheral ACKs each write).
-          // Use write-without-response on Android (avoids Promise hang issues with
-          // ble-plx on some Android BLE stacks where write-with-response to an iOS
-          // peripheral never resolves).
-          if (Platform.OS === 'ios') {
+          mbDisconnect(deviceId)
+        } catch {
+          /* ignore */
+        }
+      } else {
+        // ── iOS transfer: ble-plx ──
+        // Uses writeCharacteristicWithResponseForService (acknowledged writes).
+        // ble-plx returns/accepts base64 values.
+        const mgr = await getBleManager()
+        dlog(`[iOS] Connecting to ${selectedReceiver.name ?? selectedReceiver.deviceId}...`)
+        const device = await mgr.connectToDevice(selectedReceiver.deviceId)
+        await device.discoverAllServicesAndCharacteristics()
+
+        // iOS MTU is auto-negotiated. Read device.mtu from ble-plx.
+        const rawMtu = device.mtu
+        dlog(`iOS raw device.mtu = ${rawMtu}`)
+        const mtu = rawMtu && rawMtu > 23 ? rawMtu : 185
+        const maxWriteBytes = mtu - 3
+        const effectivePayloadSize = Math.max(maxWriteBytes - 3, 17)
+        dlog(`MTU: ${mtu}, effective payload per chunk: ${effectivePayloadSize} bytes`)
+
+        const chunks = chunkPayload(serialized, effectivePayloadSize)
+        dlog(`Chunked: ${chunks.length} writes (${serialized.length} bytes)`)
+
+        for (let i = 0; i < chunks.length; i++) {
+          // ble-plx uses base64
+          const bytes = chunks[i]
+          let binary = ''
+          for (let j = 0; j < bytes.length; j++) binary += String.fromCharCode(bytes[j])
+          const chunkB64 = btoa(binary)
+
+          try {
             await device.writeCharacteristicWithResponseForService(
               BSV_PAYMENT_SERVICE_UUID,
               WRITE_CHARACTERISTIC_UUID,
               chunkB64
             )
-          } else {
-            await device.writeCharacteristicWithoutResponseForService(
-              BSV_PAYMENT_SERVICE_UUID,
-              WRITE_CHARACTERISTIC_UUID,
-              chunkB64
-            )
+          } catch (writeErr: any) {
+            dlog(`Write error on chunk ${i}: ${writeErr.message}`)
+            throw writeErr
           }
-        } catch (writeErr: any) {
-          dlog(`Write error on chunk ${i}: ${writeErr.message}`)
-          throw writeErr
+          const pct = chunks.length > 1 ? Math.round((i / (chunks.length - 1)) * 100) : 100
+          setProgress(pct)
+          if (i % 10 === 0) dlog(`Sent chunk ${i + 1}/${chunks.length}`)
+          await new Promise(r => setTimeout(r, 30))
         }
-        const pct = chunks.length > 1 ? Math.round((i / (chunks.length - 1)) * 100) : 100
-        setProgress(pct)
-        if (i % 10 === 0) dlog(`Sent chunk ${i + 1}/${chunks.length}`)
-        // Pacing delay — prevents BLE buffer overflow on write-without-response
-        // and gives the peripheral time to process each chunk.
-        await new Promise(r => setTimeout(r, Platform.OS === 'android' ? 100 : 30))
+
+        await new Promise(r => setTimeout(r, 500))
+        dlog('[iOS] Transfer complete!')
+        await device.cancelConnection()
       }
-
-      // Wait for receiver to process
-      await new Promise(r => setTimeout(r, 500))
-
-      dlog('Transfer complete!')
-      await device.cancelConnection()
 
       setCompletedAmount(sats)
       setCompletedRole('sender')
@@ -741,6 +908,366 @@ export default function LocalPaymentsScreen() {
       showError(`Transfer failed: ${e.message}`)
     }
   }, [wallet, identityKey, selectedReceiver, sendAmount, adminOriginator, getBleManager, dlog, showError])
+
+  // ════════════════════════════════════════════════
+  // DEBUG TRANSPORT TESTS
+  // ════════════════════════════════════════════════
+
+  // Test A: identity-only — scan → connect → read 33-byte identity char → display raw hex.
+  // No wallet code. Validates the critical GATT read path in isolation.
+  const runIdentityTest = useCallback(async () => {
+    if (testRunning) return
+    setTestRunning(true)
+    setTestResult(null)
+    dlog('=== TEST A: Identity Read ===')
+    const t0 = Date.now()
+
+    try {
+      if (Platform.OS === 'android') {
+        const {
+          startScan: mbStartScan,
+          stopScan: mbStopScan,
+          connect: mbConnect,
+          disconnect: mbDisconnect,
+          discoverServices: mbDiscoverServices,
+          readCharacteristic: mbReadChar,
+          addEventListener: mbAddListener
+        } = await import('munim-bluetooth')
+
+        const foundDevice = await new Promise<any>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            removeLst()
+            mbStopScan()
+            reject(new Error('scan timeout — no BSV device found in 15s'))
+          }, 15000)
+          const removeLst = mbAddListener('deviceFound', (device: any) => {
+            clearTimeout(timeout)
+            removeLst()
+            mbStopScan()
+            resolve(device)
+          })
+          mbStartScan({ serviceUUIDs: [BSV_PAYMENT_SERVICE_UUID] })
+        })
+        dlog(`[+${Date.now() - t0}ms] Found: ${foundDevice.localName || foundDevice.name || foundDevice.id}`)
+
+        await mbConnect(foundDevice.id)
+        dlog(`[+${Date.now() - t0}ms] Connected`)
+
+        const services = await mbDiscoverServices(foundDevice.id)
+        dlog(`[+${Date.now() - t0}ms] discoverServices: ${services.length} services`)
+
+        let hexResult = ''
+        for (const svc of services) {
+          if (!svc.uuid.toLowerCase().includes('b5a1e000')) continue
+          for (const char of svc.characteristics) {
+            if (!char.uuid.toLowerCase().includes('b5a1e003')) continue
+            const result = await mbReadChar(foundDevice.id, svc.uuid, char.uuid)
+            hexResult = (result.value ?? '').toLowerCase().replace(/[^0-9a-f]/g, '')
+            dlog(`[+${Date.now() - t0}ms] Read identity: ${hexResult.length} hex chars`)
+            break
+          }
+          if (hexResult) break
+        }
+
+        try {
+          mbDisconnect(foundDevice.id)
+        } catch {
+          /* ignore */
+        }
+
+        if (hexResult.length === 66) {
+          const msg = `PASS: 33 bytes = ${hexResult.substring(0, 16)}...`
+          dlog(`TEST A ${msg}`)
+          setTestResult(msg)
+        } else {
+          const msg = `FAIL: got ${hexResult.length / 2} bytes: ${hexResult.substring(0, 20)}`
+          dlog(`TEST A ${msg}`)
+          setTestResult(msg)
+        }
+      } else {
+        // iOS: use ble-plx
+        const mgr = await getBleManager()
+        const foundDevice = await new Promise<any>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            mgr.stopDeviceScan()
+            reject(new Error('scan timeout'))
+          }, 15000)
+          mgr.startDeviceScan([BSV_PAYMENT_SERVICE_UUID], { allowDuplicates: false }, (err: any, device: any) => {
+            if (err || !device) return
+            clearTimeout(timeout)
+            mgr.stopDeviceScan()
+            resolve(device)
+          })
+        })
+        dlog(`[+${Date.now() - t0}ms] Found: ${foundDevice.name ?? foundDevice.id}`)
+
+        const connected = await foundDevice.connect()
+        await connected.discoverAllServicesAndCharacteristics()
+        dlog(`[+${Date.now() - t0}ms] Discovery complete`)
+
+        let hexResult = ''
+        const services = await connected.services()
+        for (const svc of services) {
+          const chars = await svc.characteristics()
+          const idChar = chars.find((c: any) => c.uuid.toLowerCase().includes('b5a1e003') && c.isReadable)
+          if (idChar) {
+            const result = await idChar.read()
+            if (result.value) {
+              const raw = atob(result.value)
+              hexResult = Array.from(raw)
+                .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
+                .join('')
+            }
+            break
+          }
+        }
+        try {
+          await connected.cancelConnection()
+        } catch {
+          /* ignore */
+        }
+
+        if (hexResult.length === 66) {
+          const msg = `PASS: 33 bytes = ${hexResult.substring(0, 16)}...`
+          dlog(`TEST A ${msg}`)
+          setTestResult(msg)
+        } else {
+          const msg = `FAIL: got ${hexResult.length / 2} bytes`
+          dlog(`TEST A ${msg}`)
+          setTestResult(msg)
+        }
+      }
+    } catch (e: any) {
+      const msg = `ERROR: ${e.message}`
+      dlog(`TEST A ${msg}`)
+      setTestResult(msg)
+    } finally {
+      setTestRunning(false)
+    }
+  }, [testRunning, getBleManager, dlog])
+
+  // Test B: tiny write — scan → connect → write 16 known bytes → disconnect.
+  // Validates that writes reach the peripheral. The receiver logs the raw hex;
+  // compare manually against '000102030405060708090a0b0c0d0e0f'.
+  const runTinyWriteTest = useCallback(async () => {
+    if (testRunning) return
+    setTestRunning(true)
+    setTestResult(null)
+    dlog('=== TEST B: Tiny Write (16 bytes) ===')
+    const knownHex = '000102030405060708090a0b0c0d0e0f' // 16 deterministic bytes
+    const t0 = Date.now()
+    try {
+      if (Platform.OS === 'android') {
+        const {
+          startScan: mbStartScan,
+          stopScan: mbStopScan,
+          connect: mbConnect,
+          disconnect: mbDisconnect,
+          discoverServices: mbDiscoverServices,
+          writeCharacteristic: mbWriteChar,
+          addEventListener: mbAddListener
+        } = await import('munim-bluetooth')
+
+        const foundDevice = await new Promise<any>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            removeLst()
+            mbStopScan()
+            reject(new Error('scan timeout'))
+          }, 15000)
+          const removeLst = mbAddListener('deviceFound', (device: any) => {
+            clearTimeout(timeout)
+            removeLst()
+            mbStopScan()
+            resolve(device)
+          })
+          mbStartScan({ serviceUUIDs: [BSV_PAYMENT_SERVICE_UUID] })
+        })
+        dlog(`[+${Date.now() - t0}ms] Found: ${foundDevice.id}`)
+        await mbConnect(foundDevice.id)
+        await mbDiscoverServices(foundDevice.id)
+        dlog(`[+${Date.now() - t0}ms] Connected + discovered`)
+        await mbWriteChar(
+          foundDevice.id,
+          BSV_PAYMENT_SERVICE_UUID,
+          WRITE_CHARACTERISTIC_UUID,
+          knownHex,
+          'writeWithoutResponse'
+        )
+        dlog(`[+${Date.now() - t0}ms] Wrote 16 bytes`)
+        await new Promise(r => setTimeout(r, 200))
+        try {
+          mbDisconnect(foundDevice.id)
+        } catch {
+          /* ignore */
+        }
+        const msg = `PASS: wrote ${knownHex} — check receiver log`
+        dlog(`TEST B ${msg}`)
+        setTestResult(msg)
+      } else {
+        const mgr = await getBleManager()
+        const foundDevice = await new Promise<any>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            mgr.stopDeviceScan()
+            reject(new Error('scan timeout'))
+          }, 15000)
+          mgr.startDeviceScan([BSV_PAYMENT_SERVICE_UUID], { allowDuplicates: false }, (err: any, d: any) => {
+            if (err || !d) return
+            clearTimeout(timeout)
+            mgr.stopDeviceScan()
+            resolve(d)
+          })
+        })
+        const connected = await foundDevice.connect()
+        await connected.discoverAllServicesAndCharacteristics()
+        const b64 = btoa(String.fromCharCode(...Array.from({ length: 16 }, (_, i) => i)))
+        await connected.writeCharacteristicWithoutResponseForService(
+          BSV_PAYMENT_SERVICE_UUID,
+          WRITE_CHARACTERISTIC_UUID,
+          b64
+        )
+        dlog(`[+${Date.now() - t0}ms] Wrote 16 bytes (base64)`)
+        try {
+          await connected.cancelConnection()
+        } catch {
+          /* ignore */
+        }
+        const msg = `PASS: wrote 16 bytes — check receiver log`
+        dlog(`TEST B ${msg}`)
+        setTestResult(msg)
+      }
+    } catch (e: any) {
+      const msg = `ERROR: ${e.message}`
+      dlog(`TEST B ${msg}`)
+      setTestResult(msg)
+    } finally {
+      setTestRunning(false)
+    }
+  }, [testRunning, getBleManager, dlog])
+
+  // Test C: 1KB chunked — sends a deterministic 1 KB payload through the full
+  // chunk protocol. Receiver verifies CRC32. No wallet code.
+  const runChunkedTest = useCallback(async () => {
+    if (testRunning) return
+    setTestRunning(true)
+    setTestResult(null)
+    dlog('=== TEST C: 1 KB Chunked Transfer ===')
+    // Build 1024 bytes: byte i = i mod 256
+    const testPayload = new Uint8Array(1024)
+    for (let i = 0; i < 1024; i++) testPayload[i] = i & 0xff
+    const t0 = Date.now()
+    try {
+      if (Platform.OS === 'android') {
+        const {
+          startScan: mbStartScan,
+          stopScan: mbStopScan,
+          connect: mbConnect,
+          disconnect: mbDisconnect,
+          discoverServices: mbDiscoverServices,
+          writeCharacteristic: mbWriteChar,
+          addEventListener: mbAddListener
+        } = await import('munim-bluetooth')
+
+        const foundDevice = await new Promise<any>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            removeLst()
+            mbStopScan()
+            reject(new Error('scan timeout'))
+          }, 15000)
+          const removeLst = mbAddListener('deviceFound', (device: any) => {
+            clearTimeout(timeout)
+            removeLst()
+            mbStopScan()
+            resolve(device)
+          })
+          mbStartScan({ serviceUUIDs: [BSV_PAYMENT_SERVICE_UUID] })
+        })
+        await mbConnect(foundDevice.id)
+        // Get MTU from event
+        const mtu = await new Promise<number>(resolve => {
+          const timer = setTimeout(() => {
+            removeMtu()
+            resolve(23)
+          }, 3000)
+          const removeMtu = mbAddListener('mtuChanged', (d: any) => {
+            if (d?.deviceId === foundDevice.id) {
+              clearTimeout(timer)
+              removeMtu()
+              resolve(d.mtu || 23)
+            }
+          })
+        })
+        dlog(`[+${Date.now() - t0}ms] MTU=${mtu}`)
+        await mbDiscoverServices(foundDevice.id)
+        const payloadSize = Math.max(mtu - 6, 17)
+        const chunks = chunkPayload(testPayload, payloadSize)
+        dlog(`Sending ${chunks.length} chunks of ${payloadSize}B...`)
+        for (let i = 0; i < chunks.length; i++) {
+          await mbWriteChar(
+            foundDevice.id,
+            BSV_PAYMENT_SERVICE_UUID,
+            WRITE_CHARACTERISTIC_UUID,
+            uint8ArrayToHex(chunks[i]),
+            'writeWithoutResponse'
+          )
+          await new Promise(r => setTimeout(r, 100))
+        }
+        await new Promise(r => setTimeout(r, 500))
+        try {
+          mbDisconnect(foundDevice.id)
+        } catch {
+          /* ignore */
+        }
+        const msg = `PASS: sent ${chunks.length} chunks (${testPayload.length}B) in ${Date.now() - t0}ms`
+        dlog(`TEST C ${msg}`)
+        setTestResult(msg)
+      } else {
+        const mgr = await getBleManager()
+        const foundDevice = await new Promise<any>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            mgr.stopDeviceScan()
+            reject(new Error('scan timeout'))
+          }, 15000)
+          mgr.startDeviceScan([BSV_PAYMENT_SERVICE_UUID], { allowDuplicates: false }, (err: any, d: any) => {
+            if (err || !d) return
+            clearTimeout(timeout)
+            mgr.stopDeviceScan()
+            resolve(d)
+          })
+        })
+        const connected = await foundDevice.connect()
+        await connected.discoverAllServicesAndCharacteristics()
+        const mtu = connected.mtu && connected.mtu > 23 ? connected.mtu : 185
+        const payloadSize = Math.max(mtu - 6, 17)
+        const chunks = chunkPayload(testPayload, payloadSize)
+        dlog(`[iOS] Sending ${chunks.length} chunks of ${payloadSize}B...`)
+        for (let i = 0; i < chunks.length; i++) {
+          const bytes = chunks[i]
+          let binary = ''
+          for (let j = 0; j < bytes.length; j++) binary += String.fromCharCode(bytes[j])
+          await connected.writeCharacteristicWithResponseForService(
+            BSV_PAYMENT_SERVICE_UUID,
+            WRITE_CHARACTERISTIC_UUID,
+            btoa(binary)
+          )
+          await new Promise(r => setTimeout(r, 30))
+        }
+        try {
+          await connected.cancelConnection()
+        } catch {
+          /* ignore */
+        }
+        const msg = `PASS: sent ${chunks.length} chunks in ${Date.now() - t0}ms`
+        dlog(`TEST C ${msg}`)
+        setTestResult(msg)
+      }
+    } catch (e: any) {
+      const msg = `ERROR: ${e.message}`
+      dlog(`TEST C ${msg}`)
+      setTestResult(msg)
+    } finally {
+      setTestRunning(false)
+    }
+  }, [testRunning, getBleManager, dlog])
 
   // ════════════════════════════════════════════════
   // RENDER
@@ -965,47 +1492,94 @@ export default function LocalPaymentsScreen() {
         )}
 
         {/* ══ Debug Panel ══ */}
-        {showDebug && debugLogs.length > 0 && (
+        {showDebug && (
           <View
             style={[styles.debugPanel, { backgroundColor: colors.backgroundTertiary, borderColor: colors.separator }]}
           >
-            <View
-              style={{
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: spacing.xs
-              }}
-            >
-              <Text style={[styles.debugTitle, { color: colors.textSecondary }]}>Debug Log</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  import('expo-clipboard').then(({ setStringAsync }) => setStringAsync(debugLogs.join('\n')))
-                }}
-              >
-                <Ionicons name="copy-outline" size={16} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled>
-              {debugLogs.slice(-40).map((line, i) => (
-                <Text
-                  key={i}
-                  style={[
-                    styles.debugLine,
-                    {
-                      color: line.includes('ERROR')
-                        ? colors.error
-                        : line.includes('SUCCESS') || line.includes('Resolved')
-                          ? colors.success
-                          : colors.textSecondary
-                    }
-                  ]}
-                  selectable
+            {/* Transport test buttons */}
+            <Text style={[styles.debugTitle, { color: colors.textSecondary, marginBottom: spacing.xs }]}>
+              Transport Tests
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.sm }}>
+              {(
+                [
+                  { label: 'A: Identity Read', run: runIdentityTest },
+                  { label: 'B: Write 16B', run: runTinyWriteTest },
+                  { label: 'C: 1KB Chunked', run: runChunkedTest }
+                ] as const
+              ).map(({ label, run }) => (
+                <TouchableOpacity
+                  key={label}
+                  onPress={run}
+                  disabled={testRunning}
+                  style={{
+                    paddingHorizontal: spacing.sm,
+                    paddingVertical: 5,
+                    borderRadius: radii.sm,
+                    backgroundColor: testRunning ? colors.separator : colors.info + '20',
+                    borderWidth: 1,
+                    borderColor: colors.info + '40'
+                  }}
                 >
-                  {line}
-                </Text>
+                  <Text style={[styles.debugLine, { color: colors.info }]}>{label}</Text>
+                </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
+            {testResult && (
+              <Text
+                style={[
+                  styles.debugLine,
+                  {
+                    color: testResult.startsWith('PASS') ? colors.success : colors.error,
+                    marginBottom: spacing.xs
+                  }
+                ]}
+                selectable
+              >
+                {testResult}
+              </Text>
+            )}
+            {debugLogs.length > 0 && (
+              <>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: spacing.xs
+                  }}
+                >
+                  <Text style={[styles.debugTitle, { color: colors.textSecondary }]}>Log</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      import('expo-clipboard').then(({ setStringAsync }) => setStringAsync(debugLogs.join('\n')))
+                    }}
+                  >
+                    <Ionicons name="copy-outline" size={16} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled>
+                  {debugLogs.slice(-40).map((line, i) => (
+                    <Text
+                      key={i}
+                      style={[
+                        styles.debugLine,
+                        {
+                          color: line.includes('ERROR')
+                            ? colors.error
+                            : line.includes('SUCCESS') || line.includes('Resolved') || line.includes('PASS')
+                              ? colors.success
+                              : colors.textSecondary
+                        }
+                      ]}
+                      selectable
+                    >
+                      {line}
+                    </Text>
+                  ))}
+                </ScrollView>
+              </>
+            )}
           </View>
         )}
       </ScrollView>
