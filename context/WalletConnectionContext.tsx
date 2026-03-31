@@ -9,9 +9,10 @@ import type { Connection } from '@/stores/ConnectionStore'
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 export const IMPLEMENTED_METHODS = new Set([
-  'getPublicKey', 'listOutputs', 'createAction', 'signAction',
+  'getPublicKey', 'listOutputs', 'listCertificates', 'createAction', 'signAction',
   'listActions', 'internalizeAction', 'acquireCertificate',
-  'relinquishCertificate', 'revealCounterpartyKeyLinkage',
+  'relinquishCertificate', 'revealCounterpartyKeyLinkage', 'createHmac', 'verifyHmac',
+  'encrypt', 'decrypt', 'createSignature', 'verifySignature',
 ])
 const AUTO_APPROVE_METHODS = new Set(['getPublicKey'])
 
