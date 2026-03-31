@@ -42,7 +42,6 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": false,
-          "modes": ["peripheral", "central"],
           "bluetoothAlwaysPermission": false
         }
       ]
