@@ -42,11 +42,8 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": false,
-          "modes": [
-            "peripheral",
-            "central"
-          ],
-          "bluetoothAlwaysPermission": "BSV Browser uses Bluetooth to send and receive payments to nearby devices."
+          "modes": ["peripheral", "central"],
+          "bluetoothAlwaysPermission": false
         }
       ]
     ],
@@ -87,10 +84,7 @@
               "scheme": "http"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
     },
@@ -98,26 +92,18 @@
       "bundleIdentifier": "org.bsvassociation.browser",
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs camera access to scan QR codes.",
-        "NSPhotoLibraryUsageDescription": "This app needs photo library access to let you select images.",
+        "NSPhotoLibraryAddUsageDescription": "This app needs permission to save images to your photo library.",
         "NSMicrophoneUsageDescription": "This app needs microphone access for video recording features.",
         "NSFaceIDUsageDescription": "This app uses Face ID/Touch ID to securely authenticate you and protect your wallet.",
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
-            "CFBundleURLSchemes": [
-              "https",
-              "http"
-            ]
+            "CFBundleURLSchemes": ["https", "http"]
           }
         ],
-        "LSApplicationQueriesSchemes": [
-          "https",
-          "http",
-          "blob",
-          "data"
-        ],
+        "LSApplicationQueriesSchemes": ["https", "http", "blob", "data"],
         "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use.",
-        "NSBluetoothAlwaysUsageDescription": "BSV Browser uses Bluetooth to send and receive payments to nearby devices.",
+        "NSBluetoothWhileInUseUsageDescription": "BSV Browser uses Bluetooth to send and receive payments to nearby devices.",
         "NSBluetoothPeripheralUsageDescription": "BSV Browser uses Bluetooth to advertise payment services to nearby devices."
       }
     },
