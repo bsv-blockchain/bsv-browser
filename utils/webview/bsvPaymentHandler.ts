@@ -27,7 +27,7 @@ export class BsvPaymentHandler {
       return cached.html
     }
 
-    const satsHeader = headers[`${HEADER_PREFIX}pay-sats`] || headers['x-bsv-pay-sats']
+    const satsHeader = headers[`${HEADER_PREFIX}sats`] || headers['x-bsv-sats']
     const serverHeader = headers[`${HEADER_PREFIX}server`] || headers['x-bsv-server']
     
     if (!satsHeader || !serverHeader) {
