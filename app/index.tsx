@@ -52,6 +52,8 @@ import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
+import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
+import { getErrorPage } from '@/utils/webview/errorPages'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
@@ -136,11 +138,14 @@ const Browser = observer(function Browser() {
   /* ----------------------------- wallet context ----------------------------- */
   const { managers, walletBuilding } = useWallet()
   const [wallet, setWallet] = useState<WalletInterface | undefined>()
+  const paymentHandlerRef = useRef<any>(null)
   useEffect(() => {
     if (!isWeb2Mode && managers?.walletManager?.authenticated) {
       setWallet(managers.walletManager)
+      paymentHandlerRef.current = getPaymentHandler(managers.walletManager)
     } else if (isWeb2Mode) {
       setWallet(undefined)
+      paymentHandlerRef.current = null
     }
   }, [managers, isWeb2Mode])
 
@@ -796,6 +801,16 @@ const Browser = observer(function Browser() {
         return
       }
 
+      if (msg.type === 'PAYMENT_REQUIRED' && paymentHandlerRef.current) {
+        console.log('Received PAYMENT_REQUIRED from page for', msg.url)
+        paymentHandlerRef.current.handle402(msg.url, msg.status, msg.headers || {}).then((html: string | null) => {
+          if (html && activeTab?.webviewRef?.current) {
+            activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`)
+          }
+        }).catch(console.error)
+        return
+      }
+
       if (await routeWebViewMessage(msg)) return
 
       if (msg.call && (!wallet || isWeb2Mode)) {
@@ -1179,6 +1194,27 @@ const Browser = observer(function Browser() {
             }}
             onHttpError={(e: any) => {
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
+              const status = e.nativeEvent?.statusCode || 404
+              const url = e.nativeEvent?.url || ''
+              if (status === 402 && paymentHandlerRef.current) {
+                console.log('402 detected, attempting payment for', url)
+                paymentHandlerRef.current.handle402(url, 402, e.nativeEvent.headers || {}).then((html: string | null) => {
+                  if (html && activeTab?.webviewRef?.current) {
+                    activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`)
+                  } else if (activeTab?.webviewRef?.current) {
+                    const fallback = getErrorPage(402)
+                    activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`)
+                  }
+                }).catch(() => {
+                  if (activeTab?.webviewRef?.current) {
+                    const fallback = getErrorPage(402)
+                    activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`)
+                  }
+                })
+              } else if (activeTab?.webviewRef?.current) {
+                const fallback = getErrorPage(status)
+                activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`)
+              }
             }}
             onLoadEnd={(event: any) =>
               tabStore.handleNavigationStateChange(activeTab.id, {
