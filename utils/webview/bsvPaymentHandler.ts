@@ -1,6 +1,6 @@
-import type { WalletInterface } from '@bsv/sdk'
+import type { WalletInterface, WalletProtocol } from '@bsv/sdk'
 
-const BRC29_PROTOCOL_ID = [2, '3241645161d8'] as const
+const BRC29_PROTOCOL_ID: WalletProtocol = [2, '3241645161d8']
 const HEADER_PREFIX = 'x-bsv-'
 
 interface PaymentCacheEntry {
@@ -55,7 +55,8 @@ export class BsvPaymentHandler {
         description: `Payment for article: ${new URL(url).pathname}`,
         outputs: [{
           satoshis: satoshisRequired,
-          lockingScript: `76a914${derivedPubKey.slice(2)}88ac`, // Simplified P2PKH
+          lockingScript: `76a914${derivedPubKey.slice(2)}88ac`,
+          outputDescription: 'Article payment',
           customInstructions: JSON.stringify({
             derivationPrefix,
             derivationSuffix,
@@ -68,8 +69,10 @@ export class BsvPaymentHandler {
       const txid = '0000000000000000000000000000000000000000000000000000000000000000' // placeholder
       const outpoint = `${txid}.0`
 
-      const paymentHeaders = {
-        [`${HEADER_PREFIX}sender`]: await this.wallet.getPublicKey({ identityKey: true }),
+      const identityResult = await this.wallet.getPublicKey({ identityKey: true })
+      const senderKey = typeof identityResult === 'string' ? identityResult : (identityResult as any).publicKey || String(identityResult)
+      const paymentHeaders: Record<string, string> = {
+        [`${HEADER_PREFIX}sender`]: senderKey,
         [`${HEADER_PREFIX}beef`]: txBase64,
         [`${HEADER_PREFIX}prefix`]: derivationPrefix,
         [`${HEADER_PREFIX}suffix`]: derivationSuffix,
@@ -80,8 +83,8 @@ export class BsvPaymentHandler {
       const response = await fetch(url, {
         headers: {
           ...paymentHeaders,
-          'Accept': 'text/html'
-        }
+          Accept: 'text/html'
+        } as HeadersInit
       })
 
       if (response.ok) {
