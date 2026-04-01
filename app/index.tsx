@@ -53,7 +53,7 @@ import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downlo
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
-import { getErrorPage, paymentLoadingPage } from '@/utils/webview/errorPages'
+import { getErrorPage, getNativeErrorInfo, paymentLoadingPage } from '@/utils/webview/errorPages'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
@@ -153,7 +153,11 @@ const Browser = observer(function Browser() {
   const { getItem, setItem } = useLocalStorage()
 
   /* -------------------------------- history -------------------------------- */
-  const { history, pushHistory, removeHistoryItem, clearHistory } = useHistory(getItem, setItem)
+  const { history, pushHistory, removeHistoryItem, clearHistory: clearHistoryOnly } = useHistory(getItem, setItem)
+  const clearHistory = useCallback(async () => {
+    await clearHistoryOnly()
+    paymentHandlerRef.current?.clearCache()
+  }, [clearHistoryOnly])
 
   /* -------------------------------- bookmarks ------------------------------- */
   const [homepageUrl, setHomepageUrlState] = useState(DEFAULT_HOMEPAGE_URL)
@@ -1192,7 +1196,15 @@ const Browser = observer(function Browser() {
             androidLayerType="hardware"
             androidHardwareAccelerationDisabled={false}
             onError={(e: any) => {
+              e.preventDefault()
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
+              const code = e.nativeEvent?.code
+              // Only handle native network errors (negative codes: DNS, TLS, timeout, etc.)
+              if (typeof code === 'number' && code < 0 && activeTab?.webviewRef?.current) {
+                const info = getNativeErrorInfo(code)
+                const page = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>:root{--bg:#f5f5f0;--text:#1a1a1a;--sub:#666}@media(prefers-color-scheme:dark){:root{--bg:#1a1a1a;--text:#e8e6e1;--sub:#999}}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:var(--bg);color:var(--text);text-align:center}h1{font-size:6rem;margin:0}.subtitle{font-size:1.5rem;margin:8px 0}.detail{color:var(--sub);padding:0 24px}</style></head><body><div><h1 style="color:${info.color}">${info.code}</h1><p class="subtitle">${info.title}</p><p class="detail">${info.detail}</p></div></body></html>`
+                activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${page.replace(/`/g, '\\`')}\`);document.close();`)
+              }
             }}
             onHttpError={(e: any) => {
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
