@@ -53,7 +53,7 @@ import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downlo
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
-import { getErrorPage } from '@/utils/webview/errorPages'
+import { getErrorPage, paymentLoadingPage } from '@/utils/webview/errorPages'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
@@ -802,7 +802,9 @@ const Browser = observer(function Browser() {
       }
 
       if (msg.type === 'PAYMENT_REQUIRED' && paymentHandlerRef.current) {
-        console.log('Received PAYMENT_REQUIRED from page for', msg.url)
+        if (activeTab?.webviewRef?.current) {
+          activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`)
+        }
         paymentHandlerRef.current.handle402(msg.url, msg.status, msg.headers || {}).then((html: string | null) => {
           if (html && activeTab?.webviewRef?.current) {
             activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`)
@@ -1197,7 +1199,9 @@ const Browser = observer(function Browser() {
               const status = e.nativeEvent?.statusCode || 404
               const url = e.nativeEvent?.url || ''
               if (status === 402 && paymentHandlerRef.current) {
-                console.log('402 detected, attempting payment for', url)
+                if (activeTab?.webviewRef?.current) {
+                  activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`)
+                }
                 paymentHandlerRef.current.handle402(url, 402, e.nativeEvent.headers || {}).then((html: string | null) => {
                   if (html && activeTab?.webviewRef?.current) {
                     activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`)
