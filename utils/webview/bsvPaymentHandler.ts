@@ -139,10 +139,10 @@ export class BsvPaymentHandler {
         return html
       }
       
-      console.error('[PaymentHandler] Payment retry failed with status:', response.status)
+      console.log('[PaymentHandler] Payment retry failed with status:', response.status)
       return getErrorPage(402)
     } catch (error) {
-      console.error('[PaymentHandler] Payment handling failed:', error)
+      console.log('[PaymentHandler] Payment handling failed:', error)
       return getErrorPage(402)
     }
   }

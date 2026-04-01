@@ -807,7 +807,7 @@ const Browser = observer(function Browser() {
           if (html && activeTab?.webviewRef?.current) {
             activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`)
           }
-        }).catch(console.error)
+        }).catch(() => {})
         return
       }
 
