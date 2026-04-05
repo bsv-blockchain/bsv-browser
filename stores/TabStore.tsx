@@ -21,7 +21,13 @@ export class TabStore {
   // Tab IDs for which the next navigation state change is a programmatic history jump
   // (goBack / goForward / navigateToHistoryIndex). handleNavigationStateChange skips the
   // history-append logic for these so jumps are never mistaken for new navigations.
-  private pendingHistoryJumps: Set<number> = new Set()
+  //
+  // This is a Map<tabId, remainingCount> instead of a Set because both
+  // onNavigationStateChange and onLoadEnd call handleNavigationStateChange with
+  // loading=false for the same navigation event.  Using a countdown of 2 ensures
+  // both callbacks are treated as jumps and neither one spuriously appends a new
+  // history entry (which would make back/forward look like a page refresh).
+  private pendingHistoryJumps: Map<number, number> = new Map()
   constructor() {
     console.log('TabStore constructor called')
     makeAutoObservable(this)
@@ -162,7 +168,7 @@ export class TabStore {
         this.tabHistoryIndexes[id] = newHistory.length - 1
         tab.canGoBack = newHistory.length > 1
         tab.canGoForward = false
-        this.pendingHistoryJumps.add(id)
+        this.pendingHistoryJumps.set(id, 2)
       }
 
       this.saveTabs()
@@ -217,7 +223,7 @@ export class TabStore {
       tab.url = url
       tab.title = entry.title || url
 
-      this.pendingHistoryJumps.add(tabId)
+      this.pendingHistoryJumps.set(tabId, 2)
       try {
         if (url === kNEW_TAB_URL) {
           // Navigate to new tab page
@@ -293,7 +299,7 @@ export class TabStore {
       // Navigate to the URL
       tab.url = url
 
-      this.pendingHistoryJumps.add(tabId)
+      this.pendingHistoryJumps.set(tabId, 2)
       try {
         tab.webviewRef.current?.injectJavaScript(`window.location.href = "${url}";`)
       } catch (error) {
@@ -356,7 +362,7 @@ export class TabStore {
     tab.url = url
     tab.title = entry.title || url
 
-    this.pendingHistoryJumps.add(tabId)
+    this.pendingHistoryJumps.set(tabId, 2)
     try {
       if (url === kNEW_TAB_URL) {
         tab.webviewRef.current.injectJavaScript(`window.location.href = "about:blank";`)
@@ -428,8 +434,21 @@ export class TabStore {
     const currentUrl = normalizeUrlForHistory(rawUrl)
 
     if (!navState.loading && currentUrl && isValidUrl(currentUrl)) {
-      const isJump = this.pendingHistoryJumps.has(tabId)
-      if (isJump) this.pendingHistoryJumps.delete(tabId)
+      // Countdown-based jump detection: each programmatic navigation sets the count to 2
+      // because both onNavigationStateChange and onLoadEnd fire handleNavigationStateChange
+      // with loading=false for the same event.  Decrementing on each loading=false call
+      // ensures both are suppressed without letting a stale token block a future organic
+      // navigation.
+      const jumpCount = this.pendingHistoryJumps.get(tabId) ?? 0
+      const isJump = jumpCount > 0
+      if (isJump) {
+        const remaining = jumpCount - 1
+        if (remaining <= 0) {
+          this.pendingHistoryJumps.delete(tabId)
+        } else {
+          this.pendingHistoryJumps.set(tabId, remaining)
+        }
+      }
 
       const history = this.tabNavigationHistories[tabId] || []
       const currentIndex = this.tabHistoryIndexes[tabId] ?? -1
