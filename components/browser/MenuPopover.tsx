@@ -22,15 +22,18 @@ interface MenuPopoverProps {
   addressBarAtTop?: boolean
   topOffset?: number
   isDesktopMode: boolean
+  isBookmarked: boolean
   onDismiss: () => void
   onShare: () => void
   onAddBookmark: () => void
+  onRemoveBookmark: () => void
   onFindInPage: () => void
   onBookmarks: () => void
   onTabs: () => void
   onNewTab: () => void
   onSettings: () => void
   onEnableWeb3: () => void
+  onConnections: () => void
   onToggleDesktopMode: () => void
 }
 
@@ -72,15 +75,18 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   addressBarAtTop = false,
   topOffset = 0,
   isDesktopMode,
+  isBookmarked,
   onDismiss,
   onShare,
   onAddBookmark,
+  onRemoveBookmark,
   onFindInPage,
   onBookmarks,
   onTabs,
   onNewTab,
   onSettings,
   onEnableWeb3,
+  onConnections,
   onToggleDesktopMode
 }) => {
   const { t } = useTranslation()
@@ -98,9 +104,20 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       {!isNewTab && canShare && <Row icon="share-outline" label={t('share')} onPress={dismiss(onShare)} />}
       {!isNewTab && (
         <View style={styles.splitRow}>
-          <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onAddBookmark)} activeOpacity={0.6}>
-            <Ionicons name="bookmark-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
-            <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('bookmark')}</Text>
+          <TouchableOpacity
+            style={styles.splitRowMain}
+            onPress={isBookmarked ? onRemoveBookmark : onAddBookmark}
+            activeOpacity={0.6}
+          >
+            <Ionicons
+              name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
+              size={22}
+              color={colors.textPrimary}
+              style={styles.rowIcon}
+            />
+            <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>
+              {isBookmarked ? t('unbookmark') : t('bookmark')}
+            </Text>
           </TouchableOpacity>
           <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
           <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onFindInPage)} activeOpacity={0.6}>
@@ -138,9 +155,18 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       {isWeb2Mode ? (
         <Row icon="flash-outline" label={t('enable_web3')} onPress={dismiss(onEnableWeb3)} />
       ) : (
-        <>
-          <Row icon="wallet-outline" label={t('wallet')} onPress={dismiss(onSettings)} />
-        </>
+        <Row icon="wallet-outline" label={t('wallet')} onPress={dismiss(onSettings)} />
+        // TODO: Websocket Link — re-enable Wallet | Link split-row once desktop side is ready
+        // <View style={styles.splitRow}>
+        //   <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onSettings)} activeOpacity={0.6}>
+        //     <Ionicons name="wallet-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
+        //     <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('wallet')}</Text>
+        //   </TouchableOpacity>
+        //   <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
+        //   <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onConnections)} activeOpacity={0.6}>
+        //     <Ionicons name="link-outline" size={22} color={colors.textPrimary} />
+        //   </TouchableOpacity>
+        // </View>
       )}
 
       <Divider />

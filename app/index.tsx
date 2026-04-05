@@ -36,7 +36,7 @@ import {
   DEFAULT_SEARCH_ENGINE_ID,
   safeBottomInset
 } from '@/shared/constants'
-import { isValidUrl } from '@/utils/generalHelpers'
+import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
 import { useTranslation } from 'react-i18next'
@@ -52,6 +52,8 @@ import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
+import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
+import { getErrorPage, getNativeErrorInfo, paymentLoadingPage } from '@/utils/webview/errorPages'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { MenuPopover } from '@/components/browser/MenuPopover'
@@ -137,11 +139,14 @@ const Browser = observer(function Browser() {
   /* ----------------------------- wallet context ----------------------------- */
   const { managers, walletBuilding } = useWallet()
   const [wallet, setWallet] = useState<WalletInterface | undefined>()
+  const paymentHandlerRef = useRef<any>(null)
   useEffect(() => {
     if (!isWeb2Mode && managers?.walletManager?.authenticated) {
       setWallet(managers.walletManager)
+      paymentHandlerRef.current = getPaymentHandler(managers.walletManager)
     } else if (isWeb2Mode) {
       setWallet(undefined)
+      paymentHandlerRef.current = null
     }
   }, [managers, isWeb2Mode])
 
@@ -149,7 +154,11 @@ const Browser = observer(function Browser() {
   const { getItem, setItem } = useLocalStorage()
 
   /* -------------------------------- history -------------------------------- */
-  const { history, pushHistory, removeHistoryItem, clearHistory } = useHistory(getItem, setItem)
+  const { history, pushHistory, removeHistoryItem, clearHistory: clearHistoryOnly } = useHistory(getItem, setItem)
+  const clearHistory = useCallback(async () => {
+    await clearHistoryOnly()
+    paymentHandlerRef.current?.clearCache()
+  }, [clearHistoryOnly])
 
   /* -------------------------------- bookmarks ------------------------------- */
   const [homepageUrl, setHomepageUrlState] = useState(DEFAULT_HOMEPAGE_URL)
@@ -803,6 +812,18 @@ const Browser = observer(function Browser() {
         return
       }
 
+      if (msg.type === 'PAYMENT_REQUIRED' && paymentHandlerRef.current) {
+        if (activeTab?.webviewRef?.current) {
+          activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`)
+        }
+        paymentHandlerRef.current.handle402(msg.url, msg.status, msg.headers || {}).then((html: string | null) => {
+          if (html && activeTab?.webviewRef?.current) {
+            activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`)
+          }
+        }).catch(() => {})
+        return
+      }
+
       if (await routeWebViewMessage(msg)) return
 
       if (msg.call && (!wallet || isWeb2Mode)) {
@@ -895,7 +916,10 @@ const Browser = observer(function Browser() {
     if (!activeTab) return
     if (navState.url?.includes('favicon.ico') && activeTab.url === kNEW_TAB_URL) return
 
-    if (navState.url !== activeTab.url && activeCameraStreams.current.has(activeTab.id.toString())) {
+    if (
+      normalizeUrlForHistory(navState.url) !== activeTab.url &&
+      activeCameraStreams.current.has(activeTab.id.toString())
+    ) {
       activeCameraStreams.current.delete(activeTab.id.toString())
       activeTab.webviewRef?.current?.injectJavaScript(`
         (function() {
@@ -910,15 +934,17 @@ const Browser = observer(function Browser() {
     }
 
     tabStore.handleNavigationStateChange(activeTab.id, navState)
-    if (!addressEditing.current) setAddressText(navState.url)
+    // Show the clean URL (without transient challenge tokens) in the address bar
+    const cleanUrl = normalizeUrlForHistory(navState.url)
+    if (!addressEditing.current) setAddressText(cleanUrl)
 
     // Debounce history push so that rapid onNavigationStateChange events
     // (which often carry stale titles from the *previous* page) settle before
     // we commit an entry.  Only the final event's metadata is recorded.
-    if (!navState.loading && navState.url !== kNEW_TAB_URL) {
+    if (!navState.loading && cleanUrl !== kNEW_TAB_URL) {
       if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
-      const url = navState.url
-      const title = navState.title || navState.url
+      const url = cleanUrl
+      const title = navState.title || cleanUrl
       historyDebounceTimer.current = setTimeout(() => {
         pushHistory({ title, url, timestamp: Date.now() }).catch(() => {})
         historyDebounceTimer.current = null
@@ -1177,10 +1203,41 @@ const Browser = observer(function Browser() {
             androidLayerType="hardware"
             androidHardwareAccelerationDisabled={false}
             onError={(e: any) => {
+              e.preventDefault()
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
+              const code = e.nativeEvent?.code
+              // Only handle native network errors (negative codes: DNS, TLS, timeout, etc.)
+              if (typeof code === 'number' && code < 0 && activeTab?.webviewRef?.current) {
+                const info = getNativeErrorInfo(code)
+                const page = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>:root{--bg:#f5f5f0;--text:#1a1a1a;--sub:#666}@media(prefers-color-scheme:dark){:root{--bg:#1a1a1a;--text:#e8e6e1;--sub:#999}}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:var(--bg);color:var(--text);text-align:center}h1{font-size:6rem;margin:0}.subtitle{font-size:1.5rem;margin:8px 0}.detail{color:var(--sub);padding:0 24px}</style></head><body><div><h1 style="color:${info.color}">${info.code}</h1><p class="subtitle">${info.title}</p><p class="detail">${info.detail}</p></div></body></html>`
+                activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${page.replace(/`/g, '\\`')}\`);document.close();`)
+              }
             }}
             onHttpError={(e: any) => {
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
+              const status = e.nativeEvent?.statusCode || 404
+              const url = e.nativeEvent?.url || ''
+              if (status === 402 && paymentHandlerRef.current) {
+                if (activeTab?.webviewRef?.current) {
+                  activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`)
+                }
+                paymentHandlerRef.current.handle402(url, 402, e.nativeEvent.headers || {}).then((html: string | null) => {
+                  if (html && activeTab?.webviewRef?.current) {
+                    activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`)
+                  } else if (activeTab?.webviewRef?.current) {
+                    const fallback = getErrorPage(402)
+                    activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`)
+                  }
+                }).catch(() => {
+                  if (activeTab?.webviewRef?.current) {
+                    const fallback = getErrorPage(402)
+                    activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`)
+                  }
+                })
+              } else if (activeTab?.webviewRef?.current) {
+                const fallback = getErrorPage(status)
+                activeTab.webviewRef.current.injectJavaScript(`document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`)
+              }
             }}
             onLoadEnd={(event: any) =>
               tabStore.handleNavigationStateChange(activeTab.id, {
@@ -1329,11 +1386,17 @@ const Browser = observer(function Browser() {
               topOffset={8}
               bottomOffset={bottomInset + 4}
               isDesktopMode={activeTab?.isDesktopMode ?? false}
+              isBookmarked={!!activeTab && bookmarkStore.bookmarks.some(b => b.url === activeTab.url)}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {
                 if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
                   addBookmark(activeTab.title || t('untitled'), activeTab.url)
+                }
+              }}
+              onRemoveBookmark={() => {
+                if (activeTab) {
+                  bookmarkStore.removeBookmark(activeTab.url)
                 }
               }}
               onFindInPage={() => setFindInPageVisible(true)}
@@ -1347,6 +1410,7 @@ const Browser = observer(function Browser() {
               }}
               onSettings={() => sheet.push('settings')}
               onEnableWeb3={() => router.push('/auth/mnemonic')}
+              onConnections={() => router.push('/connections')}
               onToggleDesktopMode={() => {
                 if (!activeTab || desktopModeCooldown.current) return
                 desktopModeCooldown.current = true

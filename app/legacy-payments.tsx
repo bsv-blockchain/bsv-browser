@@ -18,8 +18,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Clipboard from '@react-native-clipboard/clipboard'
 
 import QRCode from 'react-native-qrcode-svg'
-import { CameraView, useCameraPermissions } from 'expo-camera'
 import { StatusBar } from 'expo-status-bar'
+import QRScanner from '@/components/QRScanner'
 import {
   PublicKey,
   P2PKH,
@@ -116,8 +116,6 @@ export default function LegacyPaymentsScreen() {
 
   // ── QR scanner state ─────────────────────────────────────────────────────
   const [scannerVisible, setScannerVisible] = useState(false)
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions()
-  const scanLockRef = useRef(false)
 
   // ── Pulse animation for "listening" indicator ─────────────────────────────
   const pulseAnim = useRef(new Animated.Value(1)).current
@@ -423,9 +421,7 @@ export default function LegacyPaymentsScreen() {
 
   // ── QR scanner ───────────────────────────────────────────────────────────
   const handleQRScanned = useCallback(
-    ({ data }: { data: string }) => {
-      if (scanLockRef.current) return
-      scanLockRef.current = true
+    (data: string) => {
       const raw = data
         .replace(/^bitcoin:/i, '')
         .split('?')[0]
@@ -434,20 +430,15 @@ export default function LegacyPaymentsScreen() {
         setRecipientAddress(raw)
         setAddressError(null)
         setScannerVisible(false)
-      } else {
-        setTimeout(() => {
-          scanLockRef.current = false
-        }, 1500)
       }
+      // Invalid scan — QRScanner will auto-retry after delay
     },
     [validateAddress]
   )
 
-  const openScanner = useCallback(async () => {
-    if (!cameraPermission?.granted) await requestCameraPermission()
-    scanLockRef.current = false
+  const openScanner = useCallback(() => {
     setScannerVisible(true)
-  }, [cameraPermission, requestCameraPermission])
+  }, [])
 
   // ── Send ─────────────────────────────────────────────────────────────────
   const handleSendBSV = useCallback(async () => {
@@ -835,50 +826,12 @@ export default function LegacyPaymentsScreen() {
         statusBarTranslucent
       >
         <StatusBar style="light" />
-        {!cameraPermission?.granted ? (
-          <View style={styles.permScreen}>
-            <View style={[styles.permIconWrap, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-              <Ionicons name="camera-outline" size={40} color="#fff" />
-            </View>
-            <Text style={styles.permTitle}>{t('scan_shares_camera_needed')}</Text>
-            <Text style={styles.permBody}>{t('scan_shares_camera_description')}</Text>
-            <TouchableOpacity style={styles.permBtn} onPress={requestCameraPermission}>
-              <Text style={styles.permBtnText}>{t('scan_shares_grant_camera')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={{ marginTop: spacing.lg }} onPress={() => setScannerVisible(false)}>
-              <Text style={styles.permBack}>{t('go_back')}</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.scannerRoot}>
-            <CameraView
-              style={StyleSheet.absoluteFill}
-              facing="back"
-              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-              onBarcodeScanned={handleQRScanned}
-            />
-            <View style={styles.scanOverlay}>
-              <View style={styles.scanTop}>
-                <TouchableOpacity style={styles.scanClose} onPress={() => setScannerVisible(false)}>
-                  <Ionicons name="close" size={26} color="#fff" />
-                </TouchableOpacity>
-              </View>
-              <View style={styles.scanMiddle}>
-                <View style={styles.scanSide} />
-                <View style={styles.scanWindow}>
-                  <View style={[styles.corner, styles.cTL]} />
-                  <View style={[styles.corner, styles.cTR]} />
-                  <View style={[styles.corner, styles.cBL]} />
-                  <View style={[styles.corner, styles.cBR]} />
-                </View>
-                <View style={styles.scanSide} />
-              </View>
-              <View style={styles.scanBottom}>
-                <Text style={styles.scanHint}>{t('scan_bsv_address_hint')}</Text>
-              </View>
-            </View>
-          </View>
-        )}
+        <QRScanner
+          multiScan
+          onScan={handleQRScanned}
+          onClose={() => setScannerVisible(false)}
+          hintText={t('scan_bsv_address_hint')}
+        />
       </Modal>
     </KeyboardAvoidingView>
   )
@@ -1187,104 +1140,5 @@ const styles = StyleSheet.create({
   snackText: {
     ...typography.subhead,
     flex: 1
-  },
-  scannerRoot: {
-    flex: 1,
-    backgroundColor: '#000'
-  },
-  scanOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between'
-  },
-  scanTop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingTop: 60,
-    paddingHorizontal: spacing.lg,
-    justifyContent: 'flex-start'
-  },
-  scanClose: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  scanMiddle: {
-    flexDirection: 'row',
-    height: 260
-  },
-  scanSide: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)'
-  },
-  scanWindow: {
-    width: 260,
-    height: 260
-  },
-  scanBottom: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    paddingTop: spacing.xxl,
-    paddingHorizontal: spacing.xl
-  },
-  scanHint: {
-    ...typography.subhead,
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'center'
-  },
-  corner: {
-    position: 'absolute',
-    width: 24,
-    height: 24
-  },
-  cTL: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderColor: '#fff' },
-  cTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderColor: '#fff' },
-  cBL: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderColor: '#fff' },
-  cBR: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderColor: '#fff' },
-
-  // ── Camera permission screen ─────────────────────────────────────────────
-  permScreen: {
-    flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xxxl
-  },
-  permIconWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.xxl
-  },
-  permTitle: {
-    ...typography.headline,
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: spacing.sm
-  },
-  permBody: {
-    ...typography.subhead,
-    color: 'rgba(255,255,255,0.6)',
-    textAlign: 'center',
-    marginBottom: spacing.xxl
-  },
-  permBtn: {
-    backgroundColor: '#007AFF',
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xxxl
-  },
-  permBtnText: {
-    ...typography.headline,
-    color: '#fff'
-  },
-  permBack: {
-    ...typography.subhead,
-    color: 'rgba(255,255,255,0.5)'
   }
 })
