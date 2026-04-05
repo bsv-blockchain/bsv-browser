@@ -167,7 +167,11 @@ export class TabStore {
     }
 
     // HYBRID APPROACH: Use custom history for new tab scenarios, WebView native for others
-    if (history.length > 1 && currentIndex > 0) {
+    // The first history entry is always kNEW_TAB_URL (about:blank), which acts as a sentinel.
+    // We never navigate back to it — the back button should be disabled before reaching it.
+    const minNavigableIndex = history.length > 0 && history[0] === kNEW_TAB_URL ? 1 : 0
+
+    if (history.length > 1 && currentIndex > minNavigableIndex) {
       // Use custom history navigation for new tab page scenarios
       const newIndex = currentIndex - 1
       const url = history[newIndex]
@@ -177,7 +181,7 @@ export class TabStore {
       this.tabHistoryIndexes[tabId] = newIndex
 
       // Update tab's navigation state based on new position
-      tab.canGoBack = newIndex > 0
+      tab.canGoBack = newIndex > minNavigableIndex
       tab.canGoForward = newIndex < history.length - 1
 
       // Navigate to the URL
@@ -396,9 +400,12 @@ export class TabStore {
     const finalCurrentIndex = this.tabHistoryIndexes[tabId] ?? -1
 
     // Use custom history logic if we have meaningful history (more than just current page)
-    // Otherwise fall back to WebView's native state
+    // Otherwise fall back to WebView's native state.
+    // The first history entry is always kNEW_TAB_URL (about:blank), which acts as a sentinel —
+    // we never navigate back to it, so the minimum navigable index is 1 in that case.
+    const finalMinNavigableIndex = finalHistory.length > 0 && finalHistory[0] === kNEW_TAB_URL ? 1 : 0
     if (finalHistory.length > 1) {
-      tab.canGoBack = finalCurrentIndex > 0
+      tab.canGoBack = finalCurrentIndex > finalMinNavigableIndex
       tab.canGoForward = finalCurrentIndex < finalHistory.length - 1
       console.log(
         `🔄 Using custom navigation state: canGoBack=${tab.canGoBack}, canGoForward=${tab.canGoForward}, historyIndex=${finalCurrentIndex}/${finalHistory.length - 1}`

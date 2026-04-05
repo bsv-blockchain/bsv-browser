@@ -54,7 +54,9 @@ export class BsvPaymentHandler {
     try {
       const serverIdentityKey = serverHeader
       const derivationPrefix = Utils.toBase64(Random(8))
-      const derivationSuffix = Utils.toBase64(Random(8))
+      const timestamp = String(Date.now())
+      // Server derives suffix as Buffer.from(time).toString('base64') — match it exactly
+      const derivationSuffix = btoa(timestamp)
       const originator = new URL(url).origin
 
       const { publicKey: derivedPubKey } = await this.wallet.getPublicKey({
@@ -64,7 +66,7 @@ export class BsvPaymentHandler {
       }, originator)
 
       const pkh = PublicKey.fromString(derivedPubKey).toHash('hex') as string
-      
+
       const { publicKey: senderIdentityKey } = await this.wallet.getPublicKey({ identityKey: true }, originator)
 
       const actionResult = await this.wallet.createAction({
@@ -92,8 +94,8 @@ export class BsvPaymentHandler {
       const paymentHeaders: Record<string, string> = {
         [`${HEADER_PREFIX}sender`]: senderIdentityKey,
         [`${HEADER_PREFIX}beef`]: txBase64,
-        [`${HEADER_PREFIX}prefix`]: derivationPrefix,
-        [`${HEADER_PREFIX}suffix`]: derivationSuffix,
+        [`${HEADER_PREFIX}nonce`]: derivationPrefix,
+        [`${HEADER_PREFIX}time`]: timestamp,
         [`${HEADER_PREFIX}vout`]: vout
       }
 
