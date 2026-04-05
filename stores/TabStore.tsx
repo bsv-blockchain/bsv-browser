@@ -18,6 +18,10 @@ export class TabStore {
   private nextId = 1
   private tabNavigationHistories: { [tabId: number]: { url: string; title: string }[] } = {} // Track navigation history per tab
   private tabHistoryIndexes: { [tabId: number]: number } = {} // Track current position in history per tab
+  // Tab IDs for which the next navigation state change is a programmatic history jump
+  // (goBack / goForward / navigateToHistoryIndex). handleNavigationStateChange skips the
+  // history-append logic for these so jumps are never mistaken for new navigations.
+  private pendingHistoryJumps: Set<number> = new Set()
   constructor() {
     console.log('TabStore constructor called')
     makeAutoObservable(this)
@@ -134,12 +138,33 @@ export class TabStore {
         }
       }
 
+      const newUrl = patch.url
+      const urlChanging = 'url' in patch && newUrl !== tab.url && newUrl && newUrl !== kNEW_TAB_URL
+
       // Log significant updates for debugging
-      if ('url' in patch && patch.url !== tab.url) {
-        console.log(`updateTab(): Updating tab ${id} URL from "${tab.url}" to "${patch.url}"`)
+      if ('url' in patch && newUrl !== tab.url) {
+        console.log(`updateTab(): Updating tab ${id} URL from "${tab.url}" to "${newUrl}"`)
       }
 
       Object.assign(tab, patch)
+
+      // When the URL changes via user navigation (address bar submit, suggestion tap, etc.),
+      // immediately record the new entry in the tab's history. Use the URL as a placeholder
+      // title — handleNavigationStateChange will update it once the page title arrives.
+      // Also mark as a pending jump so handleNavigationStateChange doesn't double-append.
+      if (urlChanging && newUrl) {
+        const history = this.tabNavigationHistories[id] || []
+        const currentIndex = this.tabHistoryIndexes[id] ?? -1
+        const newHistory =
+          currentIndex >= 0 ? history.slice(0, currentIndex + 1) : [{ url: kNEW_TAB_URL, title: 'New Tab' }]
+        newHistory.push({ url: newUrl, title: newUrl })
+        this.tabNavigationHistories[id] = newHistory
+        this.tabHistoryIndexes[id] = newHistory.length - 1
+        tab.canGoBack = newHistory.length > 1
+        tab.canGoForward = false
+        this.pendingHistoryJumps.add(id)
+      }
+
       this.saveTabs()
     } else {
       console.warn(`updateTab(): Tab with id ${id} not found`)
@@ -172,7 +197,7 @@ export class TabStore {
     // HYBRID APPROACH: Use custom history for new tab scenarios, WebView native for others
     // The first history entry is always kNEW_TAB_URL (about:blank), which acts as a sentinel.
     // We never navigate back to it — the back button should be disabled before reaching it.
-    const minNavigableIndex = history.length > 0 && history[0] === kNEW_TAB_URL ? 1 : 0
+    const minNavigableIndex = history.length > 0 && history[0]?.url === kNEW_TAB_URL ? 1 : 0
 
     if (history.length > 1 && currentIndex > minNavigableIndex) {
       // Use custom history navigation for new tab page scenarios
@@ -192,6 +217,7 @@ export class TabStore {
       tab.url = url
       tab.title = entry.title || url
 
+      this.pendingHistoryJumps.add(tabId)
       try {
         if (url === kNEW_TAB_URL) {
           // Navigate to new tab page
@@ -257,12 +283,22 @@ export class TabStore {
       // Update history index
       this.tabHistoryIndexes[tabId] = newIndex
 
+      // The first entry is always the new-tab sentinel; never count it as a navigable back target.
+      const minNavigableIndex = history.length > 0 && history[0]?.url === kNEW_TAB_URL ? 1 : 0
+
       // Update tab's navigation state based on new position
-      tab.canGoBack = newIndex > 0
+      tab.canGoBack = newIndex > minNavigableIndex
       tab.canGoForward = newIndex < history.length - 1
 
       // Navigate to the URL
       tab.url = url
+
+      this.pendingHistoryJumps.add(tabId)
+      try {
+        tab.webviewRef.current?.injectJavaScript(`window.location.href = "${url}";`)
+      } catch (error) {
+        console.error(`🔜 [TAB_STORE] Error navigating forward to ${url}:`, error)
+      }
 
       console.log(
         `🔜 [TAB_STORE] Updated navigation state: canGoBack=${tab.canGoBack}, canGoForward=${tab.canGoForward}`
@@ -320,6 +356,7 @@ export class TabStore {
     tab.url = url
     tab.title = entry.title || url
 
+    this.pendingHistoryJumps.add(tabId)
     try {
       if (url === kNEW_TAB_URL) {
         tab.webviewRef.current.injectJavaScript(`window.location.href = "about:blank";`)
@@ -391,65 +428,57 @@ export class TabStore {
     const currentUrl = normalizeUrlForHistory(rawUrl)
 
     if (!navState.loading && currentUrl && isValidUrl(currentUrl)) {
-      // Always update title when navigation completes, even if URL hasn't changed.
-      // The WebView can fire onNavigationStateChange multiple times during a page load,
-      // and the first event often carries the *previous* page's title. By not gating
-      // title updates on URL change, later events can correct a stale title.
-      if (navState.title && navState.title.trim() !== '') {
-        tab.title = navState.title
-      } else if (currentUrl !== tab.url) {
-        // Only fall back to URL-as-title when navigating to a genuinely new URL
-        tab.title = currentUrl
-      }
+      const isJump = this.pendingHistoryJumps.has(tabId)
+      if (isJump) this.pendingHistoryJumps.delete(tabId)
 
-      // Only update URL and navigation history when URL actually changed
+      const history = this.tabNavigationHistories[tabId] || []
+      const currentIndex = this.tabHistoryIndexes[tabId] ?? -1
+
+      // Update tab.url to whatever the WebView actually landed on (handles redirects etc.)
       if (currentUrl !== tab.url) {
         tab.url = currentUrl
+      }
 
-        // Add to history for real navigations (excluding about:blank but including new tab page)
-        if (currentUrl !== 'about:blank') {
-          const history = this.tabNavigationHistories[tabId] || []
-          const currentIndex = this.tabHistoryIndexes[tabId] ?? -1
-          const currentTitle = navState.title && navState.title.trim() !== '' ? navState.title : currentUrl
+      // Always update the title on the current history entry when a real title arrives.
+      // We intentionally do NOT write navState.title when first creating an entry (done
+      // in updateTab/goBack/goForward/navigateToHistoryIndex with the URL as placeholder)
+      // because the first navState event after a URL change still carries the *previous*
+      // page's title. Title correction happens here, safely, once the page has settled.
+      const freshTitle = navState.title?.trim() || ''
+      if (freshTitle) {
+        tab.title = freshTitle
+        // Also update the history entry for the current position
+        if (history[currentIndex]) {
+          history[currentIndex].title = freshTitle
+        }
+      }
 
-          // Check if this URL is already at our current position
-          if (currentUrl !== history[currentIndex]?.url) {
-            console.log(`📝 Adding URL to history: ${currentUrl}`)
-
-            // For new tab page, ensure it's always the first entry
-            if (currentUrl === kNEW_TAB_URL) {
-              // If navigating back to new tab page, update index but don't add duplicate
-              const newTabIndex = history.findIndex(e => e.url === kNEW_TAB_URL)
-              if (newTabIndex >= 0) {
-                this.tabHistoryIndexes[tabId] = newTabIndex
-              } else {
-                // This shouldn't happen with our new initialization, but handle it gracefully
-                history.unshift({ url: kNEW_TAB_URL, title: 'New Tab' })
-                this.tabHistoryIndexes[tabId] = 0
-              }
+      // If this was a programmatic jump (goBack / goForward / navigateToHistoryIndex /
+      // updateTab URL change), the history entry is already recorded — skip append logic.
+      if (!isJump && currentUrl !== 'about:blank') {
+        if (currentUrl !== history[currentIndex]?.url) {
+          // Genuine new navigation — append to history, truncating any forward stack.
+          if (currentUrl === kNEW_TAB_URL) {
+            const newTabIndex = history.findIndex(e => e.url === kNEW_TAB_URL)
+            if (newTabIndex >= 0) {
+              this.tabHistoryIndexes[tabId] = newTabIndex
             } else {
-              // For regular URLs, remove any forward history and add the new URL
-              const newHistory =
-                currentIndex >= 0 ? history.slice(0, currentIndex + 1) : [{ url: kNEW_TAB_URL, title: 'New Tab' }]
-              newHistory.push({ url: currentUrl, title: currentTitle })
-              this.tabNavigationHistories[tabId] = newHistory
-              this.tabHistoryIndexes[tabId] = newHistory.length - 1
+              history.unshift({ url: kNEW_TAB_URL, title: 'New Tab' })
+              this.tabHistoryIndexes[tabId] = 0
             }
-
-            console.log(
-              `🧭 Navigation updated: canGoBack=${tab.canGoBack}, canGoForward=${tab.canGoForward}, historyIndex=${this.tabHistoryIndexes[tabId]}/${history.length - 1}`
-            )
-          } else if (history[currentIndex]) {
-            // URL matches but title may have updated — keep the title fresh
-            const freshTitle = navState.title && navState.title.trim() !== '' ? navState.title : undefined
-            if (freshTitle && freshTitle !== history[currentIndex].title) {
-              history[currentIndex].title = freshTitle
-            }
+          } else {
+            // Use URL as placeholder title — it will be corrected above on the next event
+            // once the page has set its <title>.
+            const newHistory =
+              currentIndex >= 0 ? history.slice(0, currentIndex + 1) : [{ url: kNEW_TAB_URL, title: 'New Tab' }]
+            newHistory.push({ url: currentUrl, title: currentUrl })
+            this.tabNavigationHistories[tabId] = newHistory
+            this.tabHistoryIndexes[tabId] = newHistory.length - 1
           }
         }
-
-        this.saveTabs()
       }
+
+      this.saveTabs()
     }
 
     // HYBRID APPROACH: Calculate navigation state after history updates
@@ -461,7 +490,7 @@ export class TabStore {
     // Otherwise fall back to WebView's native state.
     // The first history entry is always kNEW_TAB_URL (about:blank), which acts as a sentinel —
     // we never navigate back to it, so the minimum navigable index is 1 in that case.
-    const finalMinNavigableIndex = finalHistory.length > 0 && finalHistory[0] === kNEW_TAB_URL ? 1 : 0
+    const finalMinNavigableIndex = finalHistory.length > 0 && finalHistory[0]?.url === kNEW_TAB_URL ? 1 : 0
     if (finalHistory.length > 1) {
       tab.canGoBack = finalCurrentIndex > finalMinNavigableIndex
       tab.canGoForward = finalCurrentIndex < finalHistory.length - 1
@@ -532,12 +561,15 @@ export class TabStore {
       }))
 
       runInAction(() => {
-        this.tabs = withRefs
+        // Reset navigation flags to false: tabNavigationHistories is in-memory only
+        // and is not persisted, so stale canGoBack/canGoForward values from the previous
+        // session would leave the back button enabled with no history behind it.
+        this.tabs = withRefs.map((t: any) => ({ ...t, canGoBack: false, canGoForward: false }))
         const maxId = Math.max(0, ...withRefs.map((t: any) => t.id))
         this.nextId = maxId + 1
 
         const restored = Number(activeIdStr)
-        this.activeTabId = withRefs.some((t: any) => t.id === restored) ? restored : (withRefs[0]?.id ?? 1)
+        this.activeTabId = this.tabs.some((t: any) => t.id === restored) ? restored : (this.tabs[0]?.id ?? 1)
       })
     } catch (e) {
       console.error('loadTabs failed', e)

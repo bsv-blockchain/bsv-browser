@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
@@ -16,6 +15,8 @@ try {
 interface HistoryPopoverProps {
   entries: { url: string; title: string }[]
   currentIndex: number
+  /** Which side of the history stack to show. */
+  direction: 'back' | 'forward'
   bottomOffset: number
   addressBarAtTop?: boolean
   topOffset?: number
@@ -34,24 +35,31 @@ function domainFromUrl(url: string): string {
   }
 }
 
-interface DeduplicatedEntry {
+/** Is this a new-tab sentinel entry? */
+function isNewTabEntry(url: string): boolean {
+  return url === 'about:blank' || url.includes('new-tab')
+}
+
+interface HistoryItem {
   url: string
   title: string
-  /** The original index in the history array (for navigateToHistoryIndex). */
+  /** The original index in the full history array (for navigateToHistoryIndex). */
   originalIndex: number
-  isCurrent: boolean
 }
 
 /**
  * Floating glass popover anchored to the bottom-left (or top-left) of the screen,
- * listing the navigation history for the active tab.
+ * listing the back or forward navigation history for the active tab.
  *
- * Items are de-duplicated by URL (keeping the entry closest to the current index)
- * and displayed with title + domain.
+ * - Long hold on Back  → shows pages *before* the current position (most recent first).
+ * - Long hold on Forward → shows pages *after* the current position (nearest first).
+ *
+ * The current page is never included. Consecutive exact-URL duplicates are collapsed.
  */
 export const HistoryPopover: React.FC<HistoryPopoverProps> = ({
   entries,
   currentIndex,
+  direction,
   bottomOffset,
   addressBarAtTop = false,
   topOffset = 0,
@@ -60,43 +68,34 @@ export const HistoryPopover: React.FC<HistoryPopoverProps> = ({
 }) => {
   const { isDark, colors } = useTheme()
 
-  /** De-duplicate entries by URL, keeping the one closest to currentIndex. */
-  const items: DeduplicatedEntry[] = useMemo(() => {
-    const seen = new Map<string, DeduplicatedEntry>()
+  const items: HistoryItem[] = useMemo(() => {
+    const result: HistoryItem[] = []
+    let prevUrl: string | null = null
 
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i]
-      const existing = seen.get(entry.url)
-
-      if (!existing) {
-        seen.set(entry.url, {
-          url: entry.url,
-          title: entry.title,
-          originalIndex: i,
-          isCurrent: i === currentIndex
-        })
-      } else {
-        // Keep the entry closest to currentIndex
-        if (Math.abs(i - currentIndex) < Math.abs(existing.originalIndex - currentIndex)) {
-          seen.set(entry.url, {
-            url: entry.url,
-            title: entry.title,
-            originalIndex: i,
-            isCurrent: i === currentIndex
-          })
-        }
-        // If either is the current, mark it
-        if (i === currentIndex) {
-          const e = seen.get(entry.url)!
-          e.isCurrent = true
-          e.originalIndex = i
-        }
+    if (direction === 'back') {
+      // Walk backwards from one before current to the start.
+      // Result order: closest-to-current first (most recent back entry at top).
+      for (let i = currentIndex - 1; i >= 0; i--) {
+        const entry = entries[i]
+        if (isNewTabEntry(entry.url)) continue
+        if (entry.url === prevUrl) continue
+        prevUrl = entry.url
+        result.push({ url: entry.url, title: entry.title, originalIndex: i })
+      }
+    } else {
+      // Walk forwards from one after current to the end.
+      // Result order: closest-to-current first (next forward entry at top).
+      for (let i = currentIndex + 1; i < entries.length; i++) {
+        const entry = entries[i]
+        if (isNewTabEntry(entry.url)) continue
+        if (entry.url === prevUrl) continue
+        prevUrl = entry.url
+        result.push({ url: entry.url, title: entry.title, originalIndex: i })
       }
     }
 
-    // Return in reverse chronological order (most recent first)
-    return Array.from(seen.values()).sort((a, b) => b.originalIndex - a.originalIndex)
-  }, [entries, currentIndex])
+    return result
+  }, [entries, currentIndex, direction])
 
   const dismiss = (fn: () => void) => () => {
     onDismiss()
@@ -108,8 +107,7 @@ export const HistoryPopover: React.FC<HistoryPopoverProps> = ({
       <ScrollView style={styles.scrollView} bounces={false} showsVerticalScrollIndicator={false}>
         {items.map((item, idx) => {
           const domain = domainFromUrl(item.url)
-          const isNewTab = item.url === 'about:blank' || item.url.includes('new-tab')
-          const displayTitle = isNewTab ? 'New Tab' : item.title || domain || item.url
+          const displayTitle = item.title || domain || item.url
 
           return (
             <React.Fragment key={`${item.url}-${item.originalIndex}`}>
@@ -119,18 +117,11 @@ export const HistoryPopover: React.FC<HistoryPopoverProps> = ({
                 onPress={dismiss(() => onSelectEntry(item.originalIndex))}
                 activeOpacity={0.6}
               >
-                {item.isCurrent && (
-                  <Ionicons name="checkmark" size={16} color={colors.accent} style={styles.checkIcon} />
-                )}
-                <View style={[styles.rowContent, !item.isCurrent && styles.rowContentNoCheck]}>
-                  <Text
-                    style={[styles.rowTitle, { color: colors.textPrimary }, item.isCurrent && styles.rowTitleCurrent]}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
+                <View style={styles.rowContent}>
+                  <Text style={[styles.rowTitle, { color: colors.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
                     {displayTitle}
                   </Text>
-                  {domain && !isNewTab ? (
+                  {domain ? (
                     <Text
                       style={[styles.rowDomain, { color: colors.textSecondary }]}
                       numberOfLines={1}
@@ -219,22 +210,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md
   },
-  checkIcon: {
-    width: 22,
-    marginRight: spacing.sm
-  },
   rowContent: {
     flex: 1,
     minWidth: 0
   },
-  rowContentNoCheck: {
-    marginLeft: 22 + spacing.sm // Indent to align with rows that have checkmarks
-  },
   rowTitle: {
     ...typography.subhead
-  },
-  rowTitleCurrent: {
-    fontWeight: '600'
   },
   rowDomain: {
     ...typography.caption1,

@@ -21,6 +21,7 @@ interface AddressBarProps {
   addressFocused: boolean
   isLoading: boolean
   canGoBack: boolean
+  canGoForward: boolean
   isNewTab: boolean
   isHttps: boolean
   menuOpen: boolean
@@ -32,6 +33,8 @@ interface AddressBarProps {
   onBlur: () => void
   onBack: () => void
   onBackLongPress: () => void
+  onForward: () => void
+  onForwardLongPress: () => void
   onReloadOrStop: () => void
   onClearText: () => void
   onCancelNewTab?: () => void
@@ -83,6 +86,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   addressFocused,
   isLoading,
   canGoBack,
+  canGoForward,
   isNewTab,
   isHttps,
   menuOpen,
@@ -94,6 +98,8 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   onBlur,
   onBack,
   onBackLongPress,
+  onForward,
+  onForwardLongPress,
   onReloadOrStop,
   onClearText,
   onCancelNewTab,
@@ -118,16 +124,20 @@ export const AddressBar: React.FC<AddressBarProps> = ({
 
   const displayText = addressFocused ? addressText : domainFromUrl(addressText)
   const isBackDisabled = !canGoBack || isNewTab
+  // Show both back and forward buttons whenever forward navigation is available.
+  // This replaces the single back button so the user can recover forward after going back.
+  const showDualNav = canGoForward && !isNewTab
 
   return (
     <View style={styles.container}>
       <View style={styles.row}>
-        {/* Back button — hidden while editing; long-press opens history popover */}
+        {/* Nav button(s) — hidden while editing */}
         {!addressFocused && !historyPopoverOpen && (
-          <GlassPill style={styles.navPill}>
+          <GlassPill style={showDualNav ? styles.navPillDual : styles.navPill}>
+            {/* Back button */}
             <TouchableOpacity
               onPress={isBackDisabled ? undefined : onBack}
-              onLongPress={onBackLongPress}
+              onLongPress={isBackDisabled ? undefined : onBackLongPress}
               delayLongPress={350}
               style={styles.navButton}
               activeOpacity={0.6}
@@ -138,10 +148,28 @@ export const AddressBar: React.FC<AddressBarProps> = ({
                 color={isBackDisabled ? (gc?.quaternary ?? colors.textQuaternary) : (gc?.accent ?? colors.accent)}
               />
             </TouchableOpacity>
+
+            {/* Divider + forward button — only when forward history is available */}
+            {showDualNav && (
+              <>
+                <View style={[styles.navDivider, { backgroundColor: gc?.separator ?? colors.separator }]} />
+                <TouchableOpacity
+                  onPress={onForward}
+                  onLongPress={onForwardLongPress}
+                  delayLongPress={350}
+                  style={styles.navButton}
+                  activeOpacity={0.6}
+                >
+                  <Ionicons name="chevron-forward" size={22} color={gc?.accent ?? colors.accent} />
+                </TouchableOpacity>
+              </>
+            )}
           </GlassPill>
         )}
         {/* Placeholder so the URL pill doesn't reflow when history popover opens */}
-        {!addressFocused && historyPopoverOpen && <View style={styles.navPlaceholder} />}
+        {!addressFocused && historyPopoverOpen && (
+          <View style={showDualNav ? styles.navPlaceholderDual : styles.navPlaceholder} />
+        )}
 
         {/* URL pill */}
         <GlassPill flex={1} style={styles.urlPill}>
@@ -246,14 +274,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 44
   },
+  navPillDual: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 88
+  },
   navButton: {
     width: 44,
     height: 44,
     alignItems: 'center',
     justifyContent: 'center'
   },
+  navDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 22,
+    opacity: 0.6
+  },
   navPlaceholder: {
     width: 44
+  },
+  navPlaceholderDual: {
+    width: 88
   },
   urlPill: {
     flexDirection: 'row',
