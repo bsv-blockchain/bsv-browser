@@ -28,6 +28,7 @@ export default function PairScreen() {
     origin: string
     expiry: string
     sig?: string
+    reconnect?: string
   }>()
 
   const {
@@ -39,8 +40,21 @@ export default function PairScreen() {
   // Pre-connection validation error (before connect() is called)
   const [preConnectError, setPreConnectError] = useState<string | null>(null)
 
-  // Whether this mount is a reconnect (context was already active when we arrived)
-  const isReconnect = useRef(status !== 'idle').current
+  // Whether this mount is a reconnect (explicitly passed from connections screen)
+  const isReconnect = params.reconnect === 'true'
+
+  // Track current status for unmount cleanup without re-running the effect
+  const statusRef = useRef(status)
+  useEffect(() => { statusRef.current = status }, [status])
+
+  // Reset error state when leaving this screen so the next scan starts fresh
+  useEffect(() => {
+    return () => {
+      if (statusRef.current === 'error' || statusRef.current === 'disconnected') {
+        disconnect()
+      }
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Validate QR params on mount — only for fresh pairings
   useEffect(() => {
@@ -99,7 +113,7 @@ export default function PairScreen() {
         <View style={styles.centered}>
           <Text style={styles.errorTitle}>Connection Failed</Text>
           <Text style={styles.errorMsg}>{preConnectError}</Text>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={() => { disconnect(); router.back() }}>
             <Text style={styles.secondaryBtnText}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -112,7 +126,7 @@ export default function PairScreen() {
         <View style={styles.centered}>
           <Text style={styles.errorTitle}>Connection Failed</Text>
           <Text style={styles.errorMsg}>{errorMsg ?? 'Something went wrong'}</Text>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={() => { disconnect(); router.back() }}>
             <Text style={styles.secondaryBtnText}>Go Back</Text>
           </TouchableOpacity>
         </View>

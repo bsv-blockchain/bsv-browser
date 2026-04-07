@@ -145,7 +145,7 @@ export default observer(function ConnectionsScreen() {
     if (!managers.permissionsManager) return
     const wallet = new WalletClient(managers.permissionsManager, domainFromOrigin(conn.origin))
     await reconnect(conn, wallet)
-    router.push('/pair')
+    router.push({ pathname: '/pair', params: { reconnect: 'true' } })
   }
 
   const active = connectionStore.connections.filter(c => c.status === 'active')

@@ -379,11 +379,18 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
     setStatus('connecting')
     setErrorMsg(null)
 
-    // Verify QR signature before trusting the origin or opening any connection
-    await verifyQrSignature(params)
+    let relay: string
+    try {
+      // Verify QR signature before trusting the origin or opening any connection
+      await verifyQrSignature(params)
 
-    // Fetch relay URL from origin over HTTPS — TLS cert is the trust anchor
-    const relay = await fetchRelay(params.origin, params.topic)
+      // Fetch relay URL from origin over HTTPS — TLS cert is the trust anchor
+      relay = await fetchRelay(params.origin, params.topic)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Connection failed')
+      setStatus('error')
+      throw err
+    }
 
     const protocolID = JSON.parse(params.protocolID) as WalletProtocol
     const { publicKey: mobileIdentityKey } = await wallet.getPublicKey({ identityKey: true })
