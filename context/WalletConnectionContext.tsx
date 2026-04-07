@@ -43,15 +43,12 @@ export interface SessionMeta {
   backendIdentityKey: string
   mobileIdentityKey:  string
   protocolID:         WalletProtocol
-  keyID:              string
 }
 
 export interface ConnectParams {
   topic:              string
-  relay:              string
   backendIdentityKey: string
   protocolID:         string   // JSON-encoded WalletProtocol
-  keyID:              string
   origin:             string
 }
 
@@ -93,6 +90,14 @@ async function decryptPayload(
   const ciphertext = Array.from(Buffer.from(ciphertextB64, 'base64url'))
   const { plaintext } = await wallet.decrypt({ protocolID, keyID, counterparty, ciphertext })
   return new TextDecoder().decode(new Uint8Array(plaintext))
+}
+
+async function fetchRelay(origin: string, topic: string): Promise<string> {
+  const res = await fetch(`${origin}/api/session/${topic}`)
+  if (!res.ok) throw new Error(`Could not fetch session from origin: HTTP ${res.status}`)
+  const data = await res.json() as { relay?: string }
+  if (!data.relay) throw new Error('Origin server did not return a relay URL')
+  return data.relay
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -209,7 +214,7 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
     const sendResponse = async (response: RpcResponse) => {
       try {
         const ciphertext = await encryptPayload(
-          wallet, meta.protocolID, meta.keyID, meta.backendIdentityKey, JSON.stringify(response),
+          wallet, meta.protocolID, meta.topic, meta.backendIdentityKey, JSON.stringify(response),
         )
         ws.send(JSON.stringify({ topic: meta.topic, ciphertext } satisfies WireEnvelope))
       } catch (err) {
@@ -274,7 +279,7 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
         let plaintext: string
         try {
           plaintext = await decryptPayload(
-            wallet, meta.protocolID, meta.keyID, meta.backendIdentityKey, envelope.ciphertext,
+            wallet, meta.protocolID, meta.topic, meta.backendIdentityKey, envelope.ciphertext,
           )
         } catch (err) {
           console.warn('[WalletConnection] decryptPayload failed:', err)
@@ -355,17 +360,20 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
     setStatus('connecting')
     setErrorMsg(null)
 
+    // Fetch relay URL from origin over HTTPS — TLS cert is the trust anchor
+    const relay = await fetchRelay(params.origin, params.topic)
+
     const protocolID = JSON.parse(params.protocolID) as WalletProtocol
     const { publicKey: mobileIdentityKey } = await wallet.getPublicKey({ identityKey: true })
 
     const meta: SessionMeta = {
-      topic: params.topic, origin: params.origin, relay: params.relay,
+      topic: params.topic, origin: params.origin, relay,
       backendIdentityKey: params.backendIdentityKey, mobileIdentityKey,
-      protocolID, keyID: params.keyID,
+      protocolID,
     }
     setSessionMeta(meta)
 
-    const ws = new WebSocket(`${params.relay}/ws?topic=${params.topic}&role=mobile`)
+    const ws = new WebSocket(`${relay}/ws?topic=${params.topic}&role=mobile`)
 
     ws.onopen = async () => {
       try {
@@ -377,7 +385,7 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
             permissions: Array.from(IMPLEMENTED_METHODS),
           },
         })
-        const ciphertext = await encryptPayload(wallet, protocolID, params.keyID, params.backendIdentityKey, payload)
+        const ciphertext = await encryptPayload(wallet, protocolID, params.topic, params.backendIdentityKey, payload)
         ws.send(JSON.stringify({ topic: params.topic, mobileIdentityKey, ciphertext } satisfies WireEnvelope))
       } catch {
         setErrorMsg('Failed to send pairing message')
@@ -387,9 +395,9 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
 
     wireSocket(ws, wallet, meta, 0, () => {
       connectionStore.add({
-        sessionId: params.topic, origin: params.origin, relay: params.relay,
+        sessionId: params.topic, origin: params.origin, relay,
         backendIdentityKey: params.backendIdentityKey, mobileIdentityKey,
-        protocolID: params.protocolID, keyID: params.keyID,
+        protocolID: params.protocolID,
         connectedAt: Date.now(), status: 'active',
       })
       setStatus('connected')
@@ -402,19 +410,22 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
     setStatus('connecting')
     setErrorMsg(null)
 
+    // Fetch relay URL from origin over HTTPS — relay may have moved since last connection
+    const relay = await fetchRelay(connection.origin, connection.sessionId)
+
     const protocolID = JSON.parse(connection.protocolID) as WalletProtocol
     const storedSeq  = await SecureStore.getItemAsync(lastSeqKey(connection.sessionId))
     const initialSeq = storedSeq ? Number(storedSeq) : 0
 
     const meta: SessionMeta = {
-      topic: connection.sessionId, origin: connection.origin, relay: connection.relay,
+      topic: connection.sessionId, origin: connection.origin, relay,
       backendIdentityKey: connection.backendIdentityKey,
       mobileIdentityKey:  connection.mobileIdentityKey,
-      protocolID, keyID: connection.keyID,
+      protocolID,
     }
     setSessionMeta(meta)
 
-    const ws = new WebSocket(`${connection.relay}/ws?topic=${connection.sessionId}&role=mobile`)
+    const ws = new WebSocket(`${relay}/ws?topic=${connection.sessionId}&role=mobile`)
 
     ws.onopen = async () => {
       try {
@@ -427,7 +438,7 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
           },
         })
         const ciphertext = await encryptPayload(
-          wallet, protocolID, connection.keyID, connection.backendIdentityKey, payload,
+          wallet, protocolID, connection.sessionId, connection.backendIdentityKey, payload,
         )
         ws.send(JSON.stringify({
           topic: connection.sessionId,

@@ -23,10 +23,8 @@ export default function PairScreen() {
   const { managers } = useWallet()
   const params = useLocalSearchParams<{
     topic: string
-    relay: string
     backendIdentityKey: string
     protocolID: string
-    keyID: string
     origin: string
     expiry: string
   }>()
@@ -47,25 +45,14 @@ export default function PairScreen() {
   useEffect(() => {
     if (isReconnect) return
 
-    const { topic, relay, backendIdentityKey, protocolID, keyID, origin, expiry } = params
-    if (!topic || !relay || !backendIdentityKey || !protocolID || !keyID || !origin || !expiry) {
+    const { topic, backendIdentityKey, protocolID, origin, expiry } = params
+    if (!topic || !backendIdentityKey || !protocolID || !origin || !expiry) {
       setPreConnectError('Invalid or missing pairing parameters')
       return
     }
     if (Date.now() / 1000 > Number(expiry)) {
       setPreConnectError('QR code has expired')
       return
-    }
-    try {
-      const relayUrl  = new URL(relay)
-      const originHost = new URL(origin).hostname
-      if (relayUrl.protocol === 'wss:' && relayUrl.hostname !== originHost) {
-        setPreConnectError(
-          `Relay host "${relayUrl.hostname}" doesn't match origin host "${originHost}" — refusing to connect`
-        )
-      }
-    } catch {
-      setPreConnectError('Invalid relay or origin URL')
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -85,10 +72,8 @@ export default function PairScreen() {
     try {
       await connect({
         topic:              params.topic,
-        relay:              params.relay,
         backendIdentityKey: params.backendIdentityKey,
         protocolID:         params.protocolID,
-        keyID:              params.keyID,
         origin:             params.origin,
       }, wallet)
     } catch (err) {
