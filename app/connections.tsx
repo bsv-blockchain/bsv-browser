@@ -30,7 +30,7 @@ type ParseResult = { params: PairingParams; error: null } | { params: null; erro
 function parsePairingUri(raw: string): ParseResult {
   try {
     const url = new URL(raw)
-    if (url.protocol !== 'bsv-wallet:' && url.protocol !== 'wallet:') return { params: null, error: 'Not a bsv-wallet:// URI' }
+    if (url.protocol !== 'bsv-wallet:') return { params: null, error: 'Not a bsv-wallet:// URI' }
 
     const g = (k: string) => url.searchParams.get(k) ?? ''
     const topic = g('topic')
