@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import * as SecureStore from 'expo-secure-store'
-import { WalletClient } from '@bsv/sdk'
+import { WalletClient, PrivateKey, ProtoWallet, Utils } from '@bsv/sdk'
 import type { WalletProtocol } from '@bsv/sdk'
 import connectionStore from '@/stores/ConnectionStore'
 import type { Connection } from '@/stores/ConnectionStore'
@@ -50,6 +50,8 @@ export interface ConnectParams {
   backendIdentityKey: string
   protocolID:         string   // JSON-encoded WalletProtocol
   origin:             string
+  expiry?:            string   // Unix seconds — required for signature verification
+  sig?:               string   // base64url DER ECDSA signature
 }
 
 interface WalletConnectionContextValue {
@@ -90,6 +92,23 @@ async function decryptPayload(
   const ciphertext = Array.from(Buffer.from(ciphertextB64, 'base64url'))
   const { plaintext } = await wallet.decrypt({ protocolID, keyID, counterparty, ciphertext })
   return new TextDecoder().decode(new Uint8Array(plaintext))
+}
+
+async function verifyQrSignature(params: ConnectParams): Promise<void> {
+  if (!params.sig) throw new Error('QR code is not signed — do not connect')
+  const anyoneWallet = new ProtoWallet(new PrivateKey(1))
+  const payload = Array.from(new TextEncoder().encode(
+    `${params.topic}|${params.backendIdentityKey}|${params.origin}|${params.expiry}`
+  ))
+  const signature = Utils.toArray(params.sig.replace(/-/g, '+').replace(/_/g, '/'), 'base64') as number[]
+  const { valid } = await anyoneWallet.verifySignature({
+    data:         payload,
+    signature,
+    protocolID:   [0, 'qr pairing'],
+    keyID:        params.topic,
+    counterparty: params.backendIdentityKey,
+  })
+  if (!valid) throw new Error('QR code signature is invalid — do not connect')
 }
 
 async function fetchRelay(origin: string, topic: string): Promise<string> {
@@ -359,6 +378,9 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
   const connect = useCallback(async (params: ConnectParams, wallet: WalletClient) => {
     setStatus('connecting')
     setErrorMsg(null)
+
+    // Verify QR signature before trusting the origin or opening any connection
+    await verifyQrSignature(params)
 
     // Fetch relay URL from origin over HTTPS — TLS cert is the trust anchor
     const relay = await fetchRelay(params.origin, params.topic)

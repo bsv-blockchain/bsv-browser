@@ -23,6 +23,7 @@ interface PairingParams {
   protocolID: string
   origin: string
   expiry: string
+  sig: string
 }
 
 type ParseResult = { params: PairingParams; error: null } | { params: null; error: string }
@@ -38,6 +39,7 @@ function parsePairingUri(raw: string): ParseResult {
     const protocolID = g('protocolID')
     const origin = g('origin')
     const expiry = g('expiry')
+    const sig = g('sig')
 
     if (!topic || !backendIdentityKey || !protocolID || !origin || !expiry) {
       return { params: null, error: 'QR code is missing required fields' }
@@ -63,7 +65,7 @@ function parsePairingUri(raw: string): ParseResult {
       return { params: null, error: 'protocolID must be a [number, string] tuple' }
     }
 
-    return { params: { topic, backendIdentityKey, protocolID, origin, expiry }, error: null }
+    return { params: { topic, backendIdentityKey, protocolID, origin, expiry, sig }, error: null }
   } catch {
     return { params: null, error: 'Could not read QR code' }
   }

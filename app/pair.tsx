@@ -27,6 +27,7 @@ export default function PairScreen() {
     protocolID: string
     origin: string
     expiry: string
+    sig?: string
   }>()
 
   const {
@@ -75,6 +76,8 @@ export default function PairScreen() {
         backendIdentityKey: params.backendIdentityKey,
         protocolID:         params.protocolID,
         origin:             params.origin,
+        expiry:             params.expiry,
+        sig:                params.sig,
       }, wallet)
     } catch (err) {
       setPreConnectError(err instanceof Error ? err.message : 'Connection failed')
