@@ -83,15 +83,13 @@
               "scheme": "http"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
     },
     "ios": {
       "bundleIdentifier": "org.bsvassociation.browser",
+      "associatedDomains": ["applinks:mobile.bsvb.tech"],
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs camera access to scan QR codes.",
         "NSPhotoLibraryAddUsageDescription": "This app needs permission to save images to your photo library.",
@@ -100,18 +98,10 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
-            "CFBundleURLSchemes": [
-              "https",
-              "http"
-            ]
+            "CFBundleURLSchemes": ["https", "http"]
           }
         ],
-        "LSApplicationQueriesSchemes": [
-          "https",
-          "http",
-          "blob",
-          "data"
-        ],
+        "LSApplicationQueriesSchemes": ["https", "http", "blob", "data"],
         "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use.",
         "NSBluetoothAlwaysUsageDescription": "BSV Browser uses Bluetooth to send and receive payments to nearby devices.",
         "NSBluetoothWhileInUseUsageDescription": "BSV Browser uses Bluetooth to send and receive payments to nearby devices.",

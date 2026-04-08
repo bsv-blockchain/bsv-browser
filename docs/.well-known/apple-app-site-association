@@ -1,0 +1,20 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["SV8SWTHA2H.org.bsvassociation.browser"],
+        "components": [
+          {
+            "/": "/pair*",
+            "comment": "Wallet pairing QR deep links — opens connections/pairing flow"
+          },
+          {
+            "/": "/*",
+            "comment": "Default browser intercept — all other HTTPS links open in BSV Browser"
+          }
+        ]
+      }
+    ]
+  }
+}
