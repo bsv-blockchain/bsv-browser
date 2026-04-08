@@ -249,10 +249,15 @@ export default function WalletConfigScreen() {
         {/* ── Account ── */}
         <GroupedSection>
           <ListRow
-            label={t('logout')}
-            icon="log-out-outline"
+            label={t('delete_wallet')}
+            icon="trash-outline"
             iconColor={colors.error}
-            onPress={logout}
+            onPress={() =>
+              Alert.alert(t('delete_wallet_warning_title'), t('delete_wallet_warning_body'), [
+                { text: t('cancel'), style: 'cancel' },
+                { text: t('delete_wallet_confirm'), style: 'destructive', onPress: logout },
+              ])
+            }
             destructive
             showChevron={false}
             isLast

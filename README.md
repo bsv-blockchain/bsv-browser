@@ -9,6 +9,7 @@ A mobile browser that brings identity, micropayments, and BSV-powered websites t
 - CWI (Computing With Integrity) provider for web apps (BRC-100 compliant)
 - Permission-gated access for web apps requesting wallet operations
 - Peer-to-peer payments via MessageBox with identity resolution
+- Local Payments -- BLE (Bluetooth Low Energy) peer-to-peer transfers between nearby phones
 - Legacy Bridge for sending/receiving via traditional P2PKH addresses
 - Trust and identity management (BRC-68 certifiers)
 - Shamir's Secret Sharing backup -- split your key into printable QR shares
@@ -29,6 +30,7 @@ A mobile browser that brings identity, micropayments, and BSV-powered websites t
 - [Code Style](#code-style)
 - [Contributing](#contributing)
 - [Building for Devices](#building-for-devices)
+- [Native Rebuild Requirements](#native-rebuild-requirements)
 - [Publishing Your Own Version](#publishing-your-own-version)
 - [Supported Languages](#supported-languages)
 - [License](#license)
@@ -108,6 +110,7 @@ bsv-browser/
 │   ├── index.tsx           #   Home / browser screen
 │   ├── auth/               #   Mnemonic & recovery-share auth flows
 │   ├── payments.tsx        #   Peer-to-peer payments (send/receive via MessageBox)
+│   ├── local-payments.tsx  #   Local Payments (BLE P2P transfer between nearby phones)
 │   ├── legacy-payments.tsx #   Legacy Bridge (P2PKH receive addresses + send to address)
 │   ├── transactions.tsx    #   Transaction history
 │   ├── settings.tsx        #   Settings screen
@@ -135,6 +138,7 @@ bsv-browser/
 ├── wallet/                 # Wallet integration layer
 ├── shared/                 # Shared constants and types (search engines, default bookmarks)
 ├── utils/                  # Helpers -- crypto, permissions, logging, webview injection
+│   ├── ble/                #   BLE local payments -- chunking, peripheral, central, pending queue
 │   ├── webview/            #   Injected polyfills, message router, CWI provider, download handler
 │   ├── backupShares.ts     #   Shamir Secret Sharing for printable key recovery
 │   ├── mnemonicWallet.ts   #   BIP-39/32 mnemonic key derivation
@@ -143,7 +147,7 @@ bsv-browser/
 ├── types/                  # Global TypeScript declarations
 ├── scripts/                # Shell / Node helper scripts (configure, version)
 ├── credentials/            # Signing keystores (Android)
-├── docs/                   # GitHub Pages marketing site + design docs
+├── docs/                   # GitHub Pages marketing site + design docs (LOCAL_PAYMENTS.md, NOWAB_IMPLEMENTATION.md)
 ├── funding-app/            # Standalone Vite app for funding (builds into docs/)
 └── assets/                 # App icons, splash screens, favicons
 ```
@@ -240,21 +244,21 @@ refactor tab store to use async initialization
 
 ### Where to look
 
-| Area                     | Key files                                                               |
-| ------------------------ | ----------------------------------------------------------------------- |
-| Adding a new screen      | `app/` -- add a new `.tsx` file; Expo Router picks it up automatically  |
-| Modifying browser chrome | `components/browser/`                                                   |
-| Wallet logic             | `context/WalletContext.tsx`, `utils/simpleWalletBuilder.ts`, `storage/` |
-| Auth / mnemonic          | `app/auth/mnemonic.tsx`, `utils/mnemonicWallet.ts`                      |
-| CWI provider             | `utils/webview/cwiProvider.ts`                                          |
-| WebView bridge           | `utils/webview/messageRouter.ts`, `utils/webview/injectedPolyfills.ts`  |
-| Permissions              | `utils/permissionsManager.ts`, `hooks/usePermissions.ts`                |
-| Payments                 | `app/payments.tsx` (P2P), `app/legacy-payments.tsx` (Legacy Bridge)     |
-| Backup / recovery        | `utils/backupShares.ts`, `app/auth/scan-shares.tsx`                     |
-| DB import/export         | `utils/importDatabases.ts`, `utils/exportDatabases.ts`                  |
-| Translations             | `context/i18n/translations.tsx` -- add your language code to the table  |
-| Theming                  | `context/theme/tokens.ts`, `context/theme/ThemeContext.tsx`             |
-| State (tabs/bookmarks)   | `stores/TabStore.tsx`, `stores/BookmarkStore.tsx`                       |
+| Area                     | Key files                                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------------------------- |
+| Adding a new screen      | `app/` -- add a new `.tsx` file; Expo Router picks it up automatically                              |
+| Modifying browser chrome | `components/browser/`                                                                               |
+| Wallet logic             | `context/WalletContext.tsx`, `utils/simpleWalletBuilder.ts`, `storage/`                             |
+| Auth / mnemonic          | `app/auth/mnemonic.tsx`, `utils/mnemonicWallet.ts`                                                  |
+| CWI provider             | `utils/webview/cwiProvider.ts`                                                                      |
+| WebView bridge           | `utils/webview/messageRouter.ts`, `utils/webview/injectedPolyfills.ts`                              |
+| Permissions              | `utils/permissionsManager.ts`, `hooks/usePermissions.ts`                                            |
+| Payments                 | `app/payments.tsx` (P2P), `app/local-payments.tsx` (BLE), `app/legacy-payments.tsx` (Legacy Bridge) |
+| Backup / recovery        | `utils/backupShares.ts`, `app/auth/scan-shares.tsx`                                                 |
+| DB import/export         | `utils/importDatabases.ts`, `utils/exportDatabases.ts`                                              |
+| Translations             | `context/i18n/translations.tsx` -- add your language code to the table                              |
+| Theming                  | `context/theme/tokens.ts`, `context/theme/ThemeContext.tsx`                                         |
+| State (tabs/bookmarks)   | `stores/TabStore.tsx`, `stores/BookmarkStore.tsx`                                                   |
 
 ## Building for Devices
 
@@ -292,6 +296,44 @@ npm run android
 npm run ios-build-for-app-store
 npm run android-build-for-play-store
 ```
+
+## Native Rebuild Requirements
+
+Some features use native libraries that require a full native rebuild (not just a Metro restart). After adding or updating these dependencies, run:
+
+```bash
+# iOS
+npx expo prebuild --platform ios --clean
+npx expo run:ios --device
+
+# Android
+npx expo prebuild --platform android --clean
+npx expo run:android --device
+```
+
+The `--clean` flag regenerates the native projects from scratch, ensuring all native modules, `patch-package` patches, and `app.json` plugin configs are picked up.
+
+**Features requiring native rebuilds:**
+
+| Feature              | Native Dependencies                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Local Payments (BLE) | `munim-bluetooth`, `react-native-ble-plx`, `react-native-nitro-modules`, `@react-native-community/netinfo` |
+| Wallet storage       | `expo-sqlite`                                                                                              |
+| Secure key storage   | `expo-secure-store`                                                                                        |
+| Crypto polyfill      | `react-native-quick-crypto`                                                                                |
+
+**When is a rebuild needed?**
+
+- After `npm install` adds a package with native code
+- After modifying files in `patches/` (applied via `patch-package` postinstall)
+- After changing `app.json` plugin configurations (e.g. BLE permissions, Expo plugins)
+
+**When is a rebuild NOT needed?**
+
+- Changes to JS/TS source files only -- Metro hot-reload is sufficient
+- Changes to translations, styles, or React component logic
+
+See [`docs/LOCAL_PAYMENTS.md`](docs/LOCAL_PAYMENTS.md) for detailed documentation on the BLE local payments architecture.
 
 ## Publishing Your Own Version
 

@@ -1,5 +1,5 @@
 import React, { useRef, useCallback } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -78,7 +78,26 @@ export default function QRScanner({ onScan, onClose, hintText, multiScan = false
     return <View style={styles.fill} />
   }
 
-  /* ── Permission denied / not yet granted ───────────────────────────────── */
+  /* ── Permission denied permanently — link to Settings ──────────────────── */
+  if (!permission.granted && !permission.canAskAgain) {
+    return (
+      <View style={styles.permScreen}>
+        <View style={styles.permIconWrap}>
+          <Ionicons name="camera-outline" size={40} color="#fff" />
+        </View>
+        <Text style={styles.permTitle}>{t('scan_shares_camera_needed')}</Text>
+        <Text style={styles.permBody}>{t('camera_denied_description')}</Text>
+        <TouchableOpacity style={styles.permBtn} onPress={() => Linking.openSettings()}>
+          <Text style={styles.permBtnText}>{t('open_settings')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={{ marginTop: spacing.lg }} onPress={onClose}>
+          <Text style={styles.permBack}>{t('go_back')}</Text>
+        </TouchableOpacity>
+      </View>
+    )
+  }
+
+  /* ── Permission not yet granted — pre-permission explanation ─────────── */
   if (!permission.granted) {
     return (
       <View style={styles.permScreen}>
@@ -88,10 +107,7 @@ export default function QRScanner({ onScan, onClose, hintText, multiScan = false
         <Text style={styles.permTitle}>{t('scan_shares_camera_needed')}</Text>
         <Text style={styles.permBody}>{t('scan_shares_camera_description')}</Text>
         <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
-          <Text style={styles.permBtnText}>{t('scan_shares_grant_camera')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={{ marginTop: spacing.lg }} onPress={onClose}>
-          <Text style={styles.permBack}>{t('go_back')}</Text>
+          <Text style={styles.permBtnText}>{t('continue_action')}</Text>
         </TouchableOpacity>
       </View>
     )

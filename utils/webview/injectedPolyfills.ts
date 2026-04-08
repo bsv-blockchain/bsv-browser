@@ -847,7 +847,7 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
 
     // Intercept fetch requests to add Accept-Language header
     const originalFetch = (window as any).fetch
-    const patchedFetch = function (this: any, input: any, init: any = {}) {
+    const patchedFetch = async function (this: any, input: any, init: any = {}) {
       // Merge headers
       const headers = new Headers(init.headers)
       if (!headers.has('Accept-Language')) {
@@ -860,7 +860,21 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         headers: headers
       }
 
-      return originalFetch.call(this, input, newInit)
+      const response = await originalFetch.call(this, input, newInit)
+
+      if (response.status === 402) {
+        const headersObj: Record<string, string> = {}
+        response.headers.forEach((v: string, k: string) => { headersObj[k] = v })
+        const reqUrl = typeof input === 'string' ? input : (input && input.url ? input.url : '')
+        ;(window as any).ReactNativeWebView?.postMessage(JSON.stringify({
+          type: 'PAYMENT_REQUIRED',
+          url: reqUrl,
+          status: 402,
+          headers: headersObj
+        }))
+      }
+
+      return response
     }
     // Restore native toString so bot-detection checks see "[native code]"
     try {
