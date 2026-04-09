@@ -864,6 +864,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         })
 
         const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)
+        // Override the library's default settings so "Who I Am" is included
+        // when no user settings have been saved yet.
+        wallet.settingsManager.config.defaultSettings = DEFAULT_SETTINGS
         newManagers.settingsManager = wallet.settingsManager
 
         logWithTimestamp(F, 'Wallet built successfully')
