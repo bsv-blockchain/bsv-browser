@@ -31,7 +31,7 @@ type ParseResult = { params: PairingParams; error: null } | { params: null; erro
 function parsePairingUri(raw: string): ParseResult {
   try {
     const url = new URL(raw)
-    if (url.protocol !== 'bsv-wallet:') return { params: null, error: 'Not a bsv-wallet:// URI' }
+    if (url.protocol !== 'bsv-browser:') return { params: null, error: 'Not a bsv-browser:// URI' }
 
     const g = (k: string) => url.searchParams.get(k) ?? ''
     const topic = g('topic')
@@ -50,7 +50,11 @@ function parsePairingUri(raw: string): ParseResult {
     }
 
     let originUrl: URL
-    try { originUrl = new URL(origin) } catch { return { params: null, error: 'Origin URL is not valid' } }
+    try {
+      originUrl = new URL(origin)
+    } catch {
+      return { params: null, error: 'Origin URL is not valid' }
+    }
     if (originUrl.protocol !== 'http:' && originUrl.protocol !== 'https:') {
       return { params: null, error: 'Origin must use http:// or https://' }
     }
@@ -60,7 +64,11 @@ function parsePairingUri(raw: string): ParseResult {
     }
 
     let proto: unknown
-    try { proto = JSON.parse(protocolID) } catch { return { params: null, error: 'protocolID is not valid JSON' } }
+    try {
+      proto = JSON.parse(protocolID)
+    } catch {
+      return { params: null, error: 'protocolID is not valid JSON' }
+    }
     if (!Array.isArray(proto) || proto.length !== 2 || typeof proto[0] !== 'number' || typeof proto[1] !== 'string') {
       return { params: null, error: 'protocolID must be a [number, string] tuple' }
     }
