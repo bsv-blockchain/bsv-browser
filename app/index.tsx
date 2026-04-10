@@ -1274,6 +1274,10 @@ const Browser = observer(function Browser() {
                     }
                   })
               } else if (activeTab?.webviewRef?.current) {
+                // For 403, the response body is often an interactive challenge page
+                // (e.g. Cloudflare human verification). Let the WebView render it
+                // as-is instead of replacing it with our custom error page.
+                if (status === 403) return
                 const fallback = getErrorPage(status)
                 activeTab.webviewRef.current.injectJavaScript(
                   `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
