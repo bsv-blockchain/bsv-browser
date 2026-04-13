@@ -23,7 +23,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 export default function WalletConfigScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  const { managers, adminOriginator, logout, selectedNetwork, switchNetwork, rebuildWallet, storage } = useWallet()
+  const {
+    managers,
+    adminOriginator,
+    logout,
+    selectedNetwork,
+    switchNetwork,
+    rebuildWallet,
+    storage,
+    settings,
+    updateSettings
+  } = useWallet()
   const { isWeb2Mode } = useBrowserMode()
   const { getMnemonic, getRecoveredKey } = useLocalStorage()
   const insets = useSafeAreaInsets()
@@ -35,6 +45,7 @@ export default function WalletConfigScreen() {
   const [networkExpanded, setNetworkExpanded] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
+  const [currencyExpanded, setCurrencyExpanded] = useState(false)
 
   // Fetch identity key (needed for print recovery shares)
   useEffect(() => {
@@ -123,6 +134,26 @@ export default function WalletConfigScreen() {
     }
   }
 
+  const CURRENCIES: { id: string; label: string; icon: string }[] = [
+    { id: 'BSV', label: 'BSV', icon: 'logo-bitcoin' },
+    { id: 'USD', label: 'USD', icon: 'cash-outline' }
+  ]
+
+  const currentCurrency = settings?.currency || 'BSV'
+
+  const handleSelectCurrency = async (target: string) => {
+    if (target === currentCurrency) {
+      setCurrencyExpanded(false)
+      return
+    }
+    setCurrencyExpanded(false)
+    try {
+      await updateSettings({ ...settings!, currency: target })
+    } catch (e) {
+      console.error('Currency switch failed:', e)
+    }
+  }
+
   const NETWORKS: { id: AppChain; label: string; color: string }[] = [
     { id: 'main', label: t('mainnet'), color: colors.success },
     { id: 'test', label: t('testnet'), color: colors.warning },
@@ -197,8 +228,43 @@ export default function WalletConfigScreen() {
             icon="shield-checkmark-outline"
             iconColor="#BF5AF2"
             onPress={() => router.push('/trust' as any)}
-            isLast
           />
+          <ListRow
+            label={t('display_currency')}
+            value={CURRENCIES.find(c => c.id === currentCurrency)?.label ?? currentCurrency}
+            icon="cash-outline"
+            iconColor="#FF9500"
+            onPress={() => setCurrencyExpanded(e => !e)}
+            showChevron={currencyExpanded}
+            chevronDown={currencyExpanded}
+            isLast={!currencyExpanded}
+          />
+          {currencyExpanded && (
+            <View style={localStyles.networkList}>
+              {CURRENCIES.map(cur => {
+                const isActive = cur.id === currentCurrency
+                return (
+                  <TouchableOpacity
+                    key={cur.id}
+                    style={localStyles.networkOption}
+                    onPress={() => handleSelectCurrency(cur.id)}
+                    activeOpacity={0.6}
+                  >
+                    <Ionicons
+                      name={cur.icon as any}
+                      size={16}
+                      color={colors.textSecondary}
+                      style={{ marginRight: spacing.md }}
+                    />
+                    <Text style={[localStyles.networkLabel, { color: colors.textPrimary }]}>{cur.label}</Text>
+                    {isActive && (
+                      <Ionicons name="checkmark" size={20} color={colors.accent} style={{ marginLeft: 'auto' }} />
+                    )}
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+          )}
         </GroupedSection>
 
         {/* ── Data & Security ── */}
@@ -255,7 +321,7 @@ export default function WalletConfigScreen() {
             onPress={() =>
               Alert.alert(t('delete_wallet_warning_title'), t('delete_wallet_warning_body'), [
                 { text: t('cancel'), style: 'cancel' },
-                { text: t('delete_wallet_confirm'), style: 'destructive', onPress: logout },
+                { text: t('delete_wallet_confirm'), style: 'destructive', onPress: logout }
               ])
             }
             destructive

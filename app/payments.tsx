@@ -27,7 +27,10 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { SatsAmountInput } from '@/components/wallet/SatsAmountInput'
+import { AmountInput } from '@/components/wallet/AmountInput'
+import AmountDisplay from '@/components/wallet/AmountDisplay'
+import { formatAmount } from '@/utils/amountFormatHelpers'
+import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 
 const MESSAGE_BOX_URL_KEY = 'message_box_url'
 const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
@@ -738,7 +741,7 @@ function PaymentRow({
       {/* Right: amount + accept */}
       <View style={styles.paymentActions}>
         <Text style={[styles.paymentAmount, { color: colors.success }]}>
-          {payment.token.amount.toLocaleString()} sats
+          <AmountDisplay>{payment.token.amount}</AmountDisplay>
         </Text>
         <TouchableOpacity
           onPress={onAccept}
@@ -760,8 +763,10 @@ export default function PaymentsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator } = useWallet()
+  const { managers, adminOriginator, settings } = useWallet()
   const wallet = managers?.permissionsManager || null
+  const { satoshisPerUSD } = React.useContext(ExchangeRateContext)
+  const currency = settings?.currency || 'BSV'
 
   const {
     messageBoxUrl,
@@ -977,7 +982,7 @@ export default function PaymentsScreen() {
     setIsSending(true)
     try {
       const { sats } = await sendPayment(client, recipientKey, sendAmount)
-      setSendResult({ type: 'success', message: `Sent ${sats.toLocaleString()} sats successfully` })
+      setSendResult({ type: 'success', message: `Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully` })
       setSendAmount('')
       clearRecipient()
       fetchPayments()
@@ -1078,8 +1083,8 @@ export default function PaymentsScreen() {
 
             {/* Amount */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_sats')}</Text>
-              <SatsAmountInput value={sendAmount} onChangeText={setSendAmount} />
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount')}</Text>
+              <AmountInput value={sendAmount} onChangeText={setSendAmount} />
             </View>
 
             {/* Send button */}

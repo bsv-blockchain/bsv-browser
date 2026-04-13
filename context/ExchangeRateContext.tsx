@@ -1,64 +1,59 @@
 import { ReactNode, createContext, useEffect, useState } from 'react'
-import { Services } from '@bsv/wallet-toolbox-mobile'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 
-const services = new Services('main')
+const CACHE_KEY = 'cached_exchange_rate'
+const HARDCODED_USD_PER_BSV = 16
+const SATS_PER_BSV = 100_000_000
 
-const EXCHANGE_RATE_UPDATE_INTERVAL = 5 * 60 * 1000
+interface ExchangeRateState {
+  satoshisPerUSD: number
+}
 
-const defaultState = {
-  satoshisPerUSD: NaN,
-  eurPerUSD: 0.93, // TODO: must tie to external service
-  gbpPerUSD: 0.79, // TODO: must tie to external service
-  whenUpdated: null,
-  isFiatPreferred: false,
-  fiatFormatIndex: 0,
-  satsFormatIndex: 0
+const defaultState: ExchangeRateState = {
+  satoshisPerUSD: SATS_PER_BSV / HARDCODED_USD_PER_BSV
 }
 
 // Create the exchange rate context and provider to use in the amount component
-export const ExchangeRateContext = createContext(defaultState)
+export const ExchangeRateContext = createContext<ExchangeRateState>(defaultState)
 
 export const ExchangeRateContextProvider: React.FC<{
   children: ReactNode
 }> = ({ children }) => {
-  const [state, setState] = useState(defaultState)
-
-  // The function instances are created here and included in the state to ensure they have stable references
-  const contextValue = {
-    ...state,
-    toggleIsFiatPreferred: () => {
-      setState(oldState => ({ ...oldState, isFiatPreferred: !oldState.isFiatPreferred }))
-    },
-    cycleFiatFormat: () => {
-      setState(oldState => ({ ...oldState, fiatFormatIndex: oldState.fiatFormatIndex + 1 }))
-    },
-    cycleSatsFormat: () => {
-      setState(oldState => ({ ...oldState, satsFormatIndex: oldState.satsFormatIndex + 1 }))
-    }
-  }
+  const [state, setState] = useState<ExchangeRateState>(defaultState)
 
   useEffect(() => {
-    const tick = async () => {
+    const init = async () => {
+      // Tier 2: Try loading cached rate from AsyncStorage
       try {
-        const usdPerBsv = await services.getBsvExchangeRate()
-        const gbpPerUSD = await services.getFiatExchangeRate('GBP')
-        const eurPerUSD = await services.getFiatExchangeRate('EUR')
-        const satoshisPerUSD = 100000000 / usdPerBsv // satsPerBsv * bsvPerUSD => satsPerUSD
-        setState((oldState: any) => ({ ...oldState, satoshisPerUSD, gbpPerUSD, eurPerUSD, whenUpdated: new Date() }))
+        const cached = await AsyncStorage.getItem(CACHE_KEY)
+        if (cached) {
+          const { usdPerBsv } = JSON.parse(cached)
+          if (typeof usdPerBsv === 'number' && usdPerBsv > 0) {
+            setState({ satoshisPerUSD: SATS_PER_BSV / usdPerBsv })
+          }
+        }
       } catch (error) {
-        console.error('Error fetching data: ', error)
-        // You can check for error.response.status here if using a library like axios
-        // and implement specific behavior for rate limiting errors (typically 429)
+        console.error('Error loading cached exchange rate:', error)
+      }
+
+      // Tier 1: Attempt live fetch from WhatsonChain
+      try {
+        const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/exchangerate')
+        const data = await response.json()
+        const usdPerBsv = data?.rate
+        if (typeof usdPerBsv === 'number' && usdPerBsv > 0) {
+          setState({ satoshisPerUSD: SATS_PER_BSV / usdPerBsv })
+          // Cache the successful result
+          await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({ usdPerBsv, timestamp: new Date().toISOString() }))
+        }
+      } catch (error) {
+        console.error('Error fetching exchange rate from WhatsonChain:', error)
+        // Tier 2/3 already loaded above -- state remains as cached or hardcoded default
       }
     }
 
-    tick() // Invoke the function immediately to perform the initial data fetch
+    init()
+  }, [])
 
-    const timerID = setInterval(() => tick(), EXCHANGE_RATE_UPDATE_INTERVAL)
-
-    // This is the cleanup function to clear the interval when the component unmounts
-    return () => clearInterval(timerID)
-  }, []) // Empty dependency array means this useEffect runs once when the component mounts
-
-  return <ExchangeRateContext.Provider value={contextValue}>{children}</ExchangeRateContext.Provider>
+  return <ExchangeRateContext.Provider value={state}>{children}</ExchangeRateContext.Provider>
 }

@@ -11,7 +11,7 @@
  * - react-native-ble-plx for central mode (scan, connect, read, write)
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useState, useCallback, useEffect, useRef, useContext } from 'react'
 import {
   View,
   Text,
@@ -30,8 +30,10 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { SatsAmountInput } from '@/components/wallet/SatsAmountInput'
+import { AmountInput } from '@/components/wallet/AmountInput'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
+import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import { formatAmount } from '@/utils/amountFormatHelpers'
 import { IdentityClient, createNonce, PublicKey, P2PKH } from '@bsv/sdk'
 
 import NetInfo from '@react-native-community/netinfo'
@@ -157,8 +159,10 @@ export default function LocalPaymentsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, storage } = useWallet()
+  const { managers, adminOriginator, storage, settings } = useWallet()
   const wallet = managers?.permissionsManager
+  const { satoshisPerUSD } = useContext(ExchangeRateContext)
+  const currency = settings?.currency || 'BSV'
 
   // Core state
   const [phase, setPhase] = useState<ScreenPhase>('permission_gate')
@@ -382,7 +386,10 @@ export default function LocalPaymentsScreen() {
         const results = await processPendingPayments(wallet as any, storage, adminOriginator)
         const successes = results.filter(r => r.success)
         if (successes.length > 0) {
-          showSnack(`Payment of ${payload.token.amount} sats received and added to wallet`, 'success')
+          showSnack(
+            `Payment of ${formatAmount(payload.token.amount, currency, satoshisPerUSD)} received and added to wallet`,
+            'success'
+          )
         } else {
           showSnack('Payment saved — will be added to wallet automatically', 'info')
         }
@@ -1411,8 +1418,8 @@ export default function LocalPaymentsScreen() {
             <Text style={[styles.phaseTitle, { color: colors.textPrimary, marginBottom: spacing.md }]}>Send to</Text>
             <IdentityCard receiver={selectedReceiver} colors={colors} />
             <View style={{ marginTop: spacing.lg }}>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_sats')}</Text>
-              <SatsAmountInput value={sendAmount} onChangeText={setSendAmount} />
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount')}</Text>
+              <AmountInput value={sendAmount} onChangeText={setSendAmount} />
             </View>
             <TouchableOpacity
               style={[
