@@ -30,6 +30,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="styles.css">
+    <script>if(localStorage.getItem('bsvb-lang')&&localStorage.getItem('bsvb-lang')!=='en')document.documentElement.classList.add('i18n-loading');</script>
 </head>
 <body>
     <!-- Hero Section -->
@@ -37,9 +38,9 @@
         <div class="container">
             <div class="hero-content">
                 <div class="hero-text">
-                    <h1>Browse. Pay. Prove&nbsp;Who&nbsp;You&nbsp;Are.</h1>
-                    <p class="hero-subtitle">A web browser with a wallet and identity built in</p>
-                    <p class="hero-description">
+                    <h1 data-i18n="hero.title">Browse. Pay. Prove&nbsp;Who&nbsp;You&nbsp;Are.</h1>
+                    <p class="hero-subtitle" data-i18n="hero.subtitle">A web browser with a wallet and identity built in</p>
+                    <p class="hero-description" data-i18n="hero.description">
                         BSV Browser turns every website into a potential storefront, login portal, or data vault.
                         Pay fractions of a cent for content, sign in without passwords, and keep your keys on your device.
                     </p>
@@ -55,7 +56,7 @@
                     
                     <div class="desktop-button">
                         <a href="https://desktop.bsvb.tech" class="btn btn-secondary" target="_blank" rel="noopener">
-                            <span class="desktop-label">🖥️&nbsp;&nbsp;Desktop Version</span>
+                            <span class="desktop-label" data-i18n="hero.desktop_btn">🖥️&nbsp;&nbsp;Desktop Version</span>
                         </a>
                     </div>
                 </div>
@@ -74,44 +75,44 @@
     <!-- Features Section -->
     <section class="features">
         <div class="container">
-            <h2>One App, Three Superpowers</h2>
-            <p class="section-subtitle">Everything you need to browse, transact, and own your identity on the web.</p>
+            <h2 data-i18n="features.heading">One App, Three Superpowers</h2>
+            <p class="section-subtitle" data-i18n="features.subtitle">Everything you need to browse, transact, and own your identity on the web.</p>
             
             <div class="features-grid">
                 <div class="feature-card">
                     <div class="feature-icon">🔐</div>
-                    <h3>Your Keys, Your Device</h3>
-                    <p>Self-custodial from day one. Your wallet keys never leave your phone, protected by industry-standard encryption and strict access permissions.</p>
+                    <h3 data-i18n="feature.keys.title">Your Keys, Your Device</h3>
+                    <p data-i18n="feature.keys.desc">Self-custodial from day one. Your wallet keys never leave your phone, protected by industry-standard encryption and strict access permissions.</p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">🌐</div>
-                    <h3>Browse Any Website</h3>
-                    <p>Use it like Chrome or Safari. When a site supports Web3, the browser handles payments and logins automatically — with your permission.</p>
+                    <h3 data-i18n="feature.browse.title">Browse Any Website</h3>
+                    <p data-i18n="feature.browse.desc">Use it like Chrome or Safari. When a site supports Web3, the browser handles payments and logins automatically — with your permission.</p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">🆔</div>
-                    <h3>Sign In Without Passwords</h3>
-                    <p>Prove who you are with cryptographic certificates. Share only what you choose — verify your age without revealing your birthday.</p>
+                    <h3 data-i18n="feature.signin.title">Sign In Without Passwords</h3>
+                    <p data-i18n="feature.signin.desc">Prove who you are with cryptographic certificates. Share only what you choose — verify your age without revealing your birthday.</p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">⚡</div>
-                    <h3>Pay Fractions of a Cent</h3>
-                    <p>Micropayments unlock content, actions, and services that subscriptions and ads never could. Transactions settle in seconds.</p>
+                    <h3 data-i18n="feature.pay.title">Pay Fractions of a Cent</h3>
+                    <p data-i18n="feature.pay.desc">Micropayments unlock content, actions, and services that subscriptions and ads never could. Transactions settle in seconds.</p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">🔗</div>
-                    <h3>Works With Any BRC-100 App</h3>
-                    <p>Built on the open wallet standard. Any compliant app connects instantly — no vendor lock-in, no proprietary plugins.</p>
+                    <h3 data-i18n="feature.brc100.title">Works With Any BRC-100 App</h3>
+                    <p data-i18n="feature.brc100.desc">Built on the open wallet standard. Any compliant app connects instantly — no vendor lock-in, no proprietary plugins.</p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">📱</div>
-                    <h3>Built for Mobile</h3>
-                    <p>Tabs, bookmarks, history, search — every feature you expect from a browser, tuned for touch and available on iOS and Android.</p>
+                    <h3 data-i18n="feature.mobile.title">Built for Mobile</h3>
+                    <p data-i18n="feature.mobile.desc">Tabs, bookmarks, history, search — every feature you expect from a browser, tuned for touch and available on iOS and Android.</p>
                 </div>
             </div>
         </div>
@@ -120,26 +121,26 @@
     <!-- Screenshots Section -->
     <section class="screenshots">
         <div class="container">
-            <h2>See It In Action</h2>
-            <p class="section-subtitle">Three things no other browser can do.</p>
+            <h2 data-i18n="screenshots.heading">See It In Action</h2>
+            <p class="section-subtitle" data-i18n="screenshots.subtitle">Three things no other browser can do.</p>
 
             <div class="screenshots-grid">
                 <div class="screenshot-item">
                     <img src="enable_web3_options.png" alt="Enable Web3 with one tap" class="screenshot">
-                    <h4>One-Tap Setup</h4>
-                    <p>Create a wallet or import an existing one. You're browsing Web3 in under 7 seconds.</p>
+                    <h4 data-i18n="screenshot.setup.title">One-Tap Setup</h4>
+                    <p data-i18n="screenshot.setup.desc">Create a wallet or import an existing one. You're browsing Web3 in under 7 seconds.</p>
                 </div>
 
                 <div class="screenshot-item">
                     <img src="potato.png" alt="Your cryptographic identity key" class="screenshot">
-                    <h4>One Identity, Every App</h4>
-                    <p>Your identity key works across all Web3 apps — no emails, no passwords, no forms.</p>
+                    <h4 data-i18n="screenshot.identity.title">One Identity, Every App</h4>
+                    <p data-i18n="screenshot.identity.desc">Your identity key works across all Web3 apps — no emails, no passwords, no forms.</p>
                 </div>
 
                 <div class="screenshot-item">
                     <img src="micropayment_authorization.png" alt="Authorize a micropayment" class="screenshot">
-                    <h4>Pay-Per-Action</h4>
-                    <p>Authorize tiny payments for individual actions — a note saved, an article read, a vote cast.</p>
+                    <h4 data-i18n="screenshot.pay.title">Pay-Per-Action</h4>
+                    <p data-i18n="screenshot.pay.desc">Authorize tiny payments for individual actions — a note saved, an article read, a vote cast.</p>
                 </div>
             </div>
     </section>
@@ -147,33 +148,33 @@
     <!-- Technical Highlights -->
     <section class="tech-highlights">
         <div class="container">
-            <h2>Built for Developers, Too</h2>
-            <p class="section-subtitle">Open source, standards-based, and ready for the apps you're building.</p>
+            <h2 data-i18n="tech.heading">Built for Developers, Too</h2>
+            <p class="section-subtitle" data-i18n="tech.subtitle">Open source, standards-based, and ready for the apps you're building.</p>
 
             <div class="tech-list">
                 <div class="tech-item">
                     <span class="tech-bullet">•</span>
-                    <span>Full BRC-100 Wallet Interface — all 28 methods, any compliant app connects out of the box</span>
+                    <span data-i18n="tech.item1">Full BRC-100 Wallet Interface — all 28 methods, any compliant app connects out of the box</span>
                 </div>
                 <div class="tech-item">
                     <span class="tech-bullet">•</span>
-                    <span>AES-256-GCM encryption and ECDSA signatures for every wallet operation</span>
+                    <span data-i18n="tech.item2">AES-256-GCM encryption and ECDSA signatures for every wallet operation</span>
                 </div>
                 <div class="tech-item">
                     <span class="tech-bullet">•</span>
-                    <span>Selective data revelation through identity certificates — users share only what they choose</span>
+                    <span data-i18n="tech.item3">Selective data revelation through identity certificates — users share only what they choose</span>
                 </div>
                 <div class="tech-item">
                     <span class="tech-bullet">•</span>
-                    <span>SPV-native with BEEF transaction format for lightweight, scalable verification</span>
+                    <span data-i18n="tech.item4">SPV-native with BEEF transaction format for lightweight, scalable verification</span>
                 </div>
                 <div class="tech-item">
                     <span class="tech-bullet">•</span>
-                    <span>Auditable key linkage proofs so privacy and accountability coexist</span>
+                    <span data-i18n="tech.item5">Auditable key linkage proofs so privacy and accountability coexist</span>
                 </div>
                 <div class="tech-item">
                     <span class="tech-bullet">•</span>
-                    <span>Named baskets give apps fine-grained control over transaction outputs and permissions</span>
+                    <span data-i18n="tech.item6">Named baskets give apps fine-grained control over transaction outputs and permissions</span>
                 </div>
             </div>
         </div>
@@ -182,8 +183,8 @@
     <!-- Download CTA -->
     <section class="download-cta">
         <div class="container">
-            <h2>Try It Now — It's Free</h2>
-            <p>Open source and self-custodial. Download BSV Browser and set up your wallet in under a minute.</p>
+            <h2 data-i18n="cta.heading">Try It Now — It's Free</h2>
+            <p data-i18n="cta.desc">Open source and self-custodial. Download BSV Browser and set up your wallet in under a minute.</p>
             
             <div class="download-buttons">
                 <a href="https://apps.apple.com/app/bsv-browser/id6755637932" class="btn btn-primary" rel="noopener">
@@ -201,16 +202,19 @@
         <div class="container">
             <div class="footer-content">
                 <div class="footer-links">
-                    <a href="support.html">Support &amp; Guide</a>
-                    <a href="privacy.html">Privacy Policy</a>
-                    <a href="usage.html">Usage Policy</a>
+                    <a href="support.html" data-i18n="footer.support">Support &amp; Guide</a>
+                    <a href="privacy.html" data-i18n="footer.privacy">Privacy Policy</a>
+                    <a href="usage.html" data-i18n="footer.usage">Usage Policy</a>
                     <a href="https://github.com/bsv-blockchain/bsv-browser" target="_blank" rel="noopener">GitHub</a>
                     <a href="https://bsvblockchain.org" target="_blank" rel="noopener">BSV Blockchain</a>
                     <a href="https://x.com/bsvblockchain" target="_blank" rel="noopener">@bsvblockchain</a>
                 </div>
-                <p class="footer-copyright">© 2026 BSV Association</p>
+                <p class="footer-copyright" data-i18n="footer.copyright">© 2026 BSV Association</p>
             </div>
         </div>
     </footer>
+    <link rel="stylesheet" href="i18n/lang-selector.css">
+    <script src="i18n/i18n.js"></script>
+    <script src="i18n/lang-selector.js"></script>
 </body>
 </html>

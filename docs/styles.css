@@ -734,3 +734,59 @@ h4 {
         font-size: 0.95rem;
     }
 }
+
+/* ============================================
+   i18n: FOUC Prevention
+   ============================================ */
+html.i18n-loading [data-i18n],
+html.i18n-loading [data-i18n-html] {
+  visibility: hidden;
+}
+
+/* ============================================
+   i18n: RTL Support (Arabic)
+   ============================================ */
+[dir="rtl"] .guide-row {
+  direction: rtl;
+}
+[dir="rtl"] .guide-row.reverse {
+  direction: ltr;
+}
+[dir="rtl"] .guide-row > * {
+  direction: rtl;
+}
+[dir="rtl"] .guide-row.reverse > * {
+  direction: ltr;
+}
+[dir="rtl"] .features-grid {
+  direction: rtl;
+}
+[dir="rtl"] .footer-links {
+  direction: rtl;
+}
+[dir="rtl"] .tip-box {
+  border-left: none;
+  border-right: 4px solid #3b82f6;
+  border-radius: 8px 0 0 8px;
+}
+[dir="rtl"] .warning-box {
+  border-left: none;
+  border-right: 4px solid #f59e0b;
+  border-radius: 8px 0 0 8px;
+}
+[dir="rtl"] .privacy p,
+[dir="rtl"] .privacy li {
+  text-align: right;
+}
+[dir="rtl"] .privacy ul,
+[dir="rtl"] .privacy ol {
+  padding-left: 0;
+  padding-right: 2rem;
+  margin-left: 0;
+  margin-right: 1rem;
+}
+[dir="rtl"] .tech-bullet {
+  margin-right: 0;
+  margin-left: 1rem;
+}
+}
