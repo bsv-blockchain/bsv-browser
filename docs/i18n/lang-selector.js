@@ -11,7 +11,9 @@
     { code: 'pt', name: 'Português' },
     { code: 'bn', name: 'বাংলা' },
     { code: 'ru', name: 'Русский' },
-    { code: 'id', name: 'Indonesia' }
+    { code: 'id', name: 'Indonesia' },
+    { code: 'ja', name: '日本語' },
+    { code: 'pl', name: 'Polski' }
   ];
 
   function getCurrentLang() {
