@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var SUPPORTED_LANGS = ['en', 'zh', 'hi', 'es', 'fr', 'ar', 'pt', 'bn', 'ru', 'id'];
+  var SUPPORTED_LANGS = ['en', 'zh', 'hi', 'es', 'fr', 'ar', 'pt', 'bn', 'ru', 'id', 'ja', 'pl'];
 
   function detectLang() {
     var lang;
