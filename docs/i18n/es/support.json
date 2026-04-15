@@ -21,7 +21,7 @@
   "nav.contact": "Contactar soporte",
 
   "what_is.heading": "¿Qué es BSV Browser?",
-  "what_is.intro": "Un navegador web gratuito y de código abierto para iOS y Android que hace todo lo que hace tu navegador actual — más tres cosas que no puede: guardar una cartera, demostrar quién eres y pagar fracciones de un centavo por cualquier cosa.",
+  "what_is.intro": "Un navegador web gratuito y de código abierto para iOS y Android que hace todo lo que hace tu navegador actual — y además tres cosas que tu navegador no puede: almacenar una cartera, demostrar quién eres y pagar fracciones de un centavo por cualquier cosa.",
   "what_is.h3_superpowers": "Un navegador normal, con superpoderes",
   "what_is.p1": "En su núcleo, BSV Browser es un navegador web con todas las funciones. Puedes visitar cualquier sitio web, gestionar marcadores, mantener el historial de navegación y abrir varias pestañas. Lo que lo diferencia es la capa Web3 opcional: cuando la activas, los sitios web que admiten el estándar BRC-100 pueden interactuar con tu cartera para pagos, verificación de identidad, cifrado y más — siempre con tu permiso explícito.",
   "what_is.modes_intro": "El navegador incluye dos modos:",
