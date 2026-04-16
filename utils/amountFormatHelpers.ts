@@ -9,119 +9,15 @@ const getLocaleDefault = (): string => {
   }
 }
 
-// Safe separator detection with fallbacks
-const getSeparator = (type: 'group' | 'decimal'): string => {
-  try {
-    const locale = getLocaleDefault()
-    const parts = Intl.NumberFormat(locale).formatToParts(1234.56)
-    const part = parts.find(p => p.type === type)
-    return part ? part.value : type === 'group' ? ',' : '.'
-  } catch {
-    // Fallback values if Intl is not supported
-    return type === 'group' ? ',' : '.'
-  }
-}
-
 const localeDefault = getLocaleDefault()
-const groupDefault = getSeparator('group')
-const decimalDefault = getSeparator('decimal')
 
-export const satoshisOptions = {
-  fiatFormats: [
-    {
-      name: 'USD',
-      // value suitable as first arg for Intl.NumberFormat or null for default locale
-      locale: 'en-US',
-      // value suitable as currency property of second arg for Intl.NumberFormat
-      currency: 'USD'
-    },
-    {
-      name: 'USD_locale',
-      locale: null,
-      currency: 'USD'
-    },
-    {
-      name: 'EUR',
-      locale: null,
-      currency: 'EUR'
-    },
-    {
-      name: 'GBP',
-      locale: null,
-      currency: 'GBP'
-    }
-  ],
-  satsFormats: [
-    {
-      // Format name for settings choice lookup
-      name: 'SATS',
-      // One of: 'SATS', 'BSV', 'mBSV'
-      // 100,000,000 SATS === 1000 mBSV === 1 BSV
-      unit: 'SATS',
-      // string to insert between integer and fraction parts, null for locale default
-      decimal: null,
-      // string to insert every three digits from decimal, null for locale default
-      group: null,
-      // full unit label
-      label: 'satoshis',
-      // abbreviated unit label
-      abbrev: 'sats'
-    },
-    {
-      name: 'SATS_Tone',
-      unit: 'SATS',
-      decimal: '.',
-      group: '_',
-      label: 'satoshis',
-      abbrev: 'sats'
-    },
-    {
-      name: 'mBSV',
-      unit: 'mBSV',
-      decimal: null,
-      group: null,
-      label: 'mBSV',
-      abbrev: ''
-    },
-    {
-      name: 'mBSV_Tone',
-      unit: 'mBSV',
-      decimal: '.',
-      group: '_',
-      label: 'mBSV',
-      abbrev: ''
-    },
-    {
-      name: 'BSV',
-      unit: 'BSV',
-      decimal: null,
-      group: null,
-      label: 'BSV',
-      abbrev: ''
-    },
-    {
-      name: 'BSV_Tone',
-      unit: 'BSV',
-      decimal: '.',
-      group: '_',
-      label: 'BSV',
-      abbrev: ''
-    }
-  ],
-  isFiatPreferred: false // If true, fiat format is preferred, else satsFormat
-}
+const SATS_PER_BSV = 100_000_000
 
 // Format number as currency with fallback for platforms where Intl is not fully supported
-const formatCurrency = (
-  value: number,
-  currency: string,
-  locale: string,
-  minDigits: number,
-  maxDigits?: number
-): string => {
+const formatCurrency = (value: number, locale: string, minDigits: number, maxDigits?: number): string => {
   try {
     const options: Intl.NumberFormatOptions = {
-      currency,
+      currency: 'USD',
       style: 'currency',
       minimumFractionDigits: minDigits
     }
@@ -135,35 +31,52 @@ const formatCurrency = (
   } catch {
     // Fallback formatting if Intl is not supported
     const fixed = value.toFixed(minDigits)
-    let symbol = '$'
-
-    if (currency === 'EUR') symbol = '€'
-    else if (currency === 'GBP') symbol = '£'
-
-    return `${symbol}${fixed}`
+    return `$${fixed}`
   }
 }
 
-export const formatSatoshisAsFiat = (
-  satoshis = NaN,
-  satoshisPerUSD = null,
-  format: any = null,
-  settingsCurrency = 'SATS',
-  eurPerUSD = 0.93,
-  gbpPerUSD = 0.79,
-  showFiatAsInteger = false
-) => {
-  if (settingsCurrency) {
-    // See if requested currency matches a known fiat format, if not use 'USD'
-    let fiatFormat = satoshisOptions.fiatFormats.find(f => f.name === settingsCurrency)
-    if (!fiatFormat) fiatFormat = satoshisOptions.fiatFormats.find(f => f.name === 'USD')
-    format = fiatFormat
+/**
+ * Format a satoshi amount as a locale-aware integer string with grouping separators.
+ * E.g. 1234567 -> "1,234,567" (en-US) or "1.234.567" (de-DE)
+ */
+const formatSatoshisLocale = (satoshis: number): string => {
+  try {
+    return new Intl.NumberFormat(localeDefault, {
+      maximumFractionDigits: 0,
+      useGrouping: true
+    }).format(satoshis)
+  } catch {
+    return Math.abs(satoshis).toLocaleString()
   }
-  format ??= satoshisOptions.fiatFormats[0]
-  const locale = format.locale ?? localeDefault
+}
 
-  const usd = satoshisPerUSD && Number.isInteger(Number(satoshis)) ? satoshis / satoshisPerUSD : NaN
+/**
+ * Format a BSV decimal amount with locale-aware separators.
+ * Shows up to 8 decimal places, trimming trailing zeros.
+ */
+const formatBsvLocale = (bsvValue: number): string => {
+  try {
+    return new Intl.NumberFormat(localeDefault, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 8,
+      useGrouping: true
+    }).format(bsvValue)
+  } catch {
+    // Fallback: trim trailing zeros from toFixed(8)
+    return parseFloat(bsvValue.toFixed(8)).toString()
+  }
+}
 
+/**
+ * Format a satoshi amount as USD using exchange rate.
+ * Dynamically adjusts decimal precision based on magnitude.
+ */
+export const formatSatoshisAsFiat = (satoshis: number, satoshisPerUSD: number, showFiatAsInteger = false): string => {
+  if (!Number.isInteger(Number(satoshis)) || !satoshisPerUSD || satoshisPerUSD <= 0) {
+    return '...'
+  }
+
+  const usd = satoshis / satoshisPerUSD
   if (isNaN(usd)) return '...'
 
   let minDigits = 2
@@ -179,136 +92,89 @@ export const formatSatoshisAsFiat = (
     maxDigits = 0
   }
 
-  if (!format || format.currency === 'USD') {
-    return formatCurrency(usd, 'USD', locale, minDigits, maxDigits)
-  } else if (format.currency === 'EUR') {
-    const eur = usd * eurPerUSD
-    if (isNaN(eur)) return '...'
-    return formatCurrency(eur, 'EUR', locale, minDigits, maxDigits)
-  } else if (format.currency === 'GBP') {
-    const gbp = usd * gbpPerUSD
-    if (isNaN(gbp)) return '...'
-    return formatCurrency(gbp, 'GBP', locale, minDigits, maxDigits)
-  }
-
-  // Default fallback
-  return formatCurrency(usd, 'USD', locale, minDigits, maxDigits)
+  return formatCurrency(usd, localeDefault, minDigits, maxDigits)
 }
+
 /**
- * Format a satoshi amount according to the specified format.
- * React Native compatible with proper error handling.
+ * Format a satoshi amount in BSV mode with smart threshold:
+ * - < 100,000,000 sats (< 1 BSV): display as satoshis with grouping (e.g., "50,000 satoshis")
+ * - >= 100,000,000 sats (>= 1 BSV): display as BSV with decimals (e.g., "1.5 BSV")
+ *
+ * All formatting is locale-aware.
  */
-export const formatSatoshis = (
-  satoshis: any,
-  showPlus = false,
-  abbreviate = false,
-  format: any = null,
-  settingsCurrency = 'SATS'
-): string => {
-  try {
-    if (settingsCurrency) {
-      // See if requested currency matches a known satoshis format, if not use 'SATS'
-      let satsFormat = satoshisOptions.satsFormats.find(f => f.name === settingsCurrency)
-      if (!satsFormat) satsFormat = satoshisOptions.satsFormats.find(f => f.name === 'SATS')
-      format = satsFormat
-    }
-    format = format ?? satoshisOptions.satsFormats[0]
+export const formatSatoshisAsBsv = (satoshis: number, showPlus = false, abbreviate = false): string => {
+  const numValue = Number(satoshis)
+  if (!Number.isInteger(numValue)) return '---'
 
-    // Convert to number and validate
-    const numValue = Number(satoshis)
-    let s: any = Number.isInteger(numValue) ? numValue : null
-    if (s === null) {
-      return '---'
-    }
+  const sign = numValue < 0 ? '-' : showPlus ? '+' : ''
+  const absValue = Math.abs(numValue)
 
-    // Determine sign prefix
-    const sign = s < 0 ? '-' : showPlus ? '+' : ''
-
-    // Convert to absolute string value
-    s = Math.abs(s).toFixed(0)
-
-    // There are at most 21 some odd million hundred million satoshis.
-    // We format this with the following separators.
-    // Note that the decimal only appears after a hundred million satoshis.
-    // 21_000_000.000_000_00
-    const g = format.group ?? groupDefault
-    const d = format.decimal ?? decimalDefault
-
-    // Determine formatting pattern based on unit
-    let p: [number, string][], sMinLen: number
-    switch (format.unit) {
-      case 'BSV':
-        sMinLen = 9
-        p = [
-          [2, g],
-          [3, g],
-          [3, d],
-          [3, g],
-          [3, g]
-        ]
-        break
-      case 'mBSV':
-        sMinLen = 6
-        p = [
-          [2, g],
-          [3, d],
-          [3, g],
-          [3, g],
-          [3, g]
-        ]
-        break
-      default:
-        sMinLen = 0
-        p = [
-          [3, g],
-          [3, g],
-          [3, g],
-          [3, g],
-          [3, g]
-        ]
-        break
-    }
-
-    // Ensure minimum length by padding with zeros
-    let r = ''
-    while (s.length < sMinLen) s = '0' + s
-
-    // Format the number with appropriate separators
-    const pCopy = [...p] // Create a copy to avoid mutating the original array
-    while (s.length > 0) {
-      if (pCopy.length === 0) {
-        r = s + r
-        s = ''
-      } else {
-        const q = pCopy.shift()!
-        r = s.substring(s.length - Math.min(q[0], s.length)) + r
-        if (s.length > q[0]) {
-          r = q[1] + r
-          s = s.substring(0, s.length - q[0])
-        } else {
-          s = ''
-        }
-      }
-    }
-
-    // Combine sign, formatted value, and label
-    r = `${sign}${r}`
-    const label = abbreviate ? format.abbrev : format.label
-    if (label && label.length > 0) {
-      r = `${r} ${label}`
-    }
-
-    return r
-  } catch (error) {
-    // Fallback for any unexpected errors
-    console.error('Error formatting satoshis:', error)
-    const numValue = Number(satoshis)
-    if (Number.isNaN(numValue)) return '---'
-
-    // Very basic fallback formatting
-    const sign = numValue < 0 ? '-' : showPlus ? '+' : ''
-    const formatted = `${sign}${Math.abs(numValue).toLocaleString()}`
-    const unit = format?.unit || 'SATS'
-    return `${formatted} ${unit.toLowerCase()}`
+  if (absValue >= SATS_PER_BSV) {
+    // Display as BSV
+    const bsvValue = absValue / SATS_PER_BSV
+    return `${sign}${formatBsvLocale(bsvValue)} BSV`
+  } else {
+    // Display as satoshis
+    const label = abbreviate ? 'sats' : 'satoshis'
+    return `${sign}${formatSatoshisLocale(absValue)} ${label}`
   }
 }
+
+/**
+ * Smart format function: formats a satoshi amount based on the currency setting.
+ * - 'USD': converts to USD using exchange rate
+ * - 'BSV' (default): uses smart threshold (satoshis for < 1 BSV, BSV for >= 1 BSV)
+ */
+export const formatAmount = (
+  satoshis: number,
+  currency: string = 'BSV',
+  satoshisPerUSD: number = 0,
+  options: { showPlus?: boolean; abbreviate?: boolean; showFiatAsInteger?: boolean } = {}
+): string => {
+  const { showPlus = false, abbreviate = false, showFiatAsInteger = false } = options
+
+  if (currency === 'USD') {
+    return formatSatoshisAsFiat(satoshis, satoshisPerUSD, showFiatAsInteger)
+  }
+
+  return formatSatoshisAsBsv(satoshis, showPlus, abbreviate)
+}
+
+/**
+ * Convert a user-entered display value back to integer satoshis.
+ * - BSV mode: input is satoshi integers, passthrough
+ * - USD mode: input is dollar amount, multiply by satoshisPerUSD
+ */
+export const parseDisplayToSatoshis = (displayValue: string, currency: string, satoshisPerUSD: number): number => {
+  const cleaned = displayValue.trim()
+  if (!cleaned) return 0
+
+  if (currency === 'USD') {
+    const usdAmount = parseFloat(cleaned)
+    if (isNaN(usdAmount)) return 0
+    return Math.round(usdAmount * satoshisPerUSD)
+  }
+
+  // BSV mode: input is always integer satoshis
+  const sats = parseInt(cleaned, 10)
+  return isNaN(sats) ? 0 : sats
+}
+
+/**
+ * Get the appropriate unit label for display.
+ * In BSV mode, the label depends on the amount (satoshis vs BSV).
+ * If no satoshi value is provided, returns "satoshis" (the input label for BSV mode).
+ */
+export const getUnitLabel = (currency: string, satoshis?: number, abbreviate = false): string => {
+  if (currency === 'USD') return 'USD'
+
+  // BSV mode: if an amount is provided, use threshold to pick label
+  if (satoshis !== undefined && Math.abs(satoshis) >= SATS_PER_BSV) {
+    return 'BSV'
+  }
+
+  return abbreviate ? 'sats' : 'satoshis'
+}
+
+// Keep legacy exports for backward compatibility during migration
+export const formatSatoshis = formatSatoshisAsBsv

@@ -35,7 +35,10 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { SatsAmountInput } from '@/components/wallet/SatsAmountInput'
+import { AmountInput } from '@/components/wallet/AmountInput'
+import AmountDisplay from '@/components/wallet/AmountDisplay'
+import { formatAmount } from '@/utils/amountFormatHelpers'
+import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 import { formatDistanceToNow } from 'date-fns'
 
 const brc29ProtocolID: WalletProtocol = [2, '3241645161d8']
@@ -65,8 +68,10 @@ export default function LegacyPaymentsScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, selectedNetwork } = useWallet()
+  const { managers, adminOriginator, selectedNetwork, settings } = useWallet()
   const wallet = managers?.permissionsManager || null
+  const { satoshisPerUSD } = React.useContext(ExchangeRateContext)
+  const currency = settings?.currency || 'BSV'
 
   // ── Tab state ────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<Tab>('receive')
@@ -331,7 +336,7 @@ export default function LegacyPaymentsScreen() {
 
       if (importedSatoshis > 0) {
         showSnack(
-          `Successfully imported ${importedSatoshis.toLocaleString()} sats${failureCount > 0 ? ` (${failureCount} failed)` : ''}`,
+          `Successfully imported ${formatAmount(importedSatoshis, currency, satoshisPerUSD)}${failureCount > 0 ? ` (${failureCount} failed)` : ''}`,
           'success'
         )
       } else if (failureCount > 0) {
@@ -463,7 +468,7 @@ export default function LegacyPaymentsScreen() {
         },
         adminOriginator
       )
-      showSnack(`Sent ${sats.toLocaleString()} sats`, 'success')
+      showSnack(`Sent ${formatAmount(sats, currency, satoshisPerUSD)}`, 'success')
       setSendLog(prev => [{ sats, address: recipientAddress, at: new Date() }, ...prev])
       setRecipientAddress('')
       setSendAmount('')
@@ -559,7 +564,7 @@ export default function LegacyPaymentsScreen() {
               <View style={[styles.balanceRow, { borderTopColor: colors.separator, marginTop: spacing.lg }]}>
                 <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>{t('imported')}</Text>
                 <Text style={[styles.balanceValue, { color: colors.success }]}>
-                  {processedTxs.reduce((sum, tx) => sum + tx.satoshis, 0).toLocaleString()} sats
+                  <AmountDisplay>{processedTxs.reduce((sum, tx) => sum + tx.satoshis, 0)}</AmountDisplay>
                 </Text>
               </View>
               <View style={[styles.logContainer, { borderColor: colors.separator, marginTop: spacing.md }]}>
@@ -576,7 +581,7 @@ export default function LegacyPaymentsScreen() {
                   >
                     <Ionicons name="checkmark-circle" size={14} color={colors.success} />
                     <Text style={[styles.logSats, { color: colors.success }]}>
-                      +{tx.satoshis.toLocaleString()} sats
+                      +<AmountDisplay>{tx.satoshis}</AmountDisplay>
                     </Text>
                     {tx.importedAt ? (
                       <Text style={[styles.logTime, { color: colors.textTertiary }]}>
@@ -649,8 +654,8 @@ export default function LegacyPaymentsScreen() {
 
         {/* Amount field */}
         <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>{t('amount_sats').toUpperCase()}</Text>
-          <SatsAmountInput value={sendAmount} onChangeText={setSendAmount} />
+          <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>{t('amount').toUpperCase()}</Text>
+          <AmountInput value={sendAmount} onChangeText={setSendAmount} />
         </View>
 
         {/* Send button */}
@@ -686,7 +691,9 @@ export default function LegacyPaymentsScreen() {
                   }
                 ]}
               >
-                <Text style={[styles.logSats, { color: colors.error }]}>-{entry.sats.toLocaleString()} sats</Text>
+                <Text style={[styles.logSats, { color: colors.error }]}>
+                  <AmountDisplay>{-entry.sats}</AmountDisplay>
+                </Text>
                 <Text
                   style={[styles.logAddress, { color: colors.textTertiary }]}
                   numberOfLines={1}

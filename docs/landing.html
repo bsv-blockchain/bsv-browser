@@ -262,6 +262,7 @@
         }
       }
     </style>
+    <script>if(localStorage.getItem('bsvb-lang')&&localStorage.getItem('bsvb-lang')!=='en')document.documentElement.classList.add('i18n-loading');</script>
   </head>
   <body>
     <!-- Rotating network graph background -->
@@ -473,7 +474,7 @@
     </div>
 
     <div class="landing-container">
-      <h1>Your</h1>
+      <h1 data-i18n="hero.your">Your</h1>
       <div class="flip-line">
         <span class="flip-word">Browser</span>
         <span class="flip-word">Wallet</span>
@@ -482,7 +483,7 @@
     </div>
 
     <div class="arrow-hint" onclick="scrollToNext()">
-      <span class="arrow-label">Enable Web3 Here</span>
+      <span class="arrow-label" data-i18n="cta.enable_web3">Enable Web3 Here</span>
       &#x2198;
     </div>
 
@@ -503,5 +504,8 @@
         }
       }, 2000)
     </script>
+    <link rel="stylesheet" href="i18n/lang-selector.css">
+    <script src="i18n/i18n.js"></script>
+    <script src="i18n/lang-selector.js"></script>
   </body>
 </html>
