@@ -155,18 +155,16 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
       {isWeb2Mode ? (
         <Row icon="flash-outline" label={t('enable_web3')} onPress={dismiss(onEnableWeb3)} />
       ) : (
-        <Row icon="wallet-outline" label={t('wallet')} onPress={dismiss(onSettings)} />
-        // TODO: Websocket Link — re-enable Wallet | Link split-row once desktop side is ready
-        // <View style={styles.splitRow}>
-        //   <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onSettings)} activeOpacity={0.6}>
-        //     <Ionicons name="wallet-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
-        //     <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('wallet')}</Text>
-        //   </TouchableOpacity>
-        //   <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
-        //   <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onConnections)} activeOpacity={0.6}>
-        //     <Ionicons name="link-outline" size={22} color={colors.textPrimary} />
-        //   </TouchableOpacity>
-        // </View>
+        <View style={styles.splitRow}>
+          <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onSettings)} activeOpacity={0.6}>
+            <Ionicons name="wallet-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
+            <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('wallet')}</Text>
+          </TouchableOpacity>
+          <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
+          <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onConnections)} activeOpacity={0.6}>
+            <Ionicons name="link-outline" size={22} color={colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
       )}
 
       <Divider />

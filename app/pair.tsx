@@ -23,12 +23,12 @@ export default function PairScreen() {
   const { managers } = useWallet()
   const params = useLocalSearchParams<{
     topic: string
-    relay: string
     backendIdentityKey: string
     protocolID: string
-    keyID: string
     origin: string
     expiry: string
+    sig?: string
+    reconnect?: string
   }>()
 
   const {
@@ -40,32 +40,34 @@ export default function PairScreen() {
   // Pre-connection validation error (before connect() is called)
   const [preConnectError, setPreConnectError] = useState<string | null>(null)
 
-  // Whether this mount is a reconnect (context was already active when we arrived)
-  const isReconnect = useRef(status !== 'idle').current
+  // Whether this mount is a reconnect (explicitly passed from connections screen)
+  const isReconnect = params.reconnect === 'true'
+
+  // Track current status for unmount cleanup without re-running the effect
+  const statusRef = useRef(status)
+  useEffect(() => { statusRef.current = status }, [status])
+
+  // Reset error state when leaving this screen so the next scan starts fresh
+  useEffect(() => {
+    return () => {
+      if (statusRef.current === 'error' || statusRef.current === 'disconnected') {
+        disconnect()
+      }
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Validate QR params on mount — only for fresh pairings
   useEffect(() => {
     if (isReconnect) return
 
-    const { topic, relay, backendIdentityKey, protocolID, keyID, origin, expiry } = params
-    if (!topic || !relay || !backendIdentityKey || !protocolID || !keyID || !origin || !expiry) {
+    const { topic, backendIdentityKey, protocolID, origin, expiry } = params
+    if (!topic || !backendIdentityKey || !protocolID || !origin || !expiry) {
       setPreConnectError('Invalid or missing pairing parameters')
       return
     }
     if (Date.now() / 1000 > Number(expiry)) {
       setPreConnectError('QR code has expired')
       return
-    }
-    try {
-      const relayUrl  = new URL(relay)
-      const originHost = new URL(origin).hostname
-      if (relayUrl.protocol === 'wss:' && relayUrl.hostname !== originHost) {
-        setPreConnectError(
-          `Relay host "${relayUrl.hostname}" doesn't match origin host "${originHost}" — refusing to connect`
-        )
-      }
-    } catch {
-      setPreConnectError('Invalid relay or origin URL')
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -85,11 +87,11 @@ export default function PairScreen() {
     try {
       await connect({
         topic:              params.topic,
-        relay:              params.relay,
         backendIdentityKey: params.backendIdentityKey,
         protocolID:         params.protocolID,
-        keyID:              params.keyID,
         origin:             params.origin,
+        expiry:             params.expiry,
+        sig:                params.sig,
       }, wallet)
     } catch (err) {
       setPreConnectError(err instanceof Error ? err.message : 'Connection failed')
@@ -111,7 +113,7 @@ export default function PairScreen() {
         <View style={styles.centered}>
           <Text style={styles.errorTitle}>Connection Failed</Text>
           <Text style={styles.errorMsg}>{preConnectError}</Text>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={() => { disconnect(); router.back() }}>
             <Text style={styles.secondaryBtnText}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -124,7 +126,7 @@ export default function PairScreen() {
         <View style={styles.centered}>
           <Text style={styles.errorTitle}>Connection Failed</Text>
           <Text style={styles.errorMsg}>{errorMsg ?? 'Something went wrong'}</Text>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={() => { disconnect(); router.back() }}>
             <Text style={styles.secondaryBtnText}>Go Back</Text>
           </TouchableOpacity>
         </View>
