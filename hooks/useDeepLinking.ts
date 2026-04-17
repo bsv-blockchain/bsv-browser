@@ -103,7 +103,7 @@ export function useDeepLinking() {
       }
 
       router.push({
-        pathname: '/pair',
+        pathname: '/connections',
         params: { topic, backendIdentityKey, protocolID, origin, expiry, sig }
       })
     } catch (error) {

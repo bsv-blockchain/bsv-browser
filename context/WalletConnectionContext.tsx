@@ -14,7 +14,6 @@ export const IMPLEMENTED_METHODS = new Set([
   'relinquishCertificate', 'revealCounterpartyKeyLinkage', 'createHmac', 'verifyHmac',
   'encrypt', 'decrypt', 'createSignature', 'verifySignature',
 ])
-const AUTO_APPROVE_METHODS = new Set(['getPublicKey'])
 
 const NAV_TIMEOUT_MS      = 5  * 60 * 1000  // 5 min  — navigated away from pair screen
 const APP_STATE_TIMEOUT_MS = 12 * 60 * 1000  // 12 min — app backgrounded
@@ -28,13 +27,6 @@ export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnect
 type RpcRequest  = { id: string; seq: number; method: string; params: unknown }
 type RpcResponse = { id: string; seq: number; result?: unknown; error?: { code: number; message: string } }
 type WireEnvelope = { topic: string; ciphertext: string; mobileIdentityKey?: string }
-
-export interface ApprovalItem {
-  method: string
-  params: unknown
-  resolve: (approved: boolean) => void
-  reject:  (err: Error) => void
-}
 
 export interface SessionMeta {
   topic:              string
@@ -58,12 +50,9 @@ interface WalletConnectionContextValue {
   status:             ConnectionStatus
   sessionMeta:        SessionMeta | null
   errorMsg:           string | null
-  currentApproval:    ApprovalItem | null
   connect:            (params: ConnectParams, wallet: WalletClient) => Promise<void>
   reconnect:          (connection: Connection, wallet: WalletClient) => Promise<void>
   disconnect:         () => void
-  approveCurrentRpc:  () => void
-  rejectCurrentRpc:   () => void
   startNavTimer:      () => void
   cancelNavTimer:     () => void
 }
@@ -133,9 +122,6 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
   const [status,        setStatus]        = useState<ConnectionStatus>('idle')
   const [sessionMeta,   setSessionMeta]   = useState<SessionMeta | null>(null)
   const [errorMsg,      setErrorMsg]      = useState<string | null>(null)
-  const [approvalQueue, setApprovalQueue] = useState<ApprovalItem[]>([])
-
-  const currentApproval = approvalQueue[0] ?? null
 
   // Internal refs — changes here don't trigger re-renders
   const wsRef              = useRef<WebSocket | null>(null)
@@ -161,10 +147,6 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
     ws?.close()
     if (navTimerRef.current)      { clearTimeout(navTimerRef.current);      navTimerRef.current      = null }
     if (appStateTimerRef.current) { clearTimeout(appStateTimerRef.current); appStateTimerRef.current = null }
-    setApprovalQueue(prev => {
-      prev.forEach(item => item.reject(new Error('Session disconnected')))
-      return []
-    })
     setSessionMeta(null)
     setStatus('idle')
   }, [])
@@ -200,28 +182,6 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
     return () => sub.remove()
   }, [disconnect])
 
-  // ── Approval queue ────────────────────────────────────────────────────────
-
-  const approveCurrentRpc = useCallback(() => {
-    setApprovalQueue(prev => {
-      prev[0]?.resolve(true)
-      return prev.slice(1)
-    })
-  }, [])
-
-  const rejectCurrentRpc = useCallback(() => {
-    setApprovalQueue(prev => {
-      prev[0]?.resolve(false)
-      return prev.slice(1)
-    })
-  }, [])
-
-  function requestApproval(method: string, params: unknown): Promise<boolean> {
-    return new Promise((resolve, reject) => {
-      setApprovalQueue(prev => [...prev, { method, params, resolve, reject }])
-    })
-  }
-
   // ── RPC dispatch ──────────────────────────────────────────────────────────
 
   async function handleRpc(
@@ -247,28 +207,19 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
       return
     }
 
-    let approved = true
-    if (!AUTO_APPROVE_METHODS.has(request.method)) {
-      try {
-        approved = await requestApproval(request.method, request.params)
-      } catch {
-        return  // session disconnected while waiting for user input
-      }
-    }
-
-    if (!approved) {
-      await sendResponse({ id: request.id, seq: request.seq,
-        error: { code: 4001, message: 'User rejected' } })
-      return
-    }
-
+    // Call wallet method directly — WalletPermissionsManager handles all
+    // permission prompts (spending, protocol, basket, certificate) via its
+    // own callbacks and the existing wallet permission modals.
     let result: unknown
     let error: { code: number; message: string } | undefined
     try {
       type WFn = (p: unknown) => Promise<unknown>
       result = await (wallet as unknown as Record<string, WFn>)[request.method](request.params)
     } catch (err) {
-      error = { code: 500, message: err instanceof Error ? err.message : 'Wallet error' }
+      const message = err instanceof Error ? err.message : 'Wallet error'
+      // WalletPermissionsManager throws when user denies — surface as rejection
+      const code = message.includes('denied') || message.includes('rejected') ? 4001 : 500
+      error = { code, message }
     }
 
     await sendResponse(error
@@ -337,10 +288,6 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
 
       // Don't change the state if this is not the current ws
       if (!wasIntentional && wsRef.current !== null && wsRef.current !== ws) {
-        setApprovalQueue(prev => {
-          prev.forEach(item => item.reject(new Error('Session disconnected')))
-          return []
-        })
         return
       }
 
@@ -355,10 +302,6 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
       lastSeqRef.current = 0
       if (navTimerRef.current)      { clearTimeout(navTimerRef.current);      navTimerRef.current      = null }
       if (appStateTimerRef.current) { clearTimeout(appStateTimerRef.current); appStateTimerRef.current = null }
-      setApprovalQueue(prev => {
-        prev.forEach(item => item.reject(new Error('Session disconnected')))
-        return []
-      })
       setSessionMeta(null)
       // Don't override the 'idle' status that disconnect() already set
       if (!wasIntentional) {
@@ -490,9 +433,8 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
 
   return (
     <WalletConnectionContext.Provider value={{
-      status, sessionMeta, errorMsg, currentApproval,
+      status, sessionMeta, errorMsg,
       connect, reconnect, disconnect,
-      approveCurrentRpc, rejectCurrentRpc,
       startNavTimer, cancelNavTimer,
     }}>
       {children}

@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Modal, ScrollView, Alert } from 'react-native'
+import React, { useEffect, useState } from 'react'
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Alert } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
 import { observer } from 'mobx-react-lite'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { WalletClient } from '@bsv/sdk'
 import type { WalletProtocol } from '@bsv/sdk'
@@ -11,6 +12,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { GroupedSection } from '@/components/ui/GroupedList'
+import { ListRow } from '@/components/ui/ListRow'
 import { useWallet } from '@/context/WalletContext'
 import connectionStore, { type Connection } from '@/stores/ConnectionStore'
 import QRScanner from '@/components/QRScanner'
@@ -91,22 +93,39 @@ export default observer(function ConnectionsScreen() {
   const { colors } = useTheme()
   const { t } = useTranslation()
   const { managers } = useWallet()
-  const { reconnect } = useWalletConnection()
+  const { connect, reconnect } = useWalletConnection()
   const insets = useSafeAreaInsets()
   const [scanning, setScanning] = useState(false)
+  const deepLinkParams = useLocalSearchParams<PairingParams>()
 
-  function handleScan(data: string) {
+  // Auto-connect when navigated here with deep link pairing params
+  useEffect(() => {
+    if (!deepLinkParams.topic || !managers.permissionsManager) return
+    const uri = `bsv-browser://pair?topic=${deepLinkParams.topic}&backendIdentityKey=${deepLinkParams.backendIdentityKey}&protocolID=${encodeURIComponent(deepLinkParams.protocolID)}&origin=${encodeURIComponent(deepLinkParams.origin)}&expiry=${deepLinkParams.expiry}&sig=${deepLinkParams.sig}`
+    handleScan(uri)
+  }, [deepLinkParams.topic, managers.permissionsManager]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleScan(data: string) {
     setScanning(false)
     const result = parsePairingUri(data)
     if (!result.params) {
       Alert.alert('Invalid QR Code', result.error)
       return
     }
-    router.push({ pathname: '/pair', params: result.params })
+    if (!managers.permissionsManager) {
+      Alert.alert('Wallet not ready', 'Please log in first')
+      return
+    }
+    const originator = domainFromOrigin(result.params.origin)
+    const wallet = new WalletClient(managers.permissionsManager, originator)
+    try {
+      await connect(result.params, wallet)
+    } catch (err) {
+      Alert.alert('Connection Failed', err instanceof Error ? err.message : 'Unknown error')
+    }
   }
 
   async function handleDisconnect(conn: Connection) {
-    // Optimistically mark disconnected — will hold even if WS send fails
     connectionStore.setStatus(conn.sessionId, 'disconnected')
 
     if (!managers.permissionsManager) return
@@ -117,7 +136,6 @@ export default observer(function ConnectionsScreen() {
 
       ws.onopen = async () => {
         try {
-          // Use lastSeq + 1 so this message isn't dropped by replay protection
           const storedSeq = await SecureStore.getItemAsync(`wallet_pairing_lastseq_${conn.sessionId}`)
           const seq = storedSeq ? Number(storedSeq) + 1 : 1
           const payload = JSON.stringify({
@@ -152,20 +170,25 @@ export default observer(function ConnectionsScreen() {
   async function handleReconnect(conn: Connection) {
     if (!managers.permissionsManager) return
     const wallet = new WalletClient(managers.permissionsManager, domainFromOrigin(conn.origin))
-    await reconnect(conn, wallet)
-    router.push({ pathname: '/pair', params: { reconnect: 'true' } })
+    try {
+      await reconnect(conn, wallet)
+    } catch (err) {
+      Alert.alert('Reconnect Failed', err instanceof Error ? err.message : 'Unknown error')
+    }
   }
 
   const active = connectionStore.connections.filter(c => c.status === 'active')
   const inactive = connectionStore.connections.filter(c => c.status !== 'active')
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
+    <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
+      {/* Header — matches settings/payments pattern */}
       <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <Text style={[styles.title, { color: colors.textPrimary }]}>Connections</Text>
-        <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
-          <Ionicons name="close" size={22} color={colors.textPrimary} />
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+          <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Connections</Text>
+        <View style={styles.headerButton} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -181,25 +204,63 @@ export default observer(function ConnectionsScreen() {
           <>
             {active.length > 0 && (
               <GroupedSection header="Active">
-                {active.map(item => (
-                  <ConnectionCard key={item.sessionId} item={item} onDisconnect={() => void handleDisconnect(item)} />
+                {active.map((item, idx) => (
+                  <ListRow
+                    key={item.sessionId}
+                    label={domainFromOrigin(item.origin)}
+                    value={new Date(item.connectedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    icon="wifi-outline"
+                    iconColor={colors.success}
+                    showChevron={false}
+                    isLast={idx === active.length - 1}
+                    trailing={
+                      <TouchableOpacity
+                        onPress={() => void handleDisconnect(item)}
+                        style={styles.trailingAction}
+                        activeOpacity={0.6}
+                      >
+                        <Text style={[styles.trailingActionText, { color: colors.error }]}>Disconnect</Text>
+                      </TouchableOpacity>
+                    }
+                  />
                 ))}
               </GroupedSection>
             )}
             {inactive.length > 0 && (
               <GroupedSection header="Disconnected">
-                {inactive.map(item => (
-                  <ConnectionCard
+                {inactive.map((item, idx) => (
+                  <ListRow
                     key={item.sessionId}
-                    item={item}
-                    onReconnect={() => void handleReconnect(item)}
-                    onRemove={() => connectionStore.remove(item.sessionId)}
+                    label={domainFromOrigin(item.origin)}
+                    icon="wifi-outline"
+                    iconColor={colors.textTertiary}
+                    showChevron={false}
+                    isLast={idx === inactive.length - 1}
+                    trailing={
+                      <View style={styles.trailingRow}>
+                        <TouchableOpacity
+                          onPress={() => void handleReconnect(item)}
+                          style={styles.trailingAction}
+                          activeOpacity={0.6}
+                        >
+                          <Text style={[styles.trailingActionText, { color: colors.info }]}>Reconnect</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => connectionStore.remove(item.sessionId)}
+                          style={[styles.trailingAction, { marginLeft: spacing.md }]}
+                          activeOpacity={0.6}
+                        >
+                          <Ionicons name="trash-outline" size={16} color={colors.textTertiary} />
+                        </TouchableOpacity>
+                      </View>
+                    }
                   />
                 ))}
               </GroupedSection>
             )}
           </>
         )}
+
       </ScrollView>
 
       <View style={[styles.footer, { borderTopColor: colors.separator }]}>
@@ -207,90 +268,24 @@ export default observer(function ConnectionsScreen() {
           <Ionicons name="qr-code-outline" size={20} color={colors.textOnAccent} style={{ marginRight: spacing.sm }} />
           <Text style={[styles.scanBtnText, { color: colors.textOnAccent }]}>Scan QR Code</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.pasteBtn, { borderColor: colors.separator }]}
+          onPress={async () => {
+            const text = await Clipboard.getStringAsync()
+            if (text) handleScan(text.trim())
+          }}
+        >
+          <Ionicons name="clipboard-outline" size={18} color={colors.textSecondary} style={{ marginRight: spacing.xs }} />
+          <Text style={[styles.pasteBtnText, { color: colors.textSecondary }]}>Paste URI</Text>
+        </TouchableOpacity>
       </View>
 
       <Modal visible={scanning} animationType="slide" onRequestClose={() => setScanning(false)}>
         <QRScanner onScan={handleScan} onClose={() => setScanning(false)} hintText={t('scan_wallet_qr_hint')} />
       </Modal>
-    </SafeAreaView>
-  )
-})
-
-// ── Connection card ────────────────────────────────────────────────────────────
-
-function ConnectionCard({
-  item,
-  onDisconnect,
-  onReconnect,
-  onRemove
-}: {
-  item: Connection
-  onDisconnect?: () => void
-  onReconnect?: () => void
-  onRemove?: () => void
-}) {
-  const { colors } = useTheme()
-  const isActive = item.status === 'active'
-  const dateStr = new Date(item.connectedAt).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  })
-
-  return (
-    <View style={[styles.card, { borderBottomColor: colors.separator }]}>
-      <View style={styles.cardTop}>
-        <View style={[styles.statusDot, { backgroundColor: isActive ? colors.success : colors.textTertiary }]} />
-        <View style={styles.cardInfo}>
-          <Text style={[styles.cardOrigin, { color: colors.textPrimary }]} numberOfLines={1}>
-            {item.origin}
-          </Text>
-          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-            {isActive ? 'Active' : 'Disconnected'} · {dateStr}
-          </Text>
-        </View>
-      </View>
-
-      <View style={[styles.cardActions, { borderTopColor: colors.separator }]}>
-        {isActive ? (
-          <TouchableOpacity
-            style={[styles.actionBtn, { borderColor: colors.separator }]}
-            onPress={onDisconnect}
-            activeOpacity={0.6}
-          >
-            <Ionicons name="wifi-outline" size={15} color={colors.error} style={{ marginRight: spacing.xs }} />
-            <Text style={[styles.actionBtnText, { color: colors.error }]}>Disconnect</Text>
-          </TouchableOpacity>
-        ) : (
-          <>
-            <TouchableOpacity
-              style={[styles.actionBtn, { borderColor: colors.separator, flex: 1 }]}
-              onPress={onReconnect}
-              activeOpacity={0.6}
-            >
-              <Ionicons name="refresh-outline" size={15} color={colors.info} style={{ marginRight: spacing.xs }} />
-              <Text style={[styles.actionBtnText, { color: colors.info }]}>Reconnect</Text>
-            </TouchableOpacity>
-            <View style={[styles.actionDivider, { backgroundColor: colors.separator }]} />
-            <TouchableOpacity
-              style={[styles.actionBtn, { borderColor: colors.separator, flex: 1 }]}
-              onPress={onRemove}
-              activeOpacity={0.6}
-            >
-              <Ionicons
-                name="trash-outline"
-                size={15}
-                color={colors.textSecondary}
-                style={{ marginRight: spacing.xs }}
-              />
-              <Text style={[styles.actionBtnText, { color: colors.textSecondary }]}>Remove</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
     </View>
   )
-}
+})
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
@@ -302,15 +297,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth
   },
-  title: {
-    ...typography.headline
+  headerButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  closeBtn: {
-    padding: spacing.xs
+  headerTitle: {
+    ...typography.headline,
+    fontWeight: '600'
   },
   scrollContent: {
     paddingTop: spacing.xxl,
@@ -331,6 +330,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20
   },
+  trailingRow: {
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  trailingAction: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm
+  },
+  trailingActionText: {
+    ...typography.footnote,
+    fontWeight: '600'
+  },
   footer: {
     padding: spacing.xl,
     borderTopWidth: StyleSheet.hairlineWidth
@@ -346,50 +357,17 @@ const styles = StyleSheet.create({
     ...typography.callout,
     fontWeight: '600'
   },
-  // Card
-  card: {
-    borderBottomWidth: StyleSheet.hairlineWidth
-  },
-  cardTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: spacing.md
-  },
-  cardInfo: {
-    flex: 1
-  },
-  cardOrigin: {
-    ...typography.subhead,
-    fontWeight: '600'
-  },
-  cardMeta: {
-    ...typography.caption1,
-    marginTop: 2
-  },
-  cardActions: {
-    flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth
-  },
-  actionBtn: {
-    flex: 1,
+  pasteBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+    borderRadius: radii.lg,
+    borderWidth: StyleSheet.hairlineWidth
   },
-  actionBtnText: {
+  pasteBtnText: {
     ...typography.footnote,
-    fontWeight: '600'
-  },
-  actionDivider: {
-    width: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch'
+    fontWeight: '500'
   }
 })

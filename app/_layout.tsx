@@ -24,8 +24,7 @@ import DefaultBrowserPrompt from '@/components/onboarding/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/context/i18n/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/onboarding/Web3BenefitsModalHandler'
-import { WalletConnectionProvider, useWalletConnection } from '@/context/WalletConnectionContext'
-import { RpcApprovalModal } from '@/components/RpcApprovalModal'
+import { WalletConnectionProvider } from '@/context/WalletConnectionContext'
 import { Ionicons } from '@expo/vector-icons'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 
@@ -74,18 +73,6 @@ function DeepLinkHandler() {
   return null
 }
 
-// Renders the RPC approval modal from layout so it persists across screen navigation
-function WalletApprovalHandler() {
-  const { currentApproval, sessionMeta, approveCurrentRpc, rejectCurrentRpc } = useWalletConnection()
-  return (
-    <RpcApprovalModal
-      pending={currentApproval}
-      origin={sessionMeta?.origin ?? ''}
-      onApprove={approveCurrentRpc}
-      onReject={rejectCurrentRpc}
-    />
-  )
-}
 
 // const DebuggerDisplay = () => {
 //   const [toggle, setToggle] = React.useState(false);
@@ -176,7 +163,6 @@ export default function RootLayout() {
                           <FirstTouchRecorder />
                           <DeepLinkHandler />
                           <Web3BenefitsModalHandler />
-                          <WalletApprovalHandler />
                           {/* <TranslationTester /> */}
                           <DefaultBrowserPrompt />
                           <PermissionSheet />
