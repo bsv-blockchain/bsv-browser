@@ -19,7 +19,7 @@ import QRScanner from '@/components/QRScanner'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { toast } from 'react-toastify'
-import { PeerPayClient, IncomingPayment } from '@bsv/message-box-client'
+import { PeerPayClient, IncomingPayment, PaymentToken } from '@bsv/message-box-client'
 import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
 import type { DisplayableIdentity } from '@bsv/sdk'
 
@@ -27,6 +27,14 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
+import {
+  OutboxEntry,
+  getOutboxEntries,
+  saveOutboxEntry,
+  markOutboxSent,
+  updateOutboxEntry,
+  removeOutboxEntry
+} from '@/utils/peerpay/outbox'
 import { AmountInput } from '@/components/wallet/AmountInput'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { formatAmount } from '@/utils/amountFormatHelpers'
@@ -203,13 +211,6 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
   }
 }
 
-async function sendPayment(client: PeerPayClient, recipientKey: string, sendAmount: string): Promise<{ sats: number }> {
-  const sats = Math.round(Number(sendAmount))
-  if (Number.isNaN(sats) || sats <= 0) throw new RangeError('invalid_amount')
-  await client.sendPayment({ recipient: recipientKey, amount: sats })
-  return { sats }
-}
-
 async function acceptWithRetry(
   client: PeerPayClient,
   messageBoxUrl: string,
@@ -320,6 +321,102 @@ function ResultBanner({ result, onDismiss, colors }: ResultBannerProps) {
     </View>
   )
 }
+
+// ── Outgoing Section ─────────────────────────────────────────────────────────
+
+interface OutgoingSectionProps {
+  readonly entries: OutboxEntry[]
+  readonly loadingOutbox: boolean
+  readonly retryingId: string | null
+  readonly colors: ReturnType<typeof import('@/context/theme/ThemeContext').useTheme>['colors']
+  readonly t: ReturnType<typeof import('react-i18next').useTranslation>['t']
+  readonly onRetry: (entry: OutboxEntry) => void
+  readonly onDismiss: (id: string) => void
+}
+
+function OutgoingSection({ entries, loadingOutbox, retryingId, colors, t, onRetry, onDismiss }: OutgoingSectionProps) {
+  if (loadingOutbox && entries.length === 0) {
+    return <ActivityIndicator size="small" color={colors.accent} style={{ marginVertical: spacing.md }} />
+  }
+  if (entries.length === 0) return null
+
+  return (
+    <>
+      <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
+        {t('outgoing_payments')}
+      </Text>
+      <View style={[styles.outgoingCard, { backgroundColor: colors.background, borderColor: colors.separator }]}>
+        {entries.map((entry, idx) => {
+          const isSent = entry.status === 'sent'
+          const isRetrying = retryingId === entry.id
+          const isLast = idx === entries.length - 1
+          const accentColor = isSent ? colors.success : colors.warning
+          const truncated = `${entry.recipient.slice(0, 8)}…${entry.recipient.slice(-4)}`
+          return (
+            <View
+              key={entry.id}
+              style={[
+                styles.outgoingRow,
+                { borderLeftColor: accentColor },
+                !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
+              ]}
+            >
+              {/* Top row: recipient key + amount */}
+              <View style={styles.outgoingInfo}>
+                <View style={styles.outgoingTopRow}>
+                  <Text style={[styles.outgoingRecipient, { color: colors.textPrimary }]} numberOfLines={1}>
+                    {truncated}
+                  </Text>
+                  <Text style={[styles.outgoingAmount, { color: accentColor }]}>
+                    <AmountDisplay>{entry.token.amount}</AmountDisplay>
+                  </Text>
+                </View>
+
+                {/* Status / error text */}
+                <Text
+                  style={[styles.outgoingStatusText, { color: isSent ? colors.success : colors.textSecondary }]}
+                  numberOfLines={2}
+                >
+                  {isSent ? t('payment_delivered') : (entry.lastError ?? t('payment_not_delivered'))}
+                </Text>
+
+                {/* Action buttons — full-width row, easy tap targets */}
+                <View style={[styles.outgoingButtons, { borderTopColor: colors.separator }]}>
+                  <TouchableOpacity
+                    onPress={() => onDismiss(entry.id)}
+                    disabled={isRetrying}
+                    style={[
+                      styles.outgoingDismissButton,
+                      isSent && { flex: 1 },
+                      !isSent && { borderRightColor: colors.separator }
+                    ]}
+                  >
+                    <Text style={[styles.outgoingDismissText, { color: colors.textSecondary }]}>{t('dismiss')}</Text>
+                  </TouchableOpacity>
+                  {!isSent && (
+                    <TouchableOpacity
+                      onPress={() => onRetry(entry)}
+                      disabled={isRetrying}
+                      style={styles.outgoingRetryButton}
+                    >
+                      {isRetrying ? (
+                        <ActivityIndicator size="small" color={colors.accent} />
+                      ) : (
+                        <Text style={[styles.outgoingRetryText, { color: colors.accent }]}>{t('retry')}</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </View>
+          )
+        })}
+      </View>
+    </>
+  )
+}
+
+// ── Incoming Section ─────────────────────────────────────────────────────────
 
 interface IncomingPaymentsSectionProps {
   readonly isConfigured: boolean
@@ -763,7 +860,7 @@ export default function PaymentsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, settings } = useWallet()
+  const { managers, adminOriginator, settings, storage } = useWallet()
   const wallet = managers?.permissionsManager || null
   const { satoshisPerUSD } = React.useContext(ExchangeRateContext)
   const currency = settings?.currency || 'BSV'
@@ -809,6 +906,11 @@ export default function PaymentsScreen() {
   const handleChangeNote = useCallback((id: string, text: string) => {
     setPaymentNotes(prev => ({ ...prev, [id]: text }))
   }, [])
+
+  // --- Outbox state ---
+  const [outboxEntries, setOutboxEntries] = useState<OutboxEntry[]>([])
+  const [loadingOutbox, setLoadingOutbox] = useState(false)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
 
   // --- Send / accept result state ---
   const [sendAmount, setSendAmount] = useState('')
@@ -882,12 +984,24 @@ export default function PaymentsScreen() {
     }
   }, [messageBoxUrl])
 
+  // --- Load outbox entries from storage ---
+  const loadOutbox = useCallback(async () => {
+    if (!storage) return
+    setLoadingOutbox(true)
+    try {
+      setOutboxEntries(await getOutboxEntries(storage))
+    } finally {
+      setLoadingOutbox(false)
+    }
+  }, [storage])
+
   // Auto-fetch when configured
   useEffect(() => {
     if (isConfigured && peerPayClientRef.current) {
       fetchPayments()
     }
-  }, [isConfigured, fetchPayments])
+    loadOutbox()
+  }, [isConfigured, fetchPayments, loadOutbox])
 
   // --- Accept payment (with optional custom description) ---
   const internalizePayment = useCallback(
@@ -978,10 +1092,34 @@ export default function PaymentsScreen() {
   // --- Send payment ---
   const handleSend = useCallback(async () => {
     const client = peerPayClientRef.current
-    if (!client || !recipientKey || !sendAmount) return
+    if (!client || !recipientKey || !sendAmount || !storage) return
+    const sats = Math.round(Number(sendAmount))
+    if (Number.isNaN(sats) || sats <= 0) {
+      setSendResult({ type: 'error', message: t('enter_valid_amount') })
+      setTimeout(() => setSendResult(null), 5000)
+      return
+    }
     setIsSending(true)
+    let outboxId: string | null = null
     try {
-      const { sats } = await sendPayment(client, recipientKey, sendAmount)
+      // Step 1: build and broadcast the transaction — token lives in memory here
+      const token = await client.createPaymentToken({ recipient: recipientKey, amount: sats })
+      // Step 2: persist token to outbox BEFORE attempting delivery
+      outboxId = await saveOutboxEntry(storage, {
+        recipient: recipientKey,
+        token: token as PaymentToken & { transaction: number[] },
+        messageBoxUrl
+      })
+      await loadOutbox()
+      // Step 3: deliver token to recipient's MessageBox
+      await client.sendMessage({
+        recipient: recipientKey,
+        messageBox: 'payment_inbox',
+        body: JSON.stringify(token)
+      })
+      // Step 4: mark delivered
+      await markOutboxSent(storage, outboxId)
+      await loadOutbox()
       setSendResult({ type: 'success', message: `Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully` })
       setSendAmount('')
       clearRecipient()
@@ -989,13 +1127,61 @@ export default function PaymentsScreen() {
     } catch (error: any) {
       const msg = error instanceof RangeError ? t('enter_valid_amount') : error.message || 'unknown error'
       setSendResult({ type: 'error', message: `Send failed: ${msg}` })
+      // outbox entry stays 'unsent' — surfaced in the Outgoing section for manual retry
     } finally {
       setIsSending(false)
       setTimeout(() => setSendResult(null), 5000)
     }
-  }, [recipientKey, sendAmount, clearRecipient, fetchPayments, t])
+  }, [
+    recipientKey,
+    sendAmount,
+    storage,
+    messageBoxUrl,
+    loadOutbox,
+    clearRecipient,
+    fetchPayments,
+    currency,
+    satoshisPerUSD,
+    t
+  ])
 
   const canSend = recipientKey.length > 0 && Number(sendAmount) > 0 && !isSending && isConfigured
+
+  // --- Retry outbox entry ---
+  const handleRetry = useCallback(
+    async (entry: OutboxEntry) => {
+      const client = peerPayClientRef.current
+      if (!client || !storage) return
+      setRetryingId(entry.id)
+      await updateOutboxEntry(storage, entry.id, { lastAttemptAt: new Date().toISOString() })
+      try {
+        await client.sendMessage({
+          recipient: entry.recipient,
+          messageBox: 'payment_inbox',
+          body: JSON.stringify(entry.token)
+        })
+        await markOutboxSent(storage, entry.id)
+        toast.success(t('payment_delivered'))
+      } catch (err: any) {
+        await updateOutboxEntry(storage, entry.id, { lastError: err?.message || 'unknown error' })
+        toast.error(`${t('retry_failed')}: ${err?.message || 'unknown error'}`)
+      } finally {
+        setRetryingId(null)
+        await loadOutbox()
+      }
+    },
+    [storage, loadOutbox, t]
+  )
+
+  // --- Dismiss outbox entry ---
+  const handleDismiss = useCallback(
+    async (id: string) => {
+      if (!storage) return
+      await removeOutboxEntry(storage, id)
+      await loadOutbox()
+    },
+    [storage, loadOutbox]
+  )
 
   return (
     <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
@@ -1112,6 +1298,16 @@ export default function PaymentsScreen() {
             </TouchableOpacity>
 
             {sendResult && <ResultBanner result={sendResult} onDismiss={() => setSendResult(null)} colors={colors} />}
+
+            <OutgoingSection
+              entries={outboxEntries}
+              loadingOutbox={loadingOutbox}
+              retryingId={retryingId}
+              colors={colors}
+              t={t}
+              onRetry={handleRetry}
+              onDismiss={handleDismiss}
+            />
 
             <IncomingPaymentsSection
               isConfigured={isConfigured}
@@ -1518,6 +1714,67 @@ const styles = StyleSheet.create({
   },
   resultDismiss: {
     padding: spacing.xs
+  },
+
+  // Outgoing section
+  outgoingCard: {
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    marginBottom: spacing.lg
+  },
+  outgoingRow: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderLeftWidth: 3
+  },
+  outgoingInfo: {
+    gap: 6
+  },
+  outgoingTopRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.md
+  },
+  outgoingRecipient: {
+    ...typography.footnote,
+    fontWeight: '500',
+    fontFamily: 'monospace',
+    flex: 1
+  },
+  outgoingAmount: {
+    ...typography.subhead,
+    fontWeight: '700',
+    flexShrink: 0
+  },
+  outgoingStatusText: {
+    ...typography.caption1,
+    marginBottom: spacing.sm
+  },
+  outgoingButtons: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginHorizontal: -spacing.lg,
+    marginBottom: -spacing.md
+  },
+  outgoingDismissButton: {
+    flex: 1,
+    paddingVertical: 13,
+    alignItems: 'center',
+    borderRightWidth: StyleSheet.hairlineWidth
+  },
+  outgoingRetryButton: {
+    flex: 1,
+    paddingVertical: 13,
+    alignItems: 'center'
+  },
+  outgoingRetryText: {
+    ...typography.subhead,
+    fontWeight: '600'
+  },
+  outgoingDismissText: {
+    ...typography.subhead
   },
 
   // Recipient input row (text field + QR scan button)
