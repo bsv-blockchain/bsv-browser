@@ -233,7 +233,7 @@ export default function WalletConfigScreen() {
             label={t('display_currency')}
             value={CURRENCIES.find(c => c.id === currentCurrency)?.label ?? currentCurrency}
             icon="cash-outline"
-            iconColor="#FF9500"
+            iconColor="#00C7BE"
             onPress={() => setCurrencyExpanded(e => !e)}
             showChevron={currencyExpanded}
             chevronDown={currencyExpanded}

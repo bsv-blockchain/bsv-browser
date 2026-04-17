@@ -8,7 +8,6 @@ export interface Connection {
   backendIdentityKey: string
   mobileIdentityKey: string
   protocolID: string  // JSON-stringified WalletProtocol
-  keyID: string
   connectedAt: number
   status: 'active' | 'disconnected'
 }

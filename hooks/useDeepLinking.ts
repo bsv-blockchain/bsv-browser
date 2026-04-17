@@ -4,25 +4,34 @@ import { router } from 'expo-router'
 import tabStore from '@/stores/TabStore'
 
 /**
- * Simplified deep linking: when app receives http/https URL, navigate browser directly to it
- * No more storing URLs for later - just open them immediately
+ * Simplified deep linking: when app receives http/https URL, navigate browser directly to it.
+ * Also handles bsv-browser://pair?... URIs for wallet pairing QR codes scanned via the camera app.
  */
 export function useDeepLinking() {
   useEffect(() => {
     // Handle app opened from deep link while closed
     const getInitialURL = async () => {
       const url = await Linking.getInitialURL()
-      if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      if (!url) return
+      if (url.startsWith('http://') || url.startsWith('https://')) {
         console.log('[Deep Link] Opening URL directly:', url)
-        handleDeepLink(url)
+        handleBrowserLink(url)
+      } else if (url.startsWith('bsv-browser://pair')) {
+        console.log('[Deep Link] Opening pairing screen:', url)
+        handlePairingLink(url)
       }
     }
 
     // Handle app opened from deep link while running
     const handleUrl = (event: { url: string }) => {
-      if (event.url && (event.url.startsWith('http://') || event.url.startsWith('https://'))) {
-        console.log('[Deep Link] Opening URL directly:', event.url)
-        handleDeepLink(event.url)
+      const url = event.url
+      if (!url) return
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        console.log('[Deep Link] Opening URL directly:', url)
+        handleBrowserLink(url)
+      } else if (url.startsWith('bsv-browser://pair')) {
+        console.log('[Deep Link] Opening pairing screen:', url)
+        handlePairingLink(url)
       }
     }
 
@@ -32,7 +41,7 @@ export function useDeepLinking() {
     return () => subscription?.remove()
   }, [])
 
-  const handleDeepLink = async (url: string) => {
+  const handleBrowserLink = async (url: string) => {
     try {
       // Wait for tabStore to initialize before attempting to handle deep link
       if (!tabStore.isInitialized) {
@@ -45,8 +54,7 @@ export function useDeepLinking() {
         }
 
         if (!tabStore.isInitialized) {
-          console.error('[Deep Link] TabStore failed to initialize, storing URL for later')
-          // Store the URL to be handled after initialization
+          console.error('[Deep Link] TabStore failed to initialize, dropping URL')
           return
         }
       }
@@ -66,6 +74,40 @@ export function useDeepLinking() {
     } catch (error) {
       console.error('[Deep Link] Error handling URL:', error)
       router.push('/')
+    }
+  }
+
+  /**
+   * Handle bsv-browser://pair?topic=...&backendIdentityKey=...&protocolID=...&origin=...&expiry=...&sig=...
+   *
+   * Used by external QR codes (e.g. scanned via the iOS/Android camera app). Parses pairing
+   * parameters from the URI and navigates directly to /pair, bypassing the connections screen.
+   * The connections screen is reserved for pairing initiated manually within the app.
+   */
+  const handlePairingLink = (url: string) => {
+    try {
+      // bsv-browser://pair?topic=... — URL constructor needs a valid base
+      const parsed = new URL(url.replace('bsv-browser://', 'bsv-browser://host/'))
+      const get = (key: string) => parsed.searchParams.get(key) ?? undefined
+
+      const topic = get('topic')
+      const backendIdentityKey = get('backendIdentityKey')
+      const protocolID = get('protocolID')
+      const origin = get('origin')
+      const expiry = get('expiry')
+      const sig = get('sig')
+
+      if (!topic || !backendIdentityKey || !protocolID || !origin || !expiry) {
+        console.warn('[Deep Link] Pairing link missing required params, ignoring:', url)
+        return
+      }
+
+      router.push({
+        pathname: '/pair',
+        params: { topic, backendIdentityKey, protocolID, origin, expiry, sig }
+      })
+    } catch (error) {
+      console.error('[Deep Link] Error handling pairing link:', error)
     }
   }
 }
