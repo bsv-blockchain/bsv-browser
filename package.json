@@ -25,6 +25,9 @@
     "clean": "rm -rf yarn.lock && rm -rf .expo && rm -rf .expo-shared && rm -rf .vscode && rm -rf .idea && rm -rf ios/Pods && rm -rf android/.gradle && rm -rf android/app/build && rm -rf ./ios",
     "version": "node scripts/version.mjs",
     "pdf": "tsx scripts/generate-pdf.ts",
+    "prebuild": "expo prebuild --clean",
+    "prebuild:ios": "expo prebuild --platform ios --clean",
+    "prebuild:android": "expo prebuild --platform android --clean",
     "postinstall": "patch-package"
   },
   "dependencies": {
