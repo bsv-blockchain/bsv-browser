@@ -338,7 +338,23 @@ const resources = {
 
       // Biometric prompts
       biometric_store_wallet: 'Securely Store Your Wallet',
-      biometric_load_wallet: 'Securely Load Your Wallet'
+      biometric_load_wallet: 'Securely Load Your Wallet',
+
+      // Connections screen
+      connections: 'Connections',
+      no_connections_yet: 'No connections yet',
+      no_connections_subtitle: 'Scan a QR code from a desktop app to connect your wallet',
+      connections_active: 'Active',
+      connections_disconnected: 'Disconnected',
+      disconnect: 'Disconnect',
+      reconnect: 'Reconnect',
+      reconnect_failed: 'Reconnect Failed',
+      scan_qr_code: 'Scan QR Code',
+      paste_uri: 'Paste URI',
+      invalid_qr_code: 'Invalid QR Code',
+      wallet_not_ready: 'Wallet not ready',
+      please_log_in_first: 'Please log in first',
+      unknown_error: 'Unknown error'
     }
   },
   zh: {
@@ -563,7 +579,23 @@ const resources = {
       scan_wallet_qr_hint: '将相机对准钱包配对二维码',
 
       biometric_store_wallet: '安全存储您的钱包',
-      biometric_load_wallet: '安全加载您的钱包'
+      biometric_load_wallet: '安全加载您的钱包',
+
+      // Connections screen
+      connections: '连接',
+      no_connections_yet: '暂无连接',
+      no_connections_subtitle: '扫描桌面应用的二维码以连接您的钱包',
+      connections_active: '活跃',
+      connections_disconnected: '已断开',
+      disconnect: '断开连接',
+      reconnect: '重新连接',
+      reconnect_failed: '重新连接失败',
+      scan_qr_code: '扫描二维码',
+      paste_uri: '粘贴 URI',
+      invalid_qr_code: '无效的二维码',
+      wallet_not_ready: '钱包未就绪',
+      please_log_in_first: '请先登录',
+      unknown_error: '未知错误'
     }
   },
   hi: {
@@ -791,7 +823,23 @@ const resources = {
       scan_wallet_qr_hint: 'कैमरे को वॉलेट पेयरिंग QR कोड पर लगाएं',
 
       biometric_store_wallet: 'अपने वॉलेट को सुरक्षित रूप से संग्रहित करें',
-      biometric_load_wallet: 'अपने वॉलेट को सुरक्षित रूप से लोड करें'
+      biometric_load_wallet: 'अपने वॉलेट को सुरक्षित रूप से लोड करें',
+
+      // Connections screen
+      connections: 'कनेक्शन',
+      no_connections_yet: 'अभी तक कोई कनेक्शन नहीं',
+      no_connections_subtitle: 'अपने वॉलेट को कनेक्ट करने के लिए डेस्कटॉप ऐप से QR कोड स्कैन करें',
+      connections_active: 'सक्रिय',
+      connections_disconnected: 'डिस्कनेक्टेड',
+      disconnect: 'डिस्कनेक्ट',
+      reconnect: 'पुनः कनेक्ट',
+      reconnect_failed: 'पुनः कनेक्ट विफल',
+      scan_qr_code: 'QR कोड स्कैन करें',
+      paste_uri: 'URI पेस्ट करें',
+      invalid_qr_code: 'अमान्य QR कोड',
+      wallet_not_ready: 'वॉलेट तैयार नहीं',
+      please_log_in_first: 'पहले लॉग इन करें',
+      unknown_error: 'अज्ञात त्रुटि'
     }
   },
   es: {
@@ -1021,7 +1069,23 @@ const resources = {
       scan_wallet_qr_hint: 'Apunte la cámara hacia un código QR de emparejamiento',
 
       biometric_store_wallet: 'Almacene su billetera de forma segura',
-      biometric_load_wallet: 'Cargue su billetera de forma segura'
+      biometric_load_wallet: 'Cargue su billetera de forma segura',
+
+      // Connections screen
+      connections: 'Conexiones',
+      no_connections_yet: 'Aún no hay conexiones',
+      no_connections_subtitle: 'Escanea un código QR desde una app de escritorio para conectar tu billetera',
+      connections_active: 'Activo',
+      connections_disconnected: 'Desconectado',
+      disconnect: 'Desconectar',
+      reconnect: 'Reconectar',
+      reconnect_failed: 'Reconexión fallida',
+      scan_qr_code: 'Escanear código QR',
+      paste_uri: 'Pegar URI',
+      invalid_qr_code: 'Código QR inválido',
+      wallet_not_ready: 'Billetera no lista',
+      please_log_in_first: 'Por favor, inicia sesión primero',
+      unknown_error: 'Error desconocido'
     }
   },
   fr: {
@@ -1251,7 +1315,23 @@ const resources = {
       scan_wallet_qr_hint: "Pointez la caméra vers un code QR d'appariement",
 
       biometric_store_wallet: 'Stocker votre portefeuille en toute sécurité',
-      biometric_load_wallet: 'Charger votre portefeuille en toute sécurité'
+      biometric_load_wallet: 'Charger votre portefeuille en toute sécurité',
+
+      // Connections screen
+      connections: 'Connexions',
+      no_connections_yet: 'Aucune connexion pour l\'instant',
+      no_connections_subtitle: 'Scannez un code QR depuis une app bureau pour connecter votre portefeuille',
+      connections_active: 'Actif',
+      connections_disconnected: 'Déconnecté',
+      disconnect: 'Déconnecter',
+      reconnect: 'Reconnecter',
+      reconnect_failed: 'Reconnexion échouée',
+      scan_qr_code: 'Scanner le code QR',
+      paste_uri: 'Coller l\'URI',
+      invalid_qr_code: 'Code QR invalide',
+      wallet_not_ready: 'Portefeuille non prêt',
+      please_log_in_first: 'Veuillez d\'abord vous connecter',
+      unknown_error: 'Erreur inconnue'
     }
   },
   ar: {
@@ -1477,7 +1557,23 @@ const resources = {
       scan_wallet_qr_hint: 'وجّه الكاميرا نحو رمز QR لإقران المحفظة',
 
       biometric_store_wallet: 'تخزين محفظتك بأمان',
-      biometric_load_wallet: 'تحميل محفظتك بأمان'
+      biometric_load_wallet: 'تحميل محفظتك بأمان',
+
+      // Connections screen
+      connections: 'الاتصالات',
+      no_connections_yet: 'لا اتصالات حتى الآن',
+      no_connections_subtitle: 'امسح رمز QR من تطبيق سطح المكتب لتوصيل محفظتك',
+      connections_active: 'نشط',
+      connections_disconnected: 'منقطع',
+      disconnect: 'قطع الاتصال',
+      reconnect: 'إعادة الاتصال',
+      reconnect_failed: 'فشل إعادة الاتصال',
+      scan_qr_code: 'مسح رمز QR',
+      paste_uri: 'لصق URI',
+      invalid_qr_code: 'رمز QR غير صالح',
+      wallet_not_ready: 'المحفظة غير جاهزة',
+      please_log_in_first: 'الرجاء تسجيل الدخول أولاً',
+      unknown_error: 'خطأ غير معروف'
     }
   },
   pt: {
@@ -1707,7 +1803,23 @@ const resources = {
       scan_wallet_qr_hint: 'Aponte a câmera para um código QR de emparelhamento',
 
       biometric_store_wallet: 'Armazene sua carteira com segurança',
-      biometric_load_wallet: 'Carregue sua carteira com segurança'
+      biometric_load_wallet: 'Carregue sua carteira com segurança',
+
+      // Connections screen
+      connections: 'Conexões',
+      no_connections_yet: 'Nenhuma conexão ainda',
+      no_connections_subtitle: 'Digitalize um código QR de um app de desktop para conectar sua carteira',
+      connections_active: 'Ativo',
+      connections_disconnected: 'Desconectado',
+      disconnect: 'Desconectar',
+      reconnect: 'Reconectar',
+      reconnect_failed: 'Falha na reconexão',
+      scan_qr_code: 'Escanear código QR',
+      paste_uri: 'Colar URI',
+      invalid_qr_code: 'Código QR inválido',
+      wallet_not_ready: 'Carteira não pronta',
+      please_log_in_first: 'Por favor, faça login primeiro',
+      unknown_error: 'Erro desconhecido'
     }
   },
   bn: {
@@ -1935,7 +2047,23 @@ const resources = {
       scan_wallet_qr_hint: 'ওয়ালেট পেয়ারিং QR কোডে ক্যামেরা তাক করুন',
 
       biometric_store_wallet: 'আপনার ওয়ালেট নিরাপদে সংরক্ষণ করুন',
-      biometric_load_wallet: 'আপনার ওয়ালেট নিরাপদে লোড করুন'
+      biometric_load_wallet: 'আপনার ওয়ালেট নিরাপদে লোড করুন',
+
+      // Connections screen
+      connections: 'সংযোগ',
+      no_connections_yet: 'এখনো কোনো সংযোগ নেই',
+      no_connections_subtitle: 'আপনার ওয়ালেট সংযুক্ত করতে ডেস্কটপ অ্যাপ থেকে QR কোড স্ক্যান করুন',
+      connections_active: 'সক্রিয়',
+      connections_disconnected: 'বিচ্ছিন্ন',
+      disconnect: 'সংযোগ বিচ্ছিন্ন',
+      reconnect: 'পুনরায় সংযুক্ত',
+      reconnect_failed: 'পুনরায় সংযোগ ব্যর্থ',
+      scan_qr_code: 'QR কোড স্ক্যান করুন',
+      paste_uri: 'URI পেস্ট করুন',
+      invalid_qr_code: 'অবৈধ QR কোড',
+      wallet_not_ready: 'ওয়ালেট প্রস্তুত নেই',
+      please_log_in_first: 'প্রথমে লগইন করুন',
+      unknown_error: 'অজানা ত্রুটি'
     }
   },
   ru: {
@@ -2165,7 +2293,23 @@ const resources = {
       scan_wallet_qr_hint: 'Направьте камеру на QR-код сопряжения кошелька',
 
       biometric_store_wallet: 'Безопасно сохранить ваш кошелёк',
-      biometric_load_wallet: 'Безопасно загрузить ваш кошелёк'
+      biometric_load_wallet: 'Безопасно загрузить ваш кошелёк',
+
+      // Connections screen
+      connections: 'Подключения',
+      no_connections_yet: 'Нет подключений',
+      no_connections_subtitle: 'Отсканируйте QR-код из настольного приложения для подключения кошелька',
+      connections_active: 'Активные',
+      connections_disconnected: 'Отключено',
+      disconnect: 'Отключить',
+      reconnect: 'Переподключить',
+      reconnect_failed: 'Ошибка переподключения',
+      scan_qr_code: 'Сканировать QR-код',
+      paste_uri: 'Вставить URI',
+      invalid_qr_code: 'Неверный QR-код',
+      wallet_not_ready: 'Кошелёк не готов',
+      please_log_in_first: 'Сначала войдите в систему',
+      unknown_error: 'Неизвестная ошибка'
     }
   },
   id: {
@@ -2393,7 +2537,23 @@ const resources = {
       scan_wallet_qr_hint: 'Arahkan kamera ke kode QR pemasangan dompet',
 
       biometric_store_wallet: 'Simpan dompet Anda dengan aman',
-      biometric_load_wallet: 'Muat dompet Anda dengan aman'
+      biometric_load_wallet: 'Muat dompet Anda dengan aman',
+
+      // Connections screen
+      connections: 'Koneksi',
+      no_connections_yet: 'Belum ada koneksi',
+      no_connections_subtitle: 'Pindai kode QR dari aplikasi desktop untuk menghubungkan dompet Anda',
+      connections_active: 'Aktif',
+      connections_disconnected: 'Terputus',
+      disconnect: 'Putuskan',
+      reconnect: 'Hubungkan Kembali',
+      reconnect_failed: 'Gagal Menghubungkan Kembali',
+      scan_qr_code: 'Pindai Kode QR',
+      paste_uri: 'Tempel URI',
+      invalid_qr_code: 'Kode QR Tidak Valid',
+      wallet_not_ready: 'Dompet belum siap',
+      please_log_in_first: 'Silakan masuk terlebih dahulu',
+      unknown_error: 'Kesalahan tidak diketahui'
     }
   },
   ja: {
@@ -2638,7 +2798,23 @@ const resources = {
 
       // Biometric prompts
       biometric_store_wallet: 'ウォレットを安全に保存',
-      biometric_load_wallet: 'ウォレットを安全に読み込み'
+      biometric_load_wallet: 'ウォレットを安全に読み込み',
+
+      // Connections screen
+      connections: '接続',
+      no_connections_yet: 'まだ接続がありません',
+      no_connections_subtitle: 'デスクトップアプリのQRコードをスキャンしてウォレットを接続してください',
+      connections_active: 'アクティブ',
+      connections_disconnected: '切断済み',
+      disconnect: '切断',
+      reconnect: '再接続',
+      reconnect_failed: '再接続に失敗しました',
+      scan_qr_code: 'QRコードをスキャン',
+      paste_uri: 'URIをペースト',
+      invalid_qr_code: '無効なQRコード',
+      wallet_not_ready: 'ウォレットの準備ができていません',
+      please_log_in_first: 'まずログインしてください',
+      unknown_error: '不明なエラー'
     }
   },
   pl: {
@@ -2884,7 +3060,23 @@ const resources = {
 
       // Biometric prompts
       biometric_store_wallet: 'Bezpiecznie zapisz portfel',
-      biometric_load_wallet: 'Bezpiecznie wczytaj portfel'
+      biometric_load_wallet: 'Bezpiecznie wczytaj portfel',
+
+      // Connections screen
+      connections: 'Połączenia',
+      no_connections_yet: 'Brak połączeń',
+      no_connections_subtitle: 'Zeskanuj kod QR z aplikacji desktopowej, aby połączyć portfel',
+      connections_active: 'Aktywne',
+      connections_disconnected: 'Rozłączone',
+      disconnect: 'Rozłącz',
+      reconnect: 'Połącz ponownie',
+      reconnect_failed: 'Ponowne połączenie nie powiodło się',
+      scan_qr_code: 'Skanuj kod QR',
+      paste_uri: 'Wklej URI',
+      invalid_qr_code: 'Nieprawidłowy kod QR',
+      wallet_not_ready: 'Portfel nie jest gotowy',
+      please_log_in_first: 'Najpierw się zaloguj',
+      unknown_error: 'Nieznany błąd'
     }
   }
 }

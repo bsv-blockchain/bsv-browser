@@ -109,11 +109,11 @@ export default observer(function ConnectionsScreen() {
     setScanning(false)
     const result = parsePairingUri(data)
     if (!result.params) {
-      Alert.alert('Invalid QR Code', result.error)
+      Alert.alert(t('invalid_qr_code'), result.error)
       return
     }
     if (!managers.permissionsManager) {
-      Alert.alert('Wallet not ready', 'Please log in first')
+      Alert.alert(t('wallet_not_ready'), t('please_log_in_first'))
       return
     }
     const originator = domainFromOrigin(result.params.origin)
@@ -121,7 +121,7 @@ export default observer(function ConnectionsScreen() {
     try {
       await connect(result.params, wallet)
     } catch (err) {
-      Alert.alert('Connection Failed', err instanceof Error ? err.message : 'Unknown error')
+      Alert.alert(t('connection_failed'), err instanceof Error ? err.message : t('unknown_error'))
     }
   }
 
@@ -173,7 +173,7 @@ export default observer(function ConnectionsScreen() {
     try {
       await reconnect(conn, wallet)
     } catch (err) {
-      Alert.alert('Reconnect Failed', err instanceof Error ? err.message : 'Unknown error')
+      Alert.alert(t('reconnect_failed'), err instanceof Error ? err.message : t('unknown_error'))
     }
   }
 
@@ -187,7 +187,7 @@ export default observer(function ConnectionsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Connections</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('connections')}</Text>
         <View style={styles.headerButton} />
       </View>
 
@@ -195,15 +195,15 @@ export default observer(function ConnectionsScreen() {
         {connectionStore.connections.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="wifi-outline" size={48} color={colors.textSecondary} style={{ marginBottom: spacing.md }} />
-            <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>No connections yet</Text>
+            <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>{t('no_connections_yet')}</Text>
             <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-              Scan a QR code from a desktop app to connect your wallet
+              {t('no_connections_subtitle')}
             </Text>
           </View>
         ) : (
           <>
             {active.length > 0 && (
-              <GroupedSection header="Active">
+              <GroupedSection header={t('connections_active')}>
                 {active.map((item, idx) => (
                   <ListRow
                     key={item.sessionId}
@@ -219,7 +219,7 @@ export default observer(function ConnectionsScreen() {
                         style={styles.trailingAction}
                         activeOpacity={0.6}
                       >
-                        <Text style={[styles.trailingActionText, { color: colors.error }]}>Disconnect</Text>
+                        <Text style={[styles.trailingActionText, { color: colors.error }]}>{t('disconnect')}</Text>
                       </TouchableOpacity>
                     }
                   />
@@ -227,7 +227,7 @@ export default observer(function ConnectionsScreen() {
               </GroupedSection>
             )}
             {inactive.length > 0 && (
-              <GroupedSection header="Disconnected">
+              <GroupedSection header={t('connections_disconnected')}>
                 {inactive.map((item, idx) => (
                   <ListRow
                     key={item.sessionId}
@@ -243,7 +243,7 @@ export default observer(function ConnectionsScreen() {
                           style={styles.trailingAction}
                           activeOpacity={0.6}
                         >
-                          <Text style={[styles.trailingActionText, { color: colors.info }]}>Reconnect</Text>
+                          <Text style={[styles.trailingActionText, { color: colors.info }]}>{t('reconnect')}</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => connectionStore.remove(item.sessionId)}
@@ -266,7 +266,7 @@ export default observer(function ConnectionsScreen() {
       <View style={[styles.footer, { borderTopColor: colors.separator }]}>
         <TouchableOpacity style={[styles.scanBtn, { backgroundColor: colors.info }]} onPress={() => setScanning(true)}>
           <Ionicons name="qr-code-outline" size={20} color={colors.textOnAccent} style={{ marginRight: spacing.sm }} />
-          <Text style={[styles.scanBtnText, { color: colors.textOnAccent }]}>Scan QR Code</Text>
+          <Text style={[styles.scanBtnText, { color: colors.textOnAccent }]}>{t('scan_qr_code')}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.pasteBtn, { borderColor: colors.separator }]}
@@ -276,7 +276,7 @@ export default observer(function ConnectionsScreen() {
           }}
         >
           <Ionicons name="clipboard-outline" size={18} color={colors.textSecondary} style={{ marginRight: spacing.xs }} />
-          <Text style={[styles.pasteBtnText, { color: colors.textSecondary }]}>Paste URI</Text>
+          <Text style={[styles.pasteBtnText, { color: colors.textSecondary }]}>{t('paste_uri')}</Text>
         </TouchableOpacity>
       </View>
 

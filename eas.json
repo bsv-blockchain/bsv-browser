@@ -24,9 +24,12 @@
     },
     "production": {
       "autoIncrement": true,
-      "credentialsSource": "local",
       "android": {
-        "buildType": "app-bundle"
+        "buildType": "app-bundle",
+        "credentialsSource": "remote"
+      },
+      "ios": {
+        "credentialsSource": "local"
       },
       "env": {
         "EXPO_PUBLIC_DEFAULT_WAB_URL": "https://wab-us-1.bsvb.tech",
