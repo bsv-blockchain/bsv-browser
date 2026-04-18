@@ -19,15 +19,23 @@ export function createArcadeBroadcastService(
       try {
         const tx = Transaction.fromBEEF(beef.toBinary())
         const ef = tx.toEF()
-        const response = await fetch(`${arcadeUrl}/tx`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/octet-stream',
-            'X-CallbackToken': callbackToken,
-            'X-FullStatusUpdates': 'true'
-          },
-          body: new Uint8Array(ef)
-        })
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 30_000)
+        let response: Response
+        try {
+          response = await fetch(`${arcadeUrl}/tx`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'X-CallbackToken': callbackToken,
+              'X-FullStatusUpdates': 'true'
+            },
+            body: new Uint8Array(ef),
+            signal: controller.signal
+          })
+        } finally {
+          clearTimeout(timeout)
+        }
         const data = await response.json()
         console.log(`[Arcade] POST /tx ${response.status}`, JSON.stringify(data))
         const txResult: PostTxResultForTxid = {
