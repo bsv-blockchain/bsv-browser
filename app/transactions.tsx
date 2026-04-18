@@ -44,7 +44,7 @@ export default function TransactionsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, selectedNetwork, storage, txStatusVersion } = useWallet()
+  const { managers, adminOriginator, selectedNetwork, storage, txStatusVersion, refreshProof } = useWallet()
 
   const [actions, setActions] = useState<WalletAction[]>([])
   const [totalActions, setTotalActions] = useState(0)
@@ -53,6 +53,7 @@ export default function TransactionsScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [copyingTxid, setCopyingTxid] = useState<string | null>(null)
   const [abortingTxid, setAbortingTxid] = useState<string | null>(null)
+  const [refreshingTxid, setRefreshingTxid] = useState<string | null>(null)
   const offsetRef = useRef(0)
 
   const fetchActions = useCallback(async (offset: number) => {
@@ -148,12 +149,27 @@ export default function TransactionsScreen() {
     }
   }, [managers.permissionsManager, adminOriginator, abortingTxid, onRefresh, t])
 
+  const handleRefreshProof = useCallback(async (txid: string) => {
+    if (refreshingTxid) return
+    setRefreshingTxid(txid)
+    try {
+      await refreshProof(txid)
+      toast.success(t('tx_proof_refreshed'))
+    } catch (e) {
+      console.info('Proof refresh:', e instanceof Error ? e.message : e)
+      toast.error(e instanceof Error ? e.message : t('tx_proof_refresh_failed'))
+    } finally {
+      setRefreshingTxid(null)
+    }
+  }, [refreshProof, refreshingTxid, t])
+
   const renderItem: ListRenderItem<WalletAction> = useCallback(({ item }) => {
     const status = getStatusInfo(item.status, colors, t)
     const isOutgoing = item.isOutgoing
     const amount = item.satoshis
     const reference = (item as any).reference as string | undefined
     const canAbort = ABORTABLE_STATUSES.has(item.status) && !!reference
+    const canRefresh = !canAbort && item.status !== 'completed' && !!item.txid
 
     return (
       <View style={[styles.row, { borderBottomColor: colors.separator }]}>
@@ -191,6 +207,20 @@ export default function TransactionsScreen() {
               </TouchableOpacity>
             ) : (
               <>
+                {canRefresh ? (
+                  <TouchableOpacity
+                    onPress={() => handleRefreshProof(item.txid)}
+                    style={styles.iconButton}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    disabled={refreshingTxid === item.txid}
+                  >
+                    <Ionicons
+                      name={refreshingTxid === item.txid ? 'hourglass-outline' : 'refresh-outline'}
+                      size={18}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                ) : <View style={styles.iconButton} />}
                 {item.txid ? (
                   <TouchableOpacity
                     onPress={() => handleExplorerLink(item.txid)}
@@ -218,7 +248,7 @@ export default function TransactionsScreen() {
         </View>
       </View>
     )
-  }, [colors, handleExplorerLink, handleCopyRawTx, handleAbort, copyingTxid, abortingTxid, t])
+  }, [colors, handleExplorerLink, handleCopyRawTx, handleAbort, handleRefreshProof, copyingTxid, abortingTxid, refreshingTxid, t])
 
   let content: React.ReactNode
   if (loading) {
