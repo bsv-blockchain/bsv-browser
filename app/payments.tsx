@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   View,
   Text,
@@ -535,7 +535,6 @@ interface ConfigPanelProps {
   readonly t: ReturnType<typeof import('react-i18next').useTranslation>['t']
   readonly onChangeUrl: (v: string) => void
   readonly onSave: () => void
-  readonly onCancel: () => void
   readonly onReset: () => void
   readonly onNone: () => void
 }
@@ -547,12 +546,11 @@ function ConfigPanel({
   t,
   onChangeUrl,
   onSave,
-  onCancel,
   onReset,
   onNone
 }: ConfigPanelProps) {
   const hasUrl = !!urlInput.trim()
-  const isNone = urlInput === 'noMessageBox'
+  const isNonDefault = urlInput.trim() !== DEFAULT_MESSAGE_BOX_URL && urlInput !== 'noMessageBox'
   return (
     <View style={[styles.configPanel, { backgroundColor: colors.backgroundSecondary }]}>
       <Text style={[styles.configTitle, { color: colors.textPrimary }]}>{t('message_box_server')}</Text>
@@ -572,44 +570,43 @@ function ConfigPanel({
           { color: colors.textPrimary, backgroundColor: colors.background, borderColor: colors.separator }
         ]}
       />
-      <View style={styles.configActions}>
-        <TouchableOpacity
-          onPress={onSave}
-          disabled={isSaving || !hasUrl}
-          style={[
-            styles.configButton,
-            { backgroundColor: hasUrl ? colors.accent : colors.backgroundSecondary, opacity: hasUrl ? 1 : 0.5 }
-          ]}
-        >
-          {isSaving ? (
-            <ActivityIndicator size="small" color={hasUrl ? colors.background : colors.textSecondary} />
-          ) : (
-            <Text style={[styles.configButtonText, { color: hasUrl ? colors.background : colors.textSecondary }]}>
-              {t('save')}
-            </Text>
-          )}
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onCancel}
-          style={[styles.configButton, { borderColor: colors.separator, borderWidth: StyleSheet.hairlineWidth }]}
-        >
-          <Text style={[styles.configButtonText, { color: colors.textSecondary }]}>{t('cancel')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onReset}
-          style={[styles.configButton, { borderColor: colors.success + '40', borderWidth: StyleSheet.hairlineWidth }]}
-        >
-          <Text style={[styles.configButtonText, { color: colors.success }]}>Reset</Text>
-        </TouchableOpacity>
+
+      {/* Primary action: Save */}
+      <TouchableOpacity
+        onPress={onSave}
+        disabled={isSaving || !hasUrl}
+        style={[
+          styles.configButtonPrimary,
+          { backgroundColor: hasUrl ? colors.accent : colors.backgroundSecondary, opacity: hasUrl ? 1 : 0.5 }
+        ]}
+      >
+        {isSaving ? (
+          <ActivityIndicator size="small" color={hasUrl ? colors.background : colors.textSecondary} />
+        ) : (
+          <Text style={[styles.configButtonTextPrimary, { color: hasUrl ? colors.background : colors.textSecondary }]}>
+            {t('save')}
+          </Text>
+        )}
+      </TouchableOpacity>
+
+      {/* Secondary / destructive row */}
+      <View style={styles.configSecondaryActions}>
+        {isNonDefault && (
+          <TouchableOpacity
+            onPress={onReset}
+            style={[styles.configResetPill, { borderColor: colors.textSecondary }]}
+          >
+            <Ionicons name="refresh" size={12} color={colors.textSecondary} />
+            <Text style={[styles.configResetText, { color: colors.textSecondary }]}>Default</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           onPress={onNone}
           disabled={isSaving}
-          style={[
-            styles.configButton,
-            { borderColor: colors.error + '40', borderWidth: StyleSheet.hairlineWidth, opacity: isSaving ? 0.5 : 1 }
-          ]}
+          style={[styles.configNoneLink, { opacity: isSaving ? 0.4 : 1 }]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Text style={[styles.configButtonText, { color: colors.error }]}>None</Text>
+          <Text style={[styles.configNoneText, { color: colors.error }]}>Use no server</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -895,7 +892,23 @@ export default function PaymentsScreen() {
   } = useIdentitySearch(wallet as any, adminOriginator)
 
   // --- PeerPay state ---
-  const peerPayClientRef = useRef<PeerPayClient | null>(null)
+  const peerPayClient = useMemo<PeerPayClient | null>(() => {
+    if (!isConfigured || !messageBoxUrl || !wallet) return null
+    try {
+      return new PeerPayClient({
+        messageBoxHost: messageBoxUrl,
+        walletClient: wallet as any,
+        originator: adminOriginator
+      })
+    } catch {
+      return null
+    }
+    // Intentionally no eager init here. The library calls init() lazily on first
+    // use (assertInitialized). Anointing requires a funded wallet — calling init()
+    // on mount would silently fail with no balance, permanently set initialized=true,
+    // and prevent anointing from ever being retried. The 30s ARC timeout on the
+    // broadcast service ensures a stalled anoint won't hang the payment indefinitely.
+  }, [isConfigured, messageBoxUrl, wallet, adminOriginator])
   const [payments, setPayments] = useState<IncomingPayment[]>([])
   const [loadingPayments, setLoadingPayments] = useState(false)
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
@@ -918,51 +931,22 @@ export default function PaymentsScreen() {
   const [sendResult, setSendResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [acceptResult, setAcceptResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
-  // --- Init PeerPayClient ---
-  useEffect(() => {
-    if (!isConfigured || !messageBoxUrl || !wallet) {
-      peerPayClientRef.current = null
-      return
-    }
-    try {
-      peerPayClientRef.current = new PeerPayClient({
-        messageBoxHost: messageBoxUrl,
-        walletClient: wallet as any,
-        originator: adminOriginator
-      })
-    } catch {
-      peerPayClientRef.current = null
-    }
-  }, [isConfigured, messageBoxUrl, wallet, adminOriginator])
-
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, '')
     if (!trimmed || !wallet) {
       await handleSaveUrl(urlInput)
       return
     }
-    try {
-      toast.info(t('checking_connection'))
-      const tempClient = new PeerPayClient({
-        messageBoxHost: trimmed,
-        walletClient: wallet as any,
-        originator: adminOriginator
-      })
-      await tempClient.init(trimmed)
-      await handleSaveUrl(urlInput)
-    } catch (error: any) {
-      toast.error(`${t('connection_failed')}: ${error.message || 'unknown error'}`)
-    }
+    await handleSaveUrl(urlInput)
   }, [handleSaveUrl, urlInput, wallet, adminOriginator, t])
 
   const handleRemove = useCallback(async () => {
     await handleReset()
-    peerPayClientRef.current = null
   }, [handleReset])
 
   // --- Fetch incoming payments ---
   const fetchPayments = useCallback(async () => {
-    const client = peerPayClientRef.current
+    const client = peerPayClient
     if (!client || !messageBoxUrl || messageBoxUrl === 'noMessageBox') return
     setLoadingPayments(true)
     try {
@@ -997,7 +981,7 @@ export default function PaymentsScreen() {
 
   // Auto-fetch when configured
   useEffect(() => {
-    if (isConfigured && peerPayClientRef.current) {
+    if (isConfigured && peerPayClient) {
       fetchPayments()
     }
     loadOutbox()
@@ -1006,7 +990,7 @@ export default function PaymentsScreen() {
   // --- Accept payment (with optional custom description) ---
   const internalizePayment = useCallback(
     async (payment: IncomingPayment, description: string) => {
-      const client = peerPayClientRef.current
+      const client = peerPayClient
       if (!client || !wallet) throw new Error('Not ready')
       await wallet.internalizeAction(
         {
@@ -1034,7 +1018,7 @@ export default function PaymentsScreen() {
 
   const handleAcceptPayment = useCallback(
     async (payment: IncomingPayment) => {
-      const client = peerPayClientRef.current
+      const client = peerPayClient
       if (!client) return
       const id = String(payment.messageId)
       const description = paymentNotes[id]?.trim() || 'Identity Payment'
@@ -1055,7 +1039,7 @@ export default function PaymentsScreen() {
   )
 
   const handleAcceptAll = useCallback(async () => {
-    const client = peerPayClientRef.current
+    const client = peerPayClient
     if (!client || payments.length === 0) return
     setAcceptingAll(true)
     setEditingNoteId(null)
@@ -1091,7 +1075,7 @@ export default function PaymentsScreen() {
 
   // --- Send payment ---
   const handleSend = useCallback(async () => {
-    const client = peerPayClientRef.current
+    const client = peerPayClient
     if (!client || !recipientKey || !sendAmount || !storage) return
     const sats = Math.round(Number(sendAmount))
     if (Number.isNaN(sats) || sats <= 0) {
@@ -1150,7 +1134,7 @@ export default function PaymentsScreen() {
   // --- Retry outbox entry ---
   const handleRetry = useCallback(
     async (entry: OutboxEntry) => {
-      const client = peerPayClientRef.current
+      const client = peerPayClient
       if (!client || !storage) return
       setRetryingId(entry.id)
       await updateOutboxEntry(storage, entry.id, { lastAttemptAt: new Date().toISOString() })
@@ -1228,10 +1212,6 @@ export default function PaymentsScreen() {
             t={t}
             onChangeUrl={setUrlInput}
             onSave={handleSave}
-            onCancel={() => {
-              if (messageBoxUrl !== 'noMessageBox') setShowConfig(false)
-              setUrlInput(messageBoxUrl)
-            }}
             onReset={handleRemove}
             onNone={handleNone}
           />
@@ -1403,20 +1383,60 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: spacing.md
   },
-  configActions: {
+  // Primary action row (Save + Cancel)
+  configPrimaryActions: {
     flexDirection: 'row',
     gap: spacing.sm
   },
-  configButton: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+  configButtonSecondary: {
+    flex: 1,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radii.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  configButtonTextSecondary: {
+    ...typography.subhead,
+    fontWeight: '500'
+  },
+  configButtonPrimary: {
+    flex: 2,
+    paddingVertical: spacing.sm + 2,
     borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center'
   },
-  configButtonText: {
+  configButtonTextPrimary: {
     ...typography.subhead,
     fontWeight: '600'
+  },
+  // Secondary / destructive row (Reset pill + None link)
+  configSecondaryActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md
+  },
+  configResetPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+    borderRadius: radii.sm,
+    borderWidth: StyleSheet.hairlineWidth
+  },
+  configResetText: {
+    ...typography.caption1,
+    fontWeight: '500'
+  },
+  configNoneLink: {
+    marginLeft: 'auto' as any
+  },
+  configNoneText: {
+    ...typography.caption1,
+    fontWeight: '500'
   },
 
   // Active server indicator
