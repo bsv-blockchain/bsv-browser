@@ -11,7 +11,7 @@ import {
   SimpleWalletManager,
   Monitor
 } from '@bsv/wallet-toolbox-mobile'
-import { KeyDeriver, PrivateKey } from '@bsv/sdk'
+import { KeyDeriver, PrivateKey, MerklePath } from '@bsv/sdk'
 import {
   DEFAULT_SETTINGS as LIB_DEFAULT_SETTINGS,
   WalletSettings,
@@ -103,6 +103,8 @@ export interface WalletContextValue {
   /** Tear down the current wallet and re-trigger auto-build (e.g. after DB import). */
   rebuildWallet: () => Promise<void>
   storage: StorageExpoSQLite | null
+  /** Fetch BUMP from WoC and store merkle proof, advancing tx status to completed */
+  refreshProof: (txid: string) => Promise<void>
   /** Incremented when a transaction status changes via SSE, triggers UI refresh */
   txStatusVersion: number
   /** True while the wallet is being built (biometric auth pending, async build in progress) */
@@ -146,6 +148,7 @@ export const WalletContext = createContext<WalletContextValue>({
   switchNetwork: async () => {},
   rebuildWallet: async () => {},
   storage: null,
+  refreshProof: async () => {},
   txStatusVersion: 0,
   walletBuilding: false,
   bleNotification: null,
@@ -985,6 +988,43 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })
   }, [deleteSnap, deleteMnemonic, deleteRecoveredKey])
 
+  const refreshProof = useCallback(async (txid: string): Promise<void> => {
+    if (!storage) throw new Error('Storage not available')
+
+    const wocBase = selectedNetwork === 'teratest'
+      ? 'https://woc-ttn.bsvb.tech'
+      : 'https://api.whatsonchain.com'
+    const chain = selectedNetwork === 'main' ? 'main' : 'test'
+
+    const res = await fetch(`${wocBase}/v1/bsv/${chain}/tx/${txid}/proof/bump`)
+    if (!res.ok) throw new Error(`BUMP not available (HTTP ${res.status}) — transaction may not be mined yet`)
+
+    const bumpHex = (await res.text()).trim()
+    const merklePath = MerklePath.fromHex(bumpHex)
+    const merkleRoot = merklePath.computeRoot(txid)
+    const leaf = merklePath.path[0].find(l => l.txid === true && l.hash === txid)
+    if (!leaf) throw new Error('txid not found in BUMP path')
+
+    const reqs = await storage.findProvenTxReqs({ partial: { txid } })
+    if (!reqs.length) throw new Error('No pending record found for this transaction')
+
+    const req = reqs[0]
+    await storage.updateProvenTxReqWithNewProvenTx({
+      provenTxReqId: req.provenTxReqId,
+      status: req.status,
+      txid,
+      attempts: req.attempts,
+      history: req.history,
+      index: leaf.offset,
+      height: merklePath.blockHeight,
+      blockHash: '',
+      merklePath: merklePath.toBinary(),
+      merkleRoot,
+    })
+
+    setTxStatusVersion(v => v + 1)
+  }, [storage, selectedNetwork])
+
   const contextValue = useMemo<WalletContextValue>(
     () => ({
       managers,
@@ -1015,6 +1055,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       switchNetwork,
       rebuildWallet,
       storage,
+      refreshProof,
       txStatusVersion,
       walletBuilding,
       bleNotification,
@@ -1049,6 +1090,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       switchNetwork,
       rebuildWallet,
       storage,
+      refreshProof,
       txStatusVersion,
       walletBuilding,
       bleNotification,
