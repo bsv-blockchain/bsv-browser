@@ -308,6 +308,12 @@ export default function WalletConfigScreen() {
             onPress={handleImportData}
             showChevron={false}
             trailing={isImporting ? <ActivityIndicator size="small" /> : undefined}
+          />
+          <ListRow
+            label="Debugging"
+            icon="terminal-outline"
+            iconColor="#8E8E93"
+            onPress={() => router.push('/logs' as any)}
             isLast
           />
         </GroupedSection>

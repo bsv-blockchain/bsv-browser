@@ -11,7 +11,7 @@ import {
   SimpleWalletManager,
   Monitor
 } from '@bsv/wallet-toolbox-mobile'
-import { KeyDeriver, PrivateKey, MerklePath } from '@bsv/sdk'
+import { KeyDeriver, PrivateKey, MerklePath, Transaction, Utils } from '@bsv/sdk'
 import {
   DEFAULT_SETTINGS as LIB_DEFAULT_SETTINGS,
   WalletSettings,
@@ -43,7 +43,12 @@ import { UserContext } from './UserContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { usePermissionQueue } from '@/hooks/usePermissionQueue'
 import { createServices } from '@/services/walletServiceConfig'
-import { createArcadeBroadcastService } from '@/services/arcadeBroadcastProvider'
+import {
+  createArcadeBroadcastService,
+  createTaalBroadcastService,
+  createGorillaPoolBroadcastService,
+  createWocBroadcastService
+} from '@/services/arcadeBroadcastProvider'
 import { getExchangeRate } from '@/services/exchangeRate'
 import { router } from 'expo-router'
 import { logWithTimestamp } from '@/utils/logging'
@@ -117,6 +122,12 @@ export interface WalletContextValue {
    */
   bleNotification: { message: string; type: 'success' | 'error' | 'info' } | null
   clearBleNotification: () => void
+  /** Run a named monitor task and return its log output */
+  runMonitorTask: (taskName: string) => Promise<string>
+  /** List available monitor task names */
+  getMonitorTaskNames: () => string[]
+  /** Check spendability of all UTXOs against WoC */
+  checkUtxoSpendability: () => Promise<string>
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -152,7 +163,10 @@ export const WalletContext = createContext<WalletContextValue>({
   txStatusVersion: 0,
   walletBuilding: false,
   bleNotification: null,
-  clearBleNotification: () => {}
+  clearBleNotification: () => {},
+  runMonitorTask: async () => '',
+  getMonitorTaskNames: () => [],
+  checkUtxoSpendability: async () => ''
 })
 
 type PermissionType = 'identity' | 'protocol' | 'renewal' | 'basket'
@@ -507,10 +521,23 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         const { services, serviceOptions } = createServices(selectedNetwork, callbackToken, bsvExchangeRate)
 
-        // Replace default broadcast providers with Arcade
+        // Replace all default broadcast providers with EF/rawtx-only services.
+        // Order: Arcade → Taal → GorillaPool → WoC → Bitails. UntilSuccess stops at first success.
+        const bitailsService = (services as any).bitails
         services.postBeefServices.remove('GorillaPoolArcBeef')
         services.postBeefServices.remove('TaalArcBeef')
+        services.postBeefServices.remove('Bitails')
+        services.postBeefServices.remove('WhatsOnChain')
         services.postBeefServices.add(createArcadeBroadcastService(serviceOptions.arcUrl!, callbackToken))
+        const taalArcUrl = chain === 'main' ? 'https://arc.taal.com' : chain === 'test' ? 'https://arc-test.taal.com' : 'https://arc-teratest.taal.com'
+        services.postBeefServices.add(createTaalBroadcastService(taalArcUrl, serviceOptions.taalApiKey))
+        if (chain === 'main') {
+          services.postBeefServices.add(createGorillaPoolBroadcastService('https://arc.gorillapool.io'))
+        }
+        services.postBeefServices.add(createWocBroadcastService(chain, serviceOptions.whatsOnChainApiKey))
+        if (bitailsService) {
+          services.postBeefServices.add({ name: 'Bitails', service: bitailsService.postBeef.bind(bitailsService) })
+        }
 
         const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)
         // Set default settings including "Who I Am" certifier before first get().
@@ -633,6 +660,22 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           }
           const monitor = new Monitor(monitorOptions)
           monitor.addDefaultTasks()
+
+          // Patch TaskArcadeSSE: treat REJECTED as retryable, not permanent failure.
+          // Arcade returns REJECTED with 503 "no available server" for transient infra
+          // errors — the default handler marks these as permanently invalid.
+          const sseTask = monitor._tasks.find(t => t.name === 'ArcadeSSE') as any
+          if (sseTask) {
+            const origProcess = sseTask.processStatusEvent.bind(sseTask)
+            sseTask.processStatusEvent = async (event: any) => {
+              if (event.txStatus === 'REJECTED') {
+                console.log(`[TaskArcadeSSE] REJECTED treated as retryable: txid=${event.txid}`)
+                return `SSE: txid=${event.txid} status=REJECTED (ignored — retryable)\n`
+              }
+              return origProcess(event)
+            }
+          }
+
           // startTasks runs in background — don't await (it never resolves until stopTasks)
           monitor.startTasks().catch(e => console.error('[WalletContext] Monitor error:', e))
           monitorRef.current = monitor
@@ -1025,6 +1068,173 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     setTxStatusVersion(v => v + 1)
   }, [storage, selectedNetwork])
 
+  const runMonitorTask = useCallback(async (taskName: string): Promise<string> => {
+    const monitor = monitorRef.current
+    if (!monitor) return 'Monitor not running'
+    try {
+      return await monitor.runTask(taskName)
+    } catch (e: any) {
+      return `Error: ${e.message || 'unknown'}`
+    }
+  }, [])
+
+  const DIAGNOSTIC_TASKS = new Set([
+    'SendWaiting', 'CheckForProofs', 'CheckNoSends',
+    'ReviewStatus', 'MonitorCallHistory', 'ArcadeSSE'
+  ])
+
+  const getMonitorTaskNames = useCallback((): string[] => {
+    const monitor = monitorRef.current
+    if (!monitor) return []
+    return [...monitor._tasks, ...monitor._otherTasks]
+      .map(t => t.name)
+      .filter(n => DIAGNOSTIC_TASKS.has(n))
+  }, [])
+
+  const checkUtxoSpendability = useCallback(async (): Promise<string> => {
+    if (!storage) return 'Storage not available'
+    const wallet = managers?.permissionsManager
+    if (!wallet) return 'Wallet not ready'
+    const wocBase =
+      selectedNetwork === 'main'
+        ? 'https://api.whatsonchain.com/v1/bsv/main'
+        : selectedNetwork === 'test'
+          ? 'https://api.whatsonchain.com/v1/bsv/test'
+          : 'https://api.whatsonchain.com/v1/bsv/main'
+
+    // Rate limit: max 3 requests/sec (WoC limit ~1 per 0.34s)
+    const WOC_INTERVAL = 340
+    let lastRequest = 0
+    const throttledFetch = async (url: string, init?: RequestInit): Promise<Response> => {
+      const now = Date.now()
+      const wait = WOC_INTERVAL - (now - lastRequest)
+      if (wait > 0) await new Promise(r => setTimeout(r, wait))
+      lastRequest = Date.now()
+      return fetch(url, init)
+    }
+
+    try {
+      const outputs = await storage.findOutputs({
+        partial: { spendable: true as any },
+        noScript: true,
+        txStatus: ['completed', 'unproven', 'nosend'] as any
+      })
+      if (outputs.length === 0) return 'No spendable outputs found.'
+
+      const lines: string[] = [`Found ${outputs.length} spendable output(s). Checking WoC...\n`]
+      let spentCount = 0
+      let unspentCount = 0
+      let errorCount = 0
+      let internalizedCount = 0
+
+      for (const o of outputs) {
+        if (!o.txid) {
+          lines.push(`  outputId=${o.outputId} — no txid, skipped`)
+          continue
+        }
+        try {
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 10_000)
+          let resp: Response
+          try {
+            resp = await throttledFetch(`${wocBase}/tx/${o.txid}/${o.vout}/spent`, {
+              signal: controller.signal
+            })
+          } finally {
+            clearTimeout(timeout)
+          }
+          if (resp.status === 404) {
+            unspentCount++
+            continue
+          }
+          if (!resp.ok) {
+            errorCount++
+            lines.push(`  ERROR: ${o.txid}:${o.vout} — HTTP ${resp.status}`)
+            continue
+          }
+
+          const spentData = await resp.json()
+          const spendingTxid = spentData.txid
+          spentCount++
+          lines.push(`  SPENT: ${o.txid}:${o.vout} (${o.satoshis} sat) → by ${spendingTxid}`)
+
+          // Try to fetch BEEF for spending tx and internalize change outputs
+          try {
+            const beefResp = await throttledFetch(`${wocBase}/tx/${spendingTxid}/beef`)
+            if (!beefResp.ok) {
+              lines.push(`    ↳ BEEF fetch failed (HTTP ${beefResp.status}), marking unspendable`)
+              await storage.updateOutput(o.outputId, { spendable: false as any })
+              continue
+            }
+            const beefHex = await beefResp.text()
+            const beefBytes = Utils.toArray(beefHex, 'hex')
+            const tx = Transaction.fromBEEF(beefBytes)
+            const atomicBeef = tx.toAtomicBEEF()
+
+            // Find change outputs we created for this spending tx
+            const changeOutputs = await storage.findOutputs({
+              partial: { change: true as any, spendable: false as any },
+              noScript: true
+            })
+            // Match by looking up which of our change outputs belong to the spending tx
+            // via the transactions table (our tx with this on-chain txid)
+            const txRows = await storage.findTransactions({ partial: { txid: spendingTxid } })
+            const matchingTxId = txRows.length > 0 ? txRows[0].transactionId : undefined
+
+            const outputsToInternalize: any[] = []
+            if (matchingTxId) {
+              const txChangeOutputs = changeOutputs.filter(co => co.transactionId === matchingTxId)
+              for (const co of txChangeOutputs) {
+                if (co.derivationPrefix && co.derivationSuffix) {
+                  outputsToInternalize.push({
+                    outputIndex: co.vout,
+                    protocol: 'wallet payment',
+                    paymentRemittance: {
+                      derivationPrefix: co.derivationPrefix,
+                      derivationSuffix: co.derivationSuffix,
+                      senderIdentityKey: co.senderIdentityKey || (await wallet.getPublicKey({ identityKey: true }, adminOriginator)).publicKey
+                    }
+                  })
+                }
+              }
+            }
+
+            if (outputsToInternalize.length > 0) {
+              await wallet.internalizeAction({
+                tx: atomicBeef,
+                outputs: outputsToInternalize,
+                description: 'Recovered from stale UTXO check'
+              }, adminOriginator)
+              internalizedCount++
+              lines.push(`    ↳ INTERNALIZED: ${outputsToInternalize.length} change output(s) recovered`)
+            } else {
+              // No change outputs to recover, just mark input as unspendable
+              await storage.updateOutput(o.outputId, { spendable: false as any })
+              lines.push(`    ↳ No recoverable change outputs, marked unspendable`)
+            }
+          } catch (e: any) {
+            lines.push(`    ↳ Internalize failed: ${e.message}, marking unspendable`)
+            await storage.updateOutput(o.outputId, { spendable: false as any })
+          }
+        } catch (e: any) {
+          errorCount++
+          lines.push(`  ERROR: ${o.txid}:${o.vout} — ${e.message}`)
+        }
+      }
+
+      lines.push(`\nSummary: ${unspentCount} unspent, ${spentCount} spent, ${internalizedCount} internalized, ${errorCount} errors`)
+      if (internalizedCount > 0) {
+        lines.push(`✓ ${internalizedCount} spending tx(s) internalized with change outputs`)
+      }
+      if (spentCount > internalizedCount) {
+        lines.push(`⚠ ${spentCount - internalizedCount} stale output(s) marked unspendable (no change to recover)`)
+      }
+      return lines.join('\n')
+    } catch (e: any) {
+      return `Error querying outputs: ${e.message}`
+    }
+  }, [storage, selectedNetwork, managers, adminOriginator])
+
   const contextValue = useMemo<WalletContextValue>(
     () => ({
       managers,
@@ -1059,7 +1269,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       txStatusVersion,
       walletBuilding,
       bleNotification,
-      clearBleNotification
+      clearBleNotification,
+      runMonitorTask,
+      getMonitorTaskNames,
+      checkUtxoSpendability
     }),
     [
       managers,
@@ -1094,7 +1307,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       txStatusVersion,
       walletBuilding,
       bleNotification,
-      clearBleNotification
+      clearBleNotification,
+      runMonitorTask,
+      getMonitorTaskNames,
+      checkUtxoSpendability
     ]
   )
 
