@@ -33,9 +33,9 @@
   "dependencies": {
     "@bsv/btms": "^1.0.1",
     "@bsv/btms-permission-module": "^1.0.1",
-    "@bsv/message-box-client": "^2.0.4",
+    "@bsv/message-box-client": "^2.1.0",
     "@bsv/sdk": "^2.0.13",
-    "@bsv/wallet-toolbox-mobile": "^2.1.9",
+    "@bsv/wallet-toolbox-mobile": "^2.1.21",
     "@callstack/liquid-glass": "^0.7.0",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",
@@ -124,7 +124,8 @@
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "patch-package": "^8.0.1",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "ws": "^8.20.0"
   },
   "overrides": {
     "minimatch": "^10.2.2"

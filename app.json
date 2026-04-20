@@ -42,7 +42,7 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": false,
-          "bluetoothAlwaysPermission": "BSV Browser uses Bluetooth to send and receive payments to nearby devices."
+          "bluetoothAlwaysPermission": false
         }
       ]
     ],
@@ -91,6 +91,7 @@
       ]
     },
     "ios": {
+      "supportsTablet": true,
       "bundleIdentifier": "org.bsvassociation.browser",
       "associatedDomains": [
         "applinks:mobile.bsvb.tech"
@@ -116,7 +117,6 @@
           "data"
         ],
         "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use.",
-        "NSBluetoothAlwaysUsageDescription": "BSV Browser uses Bluetooth to send and receive payments to nearby devices.",
         "NSBluetoothWhileInUseUsageDescription": "BSV Browser uses Bluetooth to send and receive payments to nearby devices.",
         "NSBluetoothPeripheralUsageDescription": "BSV Browser uses Bluetooth to advertise payment services to nearby devices."
       }
