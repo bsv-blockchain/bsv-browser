@@ -12,6 +12,8 @@ const getLocaleDefault = (): string => {
 const localeDefault = getLocaleDefault()
 
 const SATS_PER_BSV = 100_000_000
+const CENTS_PER_USD = 100
+const CENT_THRESHOLD = 0.01
 
 // Format number as currency with fallback for platforms where Intl is not fully supported
 const formatCurrency = (value: number, locale: string, minDigits: number, maxDigits?: number): string => {
@@ -68,8 +70,31 @@ const formatBsvLocale = (bsvValue: number): string => {
 }
 
 /**
- * Format a satoshi amount as USD using exchange rate.
+ * Format a sub-cent USD value as cents (¢).
  * Dynamically adjusts decimal precision based on magnitude.
+ */
+const formatCents = (cents: number): string => {
+  const absCents = Math.abs(cents)
+  let maxDigits = 2
+  if (absCents < 0.01) maxDigits = 4
+  else if (absCents < 0.1) maxDigits = 3
+
+  try {
+    const formatted = new Intl.NumberFormat(localeDefault, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: maxDigits,
+      useGrouping: true
+    }).format(cents)
+    return `${formatted}¢`
+  } catch {
+    return `${parseFloat(cents.toFixed(maxDigits))}¢`
+  }
+}
+
+/**
+ * Format a satoshi amount as USD using exchange rate.
+ * - >= $0.01: standard dollar formatting with dynamic precision
+ * - < $0.01: micro-dollar formatting (μ$) where $1 = μ$1,000,000
  */
 export const formatSatoshisAsFiat = (satoshis: number, satoshisPerUSD: number, showFiatAsInteger = false): string => {
   if (!Number.isInteger(Number(satoshis)) || !satoshisPerUSD || satoshisPerUSD <= 0) {
@@ -79,12 +104,17 @@ export const formatSatoshisAsFiat = (satoshis: number, satoshisPerUSD: number, s
   const usd = satoshis / satoshisPerUSD
   if (isNaN(usd)) return '...'
 
+  const v = Math.abs(usd)
+
+  // Sub-cent values: display as cents (¢)
+  if (v > 0 && v < CENT_THRESHOLD && !showFiatAsInteger) {
+    const cents = usd * CENTS_PER_USD
+    return formatCents(cents)
+  }
+
   let minDigits = 2
   let maxDigits: number | undefined
-  const v = Math.abs(usd)
-  if (v < 0.001) minDigits = 6
-  else if (v < 0.01) minDigits = 5
-  else if (v < 0.1) minDigits = 4
+  if (v < 0.1) minDigits = 4
   else if (v < 1) minDigits = 3
 
   if (showFiatAsInteger) {
@@ -165,8 +195,14 @@ export const parseDisplayToSatoshis = (displayValue: string, currency: string, s
  * In BSV mode, the label depends on the amount (satoshis vs BSV).
  * If no satoshi value is provided, returns "satoshis" (the input label for BSV mode).
  */
-export const getUnitLabel = (currency: string, satoshis?: number, abbreviate = false): string => {
-  if (currency === 'USD') return 'USD'
+export const getUnitLabel = (currency: string, satoshis?: number, abbreviate = false, satoshisPerUSD?: number): string => {
+  if (currency === 'USD') {
+    if (satoshis !== undefined && satoshisPerUSD && satoshisPerUSD > 0) {
+      const usd = Math.abs(satoshis / satoshisPerUSD)
+      if (usd > 0 && usd < CENT_THRESHOLD) return '¢'
+    }
+    return 'USD'
+  }
 
   // BSV mode: if an amount is provided, use threshold to pick label
   if (satoshis !== undefined && Math.abs(satoshis) >= SATS_PER_BSV) {
