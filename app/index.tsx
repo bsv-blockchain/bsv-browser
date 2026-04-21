@@ -140,6 +140,7 @@ const Browser = observer(function Browser() {
   const { managers, walletBuilding } = useWallet()
   const [wallet, setWallet] = useState<WalletInterface | undefined>()
   const paymentHandlerRef = useRef<any>(null)
+  const paymentInFlightUrl = useRef<string | null>(null)
   useEffect(() => {
     if (!isWeb2Mode && managers?.walletManager?.authenticated) {
       setWallet(managers.walletManager)
@@ -832,6 +833,9 @@ const Browser = observer(function Browser() {
       }
 
       if (msg.type === 'PAYMENT_REQUIRED' && paymentHandlerRef.current) {
+        // Skip if a payment is already being handled for this URL (e.g. onHttpError already fired)
+        if (paymentInFlightUrl.current === msg.url) return
+        paymentInFlightUrl.current = msg.url
         if (activeTab?.webviewRef?.current) {
           activeTab.webviewRef.current.injectJavaScript(
             `document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`
@@ -847,6 +851,7 @@ const Browser = observer(function Browser() {
             }
           })
           .catch(() => {})
+          .finally(() => { paymentInFlightUrl.current = null })
         return
       }
 
@@ -940,6 +945,7 @@ const Browser = observer(function Browser() {
   /* -------------------------------------------------------------------------- */
   const handleNavStateChange = (navState: WebViewNavigation) => {
     if (!activeTab) return
+    if (paymentInFlightUrl.current) return
     if (navState.url?.includes('favicon.ico') && activeTab.url === kNEW_TAB_URL) return
 
     if (
@@ -1246,6 +1252,9 @@ const Browser = observer(function Browser() {
               const status = e.nativeEvent?.statusCode || 404
               const url = e.nativeEvent?.url || ''
               if (status === 402 && paymentHandlerRef.current) {
+                // Skip if a payment is already being handled for this URL (e.g. fetch polyfill already fired)
+                if (paymentInFlightUrl.current === url) return
+                paymentInFlightUrl.current = url
                 if (activeTab?.webviewRef?.current) {
                   activeTab.webviewRef.current.injectJavaScript(
                     `document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`
@@ -1273,6 +1282,7 @@ const Browser = observer(function Browser() {
                       )
                     }
                   })
+                  .finally(() => { paymentInFlightUrl.current = null })
               } else if (activeTab?.webviewRef?.current) {
                 // For 403, the response body is often an interactive challenge page
                 // (e.g. Cloudflare human verification). Let the WebView render it
@@ -1284,12 +1294,16 @@ const Browser = observer(function Browser() {
                 )
               }
             }}
-            onLoadEnd={(event: any) =>
+            onLoadEnd={(event: any) => {
+              // Suppress state updates while 402 payment is in flight — document.write
+              // of the loading page fires onLoadEnd which re-renders and flickers the
+              // spending authorization modal.
+              if (paymentInFlightUrl.current) return
               tabStore.handleNavigationStateChange(activeTab.id, {
                 ...(event.nativeEvent ?? event),
                 loading: false
               })
-            }
+            }}
             javaScriptEnabled
             domStorageEnabled
             allowsBackForwardNavigationGestures

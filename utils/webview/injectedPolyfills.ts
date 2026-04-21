@@ -872,6 +872,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
           status: 402,
           headers: headersObj
         }))
+        // Don't return 402 to page JS — RN handles payment and replaces page content.
+        // Never-resolving promise prevents page from retrying or reacting to 402.
+        return new Promise(() => {})
       }
 
       return response

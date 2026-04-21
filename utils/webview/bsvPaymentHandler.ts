@@ -11,6 +11,7 @@ interface PaymentCacheEntry {
 }
 
 const paymentCache = new Map<string, PaymentCacheEntry>()
+const inFlightPayments = new Map<string, Promise<string | null>>()
 
 export class BsvPaymentHandler {
   readonly wallet: WalletInterface
@@ -23,11 +24,28 @@ export class BsvPaymentHandler {
   async handle402(url: string, status: number, headers: Record<string, string>): Promise<string | null> {
     const cacheKey = url
     const cached = paymentCache.get(cacheKey)
-    
+
     if (cached && (Date.now() - cached.timestamp) < this.cacheTimeoutMs) {
       return cached.html
     }
 
+    // Coalesce concurrent calls for the same URL into a single payment
+    const existing = inFlightPayments.get(cacheKey)
+    if (existing) {
+      return existing
+    }
+
+    const paymentPromise = this._doPayment(url, headers)
+    inFlightPayments.set(cacheKey, paymentPromise)
+
+    try {
+      return await paymentPromise
+    } finally {
+      inFlightPayments.delete(cacheKey)
+    }
+  }
+
+  private async _doPayment(url: string, headers: Record<string, string>): Promise<string | null> {
     let satsHeader: string | undefined = headers[`${HEADER_PREFIX}sats`] || headers['x-bsv-sats']
     let serverHeader: string | undefined = headers[`${HEADER_PREFIX}server`] || headers['x-bsv-server']
 
@@ -108,10 +126,10 @@ export class BsvPaymentHandler {
 
       if (response.ok) {
         const html = await response.text()
-        paymentCache.set(cacheKey, { html, timestamp: Date.now() })
+        paymentCache.set(url, { html, timestamp: Date.now() })
         return html
       }
-      
+
       return getErrorPage(402)
     } catch {
       return getErrorPage(402)
@@ -120,6 +138,7 @@ export class BsvPaymentHandler {
 
   clearCache() {
     paymentCache.clear()
+    inFlightPayments.clear()
   }
 }
 
