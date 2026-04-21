@@ -10,6 +10,7 @@ import { useBrowserMode } from '@/context/BrowserModeContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
+
 import { formatAmount, parseDisplayToSatoshis, getUnitLabel } from '@/utils/amountFormatHelpers'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 import { GroupedSection } from '@/components/ui/GroupedList'

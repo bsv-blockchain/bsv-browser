@@ -54,8 +54,6 @@ export const DEFAULT_AUTO_APPROVE_THRESHOLD = 100_000
 export const AUTO_APPROVE_COOLDOWN_MS = 10_000
 /** AsyncStorage key for persisted auto-approve threshold */
 export const AUTO_APPROVE_STORAGE_KEY = 'autoApproveThreshold'
-/** AsyncStorage key for display currency preference */
-export const DISPLAY_CURRENCY_STORAGE_KEY = 'displayCurrency'
 
 export const defaultBookmarks: Bookmark[] = [
   // { title: 'BSV Association', url: 'https://bitcoinsv.com', added: 0 },

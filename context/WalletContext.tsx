@@ -39,7 +39,7 @@ import { toast } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import type { AppChain } from './config'
 import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR } from './config'
-import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_COOLDOWN_MS, AUTO_APPROVE_STORAGE_KEY, DISPLAY_CURRENCY_STORAGE_KEY } from '@/shared/constants'
+import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_COOLDOWN_MS, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { UserContext } from './UserContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
@@ -298,9 +298,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     AsyncStorage.getItem(AUTO_APPROVE_STORAGE_KEY).then(v => {
       if (v !== null) autoApproveThresholdRef.current = Number(v) || 0
     })
-    // Load display currency before wallet builds so UI reflects preference immediately
-    AsyncStorage.getItem(DISPLAY_CURRENCY_STORAGE_KEY).then(v => {
-      if (v) setSettings(prev => ({ ...prev, currency: v }))
+    AsyncStorage.getItem('walletSettings').then(v => {
+      if (v) setSettings(prev => ({ ...prev, ...JSON.parse(v) }))
     })
   }, [])
 
@@ -365,15 +364,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   const updateSettings = useCallback(
     async (newSettings: WalletSettings) => {
-      // Always persist currency to AsyncStorage (works before wallet is built)
-      if (newSettings.currency) {
-        await AsyncStorage.setItem(DISPLAY_CURRENCY_STORAGE_KEY, newSettings.currency)
-      }
-      // Sync to wallet DB when available, but don't require it
-      if (managers.settingsManager) {
-        await managers.settingsManager.set(newSettings)
-      }
       setSettings(newSettings)
+      AsyncStorage.setItem('walletSettings', JSON.stringify(newSettings))
     },
     [managers.settingsManager]
   )
@@ -970,26 +962,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })()
   }, [configStatus, walletBuilt, buildWalletFromMnemonic, buildWalletFromRecoveredKey, getRecoveredKey])
 
-  // When Settings manager becomes available, populate the user's settings
-  // but preserve AsyncStorage currency as source of truth for display preference
-  useEffect(() => {
-    const loadSettings = async () => {
-      if (managers.settingsManager) {
-        try {
-          const userSettings = await managers.settingsManager.get()
-          const savedCurrency = await AsyncStorage.getItem(DISPLAY_CURRENCY_STORAGE_KEY)
-          if (savedCurrency) {
-            userSettings.currency = savedCurrency
-          }
-          setSettings(userSettings)
-        } catch {
-          // Unable to load settings, defaults are already loaded.
-        }
-      }
-    }
-
-    loadSettings()
-  }, [managers.settingsManager])
+  // Settings are AsyncStorage-only — no on-chain sync needed
 
   // ── Background BLE pending payment processing ──
   // After wallet build completes, attempt to internalize any BLE payments that
