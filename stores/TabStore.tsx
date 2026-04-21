@@ -6,6 +6,7 @@ import { LayoutAnimation } from 'react-native'
 import { Tab } from '@/shared/types/browser'
 import { kNEW_TAB_URL } from '@/shared/constants'
 import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
+import { deleteThumbnail } from '@/utils/thumbnailService'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
 const STORAGE_KEYS = { TABS: 'tabs', ACTIVE: 'activeTabId' }
@@ -395,6 +396,7 @@ export class TabStore {
       tab.webviewRef.current.clearCache?.(true)
       tab.webviewRef.current.clearHistory?.()
     }
+    deleteThumbnail(id)
 
     delete this.tabNavigationHistories[id]
     delete this.tabHistoryIndexes[id]

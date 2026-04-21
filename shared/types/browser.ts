@@ -9,6 +9,7 @@ export type Tab = {
   canGoForward: boolean
   isLoading: boolean
   isDesktopMode: boolean
+  thumbnailUri?: string
 }
 export type HistoryEntry = { title: string; url: string; timestamp: number }
 export type Bookmark = { title: string; url: string; added: number }

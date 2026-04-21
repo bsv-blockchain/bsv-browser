@@ -16,7 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons'
 import { Swipeable } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { WebView } from 'react-native-webview'
+import { Image } from 'expo-image'
 import * as Haptics from 'expo-haptics'
 import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
@@ -112,15 +112,20 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
               <View style={styles.emptyTab}>
                 <Text style={{ fontSize: 15, color: colors.textSecondary }}>{t('new_tab')}</Text>
               </View>
-            ) : (
-              <WebView
-                source={{ uri: item.url || kNEW_TAB_URL }}
+            ) : item.thumbnailUri ? (
+              <Image
+                source={{ uri: item.thumbnailUri }}
                 style={{ flex: 1 }}
-                scrollEnabled={false}
-                androidLayerType={Platform.OS === 'android' ? 'software' : undefined as any}
-                androidHardwareAccelerationDisabled={Platform.OS === 'android'}
-                pointerEvents="none"
+                contentFit="cover"
+                transition={200}
               />
+            ) : (
+              <View style={styles.emptyTab}>
+                <Ionicons name="globe-outline" size={28} color={colors.textSecondary} />
+                <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4 }} numberOfLines={1}>
+                  {item.title || item.url}
+                </Text>
+              </View>
             )}
             <View style={[styles.titleBar, { backgroundColor: colors.chromeBackground }]}>
               <Text numberOfLines={1} style={{ flex: 1, color: colors.textPrimary, fontSize: 12 }}>
@@ -144,7 +149,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
         numColumns={2}
-        removeClippedSubviews={false}
+        removeClippedSubviews
         maxToRenderPerBatch={6}
         updateCellsBatchingPeriod={50}
         initialNumToRender={6}

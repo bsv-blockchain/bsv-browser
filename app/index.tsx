@@ -50,6 +50,7 @@ import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
+import { captureThumbnail, cleanupOrphanedThumbnails, thumbnailExists } from '@/utils/thumbnailService'
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
@@ -113,8 +114,20 @@ const Browser = observer(function Browser() {
   // even when safe-area-context reports 0 on some devices
   const bottomInset = safeBottomInset(insets.bottom)
 
+  const webviewContainerRef = useRef<View>(null)
+  const thumbnailCaptureTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
-    tabStore.initializeTabs()
+    tabStore.initializeTabs().then(() => {
+      const ids = tabStore.tabs.map(t => t.id)
+      cleanupOrphanedThumbnails(ids)
+      // Validate persisted thumbnail URIs still exist on disk
+      for (const tab of tabStore.tabs) {
+        if (tab.thumbnailUri && !thumbnailExists(tab.thumbnailUri)) {
+          tab.thumbnailUri = undefined
+        }
+      }
+    })
     cleanupDownloadsCache()
   }, [])
 
@@ -203,6 +216,12 @@ const Browser = observer(function Browser() {
   /* ---------------------------------- tabs --------------------------------- */
   const activeTab = tabStore.activeTab
 
+  const captureActiveThumbnail = useCallback(async () => {
+    if (!activeTab || activeTab.url === kNEW_TAB_URL) return
+    const uri = await captureThumbnail(webviewContainerRef, activeTab.id)
+    if (uri) tabStore.updateTab(activeTab.id, { thumbnailUri: uri })
+  }, [activeTab])
+
   /* -------------------------- ui / animation state -------------------------- */
   const addressEditing = useRef(false)
   const [addressText, setAddressText] = useState(kNEW_TAB_URL)
@@ -246,6 +265,7 @@ const Browser = observer(function Browser() {
   useEffect(() => {
     return () => {
       if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
+      if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
     }
   }, [])
 
@@ -1084,6 +1104,8 @@ const Browser = observer(function Browser() {
     if (activeTab) {
       return (
         <View
+          ref={webviewContainerRef}
+          collapsable={false}
           style={{
             position: 'absolute',
             top: isFullscreen ? 0 : insets.top,
@@ -1303,6 +1325,11 @@ const Browser = observer(function Browser() {
                 ...(event.nativeEvent ?? event),
                 loading: false
               })
+              // Capture thumbnail after page settles
+              if (activeTab.url !== kNEW_TAB_URL) {
+                if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
+                thumbnailCaptureTimer.current = setTimeout(() => captureActiveThumbnail(), 800)
+              }
             }}
             javaScriptEnabled
             domStorageEnabled
@@ -1463,7 +1490,10 @@ const Browser = observer(function Browser() {
               }}
               onFindInPage={() => setFindInPageVisible(true)}
               onBookmarks={() => sheet.push('browser-menu')}
-              onTabs={() => setShowTabsView(true)}
+              onTabs={async () => {
+                await captureActiveThumbnail()
+                setShowTabsView(true)
+              }}
               onNewTab={() => {
                 focusAddressBarOnNewTab.current = true
                 tabStore.newTab()
