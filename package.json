@@ -28,7 +28,7 @@
     "prebuild": "expo prebuild --clean",
     "prebuild:ios": "expo prebuild --platform ios --clean",
     "prebuild:android": "expo prebuild --platform android --clean",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package && node -e \"const fs=require('fs'),p=require('path'),t=p.join('node_modules','expo','node_modules','@expo','cli','node_modules'),s=p.join('node_modules','@expo','cli','node_modules','glob');fs.mkdirSync(t,{recursive:true});try{fs.symlinkSync(p.resolve(s),p.join(t,'glob'))}catch(e){if(e.code!=='EEXIST')throw e}\""
   },
   "dependencies": {
     "@bsv/btms": "^1.0.1",
