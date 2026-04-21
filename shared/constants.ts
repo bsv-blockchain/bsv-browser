@@ -48,6 +48,15 @@ export const SEARCH_ENGINES: SearchEngine[] = [
 
 export const DEFAULT_SEARCH_ENGINE_ID = 'startpage'
 
+/** Auto-approve transactions below this satoshi amount without showing the spend modal */
+export const DEFAULT_AUTO_APPROVE_THRESHOLD = 100_000
+/** Minimum milliseconds between auto-approved transactions (global, origin-agnostic) */
+export const AUTO_APPROVE_COOLDOWN_MS = 10_000
+/** AsyncStorage key for persisted auto-approve threshold */
+export const AUTO_APPROVE_STORAGE_KEY = 'autoApproveThreshold'
+/** AsyncStorage key for display currency preference */
+export const DISPLAY_CURRENCY_STORAGE_KEY = 'displayCurrency'
+
 export const defaultBookmarks: Bookmark[] = [
   // { title: 'BSV Association', url: 'https://bitcoinsv.com', added: 0 },
   // { title: 'Project Babbage', url: 'https://projectbabbage.com', added: 0 },

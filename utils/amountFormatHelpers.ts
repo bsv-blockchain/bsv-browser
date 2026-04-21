@@ -17,6 +17,8 @@ const CENT_THRESHOLD = 0.01
 
 // Format number as currency with fallback for platforms where Intl is not fully supported
 const formatCurrency = (value: number, locale: string, minDigits: number, maxDigits?: number): string => {
+  const abs = Math.abs(value)
+  let formatted: string
   try {
     const options: Intl.NumberFormatOptions = {
       currency: 'USD',
@@ -29,12 +31,12 @@ const formatCurrency = (value: number, locale: string, minDigits: number, maxDig
     }
 
     const formatter = new Intl.NumberFormat(locale, options)
-    return formatter.format(value)
+    formatted = formatter.format(abs)
   } catch {
     // Fallback formatting if Intl is not supported
-    const fixed = value.toFixed(minDigits)
-    return `$${fixed}`
+    formatted = `$${abs.toFixed(minDigits)}`
   }
+  return value < 0 ? `(${formatted})` : formatted
 }
 
 /**
@@ -101,26 +103,22 @@ export const formatSatoshisAsFiat = (satoshis: number, satoshisPerUSD: number, s
     return '...'
   }
 
-  const usd = satoshis / satoshisPerUSD
-  if (isNaN(usd)) return '...'
+  const rawUsd = satoshis / satoshisPerUSD
+  if (isNaN(rawUsd)) return '...'
 
-  const v = Math.abs(usd)
+  const v = Math.abs(rawUsd)
 
-  // Sub-cent values: display as cents (¢)
+  // Sub-cent values: display as "< $0.01" or "< -$0.01"
   if (v > 0 && v < CENT_THRESHOLD && !showFiatAsInteger) {
-    const cents = usd * CENTS_PER_USD
-    return formatCents(cents)
+    return rawUsd < 0 ? '< ($0.01)' : '< $0.01'
   }
 
-  let minDigits = 2
-  let maxDigits: number | undefined
-  if (v < 0.1) minDigits = 4
-  else if (v < 1) minDigits = 3
+  // Round up to nearest cent for display (e.g. $0.031 -> $0.04)
+  const sign = rawUsd < 0 ? -1 : 1
+  const usd = sign * Math.ceil(Math.abs(rawUsd) * CENTS_PER_USD) / CENTS_PER_USD
 
-  if (showFiatAsInteger) {
-    minDigits = 0
-    maxDigits = 0
-  }
+  const minDigits = showFiatAsInteger ? 0 : 2
+  const maxDigits = showFiatAsInteger ? 0 : 2
 
   return formatCurrency(usd, localeDefault, minDigits, maxDigits)
 }

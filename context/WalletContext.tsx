@@ -39,6 +39,8 @@ import { toast } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import type { AppChain } from './config'
 import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR } from './config'
+import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_COOLDOWN_MS, AUTO_APPROVE_STORAGE_KEY, DISPLAY_CURRENCY_STORAGE_KEY } from '@/shared/constants'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { UserContext } from './UserContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { usePermissionQueue } from '@/hooks/usePermissionQueue'
@@ -62,6 +64,10 @@ import { AppState, AppStateStatus } from 'react-native'
 import RNEventSource from 'react-native-sse'
 import NetInfo from '@react-native-community/netinfo'
 import { processPendingPayments } from '@/utils/ble/pendingPayments'
+
+// Global, origin-agnostic rate limit for auto-approved spending.
+// In-memory only — resets on app restart (intentional: more secure).
+let lastAutoApproveTime = 0
 
 // -----
 // Context Types
@@ -284,6 +290,20 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   } | null>(null)
   const clearBleNotification = useCallback(() => setBleNotification(null), [])
 
+  // Auto-approve: cached threshold (satoshis) and managers ref for use in callback
+  const autoApproveThresholdRef = useRef<number>(DEFAULT_AUTO_APPROVE_THRESHOLD)
+  const managersRef = useRef<ManagerState>({})
+  useEffect(() => { managersRef.current = managers }, [managers])
+  useEffect(() => {
+    AsyncStorage.getItem(AUTO_APPROVE_STORAGE_KEY).then(v => {
+      if (v !== null) autoApproveThresholdRef.current = Number(v) || 0
+    })
+    // Load display currency before wallet builds so UI reflects preference immediately
+    AsyncStorage.getItem(DISPLAY_CURRENCY_STORAGE_KEY).then(v => {
+      if (v) setSettings(prev => ({ ...prev, currency: v }))
+    })
+  }, [])
+
   const {
     getSnap,
     deleteSnap,
@@ -345,10 +365,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   const updateSettings = useCallback(
     async (newSettings: WalletSettings) => {
-      if (!managers.settingsManager) {
-        throw new Error('The user must be logged in to update settings!')
+      // Always persist currency to AsyncStorage (works before wallet is built)
+      if (newSettings.currency) {
+        await AsyncStorage.setItem(DISPLAY_CURRENCY_STORAGE_KEY, newSettings.currency)
       }
-      await managers.settingsManager.set(newSettings)
+      // Sync to wallet DB when available, but don't require it
+      if (managers.settingsManager) {
+        await managers.settingsManager.set(newSettings)
+      }
       setSettings(newSettings)
     },
     [managers.settingsManager]
@@ -438,6 +462,21 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     async (args: PermissionRequest & { requestID: string }): Promise<void> => {
       const { requestID, originator, reason, renewal, spending } = args
       if (!requestID || !spending) return
+
+      // Auto-approve small transactions if within threshold and cooldown
+      const threshold = autoApproveThresholdRef.current
+      if (threshold > 0 && spending.satoshis <= threshold) {
+        const now = Date.now()
+        if (now - lastAutoApproveTime >= AUTO_APPROVE_COOLDOWN_MS) {
+          lastAutoApproveTime = now
+          managersRef.current.permissionsManager?.grantPermission({
+            requestID,
+            ephemeral: true,
+            amount: spending.satoshis
+          })
+          return
+        }
+      }
 
       spendingQueue.enqueue({
         requestID,
@@ -932,11 +971,16 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   }, [configStatus, walletBuilt, buildWalletFromMnemonic, buildWalletFromRecoveredKey, getRecoveredKey])
 
   // When Settings manager becomes available, populate the user's settings
+  // but preserve AsyncStorage currency as source of truth for display preference
   useEffect(() => {
     const loadSettings = async () => {
       if (managers.settingsManager) {
         try {
           const userSettings = await managers.settingsManager.get()
+          const savedCurrency = await AsyncStorage.getItem(DISPLAY_CURRENCY_STORAGE_KEY)
+          if (savedCurrency) {
+            userSettings.currency = savedCurrency
+          }
           setSettings(userSettings)
         } catch {
           // Unable to load settings, defaults are already loaded.

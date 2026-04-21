@@ -71,8 +71,7 @@ export default function TransactionsScreen() {
       if (actions.length === 0) setLoading(true)
       const result = await fetchActions(0)
       if (cancelled || !result) return
-      const reversedActions = [...result.actions].reverse()
-      setActions(reversedActions)
+      setActions(result.actions)
       setTotalActions(result.totalActions)
       offsetRef.current = result.actions.length
       setLoading(false)
@@ -85,8 +84,7 @@ export default function TransactionsScreen() {
     setLoadingMore(true)
     const result = await fetchActions(offsetRef.current)
     if (result) {
-      const reversedActions = [...result.actions].reverse()
-      setActions(prev => [...prev, ...reversedActions])
+      setActions(prev => [...prev, ...result.actions])
       setTotalActions(result.totalActions)
       offsetRef.current += result.actions.length
     }
@@ -97,8 +95,7 @@ export default function TransactionsScreen() {
     setRefreshing(true)
     const result = await fetchActions(0)
     if (result) {
-      const reversedActions = [...result.actions].reverse()
-      setActions(reversedActions)
+      setActions(result.actions)
       setTotalActions(result.totalActions)
       offsetRef.current = result.actions.length
     }
@@ -186,7 +183,7 @@ export default function TransactionsScreen() {
           </View>
         </View>
         <View style={styles.rowRight}>
-          <Text style={[styles.amount, { color: isOutgoing ? colors.error : colors.textPrimary }]}>
+          <Text style={[styles.amount, { color: colors.textPrimary }]}>
             <AmountDisplay>
               {amount}
             </AmountDisplay>

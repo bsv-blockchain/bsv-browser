@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { ActivityIndicator, Alert, View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
+import React, { useState, useEffect, useContext, useRef, useCallback } from 'react'
+import { ActivityIndicator, Alert, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
@@ -8,6 +8,10 @@ import { useWallet } from '@/context/WalletContext'
 import type { AppChain } from '@/context/config'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
+import { formatAmount, parseDisplayToSatoshis, getUnitLabel } from '@/utils/amountFormatHelpers'
+import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
 import { router } from 'expo-router'
@@ -46,6 +50,31 @@ export default function WalletConfigScreen() {
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [currencyExpanded, setCurrencyExpanded] = useState(false)
+  const [thresholdExpanded, setThresholdExpanded] = useState(false)
+  const [thresholdSats, setThresholdSats] = useState(DEFAULT_AUTO_APPROVE_THRESHOLD)
+  const [thresholdInput, setThresholdInput] = useState('')
+  const { satoshisPerUSD } = useContext(ExchangeRateContext)
+
+  const currentCurrency = settings?.currency || 'BSV'
+
+  // Load persisted auto-approve threshold
+  useEffect(() => {
+    AsyncStorage.getItem(AUTO_APPROVE_STORAGE_KEY).then(v => {
+      if (v !== null) setThresholdSats(Number(v) || 0)
+    })
+  }, [])
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleThresholdInput = useCallback((text: string) => {
+    setThresholdInput(text)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      const sats = parseDisplayToSatoshis(text, currentCurrency, satoshisPerUSD)
+      const clamped = Math.max(0, Math.round(sats))
+      setThresholdSats(clamped)
+      AsyncStorage.setItem(AUTO_APPROVE_STORAGE_KEY, String(clamped))
+    }, 600)
+  }, [currentCurrency, satoshisPerUSD])
 
   // Fetch identity key (needed for print recovery shares)
   useEffect(() => {
@@ -138,8 +167,6 @@ export default function WalletConfigScreen() {
     { id: 'BSV', label: 'BSV', icon: 'logo-bitcoin' },
     { id: 'USD', label: 'USD', icon: 'cash-outline' }
   ]
-
-  const currentCurrency = settings?.currency || 'BSV'
 
   const handleSelectCurrency = async (target: string) => {
     if (target === currentCurrency) {
@@ -237,7 +264,6 @@ export default function WalletConfigScreen() {
             onPress={() => setCurrencyExpanded(e => !e)}
             showChevron={currencyExpanded}
             chevronDown={currencyExpanded}
-            isLast={!currencyExpanded}
           />
           {currencyExpanded && (
             <View style={localStyles.networkList}>
@@ -263,6 +289,47 @@ export default function WalletConfigScreen() {
                   </TouchableOpacity>
                 )
               })}
+            </View>
+          )}
+          <ListRow
+            label="Auto Spend Up To"
+            value={thresholdSats === 0 ? 'Off'
+              : currentCurrency === 'USD' && satoshisPerUSD > 0
+                ? `$${(thresholdSats / satoshisPerUSD).toFixed(2)}`
+                : formatAmount(thresholdSats, currentCurrency, satoshisPerUSD)}
+            icon="flash-outline"
+            iconColor="#FF9F0A"
+            onPress={() => {
+              setThresholdExpanded(e => !e)
+              if (!thresholdExpanded) {
+                // Pre-fill input with current value in display currency
+                if (currentCurrency === 'USD' && satoshisPerUSD > 0) {
+                  setThresholdInput(thresholdSats === 0 ? '0' : (thresholdSats / satoshisPerUSD).toFixed(2))
+                } else {
+                  setThresholdInput(String(thresholdSats))
+                }
+              }
+            }}
+            showChevron={thresholdExpanded}
+            chevronDown={thresholdExpanded}
+            isLast={!thresholdExpanded}
+          />
+          {thresholdExpanded && (
+            <View style={localStyles.networkList}>
+              <View style={localStyles.thresholdRow}>
+                <TextInput
+                  style={[localStyles.thresholdInput, { color: colors.textPrimary, borderColor: colors.separator }]}
+                  value={thresholdInput}
+                  onChangeText={handleThresholdInput}
+                  keyboardType="numeric"
+                  placeholder={`0 ${getUnitLabel(currentCurrency)}`}
+                  placeholderTextColor={colors.textSecondary}
+                  returnKeyType="done"
+                />
+                <Text style={[localStyles.thresholdUnit, { color: colors.textSecondary }]}>
+                  {getUnitLabel(currentCurrency)}
+                </Text>
+              </View>
             </View>
           )}
         </GroupedSection>
@@ -377,5 +444,23 @@ const localStyles = StyleSheet.create({
   },
   networkLabel: {
     ...typography.body
+  },
+  thresholdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm
+  },
+  thresholdInput: {
+    flex: 1,
+    ...typography.body,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  thresholdUnit: {
+    ...typography.body,
+    marginLeft: spacing.sm
   }
 })
