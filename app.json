@@ -42,7 +42,7 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": false,
-          "bluetoothAlwaysPermission": false
+          "bluetoothAlwaysPermission": "BSV Browser uses Bluetooth to send and receive payments to nearby devices."
         }
       ]
     ],

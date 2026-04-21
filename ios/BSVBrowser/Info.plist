@@ -60,6 +60,8 @@
       <key>NSAllowsLocalNetworking</key>
       <true/>
     </dict>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>BSV Browser uses Bluetooth to send and receive payments to nearby devices.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>BSV Browser uses Bluetooth to advertise payment services to nearby devices.</string>
     <key>NSBluetoothWhileInUseUsageDescription</key>
