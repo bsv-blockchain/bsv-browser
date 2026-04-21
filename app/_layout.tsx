@@ -8,14 +8,14 @@ if (typeof AbortSignal !== 'undefined' && !AbortSignal.timeout) {
 }
 
 import React, { useEffect } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, useColorScheme } from 'react-native'
+import { View, useColorScheme } from 'react-native'
 import { Stack } from 'expo-router'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'
 import packageJson from '../package.json'
 import { WalletContextProvider, useWallet } from '@/context/WalletContext'
 import { ExchangeRateContextProvider } from '@/context/ExchangeRateContext'
-import { ThemeProvider, useTheme } from '@/context/theme/ThemeContext'
+import { ThemeProvider } from '@/context/theme/ThemeContext'
 // TODO: Re-add RecoveryKeySaver when WAB support returns
 import LocalStorageProvider from '@/context/LocalStorageProvider'
 import PermissionSheet from '@/components/ui/PermissionSheet'
@@ -25,8 +25,6 @@ import { LanguageProvider } from '@/context/i18n/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/onboarding/Web3BenefitsModalHandler'
 import { WalletConnectionProvider } from '@/context/WalletConnectionContext'
-import { Ionicons } from '@expo/vector-icons'
-import { spacing, radii, typography } from '@/context/theme/tokens'
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
@@ -91,57 +89,6 @@ function DeepLinkHandler() {
 //   )
 // }
 
-// Global snackbar that shows BLE payment notifications from background processing.
-// Rendered inside ThemeProvider + WalletContextProvider so it has access to
-// both colours and the wallet notification state.
-function BLENotificationSnackbar() {
-  const { bleNotification, clearBleNotification } = useWallet()
-  const { colors } = useTheme()
-
-  if (!bleNotification) return null
-
-  const isSuccess = bleNotification.type === 'success'
-  const isError = bleNotification.type === 'error'
-  const borderColor = isSuccess ? colors.success : isError ? colors.error : colors.separator
-  const iconColor = isSuccess ? colors.success : isError ? colors.error : colors.info
-  const iconName = isSuccess ? 'checkmark-circle' : isError ? 'alert-circle' : 'information-circle'
-
-  return (
-    <TouchableOpacity
-      activeOpacity={0.9}
-      onPress={clearBleNotification}
-      style={[snackStyles.snack, { backgroundColor: colors.backgroundElevated, borderColor }]}
-    >
-      <Ionicons name={iconName} size={18} color={iconColor} />
-      <Text style={[snackStyles.text, { color: colors.textPrimary }]}>{bleNotification.message}</Text>
-    </TouchableOpacity>
-  )
-}
-
-const snackStyles = StyleSheet.create({
-  snack: {
-    position: 'absolute',
-    bottom: 40,
-    left: spacing.lg,
-    right: spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 6,
-    zIndex: 9999
-  },
-  text: {
-    ...typography.subhead,
-    flex: 1
-  }
-})
 
 export default function RootLayout() {
   const isDark = useColorScheme() === 'dark'
@@ -166,7 +113,6 @@ export default function RootLayout() {
                           {/* <TranslationTester /> */}
                           <DefaultBrowserPrompt />
                           <PermissionSheet />
-                          <BLENotificationSnackbar />
                           <Stack
                             screenOptions={{
                               animation: 'slide_from_right',
@@ -181,7 +127,6 @@ export default function RootLayout() {
                             <Stack.Screen name="wallet-config" />
                             <Stack.Screen name="legacy-payments" />
                             <Stack.Screen name="payments" />
-                            <Stack.Screen name="local-payments" />
                             <Stack.Screen name="connections" />
                             <Stack.Screen name="pair" />
                             <Stack.Screen name="not-found" />

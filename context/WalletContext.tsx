@@ -63,7 +63,7 @@ import { createBtmsModule } from '@bsv/btms-permission-module'
 import { AppState, AppStateStatus } from 'react-native'
 import RNEventSource from 'react-native-sse'
 import NetInfo from '@react-native-community/netinfo'
-import { processPendingPayments } from '@/utils/ble/pendingPayments'
+
 
 // Global, origin-agnostic rate limit for auto-approved spending.
 // In-memory only — resets on app restart (intentional: more secure).
@@ -126,8 +126,6 @@ export interface WalletContextValue {
    * wallet build or when connectivity is restored). Cleared by the UI after
    * display. null = no pending notification.
    */
-  bleNotification: { message: string; type: 'success' | 'error' | 'info' } | null
-  clearBleNotification: () => void
   /** Run a named monitor task and return its log output */
   runMonitorTask: (taskName: string) => Promise<string>
   /** List available monitor task names */
@@ -168,8 +166,6 @@ export const WalletContext = createContext<WalletContextValue>({
   refreshProof: async () => {},
   txStatusVersion: 0,
   walletBuilding: false,
-  bleNotification: null,
-  clearBleNotification: () => {},
   runMonitorTask: async () => '',
   getMonitorTaskNames: () => [],
   checkUtxoSpendability: async () => ''
@@ -284,12 +280,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
   const walletBuildingRef = useRef<boolean>(false)
   const [walletBuilding, setWalletBuilding] = useState<boolean>(false)
-  const [bleNotification, setBleNotification] = useState<{
-    message: string
-    type: 'success' | 'error' | 'info'
-  } | null>(null)
-  const clearBleNotification = useCallback(() => setBleNotification(null), [])
-
   // Auto-approve: cached threshold (satoshis) and managers ref for use in callback
   const autoApproveThresholdRef = useRef<number>(DEFAULT_AUTO_APPROVE_THRESHOLD)
   const managersRef = useRef<ManagerState>({})
@@ -964,44 +954,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   // Settings are AsyncStorage-only — no on-chain sync needed
 
-  // ── Background BLE pending payment processing ──
-  // After wallet build completes, attempt to internalize any BLE payments that
-  // were received while offline. A NetInfo listener then re-triggers whenever
-  // the device comes back online so the queue drains automatically.
-  useEffect(() => {
-    if (!walletBuilt || !managers.permissionsManager || !storage) return
-
-    const tryProcess = async () => {
-      try {
-        const netState = await NetInfo.fetch()
-        if (!netState.isConnected || netState.isInternetReachable === false) return
-        const results = await processPendingPayments(managers.permissionsManager as any, storage, adminOriginator)
-        const successes = results.filter(r => r.success)
-        if (successes.length > 0) {
-          const msg =
-            successes.length === 1
-              ? 'A local payment was added to your wallet'
-              : `${successes.length} local payments were added to your wallet`
-          setBleNotification({ message: msg, type: 'success' })
-        }
-      } catch {
-        // Best-effort — failures are recorded per-entry in the queue
-      }
-    }
-
-    // Run immediately after wallet build
-    tryProcess()
-
-    // Also run when connectivity is restored
-    const unsubscribe = NetInfo.addEventListener(state => {
-      if (state.isConnected && state.isInternetReachable !== false) {
-        tryProcess()
-      }
-    })
-
-    return () => unsubscribe()
-  }, [walletBuilt, managers.permissionsManager, storage, adminOriginator])
-
   // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
@@ -1285,8 +1237,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       refreshProof,
       txStatusVersion,
       walletBuilding,
-      bleNotification,
-      clearBleNotification,
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability
@@ -1323,8 +1273,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       refreshProof,
       txStatusVersion,
       walletBuilding,
-      bleNotification,
-      clearBleNotification,
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability

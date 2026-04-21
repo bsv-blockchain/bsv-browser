@@ -37,14 +37,7 @@
       "expo-sqlite",
       "expo-localization",
       "expo-web-browser",
-      "expo-camera",
-      [
-        "react-native-ble-plx",
-        {
-          "isBackgroundEnabled": false,
-          "bluetoothAlwaysPermission": "BSV Browser uses Bluetooth to send and receive payments to nearby devices."
-        }
-      ]
+      "expo-camera"
     ],
     "experiments": {
       "typedRoutes": true
@@ -64,12 +57,7 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_ADMIN",
-        "android.permission.BLUETOOTH_ADVERTISE",
-        "android.permission.BLUETOOTH_SCAN",
-        "android.permission.BLUETOOTH_CONNECT"
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "intentFilters": [
         {
@@ -116,9 +104,7 @@
           "blob",
           "data"
         ],
-        "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use.",
-        "NSBluetoothWhileInUseUsageDescription": "BSV Browser uses Bluetooth to send and receive payments to nearby devices.",
-        "NSBluetoothPeripheralUsageDescription": "BSV Browser uses Bluetooth to advertise payment services to nearby devices."
+        "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use."
       }
     },
     "owner": "bsvb"
