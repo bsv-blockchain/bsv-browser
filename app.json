@@ -81,10 +81,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "org.bsvassociation.browser",
-      "associatedDomains": [
-        "applinks:mobile.bsvb.tech"
-      ],
-      "infoPlist": {
+"infoPlist": {
         "NSCameraUsageDescription": "This app needs camera access to scan QR codes.",
         "NSPhotoLibraryAddUsageDescription": "This app needs permission to save images to your photo library.",
         "NSMicrophoneUsageDescription": "This app needs microphone access for video recording features.",
