@@ -38,14 +38,14 @@
         "EXPO_PUBLIC_DEFAULT_CHAIN": "main",
         "EXPO_PUBLIC_ADMIN_ORIGINATOR": "admin.com",
         "EXPO_PUBLIC_DEFAULT_HOMEPAGE": "https://mobile.bsvb.tech/landing.html",
-        "EXPO_PUBLIC_ARC_URL": "https://arcade-us-1.bsvb.tech",
-        "EXPO_PUBLIC_CHAINTRACKS_URL": "https://arcade-us-1.bsvb.tech/chaintracks/v1",
+        "EXPO_PUBLIC_ARC_URL": "https://arcade-v2-us-1.bsvblockchain.tech",
+        "EXPO_PUBLIC_CHAINTRACKS_URL": "https://chaintracks-us-1.bsvb.tech",
         "EXPO_PUBLIC_WOC_API_KEY": "mainnet_063497d3209bb0e11c262b96495cc9ea",
-        "EXPO_PUBLIC_TEST_ARC_URL": "https://arcade-testnet-us-1.bsvb.tech",
-        "EXPO_PUBLIC_TEST_CHAINTRACKS_URL": "https://arcade-testnet-us-1.bsvb.tech/chaintracks/v1",
+        "EXPO_PUBLIC_TEST_ARC_URL": "https://arcade-v2-testnet-us-1.bsvblockchain.tech",
+        "EXPO_PUBLIC_TEST_CHAINTRACKS_URL": "https://chaintracks-testnet-us-1.bsvb.tech",
         "EXPO_PUBLIC_TEST_WOC_API_KEY": "testnet_8a709373c94c6e372b90458fee766b04",
         "EXPO_PUBLIC_TERATEST_ARC_URL": "https://arcade-v2-ttn-us-1.bsvblockchain.tech",
-        "EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL": "https://arcade-ttn-us-1.bsvb.tech/chaintracks/v1",
+        "EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL": "https://chaintracks-testnet-us-1.bsvb.tech",
         "EXPO_PUBLIC_TERATEST_WOC_API_KEY": "testnet_8a709373c94c6e372b90458fee766b04"
       }
     }

@@ -560,6 +560,52 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           services.postBeefServices.add({ name: 'Bitails', service: bitailsService.postBeef.bind(bitailsService) })
         }
 
+        // Replace WoC getMerklePath with BUMP endpoint — no TSC→BUMP conversion needed.
+        // Remove all providers then re-add in order: WoC BUMP first, Bitails fallback.
+        const wocBumpBase = chain === 'main'
+          ? 'https://api.whatsonchain.com/v1/bsv/main'
+          : chain === 'test'
+            ? 'https://api.whatsonchain.com/v1/bsv/test'
+            : 'https://woc-ttn.bsvb.tech/v1/bsv/test'
+        const wocApiKey = serviceOptions.whatsOnChainApiKey
+        const chaintracksClient = serviceOptions.chaintracks as any
+        const getMerklePathSvc = (services as any).getMerklePathServices
+        const bitailsGetMerklePath = (services as any).bitails?.getMerklePath?.bind((services as any).bitails)
+        getMerklePathSvc.remove('WhatsOnChain')
+        getMerklePathSvc.remove('Bitails')
+        getMerklePathSvc.add({
+          name: 'WhatsOnChain',
+          service: async (txid: string): Promise<any> => {
+            const r: any = { name: 'WhatsOnChain', notes: [] }
+            try {
+              const headers: Record<string, string> = {}
+              if (wocApiKey) headers['woc-api-key'] = wocApiKey
+              const res = await fetch(`${wocBumpBase}/tx/${txid}/proof/bump`, { headers })
+              if (res.status === 404) {
+                r.notes.push({ what: 'getMerklePathNoData', when: new Date().toISOString() })
+                return r
+              }
+              if (!res.ok) {
+                r.notes.push({ what: 'getMerklePathBadStatus', httpStatus: res.status, when: new Date().toISOString() })
+                return r
+              }
+              const bumpHex = (await res.text()).trim()
+              r.merklePath = MerklePath.fromHex(bumpHex)
+              const height = r.merklePath.blockHeight
+              const header = await chaintracksClient.findHeaderForHeight(height)
+              if (header) r.header = { ...header, height }
+              r.notes.push({ what: 'getMerklePathSuccess', when: new Date().toISOString() })
+            } catch (eu: any) {
+              r.error = eu
+              r.notes.push({ what: 'getMerklePathError', description: eu?.message, when: new Date().toISOString() })
+            }
+            return r
+          }
+        })
+        if (bitailsGetMerklePath) {
+          getMerklePathSvc.add({ name: 'Bitails', service: bitailsGetMerklePath })
+        }
+
         const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)
         // Set default settings including "Who I Am" certifier before first get().
         // config is private in the type declarations but settable at runtime.
@@ -694,6 +740,68 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
                 return `SSE: txid=${event.txid} status=REJECTED (ignored — retryable)\n`
               }
               return origProcess(event)
+            }
+          }
+
+          // TaskReviewProvenTxs crawls all block heights looking for merkle root mismatches.
+          // TaskReorg handles reorgs in real-time via SSE; ChaintracksChainTracker does
+          // on-demand remote lookups during beef.verify(). The crawl is redundant on mobile.
+          const reviewProvenTxsIdx = monitor._tasks.findIndex((t: any) => t.name === 'ReviewProvenTxs')
+          if (reviewProvenTxsIdx !== -1) monitor._tasks.splice(reviewProvenTxsIdx, 1)
+
+          // TaskCheckForProofs.trigger() only fires when checkNow=true (set by TaskNewHeader).
+          // The periodic triggerMsecs fallback is commented out in the library. Patch it back in
+          // so proofs are still sought every 2h even when block header events are missed.
+          const checkForProofsTask = monitor._tasks.find((t: any) => t.name === 'CheckForProofs') as any
+          if (checkForProofsTask) {
+            // Re-enable periodic trigger (commented out in library — only fires on checkNow otherwise).
+            if (checkForProofsTask.triggerMsecs > 0) {
+              const origTrigger = checkForProofsTask.trigger.bind(checkForProofsTask)
+              checkForProofsTask.trigger = (nowMsecs: number) => {
+                const base = origTrigger(nowMsecs)
+                const elapsed = nowMsecs - checkForProofsTask.lastRunMsecsSinceEpoch
+                return { run: base.run || elapsed > checkForProofsTask.triggerMsecs }
+              }
+            }
+            // runTask exits immediately when monitor.lastNewHeader is undefined (only set by
+            // TaskNewHeader on successful chaintracks response). Fall back to currentHeight().
+            const origRunTask = checkForProofsTask.runTask.bind(checkForProofsTask)
+            checkForProofsTask.runTask = async () => {
+              if (checkForProofsTask.monitor.lastNewHeader === undefined) {
+                try {
+                  const ct = checkForProofsTask.monitor.chaintracksWithEvents || checkForProofsTask.monitor.chaintracks
+                  const height = await ct.currentHeight()
+                  checkForProofsTask.monitor.lastNewHeader = { height }
+                } catch {
+                  // chaintracks still down — can't proceed
+                  return ''
+                }
+              }
+              return origRunTask()
+            }
+            logWithTimestamp(F, `CheckForProofs patched: periodic fallback + lastNewHeader bootstrap`)
+          }
+
+          // TaskUnFail only processes 'unfail' status — nothing promotes 'invalid' → 'unfail'.
+          // Patch to also process 'invalid' reqs so transactions stuck due to service failures
+          // (e.g. WoC 401, chaintracks down) get retried. Attempts are NOT reset so reqs that
+          // are genuinely invalid accumulate attempts and stay invalid after repeated failures.
+          const unFailTask = monitor._tasks.find((t: any) => t.name === 'UnFail') as any
+          if (unFailTask) {
+            const origRunTask = unFailTask.runTask.bind(unFailTask)
+            unFailTask.runTask = async () => {
+              let log = await origRunTask()
+              const invalidReqs = await unFailTask.storage.findProvenTxReqs({
+                partial: {},
+                status: ['invalid'],
+                paged: { limit: 100, offset: 0 }
+              })
+              if (invalidReqs.length > 0) {
+                log += `\n${invalidReqs.length} invalid reqs — retrying proof lookup\n`
+                const r = await unFailTask.unfail(invalidReqs, 2)
+                log += r.log
+              }
+              return log
             }
           }
 
@@ -1049,7 +1157,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   const DIAGNOSTIC_TASKS = new Set([
     'SendWaiting', 'CheckForProofs', 'CheckNoSends',
-    'ReviewStatus', 'MonitorCallHistory', 'ArcadeSSE'
+    'ReviewStatus', 'MonitorCallHistory', 'ArcadeSSE', 'UnFail'
   ])
 
   const getMonitorTaskNames = useCallback((): string[] => {
