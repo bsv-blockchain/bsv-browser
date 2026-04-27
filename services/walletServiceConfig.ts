@@ -8,24 +8,6 @@ import type {
   WalletServicesOptions
 } from '@bsv/wallet-toolbox-mobile/out/src/sdk'
 
-function makeLoggingChaintracksClient(network: AppChain, url: string): ChaintracksServiceClient {
-  const client = new ChaintracksServiceClient(network, url)
-  console.log(`[ChainTracker] Created for network="${network}" url="${url}"`)
-  const original = client.findHeaderForHeight.bind(client)
-  client.findHeaderForHeight = async (height: number) => {
-    console.log(`[ChainTracker] findHeaderForHeight(${height}) → GET ${url}/findHeaderHexForHeight?height=${height}`)
-    try {
-      const result = await original(height)
-      console.log(`[ChainTracker] findHeaderForHeight(${height}) ← ${result ? JSON.stringify(result).slice(0, 120) : 'undefined'}`)
-      return result
-    } catch (e: unknown) {
-      console.error(`[ChainTracker] findHeaderForHeight(${height}) ERROR:`, e)
-      throw e
-    }
-  }
-  return client
-}
-
 /**
  * Build the WalletServicesOptions for a given network.
  * Pure function — no React dependencies.
@@ -57,7 +39,7 @@ export function createServiceOptions(
       fiatUpdateMsecs: 60 * 60 * 1000,
       whatsOnChainApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
       taalApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
-      chaintracks: makeLoggingChaintracksClient(
+      chaintracks: new ChaintracksServiceClient(
         network,
         process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://chaintracks-us-1.bsvb.tech'
       )
@@ -76,7 +58,7 @@ export function createServiceOptions(
       fiatUpdateMsecs: 60 * 60 * 1000000,
       whatsOnChainApiKey: process.env?.EXPO_PUBLIC_TEST_WOC_API_KEY ?? '',
       taalApiKey: process.env?.EXPO_PUBLIC_TEST_TAAL_API_KEY ?? '',
-      chaintracks: makeLoggingChaintracksClient(
+      chaintracks: new ChaintracksServiceClient(
         network,
         process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ?? 'https://chaintracks-testnet-us-1.bsvb.tech'
       )
@@ -95,7 +77,7 @@ export function createServiceOptions(
     fiatUpdateMsecs: 60 * 60 * 1000000,
     whatsOnChainApiKey: process.env?.EXPO_PUBLIC_TERATEST_WOC_API_KEY ?? '',
     taalApiKey: process.env?.EXPO_PUBLIC_TERATEST_WOC_API_KEY ?? '',
-    chaintracks: makeLoggingChaintracksClient(
+    chaintracks: new ChaintracksServiceClient(
       network,
       process.env?.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL ?? 'https://chaintracks-testnet-us-1.bsvb.tech'
     )
