@@ -24,9 +24,11 @@ import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
 import type { DisplayableIdentity } from '@bsv/sdk'
 
 import { useTranslation } from 'react-i18next'
+import { useLocalSearchParams } from 'expo-router'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
+import { parsePeerPayURI } from '@/utils/parsePeerPayURI'
 import {
   OutboxEntry,
   getOutboxEntries,
@@ -103,7 +105,12 @@ async function searchIdentities(idClient: IdentityClient, text: string): Promise
   return unique(results)
 }
 
-function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
+function useIdentitySearch(
+  wallet: any,
+  adminOriginator: string | undefined,
+  initialIdentityKey?: string,
+  onPeerPayAmount?: (sats: number) => void
+) {
   const identityClientRef = useRef<IdentityClient | null>(null)
   useEffect(() => {
     if (!wallet) return
@@ -112,11 +119,11 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
     } catch {}
   }, [wallet, adminOriginator])
 
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState(initialIdentityKey ?? '')
   const [searchResults, setSearchResults] = useState<DisplayableIdentity[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [selectedIdentity, setSelectedIdentity] = useState<DisplayableIdentity | null>(null)
-  const [recipientKey, setRecipientKey] = useState('')
+  const [recipientKey, setRecipientKey] = useState(initialIdentityKey ?? '')
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── QR scanner state ────────────────────────────────────────────────────────
@@ -176,19 +183,36 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
   }, [])
 
   // ── QR scanner handlers ─────────────────────────────────────────────────────
-  const handleQRScanned = useCallback((data: string) => {
-    const raw = data.trim()
-    try {
-      PublicKey.fromString(raw)
-      setSearchQuery(raw)
-      setRecipientKey(raw)
-      setSelectedIdentity(null)
-      setSearchResults([])
-      setScannerVisible(false)
-    } catch {
-      // Not a valid compressed public key — QRScanner will auto-retry after delay
-    }
-  }, [])
+  const handleQRScanned = useCallback(
+    (data: string) => {
+      const raw = data.trim()
+
+      // Try peerpay: URI first
+      const peerPay = parsePeerPayURI(raw)
+      if (peerPay) {
+        setSearchQuery(peerPay.identityKey)
+        setRecipientKey(peerPay.identityKey)
+        setSelectedIdentity(null)
+        setSearchResults([])
+        setScannerVisible(false)
+        if (peerPay.sats !== undefined) onPeerPayAmount?.(peerPay.sats)
+        return
+      }
+
+      // Fall back to raw public key
+      try {
+        PublicKey.fromString(raw)
+        setSearchQuery(raw)
+        setRecipientKey(raw)
+        setSelectedIdentity(null)
+        setSearchResults([])
+        setScannerVisible(false)
+      } catch {
+        // Not a valid compressed public key — QRScanner will auto-retry after delay
+      }
+    },
+    [onPeerPayAmount]
+  )
 
   const openScanner = useCallback(() => {
     setScannerVisible(true)
@@ -857,10 +881,25 @@ export default function PaymentsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, settings, storage } = useWallet()
+  const { managers, adminOriginator, settings, storage, walletBuilding } = useWallet()
   const wallet = managers?.permissionsManager || null
   const { satoshisPerUSD } = React.useContext(ExchangeRateContext)
   const currency = settings?.currency || 'BSV'
+
+  const { identityKey: paramIdentityKey, sats: paramSats } = useLocalSearchParams<{
+    identityKey?: string
+    sats?: string
+  }>()
+
+  // If wallet build finishes (auth prompt resolved) and wallet is still null, auth failed — go back
+  const prevWalletBuilding = useRef(walletBuilding)
+  useEffect(() => {
+    const wasBuilding = prevWalletBuilding.current
+    prevWalletBuilding.current = walletBuilding
+    if (wasBuilding && !walletBuilding && !wallet) {
+      router.back()
+    }
+  }, [walletBuilding, wallet])
 
   const {
     messageBoxUrl,
@@ -874,6 +913,11 @@ export default function PaymentsScreen() {
     handleNone
   } = useMessageBoxConfig(t)
   const isConfigured = !!messageBoxUrl
+
+  const [sendAmount, setSendAmount] = useState(() => {
+    const n = paramSats ? parseInt(paramSats, 10) : NaN
+    return !isNaN(n) && n > 0 ? String(n) : ''
+  })
 
   const {
     identityClientRef,
@@ -889,7 +933,12 @@ export default function PaymentsScreen() {
     setScannerVisible,
     handleQRScanned,
     openScanner
-  } = useIdentitySearch(wallet as any, adminOriginator)
+  } = useIdentitySearch(
+    wallet as any,
+    adminOriginator,
+    paramIdentityKey,
+    (sats) => setSendAmount(String(sats))
+  )
 
   // --- PeerPay state ---
   const peerPayClient = useMemo<PeerPayClient | null>(() => {
@@ -926,7 +975,6 @@ export default function PaymentsScreen() {
   const [retryingId, setRetryingId] = useState<string | null>(null)
 
   // --- Send / accept result state ---
-  const [sendAmount, setSendAmount] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [sendResult, setSendResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [acceptResult, setAcceptResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)

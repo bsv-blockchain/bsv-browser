@@ -75,6 +75,18 @@
             "BROWSABLE",
             "DEFAULT"
           ]
+        },
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "peerpay"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -92,6 +104,11 @@
             "CFBundleURLSchemes": [
               "https",
               "http"
+            ]
+          },
+          {
+            "CFBundleURLSchemes": [
+              "peerpay"
             ]
           }
         ],
