@@ -3,7 +3,7 @@
   "description": "BSV Browser - Enabling identity, micropayments, and use of BSV websites on mobile devices",
   "author": "BSV Association",
   "main": "index.js",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "license": "Open BSV",
   "scripts": {
     "start": "expo start --dev-client",
