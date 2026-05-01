@@ -37,7 +37,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText })
 
   // In USD mode, we maintain a separate display value (dollars) from the satoshi value
   const [usdDisplayValue, setUsdDisplayValue] = useState('')
-  const lastEmittedSats = useRef(value)
+  const lastEmittedSats = useRef('')
 
   // Sync USD display value when the satoshi value changes externally (e.g., cleared by parent)
   useEffect(() => {
