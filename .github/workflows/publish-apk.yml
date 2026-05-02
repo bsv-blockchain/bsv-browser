@@ -1,0 +1,60 @@
+name: Publish APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-apk:
+    name: Build and Publish Android APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android APK via EAS
+        id: build
+        run: |
+          BUILD_JSON=$(eas build \
+            --profile production-apk \
+            --platform android \
+            --non-interactive \
+            --wait \
+            --json)
+          APK_URL=$(echo "$BUILD_JSON" | jq -r \
+            '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // .buildUrl // empty')
+          if [ -z "$APK_URL" ] || [ "$APK_URL" = "null" ]; then
+            echo "::error::Failed to retrieve APK URL from EAS build output."
+            exit 1
+          fi
+          echo "apk_url=$APK_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Download APK
+        run: |
+          curl -fSL "${{ steps.build.outputs.apk_url }}" \
+            -o "bsv-browser-${{ github.ref_name }}.apk"
+
+      - name: Create GitHub Release and upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bsv-browser-${{ github.ref_name }}.apk
+          generate_release_notes: true

@@ -48,6 +48,12 @@
         "EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL": "https://chaintracks-testnet-us-1.bsvb.tech",
         "EXPO_PUBLIC_TERATEST_WOC_API_KEY": "testnet_8a709373c94c6e372b90458fee766b04"
       }
+    },
+    "production-apk": {
+      "extends": "production",
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
   "submit": {
