@@ -881,7 +881,7 @@ export default function PaymentsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, settings, storage, walletBuilding } = useWallet()
+  const { managers, adminOriginator, settings, storage, walletBuilding, walletBuilt } = useWallet()
   const wallet = managers?.permissionsManager || null
   const { satoshisPerUSD } = React.useContext(ExchangeRateContext)
   const currency = settings?.currency || 'BSV'
@@ -896,10 +896,10 @@ export default function PaymentsScreen() {
   useEffect(() => {
     const wasBuilding = prevWalletBuilding.current
     prevWalletBuilding.current = walletBuilding
-    if (wasBuilding && !walletBuilding && !wallet) {
+    if (wasBuilding && !walletBuilding && !walletBuilt) {
       router.back()
     }
-  }, [walletBuilding, wallet])
+  }, [walletBuilding, walletBuilt])
 
   const {
     messageBoxUrl,

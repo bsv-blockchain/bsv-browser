@@ -120,6 +120,8 @@ export interface WalletContextValue {
   txStatusVersion: number
   /** True while the wallet is being built (biometric auth pending, async build in progress) */
   walletBuilding: boolean
+  /** True once the wallet has been successfully built (mnemonic/key provisioned) */
+  walletBuilt: boolean
   /**
    * Notification from background BLE payment processing.
    * Set when pending payments are internalized in the background (e.g. on
@@ -166,6 +168,7 @@ export const WalletContext = createContext<WalletContextValue>({
   refreshProof: async () => {},
   txStatusVersion: 0,
   walletBuilding: false,
+  walletBuilt: false,
   runMonitorTask: async () => '',
   getMonitorTaskNames: () => [],
   checkUtxoSpendability: async () => ''
@@ -1345,6 +1348,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       refreshProof,
       txStatusVersion,
       walletBuilding,
+      walletBuilt,
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability
@@ -1381,6 +1385,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       refreshProof,
       txStatusVersion,
       walletBuilding,
+      walletBuilt,
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability
