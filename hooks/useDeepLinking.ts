@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { Linking } from 'react-native'
 import { router } from 'expo-router'
 import tabStore from '@/stores/TabStore'
-import { parsePeerPayURI } from '@/utils/parsePeerPayURI'
 
 /**
  * Simplified deep linking: when app receives http/https URL, navigate browser directly to it.
@@ -85,15 +84,7 @@ export function useDeepLinking() {
   }
 
   const handlePeerPayLink = (url: string) => {
-    const parsed = parsePeerPayURI(url)
-    if (!parsed) {
-      console.warn('[Deep Link] Invalid peerpay URI:', url)
-      router.replace('/payments')
-      return
-    }
-    const params: Record<string, string> = { identityKey: parsed.identityKey }
-    if (parsed.sats !== undefined) params.sats = String(parsed.sats)
-    router.replace({ pathname: '/payments', params })
+    router.replace({ pathname: '/payments', params: { peerpay: url } })
   }
 
   /**

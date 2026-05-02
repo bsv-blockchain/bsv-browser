@@ -9,11 +9,10 @@ import {
   StyleSheet,
   Keyboard,
   Image,
-  Modal,
-  Platform
+  Modal
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import QRScanner from '@/components/QRScanner'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -24,11 +23,10 @@ import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
 import type { DisplayableIdentity } from '@bsv/sdk'
 
 import { useTranslation } from 'react-i18next'
-import { useLocalSearchParams } from 'expo-router'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { parsePeerPayURI } from '@/utils/parsePeerPayURI'
+import { type PeerPayValidationResult, validatePeerPayURI } from '@/utils/parsePeerPayURI'
 import {
   OutboxEntry,
   getOutboxEntries,
@@ -44,6 +42,16 @@ import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 
 const MESSAGE_BOX_URL_KEY = 'message_box_url'
 const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
+
+const firstParam = (value: string | string[] | undefined) => {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function peerPayValidationMessage(result: PeerPayValidationResult | null) {
+  if (!result || !result.isPeerPay) return null
+  const messages = [result.errors.identityKey, result.errors.sats].filter(Boolean)
+  return messages.length ? messages.join('. ') : null
+}
 
 const unique = (results: DisplayableIdentity[]) => {
   return results.filter((identity, index) => {
@@ -109,7 +117,8 @@ function useIdentitySearch(
   wallet: any,
   adminOriginator: string | undefined,
   initialIdentityKey?: string,
-  onPeerPayAmount?: (sats: number) => void
+  onPeerPayAmount?: (sats: number) => void,
+  onPeerPayError?: (message: string) => void
 ) {
   const identityClientRef = useRef<IdentityClient | null>(null)
   useEffect(() => {
@@ -125,6 +134,17 @@ function useIdentitySearch(
   const [selectedIdentity, setSelectedIdentity] = useState<DisplayableIdentity | null>(null)
   const [recipientKey, setRecipientKey] = useState(initialIdentityKey ?? '')
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const setDirectRecipient = useCallback((identityKey: string) => {
+    setSearchQuery(identityKey)
+    setRecipientKey(identityKey)
+    setSelectedIdentity(null)
+    setSearchResults([])
+  }, [])
+
+  useEffect(() => {
+    if (initialIdentityKey) setDirectRecipient(initialIdentityKey)
+  }, [initialIdentityKey, setDirectRecipient])
 
   // ── QR scanner state ────────────────────────────────────────────────────────
   const [scannerVisible, setScannerVisible] = useState(false)
@@ -188,14 +208,15 @@ function useIdentitySearch(
       const raw = data.trim()
 
       // Try peerpay: URI first
-      const peerPay = parsePeerPayURI(raw)
-      if (peerPay) {
-        setSearchQuery(peerPay.identityKey)
-        setRecipientKey(peerPay.identityKey)
-        setSelectedIdentity(null)
-        setSearchResults([])
+      if (raw.toLowerCase().startsWith('peerpay:')) {
+        const validation = validatePeerPayURI(raw)
+        const errorMessage = peerPayValidationMessage(validation)
+
+        if (validation.identityKey) setDirectRecipient(validation.identityKey)
+        if (validation.sats !== undefined) onPeerPayAmount?.(validation.sats)
+        if (errorMessage) onPeerPayError?.(errorMessage)
+
         setScannerVisible(false)
-        if (peerPay.sats !== undefined) onPeerPayAmount?.(peerPay.sats)
         return
       }
 
@@ -211,7 +232,7 @@ function useIdentitySearch(
         // Not a valid compressed public key — QRScanner will auto-retry after delay
       }
     },
-    [onPeerPayAmount]
+    [onPeerPayAmount, onPeerPayError, setDirectRecipient]
   )
 
   const openScanner = useCallback(() => {
@@ -886,10 +907,19 @@ export default function PaymentsScreen() {
   const { satoshisPerUSD } = React.useContext(ExchangeRateContext)
   const currency = settings?.currency || 'BSV'
 
-  const { identityKey: paramIdentityKey, sats: paramSats } = useLocalSearchParams<{
-    identityKey?: string
-    sats?: string
+  const params = useLocalSearchParams<{
+    identityKey?: string | string[]
+    sats?: string | string[]
+    peerpay?: string | string[]
   }>()
+  const paramPeerPay = firstParam(params.peerpay)
+  const peerPayValidation = useMemo(
+    () => (paramPeerPay ? validatePeerPayURI(paramPeerPay) : null),
+    [paramPeerPay]
+  )
+  const peerPayErrorMessage = peerPayValidationMessage(peerPayValidation)
+  const routeIdentityKey = peerPayValidation?.identityKey ?? firstParam(params.identityKey)
+  const routeSats = peerPayValidation?.sats !== undefined ? String(peerPayValidation.sats) : firstParam(params.sats)
 
   // If wallet build finishes (auth prompt resolved) and wallet is still null, auth failed — go back
   const prevWalletBuilding = useRef(walletBuilding)
@@ -915,9 +945,10 @@ export default function PaymentsScreen() {
   const isConfigured = !!messageBoxUrl
 
   const [sendAmount, setSendAmount] = useState(() => {
-    const n = paramSats ? parseInt(paramSats, 10) : NaN
+    const n = routeSats ? parseInt(routeSats, 10) : NaN
     return !isNaN(n) && n > 0 ? String(n) : ''
   })
+  const [peerPayNotice, setPeerPayNotice] = useState<{ type: 'error'; message: string } | null>(null)
 
   const {
     identityClientRef,
@@ -936,9 +967,24 @@ export default function PaymentsScreen() {
   } = useIdentitySearch(
     wallet as any,
     adminOriginator,
-    paramIdentityKey,
-    (sats) => setSendAmount(String(sats))
+    routeIdentityKey,
+    (sats) => setSendAmount(String(sats)),
+    (message) => setPeerPayNotice({ type: 'error', message })
   )
+
+  useEffect(() => {
+    if (!paramPeerPay) return
+
+    if (peerPayValidation?.sats !== undefined) setSendAmount(String(peerPayValidation.sats))
+    else if (peerPayValidation?.errors.sats) setSendAmount('')
+
+    if (peerPayErrorMessage) {
+      if (!peerPayValidation?.identityKey) clearRecipient()
+      setPeerPayNotice({ type: 'error', message: peerPayErrorMessage })
+    } else {
+      setPeerPayNotice(null)
+    }
+  }, [paramPeerPay, peerPayErrorMessage, peerPayValidation, clearRecipient])
 
   // --- PeerPay state ---
   const peerPayClient = useMemo<PeerPayClient | null>(() => {
@@ -1263,6 +1309,10 @@ export default function PaymentsScreen() {
             onReset={handleRemove}
             onNone={handleNone}
           />
+        )}
+
+        {peerPayNotice && (
+          <ResultBanner result={peerPayNotice} onDismiss={() => setPeerPayNotice(null)} colors={colors} />
         )}
 
         {messageBoxUrl === 'noMessageBox' ? (
