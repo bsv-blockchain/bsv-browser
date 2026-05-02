@@ -927,7 +927,11 @@ export default function PaymentsScreen() {
     const wasBuilding = prevWalletBuilding.current
     prevWalletBuilding.current = walletBuilding
     if (wasBuilding && !walletBuilding && !walletBuilt) {
-      router.back()
+      if (router.canGoBack()) {
+        router.back()
+      } else {
+        router.replace('/')
+      }
     }
   }, [walletBuilding, walletBuilt])
 
@@ -1265,7 +1269,7 @@ export default function PaymentsScreen() {
     <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+        <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={styles.headerButton}>
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('payments')}</Text>
