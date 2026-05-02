@@ -9,7 +9,10 @@ import tabStore from '@/stores/TabStore'
  */
 export function useDeepLinking() {
   useEffect(() => {
-    // Handle app opened from deep link while closed
+    // Handle app opened from deep link while closed.
+    // Note: peerpay: initial URLs are already handled by +native-intent.ts which
+    // maps them to /payments?peerpay=... as the initial route. Calling router.replace
+    // here too would remount the payments screen mid-wallet-build and cause a flicker.
     const getInitialURL = async () => {
       const url = await Linking.getInitialURL()
       if (!url) return
@@ -19,10 +22,8 @@ export function useDeepLinking() {
       } else if (url.startsWith('bsv-browser://pair')) {
         console.log('[Deep Link] Opening pairing screen:', url)
         handlePairingLink(url)
-      } else if (url.toLowerCase().startsWith('peerpay:')) {
-        console.log('[Deep Link] Opening payments screen:', url)
-        handlePeerPayLink(url)
       }
+      // peerpay: intentionally omitted — handled by +native-intent.ts on cold start
     }
 
     // Handle app opened from deep link while running
