@@ -9,7 +9,14 @@ import type { AppChain } from '@/context/config'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
+import {
+  DEFAULT_AUTO_APPROVE_THRESHOLD,
+  AUTO_APPROVE_STORAGE_KEY,
+  KNOWN_ARC_URLS,
+  DEFAULT_ARC_URLS,
+  arcUrlStorageKey,
+  arcApiTokenStorageKey
+} from '@/shared/constants'
 
 import { formatAmount, parseDisplayToSatoshis, getUnitLabel } from '@/utils/amountFormatHelpers'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
@@ -54,6 +61,10 @@ export default function WalletConfigScreen() {
   const [thresholdExpanded, setThresholdExpanded] = useState(false)
   const [thresholdSats, setThresholdSats] = useState(DEFAULT_AUTO_APPROVE_THRESHOLD)
   const [thresholdInput, setThresholdInput] = useState('')
+  const [arcExpanded, setArcExpanded] = useState(false)
+  const [arcUrlInput, setArcUrlInput] = useState('')
+  const [arcTokenInput, setArcTokenInput] = useState('')
+  const [arcSaving, setArcSaving] = useState(false)
   const { satoshisPerUSD } = useContext(ExchangeRateContext)
 
   const currentCurrency = settings?.currency || 'BSV'
@@ -64,6 +75,17 @@ export default function WalletConfigScreen() {
       if (v !== null) setThresholdSats(Number(v) || 0)
     })
   }, [])
+
+  // Load persisted ARC URL + token for current network
+  useEffect(() => {
+    Promise.all([
+      AsyncStorage.getItem(arcUrlStorageKey(selectedNetwork)),
+      AsyncStorage.getItem(arcApiTokenStorageKey(selectedNetwork))
+    ]).then(([url, token]) => {
+      setArcUrlInput(url ?? DEFAULT_ARC_URLS[selectedNetwork] ?? '')
+      setArcTokenInput(token ?? '')
+    })
+  }, [selectedNetwork])
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleThresholdInput = useCallback((text: string) => {
@@ -182,6 +204,43 @@ export default function WalletConfigScreen() {
     }
   }
 
+  const handleApplyArc = async () => {
+    if (arcSaving) return
+    setArcSaving(true)
+    try {
+      const url = arcUrlInput.trim()
+      const token = arcTokenInput.trim()
+      const defaultUrl = DEFAULT_ARC_URLS[selectedNetwork] ?? ''
+      if (url && url !== defaultUrl) {
+        await AsyncStorage.setItem(arcUrlStorageKey(selectedNetwork), url)
+      } else {
+        await AsyncStorage.removeItem(arcUrlStorageKey(selectedNetwork))
+      }
+      if (token) {
+        await AsyncStorage.setItem(arcApiTokenStorageKey(selectedNetwork), token)
+      } else {
+        await AsyncStorage.removeItem(arcApiTokenStorageKey(selectedNetwork))
+      }
+      setArcExpanded(false)
+      await rebuildWallet()
+    } catch (e) {
+      console.error('[WalletConfig] ARC settings save failed:', e)
+    } finally {
+      setArcSaving(false)
+    }
+  }
+
+  const handleResetArc = async () => {
+    await Promise.all([
+      AsyncStorage.removeItem(arcUrlStorageKey(selectedNetwork)),
+      AsyncStorage.removeItem(arcApiTokenStorageKey(selectedNetwork))
+    ])
+    setArcUrlInput(DEFAULT_ARC_URLS[selectedNetwork] ?? '')
+    setArcTokenInput('')
+    setArcExpanded(false)
+    await rebuildWallet()
+  }
+
   const NETWORKS: { id: AppChain; label: string; color: string }[] = [
     { id: 'main', label: t('mainnet'), color: colors.success },
     { id: 'test', label: t('testnet'), color: colors.warning },
@@ -252,11 +311,103 @@ export default function WalletConfigScreen() {
             </View>
           )}
           <ListRow
-            label={t('trust_network')}
-            icon="shield-checkmark-outline"
-            iconColor="#BF5AF2"
-            onPress={() => router.push('/trust' as any)}
+            label={t('arc_endpoint')}
+            value={(() => {
+              const known = KNOWN_ARC_URLS.find(k => arcUrlInput.startsWith(k.url))
+              return known ? known.label : arcUrlInput.replace('https://', '')
+            })()}
+            icon="radio-outline"
+            iconColor="#6E56CF"
+            onPress={() => setArcExpanded(e => !e)}
+            showChevron={arcExpanded}
+            chevronDown={arcExpanded}
+            isLast={arcExpanded}
           />
+          {arcExpanded && (
+            <View style={[localStyles.networkList, { paddingTop: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }]}>
+              {KNOWN_ARC_URLS.map(preset => {
+                const isSelected = arcUrlInput.startsWith(preset.url)
+                return (
+                  <TouchableOpacity
+                    key={preset.url}
+                    style={localStyles.networkOption}
+                    onPress={() => setArcUrlInput(preset.url)}
+                    activeOpacity={0.6}
+                  >
+                    <View
+                      style={[
+                        localStyles.networkDot,
+                        { backgroundColor: isSelected ? colors.accent : colors.separator }
+                      ]}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[localStyles.networkLabel, { color: colors.textPrimary }]}>
+                        {preset.label}
+                      </Text>
+                      <Text style={{ ...typography.caption1, color: colors.textSecondary }} numberOfLines={1}>
+                        {preset.url.replace('https://', '')}
+                      </Text>
+                    </View>
+                    {preset.requiresToken && (
+                      <Text style={{ ...typography.caption1, color: colors.warning, marginLeft: spacing.sm }}>
+                        {t('arc_requires_token')}
+                      </Text>
+                    )}
+                    {isSelected && (
+                      <Ionicons name="checkmark" size={18} color={colors.accent} style={{ marginLeft: spacing.sm }} />
+                    )}
+                  </TouchableOpacity>
+                )
+              })}
+              <View style={localStyles.arcInputRow}>
+                <Text style={[localStyles.arcLabel, { color: colors.textSecondary }]}>{t('arc_custom_url')}</Text>
+                <TextInput
+                  style={[localStyles.arcInput, { color: colors.textPrimary, borderColor: colors.separator }]}
+                  value={arcUrlInput}
+                  onChangeText={setArcUrlInput}
+                  placeholder="https://..."
+                  placeholderTextColor={colors.textSecondary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  returnKeyType="next"
+                />
+              </View>
+              <View style={localStyles.arcInputRow}>
+                <Text style={[localStyles.arcLabel, { color: colors.textSecondary }]}>{t('arc_api_token')}</Text>
+                <TextInput
+                  style={[localStyles.arcInput, { color: colors.textPrimary, borderColor: colors.separator }]}
+                  value={arcTokenInput}
+                  onChangeText={setArcTokenInput}
+                  placeholder="Optional"
+                  placeholderTextColor={colors.textSecondary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  secureTextEntry={false}
+                />
+              </View>
+              <View style={localStyles.arcButtonRow}>
+                <TouchableOpacity
+                  style={[localStyles.arcButton, { backgroundColor: colors.backgroundTertiary }]}
+                  onPress={handleResetArc}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ ...typography.body, color: colors.textSecondary }}>{t('arc_reset_default')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[localStyles.arcButton, { backgroundColor: colors.accent }]}
+                  onPress={handleApplyArc}
+                  activeOpacity={0.7}
+                >
+                  {arcSaving
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Text style={{ ...typography.body, color: '#fff', fontWeight: '600' }}>{t('arc_apply')}</Text>
+                  }
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
           <ListRow
             label={t('display_currency')}
             value={CURRENCIES.find(c => c.id === currentCurrency)?.label ?? currentCurrency}
@@ -337,6 +488,12 @@ export default function WalletConfigScreen() {
 
         {/* ── Data & Security ── */}
         <GroupedSection header={t('data_and_security')}>
+          <ListRow
+            label={t('trust_network')}
+            icon="shield-checkmark-outline"
+            iconColor="#BF5AF2"
+            onPress={() => router.push('/trust' as any)}
+          />
           <ListRow
             label={t('recovery_phrase')}
             icon="key-outline"
@@ -463,5 +620,33 @@ const localStyles = StyleSheet.create({
   thresholdUnit: {
     ...typography.body,
     marginLeft: spacing.sm
+  },
+  arcInputRow: {
+    paddingTop: spacing.md,
+    gap: spacing.xs
+  },
+  arcLabel: {
+    ...typography.caption1,
+    marginBottom: spacing.xs
+  },
+  arcInput: {
+    ...typography.body,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  arcButtonRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm
+  },
+  arcButton: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center'
   }
 })

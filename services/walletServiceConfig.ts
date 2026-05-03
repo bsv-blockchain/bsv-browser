@@ -15,7 +15,9 @@ import type {
 export function createServiceOptions(
   network: AppChain,
   callbackToken: string,
-  bsvExchangeRate: BsvExchangeRate
+  bsvExchangeRate: BsvExchangeRate,
+  arcUrlOverride?: string,
+  arcApiKeyOverride?: string
 ): WalletServicesOptions {
   const base = {
     chain: network,
@@ -30,9 +32,9 @@ export function createServiceOptions(
   if (network === 'main') {
     return {
       ...base,
-      arcUrl: process.env?.EXPO_PUBLIC_ARC_URL ?? 'https://arcade-v2-us-1.bsvblockchain.tech',
+      arcUrl: arcUrlOverride ?? process.env?.EXPO_PUBLIC_ARC_URL ?? 'https://arcade-v2-us-1.bsvblockchain.tech',
       arcConfig: {
-        apiKey: process.env?.EXPO_PUBLIC_ARC_API_KEY ?? '',
+        apiKey: arcApiKeyOverride ?? process.env?.EXPO_PUBLIC_ARC_API_KEY ?? '',
         callbackToken
       },
       bsvUpdateMsecs: 60 * 60 * 1000,
@@ -49,9 +51,9 @@ export function createServiceOptions(
   if (network === 'test') {
     return {
       ...base,
-      arcUrl: process.env?.EXPO_PUBLIC_TEST_ARC_URL ?? 'https://arcade-v2-testnet-us-1.bsvblockchain.tech',
+      arcUrl: arcUrlOverride ?? process.env?.EXPO_PUBLIC_TEST_ARC_URL ?? 'https://arcade-v2-testnet-us-1.bsvblockchain.tech',
       arcConfig: {
-        apiKey: process.env?.EXPO_PUBLIC_TEST_ARC_API_KEY ?? '',
+        apiKey: arcApiKeyOverride ?? process.env?.EXPO_PUBLIC_TEST_ARC_API_KEY ?? '',
         callbackToken
       },
       bsvUpdateMsecs: 60 * 60 * 1000000,
@@ -68,9 +70,9 @@ export function createServiceOptions(
   // teratest
   return {
     ...base,
-    arcUrl: process.env?.EXPO_PUBLIC_TERATEST_ARC_URL ?? 'https://arcade-v2-ttn-us-1.bsvblockchain.tech',
+    arcUrl: arcUrlOverride ?? process.env?.EXPO_PUBLIC_TERATEST_ARC_URL ?? 'https://arcade-v2-ttn-us-1.bsvblockchain.tech',
     arcConfig: {
-      apiKey: process.env?.EXPO_PUBLIC_TERATEST_ARC_API_KEY ?? '',
+      apiKey: arcApiKeyOverride ?? process.env?.EXPO_PUBLIC_TERATEST_ARC_API_KEY ?? '',
       callbackToken
     },
     bsvUpdateMsecs: 60 * 60 * 1000000,
@@ -90,9 +92,11 @@ export function createServiceOptions(
 export function createServices(
   network: AppChain,
   callbackToken: string,
-  bsvExchangeRate: BsvExchangeRate
+  bsvExchangeRate: BsvExchangeRate,
+  arcUrlOverride?: string,
+  arcApiKeyOverride?: string
 ): { services: Services; serviceOptions: WalletServicesOptions } {
-  const serviceOptions = createServiceOptions(network, callbackToken, bsvExchangeRate)
+  const serviceOptions = createServiceOptions(network, callbackToken, bsvExchangeRate, arcUrlOverride, arcApiKeyOverride)
   const services = new Services(serviceOptions)
   return { services, serviceOptions }
 }

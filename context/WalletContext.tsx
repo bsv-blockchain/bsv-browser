@@ -543,7 +543,17 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const bsvExchangeRate = await getExchangeRate()
         const callbackToken = keyDeriver.identityKey.substring(0, 32)
 
-        const { services, serviceOptions } = createServices(selectedNetwork, callbackToken, bsvExchangeRate)
+        const [arcUrlOverride, arcApiTokenOverride] = await Promise.all([
+          AsyncStorage.getItem(`arc_custom_url_${chain}`),
+          AsyncStorage.getItem(`arc_custom_api_token_${chain}`)
+        ])
+        const { services, serviceOptions } = createServices(
+          selectedNetwork,
+          callbackToken,
+          bsvExchangeRate,
+          arcUrlOverride || undefined,
+          arcApiTokenOverride || undefined
+        )
 
         // Replace all default broadcast providers with EF/rawtx-only services.
         // Order: Arcade → Taal → GorillaPool → WoC → Bitails. UntilSuccess stops at first success.

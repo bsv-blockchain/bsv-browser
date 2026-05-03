@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Modal, Pressable } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -15,14 +15,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import Clipboard from '@react-native-clipboard/clipboard'
 import QRCode from 'react-native-qrcode-svg'
 
-const BALANCE_CACHE_KEY = 'cached_wallet_balance'
-const BALANCE_CACHE_TIMESTAMP_KEY = 'cached_wallet_balance_timestamp'
 const CACHE_DURATION = 30000
 
 export default function SettingsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const { managers, adminOriginator, selectedNetwork } = useWallet()
+
+  const balanceCacheKey = `cached_wallet_balance_${selectedNetwork}`
+  const balanceCacheTimestampKey = `cached_wallet_balance_ts_${selectedNetwork}`
   const { isWeb2Mode } = useBrowserMode()
   const [identityKey, setIdentityKey] = useState('')
   const [copiedKey, setCopiedKey] = useState(false)
@@ -56,35 +57,26 @@ export default function SettingsScreen() {
       setAccountBalance(total)
       setBalanceLoading(false)
       await Promise.all([
-        AsyncStorage.setItem(BALANCE_CACHE_KEY, String(total)),
-        AsyncStorage.setItem(BALANCE_CACHE_TIMESTAMP_KEY, String(Date.now()))
+        AsyncStorage.setItem(balanceCacheKey, String(total)),
+        AsyncStorage.setItem(balanceCacheTimestampKey, String(Date.now()))
       ])
     } catch (e) {
       console.error('Error refreshing balance:', e)
       setBalanceLoading(false)
     }
-  }, [managers, adminOriginator])
-
-  // Ref set to true when a network switch is in progress so the effect below
-  // skips the cache and fetches fresh once the rebuilt wallet is available.
-  const pendingNetworkRefreshRef = useRef(false)
+  }, [managers, adminOriginator, balanceCacheKey, balanceCacheTimestampKey])
 
   useEffect(() => {
-    if (!managers.permissionsManager) return
-
-    if (pendingNetworkRefreshRef.current) {
-      pendingNetworkRefreshRef.current = false
-      setBalanceLoading(true)
-      const t = setTimeout(refreshBalance, 300)
-      return () => clearTimeout(t)
+    if (!managers.permissionsManager) {
+      setAccountBalance(null)
+      return
     }
 
-    // Normal mount/manager-change path: consult cache first
     let cancelled = false
     ;(async () => {
       const [cached, ts] = await Promise.all([
-        AsyncStorage.getItem(BALANCE_CACHE_KEY),
-        AsyncStorage.getItem(BALANCE_CACHE_TIMESTAMP_KEY)
+        AsyncStorage.getItem(balanceCacheKey),
+        AsyncStorage.getItem(balanceCacheTimestampKey)
       ])
       if (cancelled) return
       if (cached !== null) {
@@ -101,7 +93,7 @@ export default function SettingsScreen() {
     return () => {
       cancelled = true
     }
-  }, [managers.permissionsManager, refreshBalance])
+  }, [managers.permissionsManager, refreshBalance, balanceCacheKey, balanceCacheTimestampKey])
 
   return (
     <View style={{ backgroundColor: colors.backgroundSecondary }}>
