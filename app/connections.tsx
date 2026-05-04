@@ -16,7 +16,7 @@ import { ListRow } from '@/components/ui/ListRow'
 import { useWallet } from '@/context/WalletContext'
 import connectionStore, { type Connection } from '@/stores/ConnectionStore'
 import QRScanner from '@/components/QRScanner'
-import { useWalletConnection } from '@/context/WalletConnectionContext'
+import { useWalletConnection, lastSeqKey } from '@/context/WalletConnectionContext'
 
 interface PairingParams {
   [key: string]: string // required by Expo Router's UnknownInputParams
@@ -246,7 +246,10 @@ export default observer(function ConnectionsScreen() {
                           <Text style={[styles.trailingActionText, { color: colors.info }]}>{t('reconnect')}</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                          onPress={() => connectionStore.remove(item.sessionId)}
+                          onPress={() => {
+                            void SecureStore.deleteItemAsync(lastSeqKey(item.sessionId))
+                            connectionStore.remove(item.sessionId)
+                          }}
                           style={[styles.trailingAction, { marginLeft: spacing.md }]}
                           activeOpacity={0.6}
                         >

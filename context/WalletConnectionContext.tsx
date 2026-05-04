@@ -18,7 +18,7 @@ export const IMPLEMENTED_METHODS = new Set([
 const NAV_TIMEOUT_MS      = 5  * 60 * 1000  // 5 min  — navigated away from pair screen
 const APP_STATE_TIMEOUT_MS = 12 * 60 * 1000  // 12 min — app backgrounded
 
-const lastSeqKey = (topic: string) => `wallet_pairing_lastseq_${topic}`
+export const lastSeqKey = (topic: string) => `wallet_pairing_lastseq_${topic}`
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
