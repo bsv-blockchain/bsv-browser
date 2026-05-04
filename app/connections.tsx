@@ -136,7 +136,7 @@ export default observer(function ConnectionsScreen() {
 
       ws.onopen = async () => {
         try {
-          const storedSeq = await SecureStore.getItemAsync(`wallet_pairing_lastseq_${conn.sessionId}`)
+          const storedSeq = await SecureStore.getItemAsync(lastSeqKey(conn.sessionId))
           const seq = storedSeq ? Number(storedSeq) + 1 : 1
           const payload = JSON.stringify({
             id: crypto.randomUUID(),
