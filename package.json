@@ -3,7 +3,7 @@
   "description": "BSV Browser - Enabling identity, micropayments, and use of BSV websites on mobile devices",
   "author": "BSV Association",
   "main": "index.js",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "license": "Open BSV",
   "scripts": {
     "start": "expo start --dev-client",
@@ -33,9 +33,10 @@
   "dependencies": {
     "@bsv/btms": "^1.0.1",
     "@bsv/btms-permission-module": "^1.0.1",
-    "@bsv/message-box-client": "^2.1.0",
-    "@bsv/sdk": "^2.0.13",
-    "@bsv/wallet-toolbox-mobile": "^2.1.21",
+    "@bsv/message-box-client": "^2.1.1",
+    "@bsv/sdk": "^2.1.0",
+    "@bsv/wallet-relay": "^0.1.1",
+    "@bsv/wallet-toolbox-mobile": "^2.1.25",
     "@callstack/liquid-glass": "^0.7.0",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",
