@@ -11,7 +11,8 @@ import {
   KeyboardAvoidingView,
   BackHandler,
   InteractionManager,
-  ActivityIndicator
+  ActivityIndicator,
+  useWindowDimensions
 } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -34,7 +35,8 @@ import {
   kNEW_TAB_URL,
   SEARCH_ENGINES,
   DEFAULT_SEARCH_ENGINE_ID,
-  safeBottomInset
+  safeBottomInset,
+  ADDRESS_BAR_HEIGHT
 } from '@/shared/constants'
 import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
@@ -81,6 +83,46 @@ function getInjectableJSMessage(message: any = {}) {
       window.dispatchEvent(new MessageEvent('message', {
         data: JSON.stringify(${messageString})
       }));
+    })();
+  `
+}
+
+/**
+ * Builds a small injection script that exposes the current browser chrome
+ * safe area insets (including address-bar reservations) to the web page via
+ * CSS custom properties, a global object, and a CustomEvent.
+ *
+ *   padding-bottom: calc(
+ *     env(safe-area-inset-bottom) +
+ *     var(--browser-safe-area-inset-bottom, 0px)
+ *   );
+ *
+ * The bottom value is driven by `bottomReservedHeight` (coordinated name with
+ * the measurement agent responsible for precise on-layout / keyboard /
+ * orientation measurements). Re-dispatch of the event and updates to
+ * window.__browserSafeAreaInsets.bottom occur on every call (initial load,
+ * bar reposition, measurement change, orientation, keyboard).
+ *
+ * The generated script is resilient (inner try/catch) and idempotent
+ * (repeated sets / dispatches are harmless).
+ */
+function buildBrowserSafeAreaScript(bottomReservedHeight: number, topReservedHeight: number) {
+  return `
+    (function(){
+      try {
+        var root = document.documentElement;
+        root.style.setProperty('--browser-safe-area-inset-bottom', '${bottomReservedHeight}px');
+        root.style.setProperty('--browser-safe-area-inset-top', '${topReservedHeight}px');
+        root.style.setProperty('--browser-address-bar-height', '${ADDRESS_BAR_HEIGHT}px');
+
+        // Expose current values for JS access (precise measured bottomReservedHeight)
+        window.__browserSafeAreaInsets = { bottom: ${bottomReservedHeight}, top: ${topReservedHeight} };
+
+        // Notify any listeners (pages can addEventListener('browser-safe-area-change', ...))
+        window.dispatchEvent(new CustomEvent('browser-safe-area-change', {
+          detail: window.__browserSafeAreaInsets
+        }));
+      } catch (e) {}
     })();
   `
 }
@@ -230,6 +272,13 @@ const Browser = observer(function Browser() {
 
   const addressInputRef = useRef<TextInput>(null)
 
+  // Collapse ref + stable callback declared BEFORE the hook so the function
+  // identity is defined at the call site (avoids TDZ → undefined → no-op default).
+  const collapseRef = useRef<() => void>(() => {})
+  const requestCollapseAddressBar = useCallback(() => {
+    collapseRef.current()
+  }, [])
+
   const {
     keyboardVisible,
     addressBarPanGesture,
@@ -242,8 +291,12 @@ const Browser = observer(function Browser() {
     addressEditing,
     addressInputRef,
     setAddressFocused,
-    setAddressSuggestions
+    setAddressSuggestions,
+    requestCollapseAddressBar
   )
+
+  // Window dimensions for detecting orientation changes (to trigger safe-area re-injection)
+  const { width: winWidth, height: winHeight } = useWindowDimensions()
 
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
@@ -260,6 +313,62 @@ const Browser = observer(function Browser() {
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Address bar collapse state (new gesture: rightward hold+swipe collapses bar into the ... button)
+  const [addressBarCollapsed, setAddressBarCollapsed] = useState(false)
+  // Remember where the bar was before collapsing so we can restore the position on expand
+  const positionBeforeCollapse = useRef<'top' | 'bottom'>('bottom')
+
+  const collapseAddressBar = useCallback(() => {
+    if (addressBarIsAtTop) {
+      // For now we only support collapsing when the bar is at the bottom (most useful)
+      return
+    }
+    positionBeforeCollapse.current = 'bottom'
+    setAddressBarCollapsed(true)
+  }, [addressBarIsAtTop])
+
+  const expandAddressBar = useCallback(() => {
+    setAddressBarCollapsed(false)
+  }, [])
+
+  // Keep the ref up to date so runOnJS always calls the latest version (avoids stale closures)
+  useEffect(() => {
+    collapseRef.current = collapseAddressBar
+  }, [collapseAddressBar])
+
+  // Direct collapse helper for the DEV button and other places
+  const doCollapse = useCallback(() => {
+    if (!addressBarIsAtTop && !addressBarCollapsed) {
+      collapseRef.current()
+    }
+  }, [addressBarIsAtTop, addressBarCollapsed])
+
+  /**
+   * Approach A: When the address bar is positioned at the bottom, inset the
+   * WebView content area from the bottom so that fixed/sticky elements on
+   * websites (nav bars, banners, etc.) do not get visually overlapped by
+   * the address bar. The WebView viewport shrinks instead of the bar being
+   * a floating overlay on top of full-height content.
+   */
+  // Tunable visual compensation (in pixels) for any slight "overhang" of the frosted glass
+  // (blur radius, border, shadow, or perceived height of the pill). Start at 0.
+  // Increase if the red block on the WebKit demo still sits a pixel or two below the bar.
+  const BOTTOM_CHROME_VISUAL_EXTRA = 0;
+
+  /**
+   * The authoritative height (from device bottom) that must be reserved for the address bar
+   * when it is positioned at the bottom.
+   *
+   * We use the *exact same math* the animation hook already uses to place the bar.
+   * This guarantees the red safe-area visualization on
+   * https://webkit.org/demos/safe-area-insets/safe-areas.html will have its bottom edge
+   * sit flush against the top edge of the frosted address bar.
+   */
+  const bottomReservedHeight = !addressBarIsAtTop && !isFullscreen
+    ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT + BOTTOM_CHROME_VISUAL_EXTRA
+    : 0;
+
   const activeCameraStreams = useRef<Set<string>>(new Set())
   const historyDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -268,6 +377,35 @@ const Browser = observer(function Browser() {
       if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
     }
   }, [])
+
+  /* ------------------ Push browser safe-area CSS vars to web content -------- */
+  useEffect(() => {
+    const webview = activeTab?.webviewRef?.current
+    if (!webview || activeTab?.url === kNEW_TAB_URL) return
+
+    // bottomReservedHeight is the authoritative measured (or fallback) value.
+    // It is what we want the red safe-area block on the WebKit demo to align against.
+    const bottom = bottomReservedHeight
+    const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
+
+    // Resilient injection (try/catch + script itself is idempotent)
+    try {
+      webview.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
+    } catch (e) {
+      // WebView may be transiently unavailable (unmount, etc.); safe to ignore
+    }
+  }, [
+    addressBarIsAtTop,
+    isFullscreen,
+    bottomReservedHeight,
+    activeTab?.id,
+    activeTab?.url,
+    // Ensure re-injection after keyboard show/hide (bar may visually move) and
+    // orientation changes (dimensions + potential measurement updates)
+    keyboardVisible,
+    winWidth,
+    winHeight
+  ])
 
   /* -------------------------------- permissions ----------------------------- */
   const domainForUrl = useCallback((u: string): string => {
@@ -1111,7 +1249,12 @@ const Browser = observer(function Browser() {
             top: isFullscreen ? 0 : insets.top,
             left: 0,
             right: 0,
-            bottom: 0
+            // On Android we keep it simple: shrink the WebView frame itself when the
+            // address bar is at the bottom. This avoids any visual overlap bugs.
+            // People are less sensitive to "content under glass" on Android.
+            bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen
+              ? bottomReservedHeight
+              : 0
           }}
         >
           {isFullscreen && (
@@ -1330,10 +1473,38 @@ const Browser = observer(function Browser() {
                 if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
                 thumbnailCaptureTimer.current = setTimeout(() => captureActiveThumbnail(), 800)
               }
+
+              // Push current browser safe area insets (CSS vars + event) to the newly loaded page.
+              // Uses bottomReservedHeight (measured from the actual address bar top edge)
+              // so the red block on the WebKit safe-areas demo aligns perfectly.
+              if (activeTab.url !== kNEW_TAB_URL && activeTab?.webviewRef?.current) {
+                const bottom = bottomReservedHeight
+                const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
+                // Resilient (try/catch); the script is idempotent and always dispatches
+                try {
+                  activeTab.webviewRef.current.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
+                } catch (e) {
+                  // transient webview unavailability is ok
+                }
+              }
             }}
             javaScriptEnabled
             domStorageEnabled
             allowsBackForwardNavigationGestures
+            automaticallyAdjustContentInsets={false}
+            contentInsetAdjustmentBehavior="never"
+            contentInset={{
+              top: 0,
+              left: 0,
+              bottom: bottomReservedHeight,
+              right: 0
+            }}
+            scrollIndicatorInsets={{
+              top: addressBarIsAtTop ? ADDRESS_BAR_HEIGHT : 0,
+              bottom: addressBarIsAtTop ? bottomInset : bottomReservedHeight,
+              left: 0,
+              right: 0
+            }}
             containerStyle={{ backgroundColor: isDark ? '#000' : '#fff' }}
             style={{ flex: 1 }}
           />
@@ -1356,8 +1527,136 @@ const Browser = observer(function Browser() {
         {/* ---- Main content: WebView lives between the safe-area bars ---- */}
         {renderMainContent()}
 
+        {/* Touch blocker shield (Approach A hybrid):
+            - WebView frame is kept full-height so page backgrounds, heroes, and
+              full-bleed visuals can paint under the frosted-glass address bar.
+            - When the address bar is at the bottom, this transparent overlay
+              captures touches in the bottom (safeBottom + 48px) region, preventing
+              web content's fixed/sticky tappable elements from being hit "under"
+              the bar while still allowing the visual background to show through.
+            - On iOS, contentInset further helps the web layout engine place
+              fixed elements above the bar naturally.
+            - zIndex sits above WebView (0) but below chromeWrapper (20). */}
+        {/* Touch blocker area — full height when bar is expanded, tiny right-corner area when collapsed */}
+        {!addressBarCollapsed && bottomReservedHeight > 0 && (
+          <View
+            pointerEvents="auto"
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: bottomReservedHeight,
+              backgroundColor: 'transparent',
+              zIndex: 15
+            }}
+          />
+        )}
+
+        {/* Small right-side blocker when collapsed (only protects taps under the ... button) */}
+        {addressBarCollapsed && (
+          <View
+            pointerEvents="auto"
+            style={{
+              position: 'absolute',
+              right: spacing.md - 4,
+              bottom: 0,
+              width: 52,
+              height: safeBottomInset(insets.bottom) + 52,
+              backgroundColor: 'transparent',
+              zIndex: 15,
+            }}
+          />
+        )}
+
+        {/* DEV-ONLY: Visual debug overlay for the reserved bottom area.
+            Renders a striped red rectangle exactly where `bottomReservedHeight` is reserved.
+            Load the WebKit safe-areas demo with the bar at the bottom — the top of this overlay
+            should line up with the bottom of the red safe-area visualization block.
+            Toggle via __DEV__ && DEBUG_BOTTOM_RESERVED. Easy to delete later. */}
+        {__DEV__ && bottomReservedHeight > 0 && !isFullscreen && !addressBarIsAtTop && !addressBarCollapsed && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: bottomReservedHeight,
+              zIndex: 12,
+              backgroundColor: 'rgba(220, 38, 38, 0.18)',
+              // Diagonal stripes similar to the WebKit demo for easy visual comparison
+              backgroundImage: 'repeating-linear-gradient(135deg, rgba(220,38,38,0.35) 0px, rgba(220,38,38,0.35) 6px, rgba(220,38,38,0.12) 6px, rgba(220,38,38,0.12) 12px)' as any,
+            }}
+          >
+            <View style={{ position: 'absolute', top: 6, left: 8, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+              <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'monospace' }}>
+                reserved = {Math.round(bottomReservedHeight)}px
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* DEV-ONLY: Manual collapse/expand button for testing the animation */}
+        {__DEV__ && !isFullscreen && !addressBarIsAtTop && (
+          <TouchableOpacity
+            onPress={() => {
+              if (addressBarCollapsed) {
+                expandAddressBar();
+              } else {
+                doCollapse();
+              }
+            }}
+            style={{
+              position: 'absolute',
+              bottom: bottomReservedHeight + 60,
+              left: 20,
+              backgroundColor: 'rgba(0, 122, 255, 0.85)',
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 6,
+              zIndex: 9999,
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
+              {addressBarCollapsed ? 'Expand Bar (DEV)' : 'Collapse Bar (DEV)'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Collapsed address bar — only the ... button in bottom-right */}
+        {addressBarCollapsed && !isFullscreen && (
+          <View
+            style={{
+              position: 'absolute',
+              bottom: safeBottomInset(insets.bottom),
+              right: spacing.md,
+              zIndex: 30,
+            }}
+            pointerEvents="box-none"
+          >
+            <TouchableOpacity
+              onPress={expandAddressBar}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              activeOpacity={0.6}
+            >
+              <Ionicons name="ellipsis-horizontal" size={20} color={colors.accent} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
-        {!isFullscreen && showAddressBar && (
+        {!isFullscreen && showAddressBar && !addressBarCollapsed && (
           <>
             <GestureDetector gesture={addressBarPanGesture}>
               <Animated.View

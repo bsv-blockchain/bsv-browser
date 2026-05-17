@@ -1,14 +1,22 @@
 const { getDefaultConfig } = require('expo/metro-config')
+const path = require('path')
 
 const config = getDefaultConfig(__dirname)
 
-// Add crypto polyfill configuration
+// Add crypto polyfill configuration + local modules
 config.resolver.extraNodeModules = {
   crypto: require.resolve('react-native-quick-crypto'),
   stream: require.resolve('stream-browserify'),
   buffer: require.resolve('buffer'),
+  'browser-safe-area': path.resolve(__dirname, 'modules/browser-safe-area'),
   ...config.resolver.extraNodeModules
 }
+
+// Make sure Metro watches the modules folder for changes
+config.watchFolders = [
+  ...(config.watchFolders || []),
+  path.resolve(__dirname, 'modules')
+]
 
 // Add wasm support for expo-sqlite on web
 config.resolver.assetExts.push('wasm')

@@ -11,7 +11,8 @@ export function useAddressBarAnimation(
   addressEditing: React.RefObject<boolean>,
   addressInputRef: React.RefObject<TextInput | null>,
   setAddressFocused: (v: boolean) => void,
-  setAddressSuggestions: (v: any[]) => void
+  setAddressSuggestions: (v: any[]) => void,
+  onRequestCollapse: () => void = () => {}
 ) {
   // Keyboard state
   const [keyboardVisible, setKeyboardVisible] = useState(false)
@@ -74,10 +75,14 @@ export function useAddressBarAnimation(
     }
   }, [addressFocused])
 
-  // Pan gesture for AddressBar
-  const addressBarPanGesture = Gesture.Pan()
+  // Single-fire guard so onUpdate doesn't spam runOnJS(onRequestCollapse) every frame
+  const collapseFired = useSharedValue(false)
+
+  // Vertical pan — moves bar between top and bottom.
+  // failOffsetX ensures horizontal motion past 20px hands gesture off to horizontalPan.
+  const verticalPan = Gesture.Pan()
     .activeOffsetY([-10, 10])
-    .failOffsetX([-25, 25])
+    .failOffsetX([-20, 20])
     .onUpdate(e => {
       const travelDistance = addressBarTravelDistance.value
       if (addressBarAtTop.value) {
@@ -89,23 +94,20 @@ export function useAddressBarAnimation(
     .onEnd(e => {
       const travelDistance = addressBarTravelDistance.value
       const threshold = travelDistance / 3
-      const shouldMoveToTop = !addressBarAtTop.value && (Math.abs(e.translationY) > threshold || e.velocityY < -800)
-      const shouldMoveToBottom = addressBarAtTop.value && (e.translationY > threshold || e.velocityY > 800)
+
+      const shouldMoveToTop = !addressBarAtTop.value &&
+        (Math.abs(e.translationY) > threshold || e.velocityY < -800)
+      const shouldMoveToBottom = addressBarAtTop.value &&
+        (e.translationY > threshold || e.velocityY > 800)
 
       if (shouldMoveToTop) {
         addressBarTranslateY.value = withSpring(0, {
-          mass: 1,
-          stiffness: 400,
-          damping: 38,
-          velocity: e.velocityY
+          mass: 1, stiffness: 400, damping: 38, velocity: e.velocityY
         })
         addressBarAtTop.value = true
       } else if (shouldMoveToBottom) {
         addressBarTranslateY.value = withSpring(travelDistance, {
-          mass: 1,
-          stiffness: 400,
-          damping: 38,
-          velocity: e.velocityY
+          mass: 1, stiffness: 400, damping: 38, velocity: e.velocityY
         })
         addressBarAtTop.value = false
       } else if (addressBarAtTop.value) {
@@ -114,6 +116,26 @@ export function useAddressBarAnimation(
         addressBarTranslateY.value = withSpring(travelDistance, { mass: 1, stiffness: 400, damping: 38 })
       }
     })
+
+  // Horizontal pan — rightward swipe collapses the bar (only when at bottom).
+  // activeOffsetX(20) requires 20px rightward before activation.
+  // failOffsetY([-15,15]) hands off to verticalPan if Y moves first.
+  const horizontalPan = Gesture.Pan()
+    .activeOffsetX(20)
+    .failOffsetY([-15, 15])
+    .onUpdate(e => {
+      if (collapseFired.value) return
+      if (addressBarAtTop.value) return
+      if (e.translationX > 30) {
+        collapseFired.value = true
+        runOnJS(onRequestCollapse)()
+      }
+    })
+    .onFinalize(() => {
+      collapseFired.value = false
+    })
+
+  const addressBarPanGesture = Gesture.Race(horizontalPan, verticalPan)
 
   // Sync addressBarAtTop SharedValue → React state for prop-driven components
   useAnimatedReaction(

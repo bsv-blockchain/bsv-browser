@@ -15,7 +15,12 @@
     },
     "plugins": [
       "./plugins/withWebBrowserEntitlement",
-      ["./plugins/withXcodeLastUpgradeVersion", { "version": "2640" }],
+      [
+        "./plugins/withXcodeLastUpgradeVersion",
+        {
+          "version": "2640"
+        }
+      ],
       "expo-router",
       [
         "expo-splash-screen",
@@ -39,7 +44,10 @@
       "expo-sqlite",
       "expo-localization",
       "expo-web-browser",
-      "expo-camera"
+      "expo-camera",
+      "expo-font",
+      "expo-image",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true
@@ -95,7 +103,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "org.bsvassociation.browser",
-"infoPlist": {
+      "infoPlist": {
         "NSCameraUsageDescription": "This app needs camera access to scan QR codes.",
         "NSPhotoLibraryAddUsageDescription": "This app needs permission to save images to your photo library.",
         "NSMicrophoneUsageDescription": "This app needs microphone access for video recording features.",
