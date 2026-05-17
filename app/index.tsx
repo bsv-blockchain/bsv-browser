@@ -11,8 +11,7 @@ import {
   KeyboardAvoidingView,
   BackHandler,
   InteractionManager,
-  ActivityIndicator,
-  useWindowDimensions
+  ActivityIndicator
 } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -298,9 +297,6 @@ const Browser = observer(function Browser() {
     requestCollapseAddressBar
   )
 
-  // Window dimensions for detecting orientation changes (to trigger safe-area re-injection)
-  const { width: winWidth, height: winHeight } = useWindowDimensions()
-
   const [showTabsView, setShowTabsView] = useState(false)
   const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
   const [historyPopoverDirection, setHistoryPopoverDirection] = useState<'back' | 'forward' | null>(null)
@@ -372,6 +368,32 @@ const Browser = observer(function Browser() {
     ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT + BOTTOM_CHROME_VISUAL_EXTRA
     : 0;
 
+  // Memoize WebView prop objects so identical values don't churn new refs
+  // each Browser re-render. Without this, every state change (menuPopoverOpen
+  // toggle, suggestions list, gesture-driven address bar position state, etc.)
+  // produces a new contentInset/scrollIndicatorInsets reference. RN-WebView
+  // forwards inline object props to the bridge on each diff, triggering
+  // WKWebView contentInset updates and a full UIScrollView re-layout. On
+  // heavy pages that cascade was stalling the JS bridge for several seconds.
+  const webviewContentInset = useMemo(
+    () => ({ top: 0, left: 0, bottom: bottomReservedHeight, right: 0 }),
+    [bottomReservedHeight]
+  )
+  const webviewScrollIndicatorInsets = useMemo(
+    () => ({
+      top: addressBarIsAtTop ? ADDRESS_BAR_HEIGHT : 0,
+      bottom: addressBarIsAtTop ? bottomInset : bottomReservedHeight,
+      left: 0,
+      right: 0
+    }),
+    [addressBarIsAtTop, bottomReservedHeight, bottomInset]
+  )
+  const webviewContainerStyle = useMemo(
+    () => ({ backgroundColor: isDark ? '#000' : '#fff' }),
+    [isDark]
+  )
+  const webviewStyle = useMemo(() => ({ flex: 1 }), [])
+
   const activeCameraStreams = useRef<Set<string>>(new Set())
   const historyDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -382,33 +404,30 @@ const Browser = observer(function Browser() {
   }, [])
 
   /* ------------------ Push browser safe-area CSS vars to web content -------- */
+  // Track last-injected values so we skip redundant injections on re-renders
+  // that don't actually change the safe-area numbers (e.g. menu popover open,
+  // suggestion list updates). Re-injection on stale state used to fire on
+  // every Browser re-render that touched any dep, even when bottom/top hadn't
+  // moved — contributing to the WKWebView main-thread stalls.
+  const lastInjectedInsets = useRef<{ bottom: number; top: number; tabId: number | null } | null>(null)
   useEffect(() => {
     const webview = activeTab?.webviewRef?.current
     if (!webview || activeTab?.url === kNEW_TAB_URL) return
 
-    // bottomReservedHeight is the authoritative measured (or fallback) value.
-    // It is what we want the red safe-area block on the WebKit demo to align against.
     const bottom = bottomReservedHeight
     const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
+    const tabId = activeTab?.id ?? null
 
-    // Resilient injection (try/catch + script itself is idempotent)
+    const prev = lastInjectedInsets.current
+    if (prev && prev.bottom === bottom && prev.top === top && prev.tabId === tabId) return
+    lastInjectedInsets.current = { bottom, top, tabId }
+
     try {
       webview.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
-    } catch (e) {
+    } catch {
       // WebView may be transiently unavailable (unmount, etc.); safe to ignore
     }
-  }, [
-    addressBarIsAtTop,
-    isFullscreen,
-    bottomReservedHeight,
-    activeTab?.id,
-    activeTab?.url,
-    // Ensure re-injection after keyboard show/hide (bar may visually move) and
-    // orientation changes (dimensions + potential measurement updates)
-    keyboardVisible,
-    winWidth,
-    winHeight
-  ])
+  }, [addressBarIsAtTop, isFullscreen, bottomReservedHeight, activeTab?.id, activeTab?.url])
 
   /* -------------------------------- permissions ----------------------------- */
   const domainForUrl = useCallback((u: string): string => {
@@ -1496,20 +1515,10 @@ const Browser = observer(function Browser() {
             allowsBackForwardNavigationGestures
             automaticallyAdjustContentInsets={false}
             contentInsetAdjustmentBehavior="never"
-            contentInset={{
-              top: 0,
-              left: 0,
-              bottom: bottomReservedHeight,
-              right: 0
-            }}
-            scrollIndicatorInsets={{
-              top: addressBarIsAtTop ? ADDRESS_BAR_HEIGHT : 0,
-              bottom: addressBarIsAtTop ? bottomInset : bottomReservedHeight,
-              left: 0,
-              right: 0
-            }}
-            containerStyle={{ backgroundColor: isDark ? '#000' : '#fff' }}
-            style={{ flex: 1 }}
+            contentInset={webviewContentInset}
+            scrollIndicatorInsets={webviewScrollIndicatorInsets}
+            containerStyle={webviewContainerStyle}
+            style={webviewStyle}
           />
         </View>
       )
