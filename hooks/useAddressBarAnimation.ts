@@ -78,6 +78,20 @@ export function useAddressBarAnimation(
   // Single-fire guard so onUpdate doesn't spam runOnJS(onRequestCollapse) every frame
   const collapseFired = useSharedValue(false)
 
+  // Reset gesture/animation state to a known-good idle position.
+  // Called when expanding the address bar after a collapse so the bar always
+  // returns to a sane translateY and the collapse-guard can fire again, even
+  // if onFinalize didn't run (e.g. the GestureDetector unmounted mid-gesture).
+  const resetGestureState = () => {
+    const travelDistance = addressBarTravelDistance.value
+    if (addressBarAtTop.value) {
+      addressBarTranslateY.value = withSpring(0, { mass: 1, stiffness: 400, damping: 38 })
+    } else {
+      addressBarTranslateY.value = withSpring(travelDistance, { mass: 1, stiffness: 400, damping: 38 })
+    }
+    collapseFired.value = false
+  }
+
   // Vertical pan — moves bar between top and bottom.
   // failOffsetX ensures horizontal motion past 20px hands gesture off to horizontalPan.
   const verticalPan = Gesture.Pan()
@@ -211,6 +225,7 @@ export function useAddressBarAnimation(
     addressBarPanGesture,
     animatedAddressBarStyle,
     animatedMenuPopoverStyle,
-    addressBarIsAtTop
+    addressBarIsAtTop,
+    resetGestureState
   }
 }

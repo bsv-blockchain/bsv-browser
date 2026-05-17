@@ -59,6 +59,7 @@ import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
 import { getErrorPage, getNativeErrorInfo, paymentLoadingPage } from '@/utils/webview/errorPages'
 
 import { AddressBar } from '@/components/browser/AddressBar'
+import { GlassPill, useGlassColors } from '@/components/browser/GlassPill'
 import { MenuPopover } from '@/components/browser/MenuPopover'
 import { HistoryPopover } from '@/components/browser/HistoryPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
@@ -147,6 +148,7 @@ const DESKTOP_UA_ANDROID =
 const Browser = observer(function Browser() {
   /* --------------------------- theme / basic hooks -------------------------- */
   const { isDark, colors } = useTheme()
+  const gc = useGlassColors()
   const insets = useSafeAreaInsets()
   const { t, i18n } = useTranslation()
   const { isWeb2Mode } = useBrowserMode()
@@ -284,7 +286,8 @@ const Browser = observer(function Browser() {
     addressBarPanGesture,
     animatedAddressBarStyle,
     animatedMenuPopoverStyle,
-    addressBarIsAtTop
+    addressBarIsAtTop,
+    resetGestureState
   } = useAddressBarAnimation(
     insets,
     addressFocused,
@@ -325,12 +328,19 @@ const Browser = observer(function Browser() {
       return
     }
     positionBeforeCollapse.current = 'bottom'
+    // Snap translateY back to bottom-position so when bar is re-expanded later
+    // it doesn't pop up at whatever mid-gesture offset the pan left behind.
+    resetGestureState()
     setAddressBarCollapsed(true)
-  }, [addressBarIsAtTop])
+  }, [addressBarIsAtTop, resetGestureState])
 
   const expandAddressBar = useCallback(() => {
     setAddressBarCollapsed(false)
-  }, [])
+    // Reset gesture/translate state so the re-mounted bar starts in a known
+    // position and the collapse guard is cleared. Prevents "stuck closed"
+    // and freezes when collapse fired mid-gesture before onFinalize ran.
+    resetGestureState()
+  }, [resetGestureState])
 
   // Keep the ref up to date so runOnJS always calls the latest version (avoids stale closures)
   useEffect(() => {
@@ -1570,25 +1580,25 @@ const Browser = observer(function Browser() {
               bottom: safeBottomInset(insets.bottom),
               right: spacing.md,
               zIndex: 30,
+              width: 44,
+              height: 44,
             }}
             pointerEvents="box-none"
           >
-            <TouchableOpacity
-              onPress={expandAddressBar}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-              activeOpacity={0.6}
-            >
-              <Ionicons name="ellipsis-horizontal" size={20} color={colors.accent} />
-            </TouchableOpacity>
+            <GlassPill style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+              <TouchableOpacity
+                onPress={expandAddressBar}
+                style={{
+                  width: 44,
+                  height: 44,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                activeOpacity={0.6}
+              >
+                <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
+              </TouchableOpacity>
+            </GlassPill>
           </View>
         )}
 
