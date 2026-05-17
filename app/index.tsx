@@ -337,13 +337,6 @@ const Browser = observer(function Browser() {
     collapseRef.current = collapseAddressBar
   }, [collapseAddressBar])
 
-  // Direct collapse helper for the DEV button and other places
-  const doCollapse = useCallback(() => {
-    if (!addressBarIsAtTop && !addressBarCollapsed) {
-      collapseRef.current()
-    }
-  }, [addressBarIsAtTop, addressBarCollapsed])
-
   /**
    * Approach A: When the address bar is positioned at the bottom, inset the
    * WebView content area from the bottom so that fixed/sticky elements on
@@ -1567,62 +1560,6 @@ const Browser = observer(function Browser() {
               zIndex: 15,
             }}
           />
-        )}
-
-        {/* DEV-ONLY: Visual debug overlay for the reserved bottom area.
-            Renders a striped red rectangle exactly where `bottomReservedHeight` is reserved.
-            Load the WebKit safe-areas demo with the bar at the bottom — the top of this overlay
-            should line up with the bottom of the red safe-area visualization block.
-            Toggle via __DEV__ && DEBUG_BOTTOM_RESERVED. Easy to delete later. */}
-        {__DEV__ && bottomReservedHeight > 0 && !isFullscreen && !addressBarIsAtTop && !addressBarCollapsed && (
-          <View
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: bottomReservedHeight,
-              zIndex: 12,
-              backgroundColor: 'rgba(220, 38, 38, 0.18)',
-              // Diagonal stripes similar to the WebKit demo for easy visual comparison
-              backgroundImage: 'repeating-linear-gradient(135deg, rgba(220,38,38,0.35) 0px, rgba(220,38,38,0.35) 6px, rgba(220,38,38,0.12) 6px, rgba(220,38,38,0.12) 12px)' as any,
-            }}
-          >
-            <View style={{ position: 'absolute', top: 6, left: 8, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-              <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'monospace' }}>
-                reserved = {Math.round(bottomReservedHeight)}px
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* DEV-ONLY: Manual collapse/expand button for testing the animation */}
-        {__DEV__ && !isFullscreen && !addressBarIsAtTop && (
-          <TouchableOpacity
-            onPress={() => {
-              if (addressBarCollapsed) {
-                expandAddressBar();
-              } else {
-                doCollapse();
-              }
-            }}
-            style={{
-              position: 'absolute',
-              bottom: bottomReservedHeight + 60,
-              left: 20,
-              backgroundColor: 'rgba(0, 122, 255, 0.85)',
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 6,
-              zIndex: 9999,
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
-              {addressBarCollapsed ? 'Expand Bar (DEV)' : 'Collapse Bar (DEV)'}
-            </Text>
-          </TouchableOpacity>
         )}
 
         {/* Collapsed address bar — only the ... button in bottom-right */}
