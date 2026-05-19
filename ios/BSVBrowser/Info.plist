@@ -25,6 +25,8 @@
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.bsvassociation.browser.web</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>https</string>
@@ -32,9 +34,19 @@
 			</array>
 		</dict>
 		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.bsvassociation.browser.peerpay</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>peerpay</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.bsvassociation.browser.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>bsv-browser</string>
 			</array>
 		</dict>
 		<dict>

@@ -111,14 +111,22 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
+            "CFBundleURLName": "org.bsvassociation.browser.web",
             "CFBundleURLSchemes": [
               "https",
               "http"
             ]
           },
           {
+            "CFBundleURLName": "org.bsvassociation.browser.peerpay",
             "CFBundleURLSchemes": [
               "peerpay"
+            ]
+          },
+          {
+            "CFBundleURLName": "org.bsvassociation.browser.pair",
+            "CFBundleURLSchemes": [
+              "bsv-browser"
             ]
           }
         ],
