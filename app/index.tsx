@@ -290,9 +290,8 @@ const Browser = observer(function Browser() {
     setBarExitAnimating(false)
   }, [])
 
-  // Forward declaration — implementation defined below. The expandPan gesture
-  // fires runOnJS(onRequestExpand) which calls this ref so we don't capture a
-  // stale identity.
+  // Forward declaration — implementation defined below. The kebab tap (when
+  // bar is collapsed) calls this ref so we don't capture a stale identity.
   const expandRef = useRef<() => void>(() => {})
   const requestExpandAddressBar = useCallback(() => {
     expandRef.current()
@@ -301,7 +300,6 @@ const Browser = observer(function Browser() {
   const {
     keyboardVisible,
     addressBarPanGesture,
-    expandPan,
     animatedAddressBarStyle,
     animatedMenuPopoverStyle,
     animatedKebabStyle,
@@ -468,20 +466,23 @@ const Browser = observer(function Browser() {
   }, [addressBarIsAtTop, bumpGlassRevision])
 
   const expandAddressBar = useCallback(() => {
-    // Bump revision BEFORE flipping the collapsed flag so when the AddressBar
-    // wrapper mounts, it uses the NEW key and its LiquidGlass pills are
-    // brand-new native views — never inheriting a stuck UIVisualEffectView
-    // state from the previous expand cycle.
+    // CRITICAL order: zero out the shared values FIRST so that when React
+    // commits the state changes below and the bar wrapper / AddressBar mount,
+    // the animatedAddressBarStyle reads collapse=0 and emits opacity=1. If we
+    // don't reset first, a stale collapse=1 from the just-finished collapse
+    // animation causes the wrapper to mount at opacity=0, which traps every
+    // LiquidGlassView pill descendant in Apple's stuck UIVisualEffectView
+    // state (pills appear transparent / lost their blur background).
+    resetGestureState()
+    // Bump revision so the AddressBar mounts with a fresh key and its
+    // LiquidGlass pills are brand-new native views — never inheriting a stuck
+    // UIVisualEffectView state from the previous expand cycle.
     bumpGlassRevision()
     setAddressBarCollapsed(false)
     // Just in case the exit-end callback didn't fire (e.g. cancelled animation),
     // make sure the bar's exit-mount flag is cleared so we don't have a ghost
     // wrapper layered behind the freshly re-mounted real bar.
     setBarExitAnimating(false)
-    // Reset gesture/translate state so the re-mounted bar starts in a known
-    // position and the collapse guard is cleared. Prevents "stuck closed"
-    // and freezes when collapse fired mid-gesture before onFinalize ran.
-    resetGestureState()
   }, [resetGestureState, bumpGlassRevision])
 
   // Keep the ref up to date so runOnJS always calls the latest version (avoids stale closures)
@@ -1758,6 +1759,12 @@ const Browser = observer(function Browser() {
               <GlassPill style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
                 <TouchableOpacity
                   onPress={() => {
+                    // Collapsed bar: first tap re-expands the address bar.
+                    // Expanded bar: tap opens the menu popover.
+                    if (addressBarCollapsed) {
+                      requestExpandAddressBar()
+                      return
+                    }
                     setHistoryPopoverDirection(null)
                     setMenuPopoverOpen(true)
                   }}
@@ -1776,28 +1783,10 @@ const Browser = observer(function Browser() {
           </Animated.View>
         )}
 
-        {/* Left-swipe hit area to expand when collapsed.
-            A wide transparent strip across the header lets the user pan-left
-            anywhere on the chrome row to bring the bar back. The kebab tap is
-            unaffected because Pan needs translation (≥20px) to activate. */}
-        {addressBarCollapsed && !isFullscreen && (
-          <GestureDetector gesture={expandPan}>
-            <Animated.View
-              style={[
-                {
-                  position: 'absolute',
-                  left: 0,
-                  right: 0,
-                  top: insets.top,
-                  height: ADDRESS_BAR_HEIGHT,
-                  zIndex: 25,
-                  backgroundColor: 'transparent',
-                },
-                animatedKebabStyle,
-              ]}
-            />
-          </GestureDetector>
-        )}
+        {/* Address bar re-expand is now a single tap on the kebab (...) pill.
+            The previous full-width left-swipe hit area was removed because it
+            captured touches across the entire top strip, blocking taps that
+            should land on the web page beneath. */}
 
         {/* ---- Floating Address Bar + Popover (absolutely positioned) ----
             Stays mounted while the collapse exit animation plays (gated by
@@ -1809,6 +1798,7 @@ const Browser = observer(function Browser() {
           <>
             <GestureDetector gesture={addressBarPanGesture}>
               <Animated.View
+                key={`chrome-wrapper-${glassRevision}`}
                 style={[styles.chromeWrapper, { top: insets.top }, animatedAddressBarStyle]}
                 // Block taps during the collapse-exit animation so the fading
                 // bar can't receive ghost touches before it unmounts.
