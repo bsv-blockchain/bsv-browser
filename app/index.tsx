@@ -17,7 +17,7 @@ import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import { GestureDetector } from 'react-native-gesture-handler'
-import Animated from 'react-native-reanimated'
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated'
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
@@ -280,11 +280,22 @@ const Browser = observer(function Browser() {
     collapseRef.current()
   }, [])
 
+  // Tracks whether the bar's collapse-exit animation is still in flight.
+  // Lets us keep the bar's <Animated.View> mounted (and animating its fade
+  // + scale on the UI thread) AFTER addressBarCollapsed has flipped to true,
+  // so the bar's exit and the dot's entrance overlap visually.
+  const [barExitAnimating, setBarExitAnimating] = useState(false)
+
+  const handleCollapseAnimationEnd = useCallback(() => {
+    setBarExitAnimating(false)
+  }, [])
+
   const {
     keyboardVisible,
     addressBarPanGesture,
     animatedAddressBarStyle,
     animatedMenuPopoverStyle,
+    animatedCollapsedDotStyle,
     addressBarIsAtTop,
     resetGestureState
   } = useAddressBarAnimation(
@@ -294,13 +305,82 @@ const Browser = observer(function Browser() {
     addressInputRef,
     setAddressFocused,
     setAddressSuggestions,
-    requestCollapseAddressBar
+    requestCollapseAddressBar,
+    handleCollapseAnimationEnd
   )
 
   const [showTabsView, setShowTabsView] = useState(false)
-  const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
-  const [historyPopoverDirection, setHistoryPopoverDirection] = useState<'back' | 'forward' | null>(null)
+
+  // Menu popover visibility — driven by a shared value so the open/close
+  // animation runs entirely on the UI thread (and stays smooth even while the
+  // JS thread is blocked, e.g. parsing large BEEF payloads). React state
+  // (menuPopoverOpen) controls mount; the close-side unmount only fires AFTER
+  // the close animation completes via runOnJS in the withTiming callback.
+  // The setMenuPopoverOpen(open) API is preserved so callers don't change.
+  const [menuPopoverOpen, _setMenuPopoverMounted] = useState(false)
+  const menuPopoverProgress = useSharedValue(0)
+  const setMenuPopoverOpen = useCallback((open: boolean) => {
+    if (open) {
+      _setMenuPopoverMounted(true)
+      menuPopoverProgress.value = withTiming(1, {
+        duration: 180,
+        easing: Easing.out(Easing.cubic)
+      })
+    } else {
+      menuPopoverProgress.value = withTiming(
+        0,
+        { duration: 160, easing: Easing.in(Easing.cubic) },
+        finished => {
+          if (finished) {
+            runOnJS(_setMenuPopoverMounted)(false)
+          }
+        }
+      )
+    }
+  }, [menuPopoverProgress])
+  // Opacity-only fade driven on the UI thread.
+  // Note: we deliberately do NOT include a transform here, since this style is
+  // composed with `animatedMenuPopoverStyle` (which owns translateY based on the
+  // address-bar position). In React Native style merge, `transform` is replaced
+  // wholesale by later entries — so adding scale here would clobber translateY.
+  const animatedMenuVisibilityStyle = useAnimatedStyle(() => ({
+    opacity: menuPopoverProgress.value
+  }))
+
+  // HistoryPopover visibility — driven by a shared value so open/close runs
+  // entirely on the UI thread (same pattern as MenuPopover above). React state
+  // (historyPopoverDirection) controls mount + which side ('back' | 'forward'
+  // | null); the close-side unmount only fires AFTER the close animation
+  // completes via runOnJS in the withTiming callback.
+  const [historyPopoverDirection, _setHistoryPopoverDirectionMounted] = useState<'back' | 'forward' | null>(null)
+  const historyPopoverProgress = useSharedValue(0)
+  const setHistoryPopoverDirection = useCallback((next: 'back' | 'forward' | null) => {
+    if (next !== null) {
+      _setHistoryPopoverDirectionMounted(next)
+      historyPopoverProgress.value = withTiming(1, {
+        duration: 180,
+        easing: Easing.out(Easing.cubic)
+      })
+    } else {
+      historyPopoverProgress.value = withTiming(
+        0,
+        { duration: 160, easing: Easing.in(Easing.cubic) },
+        finished => {
+          if (finished) {
+            runOnJS(_setHistoryPopoverDirectionMounted)(null)
+          }
+        }
+      )
+    }
+  }, [historyPopoverProgress])
   const historyPopoverOpen = historyPopoverDirection !== null
+  // Opacity-only fade for the popover wrapper. Composed with
+  // animatedMenuPopoverStyle (which owns translateY based on the address-bar
+  // position) — keep transforms out of this style so the merge doesn't
+  // clobber translateY (see MenuPopover note for the same gotcha).
+  const animatedHistoryVisibilityStyle = useAnimatedStyle(() => ({
+    opacity: historyPopoverProgress.value
+  }))
   const desktopModeCooldown = useRef(false)
 
   /* ------------------------------ find in page ----------------------------- */
@@ -324,14 +404,23 @@ const Browser = observer(function Browser() {
       return
     }
     positionBeforeCollapse.current = 'bottom'
-    // Snap translateY back to bottom-position so when bar is re-expanded later
-    // it doesn't pop up at whatever mid-gesture offset the pan left behind.
-    resetGestureState()
+    // Flip JS state immediately (dot mounts at progress=0 and fades in via the
+    // shared collapse-progress), and keep the bar wrapper mounted briefly via
+    // barExitAnimating so its UI-thread fade/scale finishes on screen.
+    //
+    // Do NOT call resetGestureState() here — that would zero
+    // addressBarCollapseProgress mid-animation, fighting the in-flight
+    // withTiming(progress, 1) on the UI thread.
+    setBarExitAnimating(true)
     setAddressBarCollapsed(true)
-  }, [addressBarIsAtTop, resetGestureState])
+  }, [addressBarIsAtTop])
 
   const expandAddressBar = useCallback(() => {
     setAddressBarCollapsed(false)
+    // Just in case the exit-end callback didn't fire (e.g. cancelled animation),
+    // make sure the bar's exit-mount flag is cleared so we don't have a ghost
+    // wrapper layered behind the freshly re-mounted real bar.
+    setBarExitAnimating(false)
     // Reset gesture/translate state so the re-mounted bar starts in a known
     // position and the collapse guard is cleared. Prevents "stuck closed"
     // and freezes when collapse fired mid-gesture before onFinalize ran.
@@ -1581,17 +1670,26 @@ const Browser = observer(function Browser() {
           />
         )}
 
-        {/* Collapsed address bar — only the ... button in bottom-right */}
+        {/* Collapsed address bar — only the ... button in bottom-right.
+            Mounted as soon as addressBarCollapsed flips true (which happens
+            immediately when the right-swipe gesture activates), but its
+            opacity + scale are driven by the SAME shared progress value as
+            the bar's exit. The dot stays invisible while the bar fades, then
+            morphs in for a clean cross-fade — both styles run on the UI
+            thread from a single shared value (no per-frame runOnJS). */}
         {addressBarCollapsed && !isFullscreen && (
-          <View
-            style={{
-              position: 'absolute',
-              bottom: safeBottomInset(insets.bottom),
-              right: spacing.md,
-              zIndex: 30,
-              width: 44,
-              height: 44,
-            }}
+          <Animated.View
+            style={[
+              {
+                position: 'absolute',
+                bottom: safeBottomInset(insets.bottom),
+                right: spacing.md,
+                zIndex: 30,
+                width: 44,
+                height: 44,
+              },
+              animatedCollapsedDotStyle,
+            ]}
             pointerEvents="box-none"
           >
             <GlassPill style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
@@ -1608,16 +1706,23 @@ const Browser = observer(function Browser() {
                 <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
               </TouchableOpacity>
             </GlassPill>
-          </View>
+          </Animated.View>
         )}
 
-        {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
-        {!isFullscreen && showAddressBar && !addressBarCollapsed && (
+        {/* ---- Floating Address Bar + Popover (absolutely positioned) ----
+            Stays mounted while the collapse exit animation plays (gated by
+            barExitAnimating) so the bar's UI-thread fade + scale completes
+            on screen before the wrapper unmounts. The GestureDetector is
+            still wrapped here, but during exit-animating the bar is fading
+            to opacity 0 so taps don't land on it visually. */}
+        {!isFullscreen && showAddressBar && (!addressBarCollapsed || barExitAnimating) && (
           <>
             <GestureDetector gesture={addressBarPanGesture}>
               <Animated.View
                 style={[styles.chromeWrapper, { top: insets.top }, animatedAddressBarStyle]}
-                pointerEvents="box-none"
+                // Block taps during the collapse-exit animation so the fading
+                // bar can't receive ghost touches before it unmounts.
+                pointerEvents={addressBarCollapsed ? 'none' : 'box-none'}
               >
                 <AddressBar
                   addressText={addressText}
@@ -1715,12 +1820,15 @@ const Browser = observer(function Browser() {
           </View>
         )}
 
-        {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
+        {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ----
+            Stays mounted while the close animation plays (the JS unmount only
+            fires after the UI-thread fade-out completes via runOnJS callback). */}
         {menuPopoverOpen && (
           <Animated.View
             style={[
               { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-              animatedMenuPopoverStyle
+              animatedMenuPopoverStyle,
+              animatedMenuVisibilityStyle
             ]}
           >
             <MenuPopover
@@ -1778,7 +1886,10 @@ const Browser = observer(function Browser() {
           </Animated.View>
         )}
 
-        {/* ---- History Popover (full-screen layer, anchored left) ---- */}
+        {/* ---- History Popover (full-screen layer, anchored left) ----
+            Stays mounted while the close animation plays (the JS unmount only
+            fires after the UI-thread fade-out completes via runOnJS callback,
+            same pattern as MenuPopover). */}
         {historyPopoverOpen &&
           activeTab &&
           (() => {
@@ -1787,7 +1898,8 @@ const Browser = observer(function Browser() {
               <Animated.View
                 style={[
                   { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-                  animatedMenuPopoverStyle
+                  animatedMenuPopoverStyle,
+                  animatedHistoryVisibilityStyle
                 ]}
               >
                 <HistoryPopover
