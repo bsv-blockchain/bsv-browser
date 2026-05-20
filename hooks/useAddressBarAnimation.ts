@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Dimensions, Keyboard, Platform, TextInput } from 'react-native'
 import { Gesture } from 'react-native-gesture-handler'
-import { useSharedValue, useAnimatedStyle, withSpring, withTiming, useAnimatedReaction, runOnJS, Easing } from 'react-native-reanimated'
+import { useSharedValue, useAnimatedStyle, withSpring, withTiming, useAnimatedReaction, runOnJS, cancelAnimation, Easing } from 'react-native-reanimated'
 import type { EdgeInsets } from 'react-native-safe-area-context'
 import { safeBottomInset, ADDRESS_BAR_HEIGHT } from '@/shared/constants'
 
@@ -21,7 +21,10 @@ export function useAddressBarAnimation(
   // so the parent can unmount the bar wrapper that was kept rendered during
   // the exit. Lets the bar's fade/scale finish on the UI thread before the
   // JS-thread unmount.
-  onCollapseAnimationEnd: () => void = () => {}
+  onCollapseAnimationEnd: () => void = () => {},
+  // Fires when a left-swipe is detected on the header area while collapsed,
+  // requesting the parent to expand the bar back. Always called via runOnJS.
+  onRequestExpand: () => void = () => {}
 ) {
   // Keyboard state
   const [keyboardVisible, setKeyboardVisible] = useState(false)
@@ -101,12 +104,18 @@ export function useAddressBarAnimation(
   // returns to a sane translateY and the collapse-guard can fire again, even
   // if onFinalize didn't run (e.g. the GestureDetector unmounted mid-gesture).
   //
-  // Note: this resets translateY/collapseFired/progress all back to "fully
-  // visible bar" defaults. It must NOT be called mid-collapse-animation, or
-  // it will fight the in-flight withTiming(progress, 1). The parent should
-  // only call this on expand (or before initiating a fresh collapse cycle).
+  // IMPORTANT: cancelAnimation() first kills any in-flight withTiming on
+  // addressBarCollapseProgress. Without this, the timing could race with the
+  // direct assignment and leave the value mid-flight at a fractional progress
+  // (e.g. 0.3). Fractional progress feeds into animatedAddressBarStyle's
+  // opacity formula (1 - collapse*2) producing a fractional opacity that
+  // triggers the documented iOS UIVisualEffectView bug — the LiquidGlassView's
+  // blur effect snaps to fully transparent and stays disabled until the next
+  // re-layout. This was the root cause of "pills randomly stuck transparent".
   const resetGestureState = () => {
     const travelDistance = addressBarTravelDistance.value
+    cancelAnimation(addressBarTranslateY)
+    cancelAnimation(addressBarCollapseProgress)
     if (addressBarAtTop.value) {
       addressBarTranslateY.value = withSpring(0, { mass: 1, stiffness: 400, damping: 38 })
     } else {
@@ -155,7 +164,7 @@ export function useAddressBarAnimation(
       }
     })
 
-  // Horizontal pan — rightward swipe collapses the bar (only when at bottom).
+  // Horizontal pan — rightward swipe collapses the bar (works at top or bottom).
   // activeOffsetX(20) requires 20px rightward before activation.
   // failOffsetY([-15,15]) hands off to verticalPan if Y moves first.
   //
@@ -178,7 +187,6 @@ export function useAddressBarAnimation(
     .failOffsetY([-15, 15])
     .onUpdate(e => {
       if (collapseFired.value) return
-      if (addressBarAtTop.value) return
       if (e.translationX > 30) {
         collapseFired.value = true
         // Flip JS state right away so the dot mounts and can fade in alongside
@@ -204,6 +212,21 @@ export function useAddressBarAnimation(
 
   const addressBarPanGesture = Gesture.Race(horizontalPan, verticalPan)
 
+  // Left-swipe expand gesture — active only while the bar is collapsed.
+  // The parent renders a wide, transparent hit-target spanning the header
+  // area (next to the always-present kebab) and wraps it in a GestureDetector
+  // bound to this gesture. A left-pan past 20px triggers expand.
+  //
+  // The kebab's own tap (menu popover) is unaffected because the kebab is a
+  // separate sibling with its own TouchableOpacity — and Pan won't activate
+  // on a simple tap (it requires translation).
+  const expandPan = Gesture.Pan()
+    .activeOffsetX(-20)
+    .failOffsetY([-15, 15])
+    .onStart(() => {
+      runOnJS(onRequestExpand)()
+    })
+
   // Sync addressBarAtTop SharedValue → React state for prop-driven components
   useAnimatedReaction(
     () => addressBarAtTop.value,
@@ -217,22 +240,30 @@ export function useAddressBarAnimation(
   // Animated style for AddressBar wrapper.
   //
   // While addressBarCollapseProgress animates 0 → 1 (UI thread), the bar
-  // *morphs* toward the dot's anchor (bottom-right): a moderate rightward
-  // translation paired with a strong scale-down + early opacity fade so the
-  // bar is already invisible by the time the dot becomes fully visible.
-  // This replaces the previous "slide fully offscreen, then dot pops in"
-  // sequence with a cross-fade/morph driven by a single shared value.
+  // *morphs* toward the dot's anchor (bottom-right): rightward translation
+  // paired with a strong scale-down so the bar visually converges into the
+  // dot's footprint.
   //
-  // Numbers chosen so that:
-  //   - bar opacity hits 0 at ~50% of progress (cleared before dot lands)
-  //   - bar shrinks to 0.6 of its size (converges toward the 44px dot)
-  //   - bar translates ~40px right (toward the dot, not fully off-screen)
+  // CRITICAL: this wrapper contains LiquidGlassView pills (back/forward, URL,
+  // kebab — each is a UIVisualEffectView on iOS). Apple's UIVisualEffectView
+  // has a long-standing rendering bug where animating its parent's opacity
+  // to fractional values (or interrupting such an animation mid-flight) can
+  // cause the visual effect to snap to fully transparent and STICK there.
+  // That was the reported "pills randomly stuck transparent" bug.
+  //
+  // Mitigation: we no longer fade the wrapper with a fractional opacity ramp.
+  // Instead we use a BINARY opacity step (1 → 0) tied to a single progress
+  // threshold. The scale-shrink + translate-right gives the perceptual
+  // morph; the dot's own opacity fade-in (mounted on a separate, freshly
+  // mounted wrapper) provides the cross-fade. The wrapper never settles at
+  // a stable fractional opacity, so the UIVisualEffectView effect is never
+  // left in the broken intermediate state.
   const animatedAddressBarStyle = useAnimatedStyle(() => {
     const keyboardOffset = addressBarAtTop.value ? 0 : -keyboardHeight.value
     const collapse = addressBarCollapseProgress.value
-    // Fade-out completes by ~50% of progress, leaving the second half for
-    // the dot's entrance to dominate visually.
-    const barOpacity = Math.max(0, 1 - collapse * 2)
+    // Binary visibility: fully visible until we've morphed most of the way,
+    // then snap invisible for the final stretch. Always emits 0 or 1.
+    const barOpacity = collapse >= 0.55 ? 0 : 1
     return {
       opacity: barOpacity,
       transform: [
@@ -243,21 +274,26 @@ export function useAddressBarAnimation(
     }
   })
 
-  // Animated style for the collapsed "..." dot.
-  // Driven by the SAME shared value as the bar's exit so the two are
-  // perfectly synchronized on the UI thread (no per-frame runOnJS).
-  // The dot stays at opacity 0 until ~40% of progress, then ramps up to 1
-  // by progress=1 with a small scale-from-0.7 morph that visually grows out
-  // of the shrinking bar's footprint.
-  const animatedCollapsedDotStyle = useAnimatedStyle(() => {
-    const collapse = addressBarCollapseProgress.value
-    // Dot starts appearing after the bar has faded to ~zero.
-    // Map progress 0.4 → 1.0  to dot-progress 0 → 1.
-    const dotProgress = Math.min(1, Math.max(0, (collapse - 0.4) / 0.6))
+  // Animated style for the always-mounted kebab (...) pill.
+  //
+  // The kebab lives OUTSIDE the collapsing portion of the address bar — it's
+  // a persistent UI element that stays visible regardless of collapse state.
+  // It still needs to follow the bar's vertical position (top vs bottom) and
+  // keyboard offset so it sits aligned with the URL pill, but it must NEVER
+  // animate opacity / scale / translateX with the collapse progress.
+  //
+  // CRITICAL: this style intentionally OMITS any reference to
+  // addressBarCollapseProgress. The kebab's GlassPill is a LiquidGlassView
+  // (UIVisualEffectView on iOS) and any fractional-opacity / interrupted
+  // opacity transition on an ancestor can stick the visual effect transparent
+  // (Apple's well-known UIVisualEffectView bug). By keeping the kebab's
+  // ancestor style at opacity = 1 always (no opacity key emitted at all), we
+  // guarantee its blur stays alive across collapse cycles.
+  const animatedKebabStyle = useAnimatedStyle(() => {
+    const keyboardOffset = addressBarAtTop.value ? 0 : -keyboardHeight.value
     return {
-      opacity: dotProgress,
       transform: [
-        { scale: 0.7 + dotProgress * 0.3 }
+        { translateY: addressBarTranslateY.value + keyboardOffset }
       ]
     }
   })
@@ -316,9 +352,10 @@ export function useAddressBarAnimation(
   return {
     keyboardVisible,
     addressBarPanGesture,
+    expandPan,
     animatedAddressBarStyle,
     animatedMenuPopoverStyle,
-    animatedCollapsedDotStyle,
+    animatedKebabStyle,
     addressBarCollapseProgress,
     addressBarIsAtTop,
     resetGestureState

@@ -290,12 +290,21 @@ const Browser = observer(function Browser() {
     setBarExitAnimating(false)
   }, [])
 
+  // Forward declaration — implementation defined below. The expandPan gesture
+  // fires runOnJS(onRequestExpand) which calls this ref so we don't capture a
+  // stale identity.
+  const expandRef = useRef<() => void>(() => {})
+  const requestExpandAddressBar = useCallback(() => {
+    expandRef.current()
+  }, [])
+
   const {
     keyboardVisible,
     addressBarPanGesture,
+    expandPan,
     animatedAddressBarStyle,
     animatedMenuPopoverStyle,
-    animatedCollapsedDotStyle,
+    animatedKebabStyle,
     addressBarIsAtTop,
     resetGestureState
   } = useAddressBarAnimation(
@@ -306,7 +315,8 @@ const Browser = observer(function Browser() {
     setAddressFocused,
     setAddressSuggestions,
     requestCollapseAddressBar,
-    handleCollapseAnimationEnd
+    handleCollapseAnimationEnd,
+    requestExpandAddressBar
   )
 
   const [showTabsView, setShowTabsView] = useState(false)
@@ -338,13 +348,20 @@ const Browser = observer(function Browser() {
       )
     }
   }, [menuPopoverProgress])
-  // Opacity-only fade driven on the UI thread.
+  // Binary visibility (NOT a fractional fade). The popover card is a
+  // LiquidGlassView (UIVisualEffectView on iOS) and animating an ancestor's
+  // opacity to fractional values triggers Apple's well-known stuck-effect
+  // bug — the blur snaps transparent and STAYS broken until the native view
+  // is re-mounted. We snap visible at the midpoint of the timing animation;
+  // the perceptual fade comes from the popover's own enter/exit transform
+  // (translateY in `animatedMenuPopoverStyle`).
+  //
   // Note: we deliberately do NOT include a transform here, since this style is
   // composed with `animatedMenuPopoverStyle` (which owns translateY based on the
   // address-bar position). In React Native style merge, `transform` is replaced
   // wholesale by later entries — so adding scale here would clobber translateY.
   const animatedMenuVisibilityStyle = useAnimatedStyle(() => ({
-    opacity: menuPopoverProgress.value
+    opacity: menuPopoverProgress.value >= 0.5 ? 1 : 0
   }))
 
   // HistoryPopover visibility — driven by a shared value so open/close runs
@@ -374,12 +391,15 @@ const Browser = observer(function Browser() {
     }
   }, [historyPopoverProgress])
   const historyPopoverOpen = historyPopoverDirection !== null
-  // Opacity-only fade for the popover wrapper. Composed with
-  // animatedMenuPopoverStyle (which owns translateY based on the address-bar
-  // position) — keep transforms out of this style so the merge doesn't
-  // clobber translateY (see MenuPopover note for the same gotcha).
+  // Binary visibility (NOT a fractional fade) — same rationale as
+  // `animatedMenuVisibilityStyle` above. The popover card is a LiquidGlassView
+  // / UIVisualEffectView, and fractional ancestor opacity sticks the effect
+  // view transparent on iOS. Snap at the midpoint of the timing animation;
+  // the perceptual movement comes from the wrapper's translateY in
+  // `animatedMenuPopoverStyle` (composed with this style). Keep transforms
+  // out of this style so the merge doesn't clobber translateY.
   const animatedHistoryVisibilityStyle = useAnimatedStyle(() => ({
-    opacity: historyPopoverProgress.value
+    opacity: historyPopoverProgress.value >= 0.5 ? 1 : 0
   }))
   const desktopModeCooldown = useRef(false)
 
@@ -398,12 +418,35 @@ const Browser = observer(function Browser() {
   // Remember where the bar was before collapsing so we can restore the position on expand
   const positionBeforeCollapse = useRef<'top' | 'bottom'>('bottom')
 
+  // glassRevision — monotonically incremented on every collapse and every
+  // expand. Used as `key` on the AddressBar subtree and on the collapsed
+  // dot's GlassPill so React fully unmounts and re-mounts the underlying
+  // LiquidGlassView (UIVisualEffectView on iOS) on each cycle.
+  //
+  // Why: @callstack/liquid-glass wraps Apple's UIVisualEffectView, which has
+  // a well-known rendering bug — once its parent goes through a fractional
+  // opacity transition (or ANY interruption while alpha < 1), the effect can
+  // snap to fully transparent and STICK there even after parent opacity
+  // returns to 1. Re-mounting the native view tears down the effect view and
+  // re-creates it, restoring the blur. The user empirically confirmed this:
+  // opening the menu popover (which conditionally re-renders the kebab pill)
+  // unsticks it. We do the same thing automatically on collapse <-> expand.
+  const [glassRevision, setGlassRevision] = useState(0)
+  const bumpGlassRevision = useCallback(() => {
+    setGlassRevision(r => r + 1)
+  }, [])
+
   const collapseAddressBar = useCallback(() => {
-    if (addressBarIsAtTop) {
-      // For now we only support collapsing when the bar is at the bottom (most useful)
-      return
-    }
-    positionBeforeCollapse.current = 'bottom'
+    // Remember pre-collapse position so expand can spring the bar back to the
+    // same edge. The useAddressBarAnimation hook keeps addressBarAtTop.value
+    // unchanged through the collapse so resetGestureState() on expand already
+    // restores the correct translateY — this ref is just for any JS-side
+    // consumers that need to know.
+    positionBeforeCollapse.current = addressBarIsAtTop ? 'top' : 'bottom'
+    // Bump revision so the collapsed dot's GlassPill mounts FRESH, and so
+    // the AddressBar (still mounted during exit-animation) is torn down at
+    // end-of-anim with a known fresh native-view tree on the next expand.
+    bumpGlassRevision()
     // Flip JS state immediately (dot mounts at progress=0 and fades in via the
     // shared collapse-progress), and keep the bar wrapper mounted briefly via
     // barExitAnimating so its UI-thread fade/scale finishes on screen.
@@ -413,9 +456,14 @@ const Browser = observer(function Browser() {
     // withTiming(progress, 1) on the UI thread.
     setBarExitAnimating(true)
     setAddressBarCollapsed(true)
-  }, [addressBarIsAtTop])
+  }, [addressBarIsAtTop, bumpGlassRevision])
 
   const expandAddressBar = useCallback(() => {
+    // Bump revision BEFORE flipping the collapsed flag so when the AddressBar
+    // wrapper mounts, it uses the NEW key and its LiquidGlass pills are
+    // brand-new native views — never inheriting a stuck UIVisualEffectView
+    // state from the previous expand cycle.
+    bumpGlassRevision()
     setAddressBarCollapsed(false)
     // Just in case the exit-end callback didn't fire (e.g. cancelled animation),
     // make sure the bar's exit-mount flag is cleared so we don't have a ghost
@@ -425,12 +473,15 @@ const Browser = observer(function Browser() {
     // position and the collapse guard is cleared. Prevents "stuck closed"
     // and freezes when collapse fired mid-gesture before onFinalize ran.
     resetGestureState()
-  }, [resetGestureState])
+  }, [resetGestureState, bumpGlassRevision])
 
   // Keep the ref up to date so runOnJS always calls the latest version (avoids stale closures)
   useEffect(() => {
     collapseRef.current = collapseAddressBar
   }, [collapseAddressBar])
+  useEffect(() => {
+    expandRef.current = expandAddressBar
+  }, [expandAddressBar])
 
   /**
    * Approach A: When the address bar is positioned at the bottom, inset the
@@ -1670,43 +1721,73 @@ const Browser = observer(function Browser() {
           />
         )}
 
-        {/* Collapsed address bar — only the ... button in bottom-right.
-            Mounted as soon as addressBarCollapsed flips true (which happens
-            immediately when the right-swipe gesture activates), but its
-            opacity + scale are driven by the SAME shared progress value as
-            the bar's exit. The dot stays invisible while the bar fades, then
-            morphs in for a clean cross-fade — both styles run on the UI
-            thread from a single shared value (no per-frame runOnJS). */}
-        {addressBarCollapsed && !isFullscreen && (
+        {/* Always-mounted kebab (...) pill.
+            Lives OUTSIDE the collapsing address-bar wrapper so it stays
+            visible during right-swipe collapse. Its translateY follows the
+            bar's vertical position (top vs bottom) + keyboard offset via
+            `animatedKebabStyle`, but the style emits NO opacity, NO scale,
+            NO translateX — only translateY. This is required so the
+            LiquidGlassView (UIVisualEffectView on iOS) never sees a
+            fractional-opacity ancestor (Apple's stuck-effect bug).
+            The kebab's tap action is always "open the menu popover". */}
+        {!isFullscreen && showAddressBar && !addressFocused && (
           <Animated.View
             style={[
               {
                 position: 'absolute',
-                bottom: safeBottomInset(insets.bottom),
                 right: spacing.md,
+                top: insets.top + spacing.xs,
                 zIndex: 30,
                 width: 44,
                 height: 44,
               },
-              animatedCollapsedDotStyle,
+              animatedKebabStyle,
             ]}
             pointerEvents="box-none"
           >
-            <GlassPill style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-              <TouchableOpacity
-                onPress={expandAddressBar}
-                style={{
-                  width: 44,
-                  height: 44,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                activeOpacity={0.6}
-              >
-                <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
-              </TouchableOpacity>
-            </GlassPill>
+            {!menuPopoverOpen && (
+              <GlassPill style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setHistoryPopoverDirection(null)
+                    setMenuPopoverOpen(true)
+                  }}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  activeOpacity={0.6}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
+                </TouchableOpacity>
+              </GlassPill>
+            )}
           </Animated.View>
+        )}
+
+        {/* Left-swipe hit area to expand when collapsed.
+            A wide transparent strip across the header lets the user pan-left
+            anywhere on the chrome row to bring the bar back. The kebab tap is
+            unaffected because Pan needs translation (≥20px) to activate. */}
+        {addressBarCollapsed && !isFullscreen && (
+          <GestureDetector gesture={expandPan}>
+            <Animated.View
+              style={[
+                {
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  top: insets.top,
+                  height: ADDRESS_BAR_HEIGHT,
+                  zIndex: 25,
+                  backgroundColor: 'transparent',
+                },
+                animatedKebabStyle,
+              ]}
+            />
+          </GestureDetector>
         )}
 
         {/* ---- Floating Address Bar + Popover (absolutely positioned) ----
@@ -1725,6 +1806,7 @@ const Browser = observer(function Browser() {
                 pointerEvents={addressBarCollapsed ? 'none' : 'box-none'}
               >
                 <AddressBar
+                  key={`address-bar-${glassRevision}`}
                   addressText={addressText}
                   addressFocused={addressFocused}
                   isLoading={activeTab?.isLoading || false}
@@ -1732,12 +1814,7 @@ const Browser = observer(function Browser() {
                   canGoForward={activeTab?.canGoForward || false}
                   isNewTab={isNewTab}
                   isHttps={activeTab?.url?.startsWith('https') || false}
-                  menuOpen={menuPopoverOpen}
                   historyPopoverOpen={historyPopoverOpen}
-                  onMorePress={() => {
-                    setHistoryPopoverDirection(null)
-                    setMenuPopoverOpen(true)
-                  }}
                   onChangeText={onChangeAddressText}
                   onSubmit={onAddressSubmit}
                   onFocus={() => {

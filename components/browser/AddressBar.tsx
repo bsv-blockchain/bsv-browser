@@ -13,9 +13,7 @@ interface AddressBarProps {
   canGoForward: boolean
   isNewTab: boolean
   isHttps: boolean
-  menuOpen: boolean
   historyPopoverOpen: boolean
-  onMorePress: () => void
   onChangeText: (text: string) => void
   onSubmit: () => void
   onFocus: () => void
@@ -50,9 +48,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   canGoForward,
   isNewTab,
   isHttps,
-  menuOpen,
   historyPopoverOpen,
-  onMorePress,
   onChangeText,
   onSubmit,
   onFocus,
@@ -166,7 +162,12 @@ export const AddressBar: React.FC<AddressBarProps> = ({
           ) : null}
         </GlassPill>
 
-        {/* More button — hidden when popover is open (popover renders in its place) or when editing */}
+        {/* Rightmost slot.
+            - When editing: an in-bar close pill (cancel new tab / blur input).
+            - Otherwise: a transparent 44px placeholder so the URL pill leaves
+              space for the always-present kebab (rendered by the parent as a
+              sibling overlay — it lives OUTSIDE the collapsing bar wrapper so
+              it stays visible during the right-swipe collapse). */}
         {addressFocused ? (
           <GlassPill style={styles.morePill}>
             <TouchableOpacity
@@ -184,14 +185,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
               <Ionicons name="close" size={20} color={gc.accent} />
             </TouchableOpacity>
           </GlassPill>
-        ) : !menuOpen ? (
-          <GlassPill style={styles.morePill}>
-            <TouchableOpacity onPress={onMorePress} style={styles.moreButton} activeOpacity={0.6}>
-              <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
-            </TouchableOpacity>
-          </GlassPill>
         ) : (
-          /* Placeholder so the URL pill doesn't reflow when popover opens */
           <View style={styles.morePlaceholder} />
         )}
       </View>
