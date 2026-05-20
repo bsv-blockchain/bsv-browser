@@ -331,11 +331,17 @@ const Browser = observer(function Browser() {
   const menuPopoverProgress = useSharedValue(0)
   const setMenuPopoverOpen = useCallback((open: boolean) => {
     if (open) {
+      // Snap progress to 1 INSTANTLY on open — no fade-in. Rationale:
+      // the popover card is a LiquidGlassView (UIVisualEffectView on iOS).
+      // If the wrapper's opacity animates from 0 -> 1 on first mount, the
+      // native effect view initialises in a disabled state and stays stuck
+      // transparent (the "first open is empty" bug). By making the wrapper
+      // opaque on its FIRST paint, the effect view initialises enabled and
+      // renders correctly. Perceptual motion still comes from the existing
+      // translateY in `animatedMenuPopoverStyle`. The close path still
+      // animates 1 -> 0 so the popover can fade out before unmounting.
       _setMenuPopoverMounted(true)
-      menuPopoverProgress.value = withTiming(1, {
-        duration: 180,
-        easing: Easing.out(Easing.cubic)
-      })
+      menuPopoverProgress.value = 1
     } else {
       menuPopoverProgress.value = withTiming(
         0,
@@ -373,11 +379,14 @@ const Browser = observer(function Browser() {
   const historyPopoverProgress = useSharedValue(0)
   const setHistoryPopoverDirection = useCallback((next: 'back' | 'forward' | null) => {
     if (next !== null) {
+      // Snap progress to 1 INSTANTLY on open — no fade-in. Same rationale as
+      // `setMenuPopoverOpen` above: the popover card is a LiquidGlassView
+      // (UIVisualEffectView on iOS), and a 0 -> 1 fade-in on first mount
+      // leaves the native effect stuck transparent. Opening with opacity
+      // already at 1 avoids the bug. Close still animates 1 -> 0 so the
+      // popover can fade out before unmounting.
       _setHistoryPopoverDirectionMounted(next)
-      historyPopoverProgress.value = withTiming(1, {
-        duration: 180,
-        easing: Easing.out(Easing.cubic)
-      })
+      historyPopoverProgress.value = 1
     } else {
       historyPopoverProgress.value = withTiming(
         0,

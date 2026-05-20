@@ -34,7 +34,7 @@
     "@bsv/btms": "^1.0.1",
     "@bsv/btms-permission-module": "^1.0.1",
     "@bsv/message-box-client": "^2.1.1",
-    "@bsv/sdk": "^2.1.1",
+    "@bsv/sdk": "^2.1.2",
     "@bsv/wallet-relay": "^0.1.1",
     "@bsv/wallet-toolbox-mobile": "^2.1.27",
     "@callstack/liquid-glass": "^0.7.1",
