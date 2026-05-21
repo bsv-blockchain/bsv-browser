@@ -1,0 +1,51 @@
+{
+  "label": "baseline",
+  "when": "2026-05-21T04:09:53.903Z",
+  "results": {
+    "console.log x10k (typical dApp logging)": {
+      "median_ms": 2.1705,
+      "iterations": 10000,
+      "ops_per_sec": 4607233
+    },
+    "console.bridge_calls_for_10k_mixed": {
+      "count": 10330
+    },
+    "provider.consumer_rerenders_for_1000_parent_renders": {
+      "count": 1000
+    },
+    "provider.value_construction x1000": {
+      "median_ms": 0.0379,
+      "iterations": 1000,
+      "ops_per_sec": 26402640
+    },
+    "bookmark.root_renders_for_500_mutations": {
+      "count": 501
+    },
+    "bookmark.isolated_renders_for_500_mutations": {
+      "count": 0
+    },
+    "bookmark.add+react x500": {
+      "median_ms": 66.2224,
+      "iterations": 5,
+      "ops_per_sec": 76
+    },
+    "tab.count_after_50_opens": {
+      "count": 50
+    },
+    "wallet.value_rebuild x1000": {
+      "median_ms": 0.2014,
+      "iterations": 1000,
+      "ops_per_sec": 4964849
+    },
+    "thumbnail.schedule x500 (every onLoadEnd)": {
+      "median_ms": 0.1937,
+      "iterations": 500,
+      "ops_per_sec": 2581205
+    },
+    "thumbnail.schedule_gated x500": {
+      "median_ms": 0.0278,
+      "iterations": 500,
+      "ops_per_sec": 17991436
+    }
+  }
+}

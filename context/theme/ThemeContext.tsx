@@ -1,4 +1,4 @@
-import React, { createContext, useContext } from 'react'
+import React, { createContext, useContext, useMemo } from 'react'
 import { useColorScheme } from 'react-native'
 import {
   lightColors as tokenLightColors,
@@ -143,15 +143,15 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const isDark = colorScheme === 'dark'
   const colors = isDark ? darkColors : lightColors
 
+  const value = useMemo(() => ({
+    mode: 'system' as ThemeMode,
+    setThemeMode: () => {},
+    colors,
+    isDark
+  }), [colors, isDark])
+
   return (
-    <ThemeContext.Provider
-      value={{
-        mode: 'system',
-        setThemeMode: () => {},
-        colors,
-        isDark,
-      }}
-    >
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   )

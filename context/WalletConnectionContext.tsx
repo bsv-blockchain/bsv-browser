@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import * as SecureStore from 'expo-secure-store'
 import { WalletClient, PrivateKey, ProtoWallet, Utils } from '@bsv/sdk'
@@ -431,12 +431,14 @@ export function WalletConnectionProvider({ children }: { children: React.ReactNo
 
   // ── Provider ──────────────────────────────────────────────────────────────
 
+  const value = useMemo<WalletConnectionContextValue>(() => ({
+    status, sessionMeta, errorMsg,
+    connect, reconnect, disconnect,
+    startNavTimer, cancelNavTimer,
+  }), [status, sessionMeta, errorMsg, connect, reconnect, disconnect, startNavTimer, cancelNavTimer])
+
   return (
-    <WalletConnectionContext.Provider value={{
-      status, sessionMeta, errorMsg,
-      connect, reconnect, disconnect,
-      startNavTimer, cancelNavTimer,
-    }}>
+    <WalletConnectionContext.Provider value={value}>
       {children}
     </WalletConnectionContext.Provider>
   )

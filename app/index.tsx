@@ -71,6 +71,25 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useHistory } from '@/hooks/useHistory'
 import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useMemoryHygiene } from '@/hooks/useMemoryHygiene'
+
+/* -------------------------------------------------------------------------- */
+/*                       ISOLATED BOOKMARK-AWARE MENU                         */
+/* -------------------------------------------------------------------------- */
+/**
+ * Wraps MenuPopover in a tiny observer that reads `bookmarkStore.bookmarks`
+ * for the active URL only. Without this wrapper the root `Browser` observer
+ * has to read `bookmarkStore.bookmarks.some(...)` directly in its render,
+ * which causes every bookmark mutation to re-render the entire WebView +
+ * chrome tree. Confining the read here keeps bookmark churn local.
+ */
+type ObservedMenuPopoverProps = Omit<React.ComponentProps<typeof MenuPopover>, 'isBookmarked'> & {
+  activeTabUrl: string | null
+}
+const ObservedMenuPopover = observer(({ activeTabUrl, ...rest }: ObservedMenuPopoverProps) => {
+  const isBookmarked = !!activeTabUrl && bookmarkStore.bookmarks.some(b => b.url === activeTabUrl)
+  return <MenuPopover {...rest} isBookmarked={isBookmarked} />
+})
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
@@ -261,9 +280,25 @@ const Browser = observer(function Browser() {
 
   const captureActiveThumbnail = useCallback(async () => {
     if (!activeTab || activeTab.url === kNEW_TAB_URL) return
+    // Defer the captureRef rasterization until the JS thread is idle so it never
+    // competes with chrome animations or active page scrolls. The thumbnail is
+    // only consumed when the tabs grid is opened or on backgrounding, so a few
+    // hundred ms of latency is invisible to the user.
+    await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
     const uri = await captureThumbnail(webviewContainerRef, activeTab.id)
     if (uri) tabStore.updateTab(activeTab.id, { thumbnailUri: uri })
   }, [activeTab])
+
+  // iOS memory hygiene: on backgrounding capture the current tab thumbnail so the
+  // user sees an up-to-date snapshot on return, and on memoryWarning purge inactive
+  // tab WebView caches. Without this the app accumulates view-shot files and
+  // unbounded WK caches until the OS terminates the process.
+  useMemoryHygiene({
+    onBackground: captureActiveThumbnail,
+    onMemoryWarning: () => {
+      tabStore.purgeInactiveTabResources()
+    }
+  })
 
   /* -------------------------- ui / animation state -------------------------- */
   const addressEditing = useRef(false)
@@ -1640,11 +1675,15 @@ const Browser = observer(function Browser() {
                 ...(event.nativeEvent ?? event),
                 loading: false
               })
-              // Capture thumbnail after page settles
-              if (activeTab.url !== kNEW_TAB_URL) {
-                if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
-                thumbnailCaptureTimer.current = setTimeout(() => captureActiveThumbnail(), 800)
-              }
+              // Thumbnail capture intentionally NOT scheduled on every onLoadEnd.
+              // Previously: setTimeout(captureActiveThumbnail, 800) ran for every page
+              // load — including video pages, dApps that navigate in-place, and
+              // micropayment auto-approve flows — causing a main-thread rasterization
+              // spike that competed with Reanimated animations and JS-thread crypto.
+              // Now capture is on-demand only, triggered by:
+              //   1. User tapping the tabs button (see ObservedMenuPopover onTabs handler)
+              //   2. AppState going inactive/background (see useEffect below)
+              // This keeps the active page hot path free of view-shot work.
 
               // Push current browser safe area insets (CSS vars + event) to the newly loaded page.
               // Uses bottomReservedHeight (measured from the actual address bar top edge)
@@ -1907,14 +1946,14 @@ const Browser = observer(function Browser() {
               animatedMenuVisibilityStyle
             ]}
           >
-            <MenuPopover
+            <ObservedMenuPopover
+              activeTabUrl={activeTab?.url ?? null}
               isNewTab={isNewTab}
               canShare={!isNewTab}
               addressBarAtTop={addressBarIsAtTop}
               topOffset={8}
               bottomOffset={bottomInset + 4}
               isDesktopMode={activeTab?.isDesktopMode ?? false}
-              isBookmarked={!!activeTab && bookmarkStore.bookmarks.some(b => b.url === activeTab.url)}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {

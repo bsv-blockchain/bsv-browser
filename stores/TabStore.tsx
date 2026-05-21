@@ -11,6 +11,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
 const STORAGE_KEYS = { TABS: 'tabs', ACTIVE: 'activeTabId' }
 
+// Hard cap on simultaneously-open tabs. On overflow, the oldest non-active tab
+// (by last-focused timestamp) is evicted. This protects iPhone SE-class devices
+// from unbounded thumbnail/metadata accumulation when users keep tabs open for
+// research workflows.
+export const MAX_TABS = 8
+
 export class TabStore {
   tabs: Tab[] = [] // Always initialize as an array
   activeTabId = 1
@@ -19,6 +25,8 @@ export class TabStore {
   private nextId = 1
   private tabNavigationHistories: { [tabId: number]: { url: string; title: string }[] } = {} // Track navigation history per tab
   private tabHistoryIndexes: { [tabId: number]: number } = {} // Track current position in history per tab
+  // LRU bookkeeping for eviction when tab count exceeds MAX_TABS.
+  private lastFocusedAt: Map<number, number> = new Map()
   // Tab IDs for which the next navigation state change is a programmatic history jump
   // (goBack / goForward / navigateToHistoryIndex). handleNavigationStateChange skips the
   // history-append logic for these so jumps are never mistaken for new navigations.
@@ -70,11 +78,17 @@ export class TabStore {
     console.log(`newTab() called with initialUrl=${initialUrl}`)
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
 
+    // Enforce MAX_TABS via LRU eviction of the oldest non-active tab.
+    if (this.tabs.length >= MAX_TABS) {
+      this.evictLeastRecentlyUsed()
+    }
+
     // Ensure initialUrl is never null or undefined
     const safeInitialUrl = initialUrl || kNEW_TAB_URL
     const newTab = this.createTab(safeInitialUrl)
     this.tabs.push(newTab)
     this.activeTabId = newTab.id
+    this.lastFocusedAt.set(newTab.id, Date.now())
 
     // Initialize navigation history for new tab
     // ALWAYS include the new tab page as the first entry so users can navigate back to it
@@ -120,11 +134,40 @@ export class TabStore {
     if (targetTab && targetTab.id !== this.activeTabId) {
       console.log(`setActiveTab(): Setting activeTabId=${id}`)
       this.activeTabId = id
+      this.lastFocusedAt.set(id, Date.now())
       this.saveActive().catch(e => console.error('saveActive failed', e))
     } else if (!targetTab) {
       console.warn(`setActiveTab(): Target tab ${id} not found`)
     } else {
       console.log(`setActiveTab(): Tab ${id} is already active, no change needed`)
+    }
+  }
+
+  /** Evict the oldest non-active tab when tab count exceeds MAX_TABS. */
+  private evictLeastRecentlyUsed() {
+    let oldestId: number | null = null
+    let oldestTime = Infinity
+    for (const t of this.tabs) {
+      if (t.id === this.activeTabId) continue
+      const focused = this.lastFocusedAt.get(t.id) ?? 0
+      if (focused < oldestTime) {
+        oldestTime = focused
+        oldestId = t.id
+      }
+    }
+    if (oldestId !== null) {
+      console.log(`[TabStore] MAX_TABS reached (${MAX_TABS}); evicting tab ${oldestId}`)
+      this.closeTab(oldestId)
+    }
+  }
+
+  /** Free heavy resources for tabs that aren't currently active. Called from memory-warning. */
+  purgeInactiveTabResources() {
+    for (const t of this.tabs) {
+      if (t.id === this.activeTabId) continue
+      try {
+        t.webviewRef?.current?.clearCache?.(true)
+      } catch {}
     }
   }
   async saveActive() {
@@ -400,6 +443,7 @@ export class TabStore {
 
     delete this.tabNavigationHistories[id]
     delete this.tabHistoryIndexes[id]
+    this.lastFocusedAt.delete(id)
     this.tabs.splice(tabIndex, 1)
 
     if (this.tabs.length === 0) {
