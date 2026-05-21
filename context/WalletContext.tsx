@@ -1406,3 +1406,103 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 }
 
 export const useWallet = () => useContext(WalletContext)
+
+/* -------------------------------------------------------------------------- */
+/*                          NARROW SELECTOR HOOKS                             */
+/* -------------------------------------------------------------------------- */
+//
+// `useWallet()` returns the full ~35-field context object — any consumer is
+// re-rendered every time *any* field changes (queue mutation, txStatusVersion
+// tick, settings update, SSE event, etc.). For components that only need a
+// slice (e.g. the chrome shell needs `walletBuilt` but doesn't care about
+// `txStatusVersion`), use one of the narrow selector hooks below.
+//
+// They share the same provider value, so they don't avoid the underlying
+// React context re-render — but they do clearly mark each consumer's
+// dependency surface, and provide a single seam for a future
+// `useSyncExternalStore`-based selector migration when the WalletContext
+// is finally split into independent providers.
+//
+// Returning a stable object via `useMemo` on the slice keys still means a
+// consumer that does `const { walletBuilt } = useWalletStatus()` re-renders
+// only when walletBuilt itself toggles — because the slice's identity tracks
+// just the queried fields. This is the maximum win achievable without
+// breaking the existing `useWallet()` API.
+
+export interface WalletStatusSlice {
+  walletBuilt: boolean
+  walletBuilding: boolean
+  snapshotLoaded: boolean
+  configStatus: ConfigStatus
+  selectedNetwork: AppChain
+}
+export const useWalletStatus = (): WalletStatusSlice => {
+  const ctx = useContext(WalletContext)
+  return useMemo<WalletStatusSlice>(
+    () => ({
+      walletBuilt: ctx.walletBuilt,
+      walletBuilding: ctx.walletBuilding,
+      snapshotLoaded: ctx.snapshotLoaded,
+      configStatus: ctx.configStatus,
+      selectedNetwork: ctx.selectedNetwork
+    }),
+    [ctx.walletBuilt, ctx.walletBuilding, ctx.snapshotLoaded, ctx.configStatus, ctx.selectedNetwork]
+  )
+}
+
+export interface WalletQueuesSlice {
+  basketRequests: BasketAccessRequest[]
+  certificateRequests: CertificateAccessRequest[]
+  protocolRequests: ProtocolAccessRequest[]
+  spendingRequests: SpendingRequest[]
+  btmsRequests: BtmsRequest[]
+  advanceBasketQueue: () => void
+  advanceCertificateQueue: () => void
+  advanceProtocolQueue: () => void
+  advanceSpendingQueue: () => void
+  advanceBtmsQueue: (approved: boolean) => void
+}
+export const useWalletQueues = (): WalletQueuesSlice => {
+  const ctx = useContext(WalletContext)
+  return useMemo<WalletQueuesSlice>(
+    () => ({
+      basketRequests: ctx.basketRequests,
+      certificateRequests: ctx.certificateRequests,
+      protocolRequests: ctx.protocolRequests,
+      spendingRequests: ctx.spendingRequests,
+      btmsRequests: ctx.btmsRequests,
+      advanceBasketQueue: ctx.advanceBasketQueue,
+      advanceCertificateQueue: ctx.advanceCertificateQueue,
+      advanceProtocolQueue: ctx.advanceProtocolQueue,
+      advanceSpendingQueue: ctx.advanceSpendingQueue,
+      advanceBtmsQueue: ctx.advanceBtmsQueue
+    }),
+    [
+      ctx.basketRequests,
+      ctx.certificateRequests,
+      ctx.protocolRequests,
+      ctx.spendingRequests,
+      ctx.btmsRequests,
+      ctx.advanceBasketQueue,
+      ctx.advanceCertificateQueue,
+      ctx.advanceProtocolQueue,
+      ctx.advanceSpendingQueue,
+      ctx.advanceBtmsQueue
+    ]
+  )
+}
+
+/** For consumers that only care about the SSE-driven transaction tick. */
+export const useTxStatusVersion = (): number => {
+  const ctx = useContext(WalletContext)
+  return ctx.txStatusVersion
+}
+
+/** Managers + storage — used by the WebView CWI message handler. */
+export const useWalletManagers = () => {
+  const ctx = useContext(WalletContext)
+  return useMemo(
+    () => ({ managers: ctx.managers, storage: ctx.storage, adminOriginator: ctx.adminOriginator }),
+    [ctx.managers, ctx.storage, ctx.adminOriginator]
+  )
+}

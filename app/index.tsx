@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
+import React, { useCallback, useDeferredValue, useEffect, useRef, useState, useMemo } from 'react'
 import {
   Keyboard,
   Platform,
@@ -72,6 +72,7 @@ import { useHistory } from '@/hooks/useHistory'
 import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useMemoryHygiene } from '@/hooks/useMemoryHygiene'
+import { mark } from '@/utils/perfMarks'
 
 /* -------------------------------------------------------------------------- */
 /*                       ISOLATED BOOKMARK-AWARE MENU                         */
@@ -775,9 +776,14 @@ const Browser = observer(function Browser() {
     fuseRef.current.setCollection([...history, ...bookmarkStore.bookmarks])
   }, [history])
 
-  const onChangeAddressText = useCallback((txt: string) => {
-    setAddressText(txt)
-    if (txt.trim().length === 0) {
+  // Keep input updates synchronous (so typing feels instant) but compute Fuse
+  // results from a deferred value. React 19 schedules the suggestion update at
+  // a lower priority, so a long Fuse pass on a big history list can never block
+  // the TextInput keystroke render.
+  const deferredAddressText = useDeferredValue(addressText)
+  useEffect(() => {
+    const txt = deferredAddressText.trim()
+    if (txt.length === 0) {
       setAddressSuggestions([])
       return
     }
@@ -789,6 +795,10 @@ const Browser = observer(function Browser() {
       .filter((item, index, self) => index === self.findIndex(t => t.url === item.url))
       .slice(0, 5)
     setAddressSuggestions(uniqueResults)
+  }, [deferredAddressText])
+
+  const onChangeAddressText = useCallback((txt: string) => {
+    setAddressText(txt)
   }, [])
 
   /* -------------------------------------------------------------------------- */
@@ -1249,6 +1259,15 @@ const Browser = observer(function Browser() {
       const origin = activeTab.url.replace(/^https?:\/\//, '').split('/')[0]
       let response: any
 
+      // Yield to any in-flight interaction (Reanimated spring on the address bar,
+      // sheet open animation, scroll gesture) before kicking off ECDSA / KeyDeriver
+      // work. Heavy wallet ops awaited inline on the JS thread used to compete with
+      // chrome animations on iPhone SE. InteractionManager.runAfterInteractions
+      // resolves immediately when the JS thread is idle, so auto-approved micros
+      // pay no extra cost.
+      await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
+
+      const perfEnd = mark(`cwi.${msg.call}`)
       try {
         switch (msg.call) {
           case 'getPublicKey':
@@ -1287,6 +1306,8 @@ const Browser = observer(function Browser() {
         sendResponseToWebView(msg.id, response)
       } catch (error: any) {
         sendErrorToWebView(msg.id, error?.message || 'unknown error', error?.code || 1)
+      } finally {
+        perfEnd()
       }
     },
     [activeTab, wallet, routeWebViewMessage, isWeb2Mode, walletBuilding]
@@ -1308,7 +1329,11 @@ const Browser = observer(function Browser() {
   /* -------------------------------------------------------------------------- */
   /*                      NAV STATE CHANGE → HISTORY TRACKING                   */
   /* -------------------------------------------------------------------------- */
-  const handleNavStateChange = (navState: WebViewNavigation) => {
+  // useCallback keeps the WebView's onNavigationStateChange prop identity stable
+  // across Browser re-renders that don't touch activeTab — otherwise every chrome
+  // animation tick reassigned this prop and the native WebView module had to
+  // re-bind its bridge listener.
+  const handleNavStateChange = useCallback((navState: WebViewNavigation) => {
     if (!activeTab) return
     if (paymentInFlightUrl.current) return
     if (navState.url?.includes('favicon.ico') && activeTab.url === kNEW_TAB_URL) return
@@ -1347,7 +1372,7 @@ const Browser = observer(function Browser() {
         historyDebounceTimer.current = null
       }, 500)
     }
-  }
+  }, [activeTab, pushHistory])
 
   /* -------------------------------------------------------------------------- */
   /*                              MANIFEST HANDLING                             */

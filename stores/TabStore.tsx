@@ -9,13 +9,24 @@ import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import { deleteThumbnail } from '@/utils/thumbnailService'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
-const STORAGE_KEYS = { TABS: 'tabs', ACTIVE: 'activeTabId' }
+import { maxTabsForTier } from '@/utils/deviceTier'
+const STORAGE_KEYS = {
+  TABS: 'tabs',
+  ACTIVE: 'activeTabId',
+  // Persisted per-tab navigation history so back/forward survives app restart.
+  // Previously the in-memory tabNavigationHistories map was lost on cold start —
+  // users tapped Back on a restored tab and the WebView's native history was
+  // empty, leaving them stranded with a disabled Back button.
+  NAV_HISTORY: 'tabNavigationHistories',
+  NAV_HISTORY_INDEXES: 'tabHistoryIndexes'
+}
 
 // Hard cap on simultaneously-open tabs. On overflow, the oldest non-active tab
-// (by last-focused timestamp) is evicted. This protects iPhone SE-class devices
-// from unbounded thumbnail/metadata accumulation when users keep tabs open for
-// research workflows.
-export const MAX_TABS = 8
+// (by last-focused timestamp) is evicted. The cap is device-tier-aware via
+// expo-device: SE-class hardware (low RAM) caps at 4, mid-range at 8, high at 12.
+// This protects iPhone SE-class devices from unbounded thumbnail/metadata
+// accumulation while letting flagship devices keep more tabs warm.
+export const MAX_TABS = maxTabsForTier()
 
 export class TabStore {
   tabs: Tab[] = [] // Always initialize as an array
@@ -611,13 +622,20 @@ export class TabStore {
     const serializable = this.tabs.map(({ webviewRef, ...rest }) => rest)
     await AsyncStorage.multiSet([
       [STORAGE_KEYS.TABS, JSON.stringify(serializable)],
-      [STORAGE_KEYS.ACTIVE, String(this.activeTabId)]
+      [STORAGE_KEYS.ACTIVE, String(this.activeTabId)],
+      [STORAGE_KEYS.NAV_HISTORY, JSON.stringify(this.tabNavigationHistories)],
+      [STORAGE_KEYS.NAV_HISTORY_INDEXES, JSON.stringify(this.tabHistoryIndexes)]
     ])
   }
 
   async loadTabs() {
     try {
-      const [[, tabsJson], [, activeIdStr]] = await AsyncStorage.multiGet([STORAGE_KEYS.TABS, STORAGE_KEYS.ACTIVE])
+      const [[, tabsJson], [, activeIdStr], [, navHistJson], [, navIdxJson]] = await AsyncStorage.multiGet([
+        STORAGE_KEYS.TABS,
+        STORAGE_KEYS.ACTIVE,
+        STORAGE_KEYS.NAV_HISTORY,
+        STORAGE_KEYS.NAV_HISTORY_INDEXES
+      ])
 
       const parsed = tabsJson ? JSON.parse(tabsJson) : []
       const withRefs = parsed.map((t: any) => ({
@@ -625,11 +643,29 @@ export class TabStore {
         webviewRef: createRef<WebView>()
       }))
 
+      // Rehydrate navigation history maps if present. canGoBack/canGoForward are
+      // recomputed from the restored history+index so the back button reflects
+      // real available history rather than stale boolean flags.
+      let restoredNavHist: { [tabId: number]: { url: string; title: string }[] } = {}
+      let restoredNavIdx: { [tabId: number]: number } = {}
+      try {
+        restoredNavHist = navHistJson ? JSON.parse(navHistJson) : {}
+        restoredNavIdx = navIdxJson ? JSON.parse(navIdxJson) : {}
+      } catch (e) {
+        console.warn('loadTabs: nav history parse failed, starting fresh', e)
+      }
+
       runInAction(() => {
-        // Reset navigation flags to false: tabNavigationHistories is in-memory only
-        // and is not persisted, so stale canGoBack/canGoForward values from the previous
-        // session would leave the back button enabled with no history behind it.
-        this.tabs = withRefs.map((t: any) => ({ ...t, canGoBack: false, canGoForward: false }))
+        this.tabNavigationHistories = restoredNavHist
+        this.tabHistoryIndexes = restoredNavIdx
+        this.tabs = withRefs.map((t: any) => {
+          const hist = restoredNavHist[t.id] || []
+          const idx = restoredNavIdx[t.id] ?? -1
+          const minIdx = hist.length > 0 && hist[0]?.url === kNEW_TAB_URL ? 1 : 0
+          const canGoBack = hist.length > 1 && idx > minIdx
+          const canGoForward = hist.length > 1 && idx < hist.length - 1
+          return { ...t, canGoBack, canGoForward }
+        })
         const maxId = Math.max(0, ...withRefs.map((t: any) => t.id))
         this.nextId = maxId + 1
 

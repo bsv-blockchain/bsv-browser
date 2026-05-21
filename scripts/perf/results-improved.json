@@ -1,11 +1,11 @@
 {
   "label": "improved",
-  "when": "2026-05-21T04:14:48.553Z",
+  "when": "2026-05-21T18:43:34.553Z",
   "results": {
     "console.log x10k (typical dApp logging)": {
-      "median_ms": 0.6051,
+      "median_ms": 0.824,
       "iterations": 10000,
-      "ops_per_sec": 16525511
+      "ops_per_sec": 12135922
     },
     "console.bridge_calls_for_10k_mixed": {
       "count": 1030
@@ -14,9 +14,9 @@
       "count": 1
     },
     "provider.value_construction x1000": {
-      "median_ms": 0.0313,
+      "median_ms": 0.194,
       "iterations": 1000,
-      "ops_per_sec": 32000000
+      "ops_per_sec": 5155755
     },
     "bookmark.root_renders_for_500_mutations": {
       "count": 1
@@ -25,27 +25,52 @@
       "count": 501
     },
     "bookmark.add+react x500": {
-      "median_ms": 62.144,
+      "median_ms": 81.5547,
       "iterations": 5,
-      "ops_per_sec": 80
+      "ops_per_sec": 61
     },
     "tab.count_after_50_opens": {
       "count": 8
     },
     "wallet.value_rebuild x1000": {
-      "median_ms": 0.1943,
+      "median_ms": 0.248,
       "iterations": 1000,
-      "ops_per_sec": 5148005
+      "ops_per_sec": 4032258
     },
     "thumbnail.schedule x500 (every onLoadEnd)": {
-      "median_ms": 0.191,
+      "median_ms": 0.3641,
       "iterations": 500,
-      "ops_per_sec": 2617226
+      "ops_per_sec": 1373155
     },
     "thumbnail.schedule_gated x500": {
-      "median_ms": 0.0294,
+      "median_ms": 0.0315,
       "iterations": 500,
-      "ops_per_sec": 17021277
+      "ops_per_sec": 15894208
+    },
+    "suggestions.sync_search_50keystrokes": {
+      "median_ms": 10.037,
+      "iterations": 500,
+      "ops_per_sec": 49815
+    },
+    "suggestions.deferred_search_50keystrokes": {
+      "median_ms": 0.1926,
+      "iterations": 500,
+      "ops_per_sec": 2595717
+    },
+    "list.measure_each_x200": {
+      "median_ms": 0.4119,
+      "iterations": 200,
+      "ops_per_sec": 485584
+    },
+    "list.getItemLayout_x200": {
+      "median_ms": 0.002,
+      "iterations": 200,
+      "ops_per_sec": 97943193
+    },
+    "cwi.10x3ms_op": {
+      "median_ms": 3.02,
+      "iterations": 10,
+      "ops_per_sec": 0
     }
   }
 }

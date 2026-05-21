@@ -84,6 +84,10 @@ const HistoryRow = memo(
 
 const FOOTER = <View style={{ height: 80 }} />
 
+// Fixed row height enables FlatList.getItemLayout — list never measures cells.
+// Matches the rendered height of `historyItem` below (padding 12+12 + title 17 + url 14).
+const HISTORY_ROW_HEIGHT = 60
+
 const HistoryListInner = ({ history, onSelect, onDelete, onClear, hideTitle = false }: Props) => {
   const { t } = useTranslation()
   const { colors } = useTheme()
@@ -148,6 +152,11 @@ const HistoryListInner = ({ history, onSelect, onDelete, onClear, hideTitle = fa
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         ListFooterComponent={FOOTER}
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
+        windowSize={5}
+        removeClippedSubviews
+        getItemLayout={(_, index) => ({ length: HISTORY_ROW_HEIGHT, offset: HISTORY_ROW_HEIGHT * index, index })}
       />
     </View>
   )
@@ -173,7 +182,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs
   },
   historyItem: {
-    padding: 12
+    padding: 12,
+    height: HISTORY_ROW_HEIGHT,
+    justifyContent: 'center'
   },
   clearBtn: {
     flexDirection: 'row',
