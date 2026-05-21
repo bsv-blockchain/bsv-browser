@@ -84,3 +84,38 @@ export const paymentLoadingPage = `<!DOCTYPE html>
   </div>
 </body>
 </html>`
+
+/**
+ * Minimal loading splash injected into the active WebView the instant a URL is
+ * submitted. Removes the perceived dead-air between the address bar collapsing
+ * and the native nav actually drawing the first byte of the new page —
+ * particularly noticeable on cold-DNS hosts and slow networks.
+ *
+ * The page is replaced as soon as the WKWebView completes the real navigation
+ * (the real page's HTML overwrites this stub), so users never see the spinner
+ * for more than the network/TLS handshake.
+ */
+export function navigationLoadingPage(targetUrl: string): string {
+  let host = ''
+  try {
+    host = new URL(targetUrl).host
+  } catch {
+    host = targetUrl
+  }
+  // Escape host for safe HTML embedding (display only — never reflected as JS).
+  const safeHost = host.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Loading…</title>${baseStyle}
+<style>
+  body { gap: 16px; flex-direction: column; }
+  .spinner { width: 28px; height: 28px; border: 3px solid var(--sub); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; opacity: 0.7; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .host { color: var(--sub); font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; letter-spacing: 0.2px; }
+</style></head>
+<body>
+  <div class="spinner"></div>
+  <div class="host">${safeHost}</div>
+</body>
+</html>`
+}

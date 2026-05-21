@@ -55,7 +55,7 @@ import { captureThumbnail, cleanupOrphanedThumbnails, thumbnailExists } from '@/
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
-import { getErrorPage, getNativeErrorInfo, paymentLoadingPage } from '@/utils/webview/errorPages'
+import { getErrorPage, getNativeErrorInfo, paymentLoadingPage, navigationLoadingPage } from '@/utils/webview/errorPages'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { GlassPill, useGlassColors } from '@/components/browser/GlassPill'
@@ -738,6 +738,29 @@ const Browser = observer(function Browser() {
     tabStore.updateTab(tabStore.activeTabId, patch)
   }, [])
 
+  /**
+   * Inject a minimal loading splash (spinner + target host) into the active
+   * WebView the instant the user commits to a navigation, before the WK
+   * native nav has produced any pixels. Eliminates the perceived dead-air
+   * between address-bar submit and the new page's first paint.
+   *
+   * Called from `onAddressSubmit` and the suggestion-tap handler — both
+   * user-initiated navigation paths. Programmatic URL changes (manifest
+   * start-url redirect, hybrid history goBack/goForward) skip the splash
+   * since those already render through other affordances.
+   */
+  const injectNavigationSplash = useCallback((url: string) => {
+    const ref = tabStore.activeTab?.webviewRef?.current
+    if (!ref) return
+    if (!/^https?:\/\//i.test(url)) return
+    try {
+      const html = navigationLoadingPage(url).replace(/`/g, '\\`')
+      ref.injectJavaScript(`document.open();document.write(\`${html}\`);document.close();`)
+    } catch {
+      // Non-fatal — splash is a UX nicety, not required.
+    }
+  }, [])
+
   /* -------------------------------------------------------------------------- */
   /*                              ADDRESS HANDLING                              */
   /* -------------------------------------------------------------------------- */
@@ -757,10 +780,12 @@ const Browser = observer(function Browser() {
     }
 
     if (!isValidUrl(entry)) entry = kNEW_TAB_URL
+
+    injectNavigationSplash(entry)
     updateActiveTab({ url: entry })
     addressEditing.current = false
     cancelableNewTabId.current = null
-  }, [addressText, updateActiveTab])
+  }, [addressText, updateActiveTab, injectNavigationSplash])
 
   /* -------------------------------------------------------------------------- */
   /*                          ADDRESS BAR AUTOCOMPLETE                          */
@@ -1935,6 +1960,7 @@ const Browser = observer(function Browser() {
                   setAddressFocused(false)
                   setAddressSuggestions([])
                   setAddressText(url)
+                  injectNavigationSplash(url)
                   updateActiveTab({ url })
                   addressEditing.current = false
                   cancelableNewTabId.current = null
