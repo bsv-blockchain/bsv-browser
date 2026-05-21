@@ -1,9 +1,10 @@
-import React, { createContext, useContext, useMemo } from 'react'
+import React, { createContext, useContext, useEffect, useMemo } from 'react'
 import { useColorScheme } from 'react-native'
 import {
   lightColors as tokenLightColors,
   darkColors as tokenDarkColors
 } from './tokens'
+import { assertThemeContrast } from './assertThemeContrast'
 
 // Theme type definitions
 export type ThemeMode = 'light' | 'dark' | 'system'
@@ -142,6 +143,13 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const colorScheme = useColorScheme()
   const isDark = colorScheme === 'dark'
   const colors = isDark ? darkColors : lightColors
+
+  // Dev-only: warn loudly if a token edit introduces an unreadable foreground/
+  // background pair (e.g. textOnAccent same brightness as accent). The check
+  // catches white-on-white / black-on-black at first render.
+  useEffect(() => {
+    assertThemeContrast(colors, isDark ? 'dark' : 'light')
+  }, [colors, isDark])
 
   const value = useMemo(() => ({
     mode: 'system' as ThemeMode,
