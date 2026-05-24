@@ -904,7 +904,7 @@ export class StorageExpoSQLite extends StorageProvider {
       'provenTxReqId',
       extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
     )
-    return this.validateEntities(rows, undefined, ['notified'])
+    return this.validateEntities(rows, undefined, ['notified', 'wasBroadcast'])
   }
 
   async findProvenTxs(args: FindProvenTxsArgs): Promise<TableProvenTx[]> {
@@ -1136,7 +1136,7 @@ export class StorageExpoSQLite extends StorageProvider {
       if (args.paged.offset) query += ` OFFSET ${args.paged.offset}`
     }
     const rows = (await db.getAllAsync(query, params)) as any[]
-    return this.validateEntities(rows, undefined, ['notified'])
+    return this.validateEntities(rows, undefined, ['notified', 'wasBroadcast'])
   }
 
   async getTxLabelMapsForUser(args: FindForUserSincePagedArgs): Promise<TableTxLabelMap[]> {

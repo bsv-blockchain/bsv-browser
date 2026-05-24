@@ -50,6 +50,8 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       inputBEEF BLOB,
       batch TEXT,
       provenTxId INTEGER,
+      wasBroadcast INTEGER NOT NULL DEFAULT 0,
+      rebroadcastAttempts INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (provenTxId) REFERENCES proven_txs(provenTxId)
     );
     CREATE INDEX IF NOT EXISTS idx_proven_tx_reqs_txid ON proven_tx_reqs(txid);
@@ -57,6 +59,17 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_proven_tx_reqs_batch ON proven_tx_reqs(batch);
     CREATE INDEX IF NOT EXISTS idx_proven_tx_reqs_provenTxId ON proven_tx_reqs(provenTxId);
   `)
+
+  // Migration 2026-04-30-001: add wasBroadcast/rebroadcastAttempts to existing DBs.
+  // SQLite has no IF NOT EXISTS for ADD COLUMN; rely on PRAGMA table_info.
+  const cols = (await db.getAllAsync(`PRAGMA table_info(proven_tx_reqs)`)) as Array<{ name: string }>
+  const names = new Set(cols.map(c => c.name))
+  if (!names.has('wasBroadcast')) {
+    await db.execAsync(`ALTER TABLE proven_tx_reqs ADD COLUMN wasBroadcast INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!names.has('rebroadcastAttempts')) {
+    await db.execAsync(`ALTER TABLE proven_tx_reqs ADD COLUMN rebroadcastAttempts INTEGER NOT NULL DEFAULT 0`)
+  }
 
   // Certificates table
   await db.execAsync(`
