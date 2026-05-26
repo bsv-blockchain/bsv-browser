@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
+import React, { useCallback, useDeferredValue, useEffect, useRef, useState, useMemo } from 'react'
 import {
   Keyboard,
   Platform,
@@ -55,7 +55,7 @@ import { captureThumbnail, cleanupOrphanedThumbnails, thumbnailExists } from '@/
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
-import { getErrorPage, getNativeErrorInfo, paymentLoadingPage } from '@/utils/webview/errorPages'
+import { getErrorPage, getNativeErrorInfo, paymentLoadingPage, navigationLoadingPage } from '@/utils/webview/errorPages'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { GlassPill, useGlassColors } from '@/components/browser/GlassPill'
@@ -71,6 +71,26 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useHistory } from '@/hooks/useHistory'
 import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useMemoryHygiene } from '@/hooks/useMemoryHygiene'
+import { mark } from '@/utils/perfMarks'
+
+/* -------------------------------------------------------------------------- */
+/*                       ISOLATED BOOKMARK-AWARE MENU                         */
+/* -------------------------------------------------------------------------- */
+/**
+ * Wraps MenuPopover in a tiny observer that reads `bookmarkStore.bookmarks`
+ * for the active URL only. Without this wrapper the root `Browser` observer
+ * has to read `bookmarkStore.bookmarks.some(...)` directly in its render,
+ * which causes every bookmark mutation to re-render the entire WebView +
+ * chrome tree. Confining the read here keeps bookmark churn local.
+ */
+type ObservedMenuPopoverProps = Omit<React.ComponentProps<typeof MenuPopover>, 'isBookmarked'> & {
+  activeTabUrl: string | null
+}
+const ObservedMenuPopover = observer(({ activeTabUrl, ...rest }: ObservedMenuPopoverProps) => {
+  const isBookmarked = !!activeTabUrl && bookmarkStore.bookmarks.some(b => b.url === activeTabUrl)
+  return <MenuPopover {...rest} isBookmarked={isBookmarked} />
+})
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
@@ -261,9 +281,25 @@ const Browser = observer(function Browser() {
 
   const captureActiveThumbnail = useCallback(async () => {
     if (!activeTab || activeTab.url === kNEW_TAB_URL) return
+    // Defer the captureRef rasterization until the JS thread is idle so it never
+    // competes with chrome animations or active page scrolls. The thumbnail is
+    // only consumed when the tabs grid is opened or on backgrounding, so a few
+    // hundred ms of latency is invisible to the user.
+    await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
     const uri = await captureThumbnail(webviewContainerRef, activeTab.id)
     if (uri) tabStore.updateTab(activeTab.id, { thumbnailUri: uri })
   }, [activeTab])
+
+  // iOS memory hygiene: on backgrounding capture the current tab thumbnail so the
+  // user sees an up-to-date snapshot on return, and on memoryWarning purge inactive
+  // tab WebView caches. Without this the app accumulates view-shot files and
+  // unbounded WK caches until the OS terminates the process.
+  useMemoryHygiene({
+    onBackground: captureActiveThumbnail,
+    onMemoryWarning: () => {
+      tabStore.purgeInactiveTabResources()
+    }
+  })
 
   /* -------------------------- ui / animation state -------------------------- */
   const addressEditing = useRef(false)
@@ -702,6 +738,29 @@ const Browser = observer(function Browser() {
     tabStore.updateTab(tabStore.activeTabId, patch)
   }, [])
 
+  /**
+   * Inject a minimal loading splash (spinner + target host) into the active
+   * WebView the instant the user commits to a navigation, before the WK
+   * native nav has produced any pixels. Eliminates the perceived dead-air
+   * between address-bar submit and the new page's first paint.
+   *
+   * Called from `onAddressSubmit` and the suggestion-tap handler — both
+   * user-initiated navigation paths. Programmatic URL changes (manifest
+   * start-url redirect, hybrid history goBack/goForward) skip the splash
+   * since those already render through other affordances.
+   */
+  const injectNavigationSplash = useCallback((url: string) => {
+    const ref = tabStore.activeTab?.webviewRef?.current
+    if (!ref) return
+    if (!/^https?:\/\//i.test(url)) return
+    try {
+      const html = navigationLoadingPage(url).replace(/`/g, '\\`')
+      ref.injectJavaScript(`document.open();document.write(\`${html}\`);document.close();`)
+    } catch {
+      // Non-fatal — splash is a UX nicety, not required.
+    }
+  }, [])
+
   /* -------------------------------------------------------------------------- */
   /*                              ADDRESS HANDLING                              */
   /* -------------------------------------------------------------------------- */
@@ -721,10 +780,12 @@ const Browser = observer(function Browser() {
     }
 
     if (!isValidUrl(entry)) entry = kNEW_TAB_URL
+
+    injectNavigationSplash(entry)
     updateActiveTab({ url: entry })
     addressEditing.current = false
     cancelableNewTabId.current = null
-  }, [addressText, updateActiveTab])
+  }, [addressText, updateActiveTab, injectNavigationSplash])
 
   /* -------------------------------------------------------------------------- */
   /*                          ADDRESS BAR AUTOCOMPLETE                          */
@@ -740,9 +801,14 @@ const Browser = observer(function Browser() {
     fuseRef.current.setCollection([...history, ...bookmarkStore.bookmarks])
   }, [history])
 
-  const onChangeAddressText = useCallback((txt: string) => {
-    setAddressText(txt)
-    if (txt.trim().length === 0) {
+  // Keep input updates synchronous (so typing feels instant) but compute Fuse
+  // results from a deferred value. React 19 schedules the suggestion update at
+  // a lower priority, so a long Fuse pass on a big history list can never block
+  // the TextInput keystroke render.
+  const deferredAddressText = useDeferredValue(addressText)
+  useEffect(() => {
+    const txt = deferredAddressText.trim()
+    if (txt.length === 0) {
       setAddressSuggestions([])
       return
     }
@@ -754,6 +820,10 @@ const Browser = observer(function Browser() {
       .filter((item, index, self) => index === self.findIndex(t => t.url === item.url))
       .slice(0, 5)
     setAddressSuggestions(uniqueResults)
+  }, [deferredAddressText])
+
+  const onChangeAddressText = useCallback((txt: string) => {
+    setAddressText(txt)
   }, [])
 
   /* -------------------------------------------------------------------------- */
@@ -1214,6 +1284,15 @@ const Browser = observer(function Browser() {
       const origin = activeTab.url.replace(/^https?:\/\//, '').split('/')[0]
       let response: any
 
+      // Yield to any in-flight interaction (Reanimated spring on the address bar,
+      // sheet open animation, scroll gesture) before kicking off ECDSA / KeyDeriver
+      // work. Heavy wallet ops awaited inline on the JS thread used to compete with
+      // chrome animations on iPhone SE. InteractionManager.runAfterInteractions
+      // resolves immediately when the JS thread is idle, so auto-approved micros
+      // pay no extra cost.
+      await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
+
+      const perfEnd = mark(`cwi.${msg.call}`)
       try {
         switch (msg.call) {
           case 'getPublicKey':
@@ -1252,6 +1331,8 @@ const Browser = observer(function Browser() {
         sendResponseToWebView(msg.id, response)
       } catch (error: any) {
         sendErrorToWebView(msg.id, error?.message || 'unknown error', error?.code || 1)
+      } finally {
+        perfEnd()
       }
     },
     [activeTab, wallet, routeWebViewMessage, isWeb2Mode, walletBuilding]
@@ -1273,7 +1354,11 @@ const Browser = observer(function Browser() {
   /* -------------------------------------------------------------------------- */
   /*                      NAV STATE CHANGE → HISTORY TRACKING                   */
   /* -------------------------------------------------------------------------- */
-  const handleNavStateChange = (navState: WebViewNavigation) => {
+  // useCallback keeps the WebView's onNavigationStateChange prop identity stable
+  // across Browser re-renders that don't touch activeTab — otherwise every chrome
+  // animation tick reassigned this prop and the native WebView module had to
+  // re-bind its bridge listener.
+  const handleNavStateChange = useCallback((navState: WebViewNavigation) => {
     if (!activeTab) return
     if (paymentInFlightUrl.current) return
     if (navState.url?.includes('favicon.ico') && activeTab.url === kNEW_TAB_URL) return
@@ -1312,7 +1397,7 @@ const Browser = observer(function Browser() {
         historyDebounceTimer.current = null
       }, 500)
     }
-  }
+  }, [activeTab, pushHistory])
 
   /* -------------------------------------------------------------------------- */
   /*                              MANIFEST HANDLING                             */
@@ -1640,11 +1725,15 @@ const Browser = observer(function Browser() {
                 ...(event.nativeEvent ?? event),
                 loading: false
               })
-              // Capture thumbnail after page settles
-              if (activeTab.url !== kNEW_TAB_URL) {
-                if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
-                thumbnailCaptureTimer.current = setTimeout(() => captureActiveThumbnail(), 800)
-              }
+              // Thumbnail capture intentionally NOT scheduled on every onLoadEnd.
+              // Previously: setTimeout(captureActiveThumbnail, 800) ran for every page
+              // load — including video pages, dApps that navigate in-place, and
+              // micropayment auto-approve flows — causing a main-thread rasterization
+              // spike that competed with Reanimated animations and JS-thread crypto.
+              // Now capture is on-demand only, triggered by:
+              //   1. User tapping the tabs button (see ObservedMenuPopover onTabs handler)
+              //   2. AppState going inactive/background (see useEffect below)
+              // This keeps the active page hot path free of view-shot work.
 
               // Push current browser safe area insets (CSS vars + event) to the newly loaded page.
               // Uses bottomReservedHeight (measured from the actual address bar top edge)
@@ -1871,6 +1960,7 @@ const Browser = observer(function Browser() {
                   setAddressFocused(false)
                   setAddressSuggestions([])
                   setAddressText(url)
+                  injectNavigationSplash(url)
                   updateActiveTab({ url })
                   addressEditing.current = false
                   cancelableNewTabId.current = null
@@ -1907,14 +1997,14 @@ const Browser = observer(function Browser() {
               animatedMenuVisibilityStyle
             ]}
           >
-            <MenuPopover
+            <ObservedMenuPopover
+              activeTabUrl={activeTab?.url ?? null}
               isNewTab={isNewTab}
               canShare={!isNewTab}
               addressBarAtTop={addressBarIsAtTop}
               topOffset={8}
               bottomOffset={bottomInset + 4}
               isDesktopMode={activeTab?.isDesktopMode ?? false}
-              isBookmarked={!!activeTab && bookmarkStore.bookmarks.some(b => b.url === activeTab.url)}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {

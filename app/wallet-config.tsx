@@ -401,8 +401,8 @@ export default function WalletConfigScreen() {
                   activeOpacity={0.7}
                 >
                   {arcSaving
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={{ ...typography.body, color: '#fff', fontWeight: '600' }}>{t('arc_apply')}</Text>
+                    ? <ActivityIndicator size="small" color={colors.textOnAccent} />
+                    : <Text style={{ ...typography.body, color: colors.textOnAccent, fontWeight: '600' }}>{t('arc_apply')}</Text>
                   }
                 </TouchableOpacity>
               </View>

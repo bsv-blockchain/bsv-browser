@@ -4,6 +4,17 @@
  * Colors follow iOS Human Interface Guidelines.
  * Typography uses the iOS type scale (system font).
  * Spacing uses a 4pt base grid.
+ *
+ * INVARIANT — contrast pairs MUST stay readable:
+ *   - `accent` ↔ `textOnAccent` (button bg vs button text)
+ *   - `background` ↔ `textPrimary`
+ *   - `backgroundSecondary` / `backgroundTertiary` ↔ `textPrimary`
+ *
+ * Never set `textOnAccent` and `accent` to the same brightness (white on white,
+ * black on black). The light theme inverts colours from the dark theme — that
+ * means BOTH theme objects must be updated when changing either field. A
+ * runtime contrast check in `assertThemeContrast.ts` warns in dev if this
+ * invariant breaks.
  */
 
 /* -------------------------------- Spacing -------------------------------- */
@@ -47,7 +58,8 @@ export const typography = {
 /* --------------------------------- Colors -------------------------------- */
 
 export const lightColors = {
-  // Accent
+  // Accent — `textOnAccent` MUST stay readable against this. Both fields invert
+  // in `darkColors` below; never let them collapse to the same brightness.
   accent: 'black',
   accentSecondary: '#222222',
 
@@ -92,7 +104,9 @@ export const lightColors = {
 } as const
 
 export const darkColors = {
-  // Accent
+  // Accent — inverted from light theme, so the contrasting text colour also
+  // inverts. Without this pairing, `<Text color={colors.textOnAccent}>` on a
+  // `colors.accent` button is white-on-white in dark mode.
   accent: 'white',
   accentSecondary: '#e8e8e8',
 
@@ -112,7 +126,8 @@ export const darkColors = {
   textSecondary: 'rgba(235, 235, 245, 0.6)',
   textTertiary: 'rgba(235, 235, 245, 0.3)',
   textQuaternary: 'rgba(235, 235, 245, 0.18)',
-  textOnAccent: '#FFFFFF',
+  // textOnAccent contrasts with the white accent — must stay dark in dark mode.
+  textOnAccent: '#000000',
 
   // Separators
   separator: 'rgba(84, 84, 88, 0.6)',

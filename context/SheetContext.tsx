@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useState } from 'react'
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react'
 
 /**
  * Sheet routes for the unified bottom sheet system.
@@ -69,18 +69,18 @@ export const SheetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setHistory([])
   }, [])
 
+  const value = useMemo<SheetContextType>(() => ({
+    route,
+    params,
+    history,
+    push,
+    pop,
+    close,
+    isOpen: route !== 'closed'
+  }), [route, params, history, push, pop, close])
+
   return (
-    <SheetContext.Provider
-      value={{
-        route,
-        params,
-        history,
-        push,
-        pop,
-        close,
-        isOpen: route !== 'closed'
-      }}
-    >
+    <SheetContext.Provider value={value}>
       {children}
     </SheetContext.Provider>
   )

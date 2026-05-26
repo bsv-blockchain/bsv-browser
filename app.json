@@ -3,11 +3,10 @@
     "name": "BSV Browser",
     "slug": "bsv-browser",
     "scheme": "bsv-browser",
-    "version": "1.4.4",
+    "version": "1.4.5",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "web": {
       "bundler": "metro",
       "output": "static",

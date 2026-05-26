@@ -9,7 +9,24 @@ import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import { deleteThumbnail } from '@/utils/thumbnailService'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
-const STORAGE_KEYS = { TABS: 'tabs', ACTIVE: 'activeTabId' }
+import { maxTabsForTier } from '@/utils/deviceTier'
+const STORAGE_KEYS = {
+  TABS: 'tabs',
+  ACTIVE: 'activeTabId',
+  // Persisted per-tab navigation history so back/forward survives app restart.
+  // Previously the in-memory tabNavigationHistories map was lost on cold start —
+  // users tapped Back on a restored tab and the WebView's native history was
+  // empty, leaving them stranded with a disabled Back button.
+  NAV_HISTORY: 'tabNavigationHistories',
+  NAV_HISTORY_INDEXES: 'tabHistoryIndexes'
+}
+
+// Hard cap on simultaneously-open tabs. On overflow, the oldest non-active tab
+// (by last-focused timestamp) is evicted. The cap is device-tier-aware via
+// expo-device: SE-class hardware (low RAM) caps at 4, mid-range at 8, high at 12.
+// This protects iPhone SE-class devices from unbounded thumbnail/metadata
+// accumulation while letting flagship devices keep more tabs warm.
+export const MAX_TABS = maxTabsForTier()
 
 export class TabStore {
   tabs: Tab[] = [] // Always initialize as an array
@@ -19,6 +36,8 @@ export class TabStore {
   private nextId = 1
   private tabNavigationHistories: { [tabId: number]: { url: string; title: string }[] } = {} // Track navigation history per tab
   private tabHistoryIndexes: { [tabId: number]: number } = {} // Track current position in history per tab
+  // LRU bookkeeping for eviction when tab count exceeds MAX_TABS.
+  private lastFocusedAt: Map<number, number> = new Map()
   // Tab IDs for which the next navigation state change is a programmatic history jump
   // (goBack / goForward / navigateToHistoryIndex). handleNavigationStateChange skips the
   // history-append logic for these so jumps are never mistaken for new navigations.
@@ -70,11 +89,17 @@ export class TabStore {
     console.log(`newTab() called with initialUrl=${initialUrl}`)
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
 
+    // Enforce MAX_TABS via LRU eviction of the oldest non-active tab.
+    if (this.tabs.length >= MAX_TABS) {
+      this.evictLeastRecentlyUsed()
+    }
+
     // Ensure initialUrl is never null or undefined
     const safeInitialUrl = initialUrl || kNEW_TAB_URL
     const newTab = this.createTab(safeInitialUrl)
     this.tabs.push(newTab)
     this.activeTabId = newTab.id
+    this.lastFocusedAt.set(newTab.id, Date.now())
 
     // Initialize navigation history for new tab
     // ALWAYS include the new tab page as the first entry so users can navigate back to it
@@ -120,11 +145,40 @@ export class TabStore {
     if (targetTab && targetTab.id !== this.activeTabId) {
       console.log(`setActiveTab(): Setting activeTabId=${id}`)
       this.activeTabId = id
+      this.lastFocusedAt.set(id, Date.now())
       this.saveActive().catch(e => console.error('saveActive failed', e))
     } else if (!targetTab) {
       console.warn(`setActiveTab(): Target tab ${id} not found`)
     } else {
       console.log(`setActiveTab(): Tab ${id} is already active, no change needed`)
+    }
+  }
+
+  /** Evict the oldest non-active tab when tab count exceeds MAX_TABS. */
+  private evictLeastRecentlyUsed() {
+    let oldestId: number | null = null
+    let oldestTime = Infinity
+    for (const t of this.tabs) {
+      if (t.id === this.activeTabId) continue
+      const focused = this.lastFocusedAt.get(t.id) ?? 0
+      if (focused < oldestTime) {
+        oldestTime = focused
+        oldestId = t.id
+      }
+    }
+    if (oldestId !== null) {
+      console.log(`[TabStore] MAX_TABS reached (${MAX_TABS}); evicting tab ${oldestId}`)
+      this.closeTab(oldestId)
+    }
+  }
+
+  /** Free heavy resources for tabs that aren't currently active. Called from memory-warning. */
+  purgeInactiveTabResources() {
+    for (const t of this.tabs) {
+      if (t.id === this.activeTabId) continue
+      try {
+        t.webviewRef?.current?.clearCache?.(true)
+      } catch {}
     }
   }
   async saveActive() {
@@ -400,6 +454,7 @@ export class TabStore {
 
     delete this.tabNavigationHistories[id]
     delete this.tabHistoryIndexes[id]
+    this.lastFocusedAt.delete(id)
     this.tabs.splice(tabIndex, 1)
 
     if (this.tabs.length === 0) {
@@ -567,13 +622,20 @@ export class TabStore {
     const serializable = this.tabs.map(({ webviewRef, ...rest }) => rest)
     await AsyncStorage.multiSet([
       [STORAGE_KEYS.TABS, JSON.stringify(serializable)],
-      [STORAGE_KEYS.ACTIVE, String(this.activeTabId)]
+      [STORAGE_KEYS.ACTIVE, String(this.activeTabId)],
+      [STORAGE_KEYS.NAV_HISTORY, JSON.stringify(this.tabNavigationHistories)],
+      [STORAGE_KEYS.NAV_HISTORY_INDEXES, JSON.stringify(this.tabHistoryIndexes)]
     ])
   }
 
   async loadTabs() {
     try {
-      const [[, tabsJson], [, activeIdStr]] = await AsyncStorage.multiGet([STORAGE_KEYS.TABS, STORAGE_KEYS.ACTIVE])
+      const [[, tabsJson], [, activeIdStr], [, navHistJson], [, navIdxJson]] = await AsyncStorage.multiGet([
+        STORAGE_KEYS.TABS,
+        STORAGE_KEYS.ACTIVE,
+        STORAGE_KEYS.NAV_HISTORY,
+        STORAGE_KEYS.NAV_HISTORY_INDEXES
+      ])
 
       const parsed = tabsJson ? JSON.parse(tabsJson) : []
       const withRefs = parsed.map((t: any) => ({
@@ -581,11 +643,29 @@ export class TabStore {
         webviewRef: createRef<WebView>()
       }))
 
+      // Rehydrate navigation history maps if present. canGoBack/canGoForward are
+      // recomputed from the restored history+index so the back button reflects
+      // real available history rather than stale boolean flags.
+      let restoredNavHist: { [tabId: number]: { url: string; title: string }[] } = {}
+      let restoredNavIdx: { [tabId: number]: number } = {}
+      try {
+        restoredNavHist = navHistJson ? JSON.parse(navHistJson) : {}
+        restoredNavIdx = navIdxJson ? JSON.parse(navIdxJson) : {}
+      } catch (e) {
+        console.warn('loadTabs: nav history parse failed, starting fresh', e)
+      }
+
       runInAction(() => {
-        // Reset navigation flags to false: tabNavigationHistories is in-memory only
-        // and is not persisted, so stale canGoBack/canGoForward values from the previous
-        // session would leave the back button enabled with no history behind it.
-        this.tabs = withRefs.map((t: any) => ({ ...t, canGoBack: false, canGoForward: false }))
+        this.tabNavigationHistories = restoredNavHist
+        this.tabHistoryIndexes = restoredNavIdx
+        this.tabs = withRefs.map((t: any) => {
+          const hist = restoredNavHist[t.id] || []
+          const idx = restoredNavIdx[t.id] ?? -1
+          const minIdx = hist.length > 0 && hist[0]?.url === kNEW_TAB_URL ? 1 : 0
+          const canGoBack = hist.length > 1 && idx > minIdx
+          const canGoForward = hist.length > 1 && idx < hist.length - 1
+          return { ...t, canGoBack, canGoForward }
+        })
         const maxId = Math.max(0, ...withRefs.map((t: any) => t.id))
         this.nextId = maxId + 1
 
