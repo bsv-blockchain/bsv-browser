@@ -182,7 +182,7 @@ const resources = {
       // Transactions screen
       no_transactions: 'No transactions yet',
       tx_status_confirmed: 'Confirmed',
-      tx_status_accepted: 'Accepted',
+      tx_status_accepted: 'Seen',
       tx_status_broadcasting: 'Broadcasting',
       tx_status_not_sent: 'Not Sent',
       tx_status_unsigned: 'Unsigned',
@@ -422,7 +422,7 @@ const resources = {
 
       no_transactions: '暂无交易',
       tx_status_confirmed: '已确认',
-      tx_status_accepted: '已接受',
+      tx_status_accepted: '已发现',
       tx_status_broadcasting: '广播中',
       tx_status_not_sent: '未发送',
       tx_status_unsigned: '未签名',
@@ -652,7 +652,7 @@ const resources = {
 
       no_transactions: 'अभी तक कोई लेनदेन नहीं',
       tx_status_confirmed: 'पुष्ट',
-      tx_status_accepted: 'स्वीकृत',
+      tx_status_accepted: 'देखा गया',
       tx_status_broadcasting: 'प्रसारण हो रहा है',
       tx_status_not_sent: 'नहीं भेजा गया',
       tx_status_unsigned: 'अहस्ताक्षरित',
@@ -884,7 +884,7 @@ const resources = {
 
       no_transactions: 'No hay transacciones aún',
       tx_status_confirmed: 'Confirmado',
-      tx_status_accepted: 'Aceptado',
+      tx_status_accepted: 'Visto',
       tx_status_broadcasting: 'Difundiendo',
       tx_status_not_sent: 'No enviado',
       tx_status_unsigned: 'Sin firmar',
@@ -1112,7 +1112,7 @@ const resources = {
 
       no_transactions: 'Aucune transaction pour le moment',
       tx_status_confirmed: 'Confirmé',
-      tx_status_accepted: 'Accepté',
+      tx_status_accepted: 'Vu',
       tx_status_broadcasting: 'Diffusion',
       tx_status_not_sent: 'Non envoyé',
       tx_status_unsigned: 'Non signé',
@@ -1339,7 +1339,7 @@ const resources = {
 
       no_transactions: 'لا توجد معاملات بعد',
       tx_status_confirmed: 'مؤكد',
-      tx_status_accepted: 'مقبول',
+      tx_status_accepted: 'مرئي',
       tx_status_broadcasting: 'جار الإذاعة',
       tx_status_not_sent: 'لم يتم الإرسال',
       tx_status_unsigned: 'غير موقع',
@@ -1564,7 +1564,7 @@ const resources = {
 
       no_transactions: 'Nenhuma transação ainda',
       tx_status_confirmed: 'Confirmado',
-      tx_status_accepted: 'Aceito',
+      tx_status_accepted: 'Visto',
       tx_status_broadcasting: 'Transmitindo',
       tx_status_not_sent: 'Não enviado',
       tx_status_unsigned: 'Não assinado',
@@ -1792,7 +1792,7 @@ const resources = {
 
       no_transactions: 'এখনো কোনো লেনদেন নেই',
       tx_status_confirmed: 'নিশ্চিত',
-      tx_status_accepted: 'গৃহীত',
+      tx_status_accepted: 'দেখা গেছে',
       tx_status_broadcasting: 'ব্রডকাস্টিং',
       tx_status_not_sent: 'পাঠানো হয়নি',
       tx_status_unsigned: 'স্বাক্ষরবিহীন',
@@ -2018,7 +2018,7 @@ const resources = {
 
       no_transactions: 'Транзакций пока нет',
       tx_status_confirmed: 'Подтверждено',
-      tx_status_accepted: 'Принято',
+      tx_status_accepted: 'Замечено',
       tx_status_broadcasting: 'Трансляция',
       tx_status_not_sent: 'Не отправлено',
       tx_status_unsigned: 'Не подписано',
@@ -2246,7 +2246,7 @@ const resources = {
 
       no_transactions: 'Belum ada transaksi',
       tx_status_confirmed: 'Dikonfirmasi',
-      tx_status_accepted: 'Diterima',
+      tx_status_accepted: 'Terlihat',
       tx_status_broadcasting: 'Menyiarkan',
       tx_status_not_sent: 'Tidak Dikirim',
       tx_status_unsigned: 'Belum Ditandatangani',
@@ -2477,7 +2477,7 @@ const resources = {
       // Transactions screen
       no_transactions: '取引履歴はまだありません',
       tx_status_confirmed: '承認済み',
-      tx_status_accepted: '受理済み',
+      tx_status_accepted: '検出済み',
       tx_status_broadcasting: 'ブロードキャスト中',
       tx_status_not_sent: '未送信',
       tx_status_unsigned: '未署名',
@@ -2720,7 +2720,7 @@ const resources = {
       // Transactions screen
       no_transactions: 'Brak transakcji',
       tx_status_confirmed: 'Potwierdzona',
-      tx_status_accepted: 'Zaakceptowana',
+      tx_status_accepted: 'Zauważona',
       tx_status_broadcasting: 'Wysyłanie',
       tx_status_not_sent: 'Niewysłana',
       tx_status_unsigned: 'Niepodpisana',

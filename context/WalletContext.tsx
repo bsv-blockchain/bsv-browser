@@ -752,6 +752,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
                 console.log(`[TaskArcadeSSE] REJECTED treated as retryable: txid=${event.txid}`)
                 return `SSE: txid=${event.txid} status=REJECTED (ignored — retryable)\n`
               }
+              // ARC emits SEEN_MULTIPLE_NODES after a tx has propagated to >1 node.
+              // Library switch only knows SEEN_ON_NETWORK — normalize so req → unmined
+              // and tx → unproven instead of falling through as unhandled.
+              if (event.txStatus === 'SEEN_MULTIPLE_NODES') {
+                return origProcess({ ...event, txStatus: 'SEEN_ON_NETWORK' })
+              }
               return origProcess(event)
             }
           }

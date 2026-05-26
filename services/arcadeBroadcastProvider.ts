@@ -28,7 +28,10 @@ function handleArcResponse(
     txResult.doubleSpend = true
   } else if (
     response.ok &&
-    (data.txStatus === 'SEEN_ON_NETWORK' || data.txStatus === 'MINED' || !data.txStatus)
+    (data.txStatus === 'SEEN_ON_NETWORK' ||
+      data.txStatus === 'SEEN_MULTIPLE_NODES' ||
+      data.txStatus === 'MINED' ||
+      !data.txStatus)
   ) {
     txResult.status = 'success'
   } else if (data.txStatus === 'REJECTED' || !response.ok) {

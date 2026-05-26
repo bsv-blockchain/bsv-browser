@@ -31,12 +31,12 @@
     "postinstall": "patch-package && node -e \"const fs=require('fs'),p=require('path'),t=p.join('node_modules','expo','node_modules','@expo','cli','node_modules'),s=p.join('node_modules','@expo','cli','node_modules','glob');fs.mkdirSync(t,{recursive:true});try{fs.symlinkSync(p.resolve(s),p.join(t,'glob'))}catch(e){if(e.code!=='EEXIST')throw e}\""
   },
   "dependencies": {
-    "@bsv/btms": "^1.0.1",
-    "@bsv/btms-permission-module": "^1.0.1",
-    "@bsv/message-box-client": "^2.1.1",
-    "@bsv/sdk": "^2.1.2",
+    "@bsv/btms": "^1.0.2",
+    "@bsv/btms-permission-module": "^1.0.2",
+    "@bsv/message-box-client": "^2.1.2",
+    "@bsv/sdk": "^2.1.4",
     "@bsv/wallet-relay": "^0.1.1",
-    "@bsv/wallet-toolbox-mobile": "^2.1.27",
+    "@bsv/wallet-toolbox-mobile": "^2.1.28",
     "@callstack/liquid-glass": "^0.7.1",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",
