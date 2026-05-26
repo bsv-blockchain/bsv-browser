@@ -20,6 +20,7 @@ import { useWallet } from '@/context/WalletContext'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import tabStore from '@/stores/TabStore'
 import type { WalletAction } from '@bsv/sdk'
+import { exportTransactionsAsCsv } from '@/utils/exportTransactions'
 
 const PAGE_SIZE = 30
 
@@ -54,6 +55,7 @@ export default function TransactionsScreen() {
   const [copyingTxid, setCopyingTxid] = useState<string | null>(null)
   const [abortingTxid, setAbortingTxid] = useState<string | null>(null)
   const [refreshingTxid, setRefreshingTxid] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
   const offsetRef = useRef(0)
 
   const fetchActions = useCallback(async (offset: number) => {
@@ -145,6 +147,28 @@ export default function TransactionsScreen() {
       setAbortingTxid(null)
     }
   }, [managers.permissionsManager, adminOriginator, abortingTxid, onRefresh, t])
+
+  const handleExport = useCallback(async () => {
+    if (!managers.permissionsManager || exporting) return
+    setExporting(true)
+    try {
+      const count = await exportTransactionsAsCsv(
+        managers.permissionsManager,
+        storage,
+        adminOriginator
+      )
+      if (count === 0) {
+        toast.info(t('no_transactions'))
+      } else {
+        toast.success(t('tx_export_success', { count }))
+      }
+    } catch (e) {
+      console.error('Failed to export transactions:', e)
+      toast.error(t('tx_export_failed'))
+    } finally {
+      setExporting(false)
+    }
+  }, [managers.permissionsManager, storage, adminOriginator, exporting, t])
 
   const handleRefreshProof = useCallback(async (txid: string) => {
     if (refreshingTxid) return
@@ -288,7 +312,18 @@ export default function TransactionsScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('transactions')}</Text>
-        <View style={styles.backButton} />
+        <TouchableOpacity
+          onPress={handleExport}
+          style={styles.backButton}
+          disabled={exporting || actions.length === 0}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons
+            name={exporting ? 'hourglass-outline' : 'download-outline'}
+            size={22}
+            color={actions.length === 0 ? colors.textQuaternary : colors.accent}
+          />
+        </TouchableOpacity>
       </View>
       {content}
     </View>

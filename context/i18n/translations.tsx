@@ -195,6 +195,8 @@ const resources = {
       tx_abort_failed: 'Failed to abort transaction',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       // Identity / Payments screen
       message_box_server: 'Message Box Server',
@@ -435,6 +437,8 @@ const resources = {
       tx_abort_failed: '中止交易失败',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       message_box_server: '消息箱服务器',
       message_box_required: '发送和接收基于身份的付款所必需的。',
@@ -665,6 +669,8 @@ const resources = {
       tx_abort_failed: 'लेनदेन रद्द करने में विफल',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       message_box_server: 'मैसेज बॉक्स सर्वर',
       message_box_required: 'पहचान-आधारित भुगतान भेजने और प्राप्त करने के लिए आवश्यक है।',
@@ -897,6 +903,8 @@ const resources = {
       tx_abort_failed: 'Error al abortar la transacción',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       message_box_server: 'Servidor de Buzón de Mensajes',
       message_box_required: 'Necesario para enviar y recibir pagos basados en identidad.',
@@ -1125,6 +1133,8 @@ const resources = {
       tx_abort_failed: "Échec de l'annulation de la transaction",
       tx_proof_refreshed: "Transaction confirmed",
       tx_proof_refresh_failed: "Could not fetch proof — transaction may not be mined yet",
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       message_box_server: 'Serveur de boîte aux lettres',
       message_box_required: "Requis pour envoyer et recevoir des paiements basés sur l'identité.",
@@ -1352,6 +1362,8 @@ const resources = {
       tx_abort_failed: 'فشل إلغاء المعاملة',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       message_box_server: 'خادم صندوق الرسائل',
       message_box_required: 'مطلوب لإرسال واستقبال المدفوعات القائمة على الهوية.',
@@ -1577,6 +1589,8 @@ const resources = {
       tx_abort_failed: 'Falha ao abortar transação',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       message_box_server: 'Servidor de Caixa de Mensagens',
       message_box_required: 'Necessário para enviar e receber pagamentos baseados em identidade.',
@@ -1805,6 +1819,8 @@ const resources = {
       tx_abort_failed: 'লেনদেন বাতিল করতে ব্যর্থ',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       message_box_server: 'মেসেজ বক্স সার্ভার',
       message_box_required: 'পরিচয়-ভিত্তিক পেমেন্ট পাঠাতে ও গ্রহণ করতে প্রয়োজনীয়।',
@@ -2031,6 +2047,8 @@ const resources = {
       tx_abort_failed: 'Не удалось отменить транзакцию',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       message_box_server: 'Сервер почтового ящика',
       message_box_required: 'Требуется для отправки и получения платежей на основе идентификатора.',
@@ -2259,6 +2277,8 @@ const resources = {
       tx_abort_failed: 'Gagal membatalkan transaksi',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       message_box_server: 'Server Kotak Pesan',
       message_box_required: 'Diperlukan untuk mengirim dan menerima pembayaran berbasis identitas.',
@@ -2490,6 +2510,8 @@ const resources = {
       tx_abort_failed: 'トランザクションの中止に失敗しました',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       // Identity / Payments screen
       message_box_server: 'メッセージボックスサーバー',
@@ -2733,6 +2755,8 @@ const resources = {
       tx_abort_failed: 'Nie udało się przerwać transakcji',
       tx_proof_refreshed: 'Transaction confirmed',
       tx_proof_refresh_failed: 'Could not fetch proof — transaction may not be mined yet',
+      tx_export_success: 'Exported {{count}} transactions',
+      tx_export_failed: 'Failed to export transactions',
 
       // Identity / Payments screen
       message_box_server: 'Serwer skrzynki wiadomości',
