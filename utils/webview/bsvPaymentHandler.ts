@@ -1,6 +1,7 @@
 import { PublicKey, Utils, Random } from '@bsv/sdk'
 import type { WalletInterface, WalletProtocol } from '@bsv/sdk'
 import { getErrorPage } from './errorPages'
+import { handleUrlDownload } from './downloadHandler'
 
 const BRC29_PROTOCOL_ID: WalletProtocol = [2, '3241645161d8']
 const HEADER_PREFIX = 'x-bsv-'
@@ -12,6 +13,87 @@ interface PaymentCacheEntry {
 
 const paymentCache = new Map<string, PaymentCacheEntry>()
 const inFlightPayments = new Map<string, Promise<string | null>>()
+
+function safeOrigin(u: string): string {
+  try { return new URL(u).origin } catch { return '' }
+}
+
+/**
+ * Parse a filename out of an HTTP Content-Disposition header, honoring both
+ * the legacy `filename="..."` and the RFC 5987 `filename*=UTF-8''...` form.
+ */
+function parseFilenameFromContentDisposition(value: string | null | undefined): string | null {
+  if (!value) return null
+  // filename*=UTF-8''<percent-encoded>   (RFC 5987 — preferred when present)
+  const ext = value.match(/filename\*\s*=\s*([^']+)''([^;]+)/i)
+  if (ext) {
+    try { return decodeURIComponent(ext[2].trim()) } catch { /* fall through */ }
+  }
+  // filename="..." or filename=...
+  const plain = value.match(/filename\s*=\s*("([^"]+)"|([^;]+))/i)
+  if (plain) {
+    const v = (plain[2] || plain[3] || '').trim()
+    if (v) return v
+  }
+  return null
+}
+
+/**
+ * Parse the same params out of an S3-style presigned URL (the AWS SDK adds
+ * `response-content-disposition` and `response-content-type` query params
+ * when the GetObjectCommand was given those overrides).
+ */
+function paramsFromPresignedUrl(rawUrl: string): { filename: string | null; mimeType: string | null } {
+  try {
+    const u = new URL(rawUrl)
+    const cd = u.searchParams.get('response-content-disposition')
+    const ct = u.searchParams.get('response-content-type')
+    return {
+      filename: parseFilenameFromContentDisposition(cd),
+      mimeType: ct || null
+    }
+  } catch {
+    return { filename: null, mimeType: null }
+  }
+}
+
+/**
+ * Lightweight confirmation page shown briefly after a paid download has been
+ * handed off to the native downloader. The OS share-sheet is the real UI;
+ * this is just so the WebView shows something coherent instead of garbage
+ * binary bytes injected as HTML.
+ */
+function buildDownloadStartedHtml(filename?: string | null): string {
+  const escName = (filename ? String(filename) : 'file').replace(/[<>&"']/g, (c) => (
+    { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string
+  ))
+  return `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download started</title>
+<style>
+  html,body{margin:0;height:100%;}
+  body{background:#0d0905;color:#f3e9d2;
+       font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;
+       display:flex;align-items:center;justify-content:center;padding:24px;
+       text-align:center;}
+  .wrap{max-width:380px;}
+  .saved{font-size:18px;margin-bottom:8px;}
+  .filename{color:#d9a86a;font-style:italic;word-break:break-all;}
+  .hint{margin-top:18px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#8a7d62;}
+  button{margin-top:18px;background:transparent;color:#f3e9d2;border:1px solid #3a2c1a;
+         padding:10px 18px;font:500 14px system-ui,sans-serif;cursor:pointer;}
+  button:hover{border-color:#5a401e;}
+</style>
+</head><body>
+<div class="wrap">
+  <div class="saved">Saved <span class="filename">${escName}</span></div>
+  <div class="hint">// pick "Save to Files" or "Save Image" in the share sheet</div>
+  <button onclick="(function(){try{history.back()}catch(e){}})()">Back</button>
+</div>
+</body></html>`
+}
 
 export class BsvPaymentHandler {
   readonly wallet: WalletInterface
@@ -125,6 +207,47 @@ export class BsvPaymentHandler {
       })
 
       if (response.ok) {
+        // If the paid endpoint redirected us cross-origin (typical of paid
+        // file downloads — e.g. dropular.link/f/abc → presigned R2 URL),
+        // fetch has already followed the redirect and we now hold the
+        // binary body. Don't try to inject those bytes as HTML. Hand the
+        // resolved URL back to the WebView via a meta-refresh / location
+        // replace so the OS native downloader can handle the attachment.
+        const requestOrigin = safeOrigin(url)
+        const responseOrigin = safeOrigin(response.url)
+        const isCrossOriginRedirect =
+          response.redirected && responseOrigin !== '' && responseOrigin !== requestOrigin
+
+        if (isCrossOriginRedirect) {
+          try { await response.body?.cancel() } catch { /* ignore */ }
+          // Pull filename + mimeType out of either the response headers or
+          // (more reliably for S3/R2 presigned URLs) the query params the
+          // signer baked into the URL itself.
+          const cdHeader = response.headers.get('content-disposition')
+          const ctHeader = response.headers.get('content-type')
+          const params = paramsFromPresignedUrl(response.url)
+          const filename = parseFilenameFromContentDisposition(cdHeader) ?? params.filename ?? undefined
+          const mimeType = ctHeader || params.mimeType || undefined
+          // Run the OS download natively (we're already in the RN runtime,
+          // no need to round-trip through the WebView via postMessage).
+          // Intentionally NOT awaited: handleUrlDownload presents a share
+          // sheet which we don't want to block the WebView on.
+          handleUrlDownload(response.url, mimeType, filename).catch(() => { /* surfaced via share sheet */ })
+          // Intentionally NOT cached — the presigned URL expires shortly
+          // and the payment cache would hand out a stale signature.
+          return buildDownloadStartedHtml(filename)
+        }
+
+        const contentType = response.headers.get('content-type') || ''
+        if (contentType && !/text\/html/i.test(contentType)) {
+          // Same-origin, but the paid endpoint returned a non-HTML asset.
+          // Same treatment: hand the URL to the native downloader.
+          try { await response.body?.cancel() } catch { /* ignore */ }
+          const filename = parseFilenameFromContentDisposition(response.headers.get('content-disposition')) ?? undefined
+          handleUrlDownload(response.url || url, contentType, filename).catch(() => {})
+          return buildDownloadStartedHtml(filename)
+        }
+
         const html = await response.text()
         paymentCache.set(url, { html, timestamp: Date.now() })
         return html
