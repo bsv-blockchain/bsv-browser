@@ -1,13 +1,13 @@
 # BSV Browser Marketing Website
 
-This is the marketing website for BSV Browser, a secure BSV Blockchain wallet app for iOS and Android.
+This is the marketing website for BSV Browser, a mobile browser with an integrated self-custodial BSV wallet for iOS and Android.
 
 ## Website Features
 
 - **Responsive Design**: Optimized for desktop, tablet, and mobile devices
 - **Modern UI**: Clean, professional design with smooth animations
 - **App Screenshots**: Interactive gallery showcasing key app features
-- **Download Links**: Direct links to TestFlight (iOS) and Google Play Store (Android - coming soon)
+- **Download Links**: Links to Google Play Store (Android) and App Store (iOS)
 - **SEO Optimized**: Proper meta tags, Open Graph, and Twitter Card support
 
 ## GitHub Pages Setup
@@ -15,46 +15,35 @@ This is the marketing website for BSV Browser, a secure BSV Blockchain wallet ap
 This website is designed to be hosted on GitHub Pages. To deploy:
 
 1. Enable GitHub Pages in your repository settings
-2. Set the source to the `marketing` directory
+2. Set the source to the `docs` directory
 3. The site will be available at: `https://[username].github.io/[repository-name]/`
 
 ## Local Development
 
 To run locally:
 
-1. Navigate to the marketing directory
+1. Navigate to the `docs` directory
 2. Open `index.html` in your browser
 3. Or use a local server like `python -m http.server 8000`
 
-## Files Structure
-
-```
-marketing/
-├── index.html          # Main landing page
-├── styles.css          # CSS styling
-├── README.md          # This file
-├── 1.PNG              # App welcome screen
-├── 2.PNG              # Web browsing example
-├── 3.PNG              # Browser menu
-├── 4.PNG              # Phone verification
-├── 5.PNG              # OTP verification
-└── 6.PNG              # Developer tools
-```
-
 ## Download Links
 
-- **iOS (TestFlight)**: https://testflight.apple.com/join/K3jmxevG
-- **Android**: Coming soon to Google Play Store
+- **Android (Google Play)**: https://play.google.com/store/apps/details?id=org.bsvassociation.browser
+- **iOS (App Store)**: Check the landing page for the latest link
 
 ## About BSV Browser
 
-BSV Browser is a secure BSV Blockchain wallet that provides:
+BSV Browser is a mobile browser with a self-custodial BSV wallet that provides:
 
-- Secure key management and encryption
-- Decentralized identity management
-- Web3 browsing capabilities
-- Instant BSV payments
-- BRC-100 wallet interface compliance
-- Mobile-optimized user experience
+- BIP-39 mnemonic-based key management (fully self-custodial)
+- Web2/Web3 dual browsing mode
+- BRC-100 compliant wallet interface (CWI) for web apps
+- Peer-to-peer payments via MessageBox
+- Legacy Bridge for traditional P2PKH address interoperability
+- Decentralized identity and trust management
+- Shamir's Secret Sharing for printable key backup
+- Database import/export for full wallet backup
+- Multi-network support (mainnet, testnet, teratest)
+- 10 languages supported
 
 Built by the BSV Association team.

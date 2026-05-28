@@ -1,20 +1,9 @@
 import React from 'react'
-import { Keyboard, PlatformColor, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
+import { Keyboard, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
-import { useTheme } from '@/context/theme/ThemeContext'
-import { BlurChrome } from '@/components/ui/BlurChrome'
 import { spacing, typography } from '@/context/theme/tokens'
-
-let LiquidGlassView: React.ComponentType<any> | null = null
-let isLiquidGlassSupported = false
-try {
-  const lg = require('@callstack/liquid-glass')
-  LiquidGlassView = lg.LiquidGlassView
-  isLiquidGlassSupported = lg.isLiquidGlassSupported ?? false
-} catch {}
-
-const PILL_RADIUS = 22
+import { GlassPill, useGlassColors, PILL_RADIUS } from '@/components/browser/GlassPill'
 
 interface AddressBarProps {
   addressText: string
@@ -24,16 +13,18 @@ interface AddressBarProps {
   canGoForward: boolean
   isNewTab: boolean
   isHttps: boolean
-  menuOpen: boolean
-  onMorePress: () => void
+  historyPopoverOpen: boolean
   onChangeText: (text: string) => void
   onSubmit: () => void
   onFocus: () => void
   onBlur: () => void
   onBack: () => void
+  onBackLongPress: () => void
   onForward: () => void
+  onForwardLongPress: () => void
   onReloadOrStop: () => void
   onClearText: () => void
+  onCancelNewTab?: () => void
   inputRef: React.RefObject<TextInput | null>
 }
 
@@ -49,34 +40,6 @@ function domainFromUrl(url: string): string {
   }
 }
 
-/** Floating glass capsule */
-const GlassPill: React.FC<{ style?: any; children: React.ReactNode; flex?: number }> = ({ style, children, flex }) => {
-  const { isDark } = useTheme()
-  const pillStyle = [styles.pill, flex !== undefined && { flex }, style]
-  const border = {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)'
-  }
-
-  if (isLiquidGlassSupported && LiquidGlassView) {
-    return (
-      <LiquidGlassView
-        effect="regular"
-        colorScheme={isDark ? 'dark' : 'light'}
-        style={[pillStyle, { borderRadius: PILL_RADIUS }]}
-      >
-        {children}
-      </LiquidGlassView>
-    )
-  }
-
-  return (
-    <BlurChrome intensity={85} borderRadius={PILL_RADIUS} style={[pillStyle, { borderRadius: PILL_RADIUS }, border]}>
-      {children}
-    </BlurChrome>
-  )
-}
-
 export const AddressBar: React.FC<AddressBarProps> = ({
   addressText,
   addressFocused,
@@ -85,66 +48,70 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   canGoForward,
   isNewTab,
   isHttps,
-  menuOpen,
-  onMorePress,
+  historyPopoverOpen,
   onChangeText,
   onSubmit,
   onFocus,
   onBlur,
   onBack,
+  onBackLongPress,
   onForward,
+  onForwardLongPress,
   onReloadOrStop,
   onClearText,
+  onCancelNewTab,
   inputRef
 }) => {
   const { t } = useTranslation()
-  const { colors } = useTheme()
-
-  // Inside LiquidGlassView, iOS semantic colors get vibrant treatment —
-  // the system auto-adjusts them for contrast against whatever is behind the glass.
-  // Hardcoded hex colors do NOT get this treatment, so we swap them out.
-  const gc = isLiquidGlassSupported
-    ? {
-        accent: PlatformColor('labelColor'),
-        primary: PlatformColor('labelColor'),
-        secondary: PlatformColor('secondaryLabelColor'),
-        tertiary: PlatformColor('tertiaryLabelColor'),
-        quaternary: PlatformColor('quaternaryLabelColor'),
-        separator: PlatformColor('separatorColor')
-      }
-    : null
+  const gc = useGlassColors()
 
   const displayText = addressFocused ? addressText : domainFromUrl(addressText)
   const isBackDisabled = !canGoBack || isNewTab
-  const isForwardDisabled = !canGoForward || isNewTab
+  // Show both back and forward buttons whenever forward navigation is available.
+  // This replaces the single back button so the user can recover forward after going back.
+  const showDualNav = canGoForward && !isNewTab
 
   return (
     <View style={styles.container}>
       <View style={styles.row}>
-        {/* Back / Forward — hidden while editing */}
-        {!addressFocused && (
-          <GlassPill style={styles.navPill}>
-            <TouchableOpacity onPress={onBack} disabled={isBackDisabled} style={styles.navButton} activeOpacity={0.6}>
-              <Ionicons
-                name="chevron-back"
-                size={22}
-                color={isBackDisabled ? (gc?.quaternary ?? colors.textQuaternary) : (gc?.accent ?? colors.accent)}
-              />
-            </TouchableOpacity>
-            <View style={[styles.navDivider, { backgroundColor: gc?.separator ?? colors.separator }]} />
+        {/* Nav button(s) — hidden while editing */}
+        {!addressFocused && !historyPopoverOpen && (
+          <GlassPill style={showDualNav ? styles.navPillDual : styles.navPill}>
+            {/* Back button */}
             <TouchableOpacity
-              onPress={onForward}
-              disabled={isForwardDisabled}
+              onPress={isBackDisabled ? undefined : onBack}
+              onLongPress={isBackDisabled ? undefined : onBackLongPress}
+              delayLongPress={350}
               style={styles.navButton}
               activeOpacity={0.6}
             >
               <Ionicons
-                name="chevron-forward"
+                name="chevron-back"
                 size={22}
-                color={isForwardDisabled ? (gc?.quaternary ?? colors.textQuaternary) : (gc?.accent ?? colors.accent)}
+                color={isBackDisabled ? gc.quaternary : gc.accent}
               />
             </TouchableOpacity>
+
+            {/* Divider + forward button — only when forward history is available */}
+            {showDualNav && (
+              <>
+                <View style={[styles.navDivider, { backgroundColor: gc.separator }]} />
+                <TouchableOpacity
+                  onPress={onForward}
+                  onLongPress={onForwardLongPress}
+                  delayLongPress={350}
+                  style={styles.navButton}
+                  activeOpacity={0.6}
+                >
+                  <Ionicons name="chevron-forward" size={22} color={gc.accent} />
+                </TouchableOpacity>
+              </>
+            )}
           </GlassPill>
+        )}
+        {/* Placeholder so the URL pill doesn't reflow when history popover opens */}
+        {!addressFocused && historyPopoverOpen && (
+          <View style={showDualNav ? styles.navPlaceholderDual : styles.navPlaceholder} />
         )}
 
         {/* URL pill */}
@@ -153,7 +120,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
             <Ionicons
               name="lock-closed"
               size={12}
-              color={gc?.secondary ?? colors.textSecondary}
+              color={gc.secondary}
               style={styles.lockIcon}
             />
           )}
@@ -167,55 +134,58 @@ export const AddressBar: React.FC<AddressBarProps> = ({
             onSubmitEditing={onSubmit}
             autoCapitalize="none"
             autoCorrect={false}
+            keyboardType={Platform.select({ ios: 'web-search', default: 'url' })}
             returnKeyType="go"
             style={[
               styles.urlInput,
               {
-                color: gc?.primary ?? colors.textPrimary,
+                color: gc.primary,
                 textAlign: addressFocused ? 'left' : 'center'
               }
             ]}
             placeholder={t('search_or_enter_website')}
-            placeholderTextColor={gc?.tertiary ?? colors.textTertiary}
+            placeholderTextColor={gc.tertiary}
             selectTextOnFocus
           />
           {addressFocused ? (
             <TouchableOpacity onPress={onClearText} style={styles.inputAction}>
-              <Ionicons name="close-circle" size={18} color={gc?.tertiary ?? colors.textTertiary} />
+              <Ionicons name="close-circle" size={18} color={gc.tertiary} />
             </TouchableOpacity>
           ) : isLoading ? (
             <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
-              <Ionicons name="close" size={18} color={gc?.secondary ?? colors.textSecondary} />
+              <Ionicons name="close" size={18} color={gc.secondary} />
             </TouchableOpacity>
           ) : !isNewTab ? (
             <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
-              <Ionicons name="refresh" size={16} color={gc?.secondary ?? colors.textSecondary} />
+              <Ionicons name="refresh" size={16} color={gc.secondary} />
             </TouchableOpacity>
           ) : null}
         </GlassPill>
 
-        {/* More button — hidden when popover is open (popover renders in its place) or when editing */}
+        {/* Rightmost slot.
+            - When editing: an in-bar close pill (cancel new tab / blur input).
+            - Otherwise: a transparent 44px placeholder so the URL pill leaves
+              space for the always-present kebab (rendered by the parent as a
+              sibling overlay — it lives OUTSIDE the collapsing bar wrapper so
+              it stays visible during the right-swipe collapse). */}
         {addressFocused ? (
           <GlassPill style={styles.morePill}>
             <TouchableOpacity
               onPress={() => {
-                inputRef.current?.blur()
-                Keyboard.dismiss()
+                if (onCancelNewTab) {
+                  onCancelNewTab()
+                } else {
+                  inputRef.current?.blur()
+                  Keyboard.dismiss()
+                }
               }}
               style={styles.moreButton}
               activeOpacity={0.6}
             >
-              <Ionicons name="close" size={20} color={gc?.accent ?? colors.accent} />
-            </TouchableOpacity>
-          </GlassPill>
-        ) : !menuOpen ? (
-          <GlassPill style={styles.morePill}>
-            <TouchableOpacity onPress={onMorePress} style={styles.moreButton} activeOpacity={0.6}>
-              <Ionicons name="ellipsis-horizontal" size={20} color={gc?.accent ?? colors.accent} />
+              <Ionicons name="close" size={20} color={gc.accent} />
             </TouchableOpacity>
           </GlassPill>
         ) : (
-          /* Placeholder so the URL pill doesn't reflow when popover opens */
           <View style={styles.morePlaceholder} />
         )}
       </View>
@@ -227,8 +197,7 @@ const styles = StyleSheet.create({
   container: {
     // No background — fully transparent, pills float over content
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.md
+    paddingTop: spacing.xs
   },
   row: {
     flexDirection: 'row',
@@ -243,18 +212,31 @@ const styles = StyleSheet.create({
   navPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.xs,
+    justifyContent: 'center',
+    width: 44
+  },
+  navPillDual: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     width: 88
   },
   navButton: {
-    flex: 1,
+    width: 44,
     height: 44,
     alignItems: 'center',
     justifyContent: 'center'
   },
   navDivider: {
     width: StyleSheet.hairlineWidth,
-    height: 20
+    height: 22,
+    opacity: 0.6
+  },
+  navPlaceholder: {
+    width: 44
+  },
+  navPlaceholderDual: {
+    width: 88
   },
   urlPill: {
     flexDirection: 'row',

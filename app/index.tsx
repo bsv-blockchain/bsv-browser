@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
+import React, { useCallback, useDeferredValue, useEffect, useRef, useState, useMemo } from 'react'
 import {
   Keyboard,
   Platform,
@@ -17,7 +17,7 @@ import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import { GestureDetector } from 'react-native-gesture-handler'
-import Animated from 'react-native-reanimated'
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated'
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
@@ -29,8 +29,15 @@ import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
 import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'
-import { DEFAULT_HOMEPAGE_URL, kNEW_TAB_URL, SEARCH_ENGINES, DEFAULT_SEARCH_ENGINE_ID } from '@/shared/constants'
-import { isValidUrl } from '@/utils/generalHelpers'
+import {
+  DEFAULT_HOMEPAGE_URL,
+  kNEW_TAB_URL,
+  SEARCH_ENGINES,
+  DEFAULT_SEARCH_ENGINE_ID,
+  safeBottomInset,
+  ADDRESS_BAR_HEIGHT
+} from '@/shared/constants'
+import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
 import { useTranslation } from 'react-i18next'
@@ -44,20 +51,46 @@ import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
-import { mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
+import { captureThumbnail, cleanupOrphanedThumbnails, thumbnailExists } from '@/utils/thumbnailService'
+import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
+import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
+import { getErrorPage, getNativeErrorInfo, paymentLoadingPage, navigationLoadingPage } from '@/utils/webview/errorPages'
 
 import { AddressBar } from '@/components/browser/AddressBar'
+import { GlassPill, useGlassColors } from '@/components/browser/GlassPill'
 import { MenuPopover } from '@/components/browser/MenuPopover'
+import { HistoryPopover } from '@/components/browser/HistoryPopover'
 import { TabsOverview } from '@/components/browser/TabsOverview'
 import { SuggestionsDropdown } from '@/components/browser/SuggestionsDropdown'
 import { SheetRouter } from '@/components/browser/SheetRouter'
+import { FindInPageBar } from '@/components/browser/FindInPageBar'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 
 import { useHistory } from '@/hooks/useHistory'
 import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useMemoryHygiene } from '@/hooks/useMemoryHygiene'
+import { mark } from '@/utils/perfMarks'
+
+/* -------------------------------------------------------------------------- */
+/*                       ISOLATED BOOKMARK-AWARE MENU                         */
+/* -------------------------------------------------------------------------- */
+/**
+ * Wraps MenuPopover in a tiny observer that reads `bookmarkStore.bookmarks`
+ * for the active URL only. Without this wrapper the root `Browser` observer
+ * has to read `bookmarkStore.bookmarks.some(...)` directly in its render,
+ * which causes every bookmark mutation to re-render the entire WebView +
+ * chrome tree. Confining the read here keeps bookmark churn local.
+ */
+type ObservedMenuPopoverProps = Omit<React.ComponentProps<typeof MenuPopover>, 'isBookmarked'> & {
+  activeTabUrl: string | null
+}
+const ObservedMenuPopover = observer(({ activeTabUrl, ...rest }: ObservedMenuPopoverProps) => {
+  const isBookmarked = !!activeTabUrl && bookmarkStore.bookmarks.some(b => b.url === activeTabUrl)
+  return <MenuPopover {...rest} isBookmarked={isBookmarked} />
+})
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
@@ -74,20 +107,90 @@ function getInjectableJSMessage(message: any = {}) {
   `
 }
 
+/**
+ * Builds a small injection script that exposes the current browser chrome
+ * safe area insets (including address-bar reservations) to the web page via
+ * CSS custom properties, a global object, and a CustomEvent.
+ *
+ *   padding-bottom: calc(
+ *     env(safe-area-inset-bottom) +
+ *     var(--browser-safe-area-inset-bottom, 0px)
+ *   );
+ *
+ * The bottom value is driven by `bottomReservedHeight` (coordinated name with
+ * the measurement agent responsible for precise on-layout / keyboard /
+ * orientation measurements). Re-dispatch of the event and updates to
+ * window.__browserSafeAreaInsets.bottom occur on every call (initial load,
+ * bar reposition, measurement change, orientation, keyboard).
+ *
+ * The generated script is resilient (inner try/catch) and idempotent
+ * (repeated sets / dispatches are harmless).
+ */
+function buildBrowserSafeAreaScript(bottomReservedHeight: number, topReservedHeight: number) {
+  return `
+    (function(){
+      try {
+        var root = document.documentElement;
+        root.style.setProperty('--browser-safe-area-inset-bottom', '${bottomReservedHeight}px');
+        root.style.setProperty('--browser-safe-area-inset-top', '${topReservedHeight}px');
+        root.style.setProperty('--browser-address-bar-height', '${ADDRESS_BAR_HEIGHT}px');
+
+        // Expose current values for JS access (precise measured bottomReservedHeight)
+        window.__browserSafeAreaInsets = { bottom: ${bottomReservedHeight}, top: ${topReservedHeight} };
+
+        // Notify any listeners (pages can addEventListener('browser-safe-area-change', ...))
+        window.dispatchEvent(new CustomEvent('browser-safe-area-change', {
+          detail: window.__browserSafeAreaInsets
+        }));
+      } catch (e) {}
+    })();
+  `
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               USER AGENTS                                  */
+/* -------------------------------------------------------------------------- */
+
+const MOBILE_UA_IOS =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1'
+const MOBILE_UA_ANDROID =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+const DESKTOP_UA_IOS =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15'
+const DESKTOP_UA_ANDROID =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
 /* -------------------------------------------------------------------------- */
 /*                                  BROWSER                                   */
 /* -------------------------------------------------------------------------- */
 
-function Browser() {
+const Browser = observer(function Browser() {
   /* --------------------------- theme / basic hooks -------------------------- */
   const { isDark, colors } = useTheme()
+  const gc = useGlassColors()
   const insets = useSafeAreaInsets()
   const { t, i18n } = useTranslation()
   const { isWeb2Mode } = useBrowserMode()
   const sheet = useSheet()
 
+  // Safe bottom inset: on Android, enforce a minimum to keep UI above OS nav bar
+  // even when safe-area-context reports 0 on some devices
+  const bottomInset = safeBottomInset(insets.bottom)
+
+  const webviewContainerRef = useRef<View>(null)
+  const thumbnailCaptureTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
-    tabStore.initializeTabs()
+    tabStore.initializeTabs().then(() => {
+      const ids = tabStore.tabs.map(t => t.id)
+      cleanupOrphanedThumbnails(ids)
+      // Validate persisted thumbnail URIs still exist on disk
+      for (const tab of tabStore.tabs) {
+        if (tab.thumbnailUri && !thumbnailExists(tab.thumbnailUri)) {
+          tab.thumbnailUri = undefined
+        }
+      }
+    })
     cleanupDownloadsCache()
   }, [])
 
@@ -110,13 +213,17 @@ function Browser() {
   }, [i18n.language])
 
   /* ----------------------------- wallet context ----------------------------- */
-  const { managers } = useWallet()
+  const { managers, walletBuilding } = useWallet()
   const [wallet, setWallet] = useState<WalletInterface | undefined>()
+  const paymentHandlerRef = useRef<any>(null)
+  const paymentInFlightUrl = useRef<string | null>(null)
   useEffect(() => {
     if (!isWeb2Mode && managers?.walletManager?.authenticated) {
       setWallet(managers.walletManager)
+      paymentHandlerRef.current = getPaymentHandler(managers.walletManager)
     } else if (isWeb2Mode) {
       setWallet(undefined)
+      paymentHandlerRef.current = null
     }
   }, [managers, isWeb2Mode])
 
@@ -124,7 +231,11 @@ function Browser() {
   const { getItem, setItem } = useLocalStorage()
 
   /* -------------------------------- history -------------------------------- */
-  const { history, pushHistory, removeHistoryItem, clearHistory } = useHistory(getItem, setItem)
+  const { history, pushHistory, removeHistoryItem, clearHistory: clearHistoryOnly } = useHistory(getItem, setItem)
+  const clearHistory = useCallback(async () => {
+    await clearHistoryOnly()
+    paymentHandlerRef.current?.clearCache()
+  }, [clearHistoryOnly])
 
   /* -------------------------------- bookmarks ------------------------------- */
   const [homepageUrl, setHomepageUrlState] = useState(DEFAULT_HOMEPAGE_URL)
@@ -168,6 +279,28 @@ function Browser() {
   /* ---------------------------------- tabs --------------------------------- */
   const activeTab = tabStore.activeTab
 
+  const captureActiveThumbnail = useCallback(async () => {
+    if (!activeTab || activeTab.url === kNEW_TAB_URL) return
+    // Defer the captureRef rasterization until the JS thread is idle so it never
+    // competes with chrome animations or active page scrolls. The thumbnail is
+    // only consumed when the tabs grid is opened or on backgrounding, so a few
+    // hundred ms of latency is invisible to the user.
+    await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
+    const uri = await captureThumbnail(webviewContainerRef, activeTab.id)
+    if (uri) tabStore.updateTab(activeTab.id, { thumbnailUri: uri })
+  }, [activeTab])
+
+  // iOS memory hygiene: on backgrounding capture the current tab thumbnail so the
+  // user sees an up-to-date snapshot on return, and on memoryWarning purge inactive
+  // tab WebView caches. Without this the app accumulates view-shot files and
+  // unbounded WK caches until the OS terminates the process.
+  useMemoryHygiene({
+    onBackground: captureActiveThumbnail,
+    onMemoryWarning: () => {
+      tabStore.purgeInactiveTabResources()
+    }
+  })
+
   /* -------------------------- ui / animation state -------------------------- */
   const addressEditing = useRef(false)
   const [addressText, setAddressText] = useState(kNEW_TAB_URL)
@@ -176,28 +309,311 @@ function Browser() {
 
   const addressInputRef = useRef<TextInput>(null)
 
-  const { keyboardVisible, addressBarPanGesture, animatedAddressBarStyle, animatedMenuPopoverStyle } =
-    useAddressBarAnimation(
-      insets,
-      addressFocused,
-      addressEditing,
-      addressInputRef,
-      setAddressFocused,
-      setAddressSuggestions
-    )
+  // Collapse ref + stable callback declared BEFORE the hook so the function
+  // identity is defined at the call site (avoids TDZ → undefined → no-op default).
+  const collapseRef = useRef<() => void>(() => {})
+  const requestCollapseAddressBar = useCallback(() => {
+    collapseRef.current()
+  }, [])
+
+  // Tracks whether the bar's collapse-exit animation is still in flight.
+  // Lets us keep the bar's <Animated.View> mounted (and animating its fade
+  // + scale on the UI thread) AFTER addressBarCollapsed has flipped to true,
+  // so the bar's exit and the dot's entrance overlap visually.
+  const [barExitAnimating, setBarExitAnimating] = useState(false)
+
+  const handleCollapseAnimationEnd = useCallback(() => {
+    setBarExitAnimating(false)
+  }, [])
+
+  // Forward declaration — implementation defined below. The kebab tap (when
+  // bar is collapsed) calls this ref so we don't capture a stale identity.
+  const expandRef = useRef<() => void>(() => {})
+  const requestExpandAddressBar = useCallback(() => {
+    expandRef.current()
+  }, [])
+
+  const {
+    keyboardVisible,
+    addressBarPanGesture,
+    animatedAddressBarStyle,
+    animatedMenuPopoverStyle,
+    animatedKebabStyle,
+    addressBarIsAtTop,
+    resetGestureState
+  } = useAddressBarAnimation(
+    insets,
+    addressFocused,
+    addressEditing,
+    addressInputRef,
+    setAddressFocused,
+    setAddressSuggestions,
+    requestCollapseAddressBar,
+    handleCollapseAnimationEnd,
+    requestExpandAddressBar
+  )
 
   const [showTabsView, setShowTabsView] = useState(false)
-  const [menuPopoverOpen, setMenuPopoverOpen] = useState(false)
+
+  // Menu popover visibility — driven by a shared value so the open/close
+  // animation runs entirely on the UI thread (and stays smooth even while the
+  // JS thread is blocked, e.g. parsing large BEEF payloads). React state
+  // (menuPopoverOpen) controls mount; the close-side unmount only fires AFTER
+  // the close animation completes via runOnJS in the withTiming callback.
+  // The setMenuPopoverOpen(open) API is preserved so callers don't change.
+  const [menuPopoverOpen, _setMenuPopoverMounted] = useState(false)
+  const menuPopoverProgress = useSharedValue(0)
+  const setMenuPopoverOpen = useCallback((open: boolean) => {
+    if (open) {
+      // Snap progress to 1 INSTANTLY on open — no fade-in. Rationale:
+      // the popover card is a LiquidGlassView (UIVisualEffectView on iOS).
+      // If the wrapper's opacity animates from 0 -> 1 on first mount, the
+      // native effect view initialises in a disabled state and stays stuck
+      // transparent (the "first open is empty" bug). By making the wrapper
+      // opaque on its FIRST paint, the effect view initialises enabled and
+      // renders correctly. Perceptual motion still comes from the existing
+      // translateY in `animatedMenuPopoverStyle`. The close path still
+      // animates 1 -> 0 so the popover can fade out before unmounting.
+      _setMenuPopoverMounted(true)
+      menuPopoverProgress.value = 1
+    } else {
+      menuPopoverProgress.value = withTiming(
+        0,
+        { duration: 160, easing: Easing.in(Easing.cubic) },
+        finished => {
+          if (finished) {
+            runOnJS(_setMenuPopoverMounted)(false)
+          }
+        }
+      )
+    }
+  }, [menuPopoverProgress])
+  // Binary visibility (NOT a fractional fade). The popover card is a
+  // LiquidGlassView (UIVisualEffectView on iOS) and animating an ancestor's
+  // opacity to fractional values triggers Apple's well-known stuck-effect
+  // bug — the blur snaps transparent and STAYS broken until the native view
+  // is re-mounted. We snap visible at the midpoint of the timing animation;
+  // the perceptual fade comes from the popover's own enter/exit transform
+  // (translateY in `animatedMenuPopoverStyle`).
+  //
+  // Note: we deliberately do NOT include a transform here, since this style is
+  // composed with `animatedMenuPopoverStyle` (which owns translateY based on the
+  // address-bar position). In React Native style merge, `transform` is replaced
+  // wholesale by later entries — so adding scale here would clobber translateY.
+  const animatedMenuVisibilityStyle = useAnimatedStyle(() => ({
+    opacity: menuPopoverProgress.value >= 0.5 ? 1 : 0
+  }))
+
+  // HistoryPopover visibility — driven by a shared value so open/close runs
+  // entirely on the UI thread (same pattern as MenuPopover above). React state
+  // (historyPopoverDirection) controls mount + which side ('back' | 'forward'
+  // | null); the close-side unmount only fires AFTER the close animation
+  // completes via runOnJS in the withTiming callback.
+  const [historyPopoverDirection, _setHistoryPopoverDirectionMounted] = useState<'back' | 'forward' | null>(null)
+  const historyPopoverProgress = useSharedValue(0)
+  const setHistoryPopoverDirection = useCallback((next: 'back' | 'forward' | null) => {
+    if (next !== null) {
+      // Snap progress to 1 INSTANTLY on open — no fade-in. Same rationale as
+      // `setMenuPopoverOpen` above: the popover card is a LiquidGlassView
+      // (UIVisualEffectView on iOS), and a 0 -> 1 fade-in on first mount
+      // leaves the native effect stuck transparent. Opening with opacity
+      // already at 1 avoids the bug. Close still animates 1 -> 0 so the
+      // popover can fade out before unmounting.
+      _setHistoryPopoverDirectionMounted(next)
+      historyPopoverProgress.value = 1
+    } else {
+      historyPopoverProgress.value = withTiming(
+        0,
+        { duration: 160, easing: Easing.in(Easing.cubic) },
+        finished => {
+          if (finished) {
+            runOnJS(_setHistoryPopoverDirectionMounted)(null)
+          }
+        }
+      )
+    }
+  }, [historyPopoverProgress])
+  const historyPopoverOpen = historyPopoverDirection !== null
+  // Binary visibility (NOT a fractional fade) — same rationale as
+  // `animatedMenuVisibilityStyle` above. The popover card is a LiquidGlassView
+  // / UIVisualEffectView, and fractional ancestor opacity sticks the effect
+  // view transparent on iOS. Snap at the midpoint of the timing animation;
+  // the perceptual movement comes from the wrapper's translateY in
+  // `animatedMenuPopoverStyle` (composed with this style). Keep transforms
+  // out of this style so the merge doesn't clobber translateY.
+  const animatedHistoryVisibilityStyle = useAnimatedStyle(() => ({
+    opacity: historyPopoverProgress.value >= 0.5 ? 1 : 0
+  }))
+  const desktopModeCooldown = useRef(false)
+
+  /* ------------------------------ find in page ----------------------------- */
+  const [findInPageVisible, setFindInPageVisible] = useState(false)
+  const [findInPageQuery, setFindInPageQuery] = useState('')
+  const [findInPageCurrent, setFindInPageCurrent] = useState(0)
+  const [findInPageTotal, setFindInPageTotal] = useState(0)
+  const [findInPageCapped, setFindInPageCapped] = useState(false)
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Address bar collapse state (new gesture: rightward hold+swipe collapses bar into the ... button)
+  const [addressBarCollapsed, setAddressBarCollapsed] = useState(false)
+  // Remember where the bar was before collapsing so we can restore the position on expand
+  const positionBeforeCollapse = useRef<'top' | 'bottom'>('bottom')
+
+  // glassRevision — monotonically incremented on every collapse and every
+  // expand. Used as `key` on the AddressBar subtree and on the collapsed
+  // dot's GlassPill so React fully unmounts and re-mounts the underlying
+  // LiquidGlassView (UIVisualEffectView on iOS) on each cycle.
+  //
+  // Why: @callstack/liquid-glass wraps Apple's UIVisualEffectView, which has
+  // a well-known rendering bug — once its parent goes through a fractional
+  // opacity transition (or ANY interruption while alpha < 1), the effect can
+  // snap to fully transparent and STICK there even after parent opacity
+  // returns to 1. Re-mounting the native view tears down the effect view and
+  // re-creates it, restoring the blur. The user empirically confirmed this:
+  // opening the menu popover (which conditionally re-renders the kebab pill)
+  // unsticks it. We do the same thing automatically on collapse <-> expand.
+  const [glassRevision, setGlassRevision] = useState(0)
+  const bumpGlassRevision = useCallback(() => {
+    setGlassRevision(r => r + 1)
+  }, [])
+
+  const collapseAddressBar = useCallback(() => {
+    // Remember pre-collapse position so expand can spring the bar back to the
+    // same edge. The useAddressBarAnimation hook keeps addressBarAtTop.value
+    // unchanged through the collapse so resetGestureState() on expand already
+    // restores the correct translateY — this ref is just for any JS-side
+    // consumers that need to know.
+    positionBeforeCollapse.current = addressBarIsAtTop ? 'top' : 'bottom'
+    // Bump revision so the collapsed dot's GlassPill mounts FRESH, and so
+    // the AddressBar (still mounted during exit-animation) is torn down at
+    // end-of-anim with a known fresh native-view tree on the next expand.
+    bumpGlassRevision()
+    // Flip JS state immediately (dot mounts at progress=0 and fades in via the
+    // shared collapse-progress), and keep the bar wrapper mounted briefly via
+    // barExitAnimating so its UI-thread fade/scale finishes on screen.
+    //
+    // Do NOT call resetGestureState() here — that would zero
+    // addressBarCollapseProgress mid-animation, fighting the in-flight
+    // withTiming(progress, 1) on the UI thread.
+    setBarExitAnimating(true)
+    setAddressBarCollapsed(true)
+  }, [addressBarIsAtTop, bumpGlassRevision])
+
+  const expandAddressBar = useCallback(() => {
+    // CRITICAL order: zero out the shared values FIRST so that when React
+    // commits the state changes below and the bar wrapper / AddressBar mount,
+    // the animatedAddressBarStyle reads collapse=0 and emits opacity=1. If we
+    // don't reset first, a stale collapse=1 from the just-finished collapse
+    // animation causes the wrapper to mount at opacity=0, which traps every
+    // LiquidGlassView pill descendant in Apple's stuck UIVisualEffectView
+    // state (pills appear transparent / lost their blur background).
+    resetGestureState()
+    // Bump revision so the AddressBar mounts with a fresh key and its
+    // LiquidGlass pills are brand-new native views — never inheriting a stuck
+    // UIVisualEffectView state from the previous expand cycle.
+    bumpGlassRevision()
+    setAddressBarCollapsed(false)
+    // Just in case the exit-end callback didn't fire (e.g. cancelled animation),
+    // make sure the bar's exit-mount flag is cleared so we don't have a ghost
+    // wrapper layered behind the freshly re-mounted real bar.
+    setBarExitAnimating(false)
+  }, [resetGestureState, bumpGlassRevision])
+
+  // Keep the ref up to date so runOnJS always calls the latest version (avoids stale closures)
+  useEffect(() => {
+    collapseRef.current = collapseAddressBar
+  }, [collapseAddressBar])
+  useEffect(() => {
+    expandRef.current = expandAddressBar
+  }, [expandAddressBar])
+
+  /**
+   * Approach A: When the address bar is positioned at the bottom, inset the
+   * WebView content area from the bottom so that fixed/sticky elements on
+   * websites (nav bars, banners, etc.) do not get visually overlapped by
+   * the address bar. The WebView viewport shrinks instead of the bar being
+   * a floating overlay on top of full-height content.
+   */
+  // Tunable visual compensation (in pixels) for any slight "overhang" of the frosted glass
+  // (blur radius, border, shadow, or perceived height of the pill). Start at 0.
+  // Increase if the red block on the WebKit demo still sits a pixel or two below the bar.
+  const BOTTOM_CHROME_VISUAL_EXTRA = 0;
+
+  /**
+   * The authoritative height (from device bottom) that must be reserved for the address bar
+   * when it is positioned at the bottom.
+   *
+   * We use the *exact same math* the animation hook already uses to place the bar.
+   * This guarantees the red safe-area visualization on
+   * https://webkit.org/demos/safe-area-insets/safe-areas.html will have its bottom edge
+   * sit flush against the top edge of the frosted address bar.
+   */
+  const bottomReservedHeight = !addressBarIsAtTop && !isFullscreen
+    ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT + BOTTOM_CHROME_VISUAL_EXTRA
+    : 0;
+
+  // Memoize WebView prop objects so identical values don't churn new refs
+  // each Browser re-render. Without this, every state change (menuPopoverOpen
+  // toggle, suggestions list, gesture-driven address bar position state, etc.)
+  // produces a new contentInset/scrollIndicatorInsets reference. RN-WebView
+  // forwards inline object props to the bridge on each diff, triggering
+  // WKWebView contentInset updates and a full UIScrollView re-layout. On
+  // heavy pages that cascade was stalling the JS bridge for several seconds.
+  const webviewContentInset = useMemo(
+    () => ({ top: 0, left: 0, bottom: bottomReservedHeight, right: 0 }),
+    [bottomReservedHeight]
+  )
+  const webviewScrollIndicatorInsets = useMemo(
+    () => ({
+      top: addressBarIsAtTop ? ADDRESS_BAR_HEIGHT : 0,
+      bottom: addressBarIsAtTop ? bottomInset : bottomReservedHeight,
+      left: 0,
+      right: 0
+    }),
+    [addressBarIsAtTop, bottomReservedHeight, bottomInset]
+  )
+  const webviewContainerStyle = useMemo(
+    () => ({ backgroundColor: isDark ? '#000' : '#fff' }),
+    [isDark]
+  )
+  const webviewStyle = useMemo(() => ({ flex: 1 }), [])
+
   const activeCameraStreams = useRef<Set<string>>(new Set())
   const historyDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     return () => {
       if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
+      if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
     }
   }, [])
+
+  /* ------------------ Push browser safe-area CSS vars to web content -------- */
+  // Track last-injected values so we skip redundant injections on re-renders
+  // that don't actually change the safe-area numbers (e.g. menu popover open,
+  // suggestion list updates). Re-injection on stale state used to fire on
+  // every Browser re-render that touched any dep, even when bottom/top hadn't
+  // moved — contributing to the WKWebView main-thread stalls.
+  const lastInjectedInsets = useRef<{ bottom: number; top: number; tabId: number | null } | null>(null)
+  useEffect(() => {
+    const webview = activeTab?.webviewRef?.current
+    if (!webview || activeTab?.url === kNEW_TAB_URL) return
+
+    const bottom = bottomReservedHeight
+    const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
+    const tabId = activeTab?.id ?? null
+
+    const prev = lastInjectedInsets.current
+    if (prev && prev.bottom === bottom && prev.top === top && prev.tabId === tabId) return
+    lastInjectedInsets.current = { bottom, top, tabId }
+
+    try {
+      webview.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
+    } catch {
+      // WebView may be transiently unavailable (unmount, etc.); safe to ignore
+    }
+  }, [addressBarIsAtTop, isFullscreen, bottomReservedHeight, activeTab?.id, activeTab?.url])
 
   /* -------------------------------- permissions ----------------------------- */
   const domainForUrl = useCallback((u: string): string => {
@@ -236,6 +652,12 @@ function Browser() {
   // When true, the next blank tab will skip homepage navigation (e.g. user explicitly opened new tab)
   const skipHomepageOnce = useRef(false)
 
+  // When true, focus and highlight the address bar after the next homepage navigation
+  const focusAddressBarOnNewTab = useRef(false)
+
+  // The tab ID of a tab opened via the new tab button that can be "cancelled" (closed to go back)
+  const cancelableNewTabId = useRef<number | null>(null)
+
   // Navigate to homepage whenever a blank tab becomes active
   useEffect(() => {
     if (!activeTab || activeTab.url !== kNEW_TAB_URL) return
@@ -243,6 +665,8 @@ function Browser() {
       skipHomepageOnce.current = false
       return
     }
+    const shouldFocusAddressBar = focusAddressBarOnNewTab.current
+    focusAddressBarOnNewTab.current = false
     ;(async () => {
       const stored = await getItem('homepageUrl')
       const url = stored || DEFAULT_HOMEPAGE_URL
@@ -250,6 +674,18 @@ function Browser() {
         tabStore.updateTab(tabStore.activeTabId, { url })
         setAddressText(url)
         setHomepageUrlState(url)
+        if (shouldFocusAddressBar) {
+          setTimeout(() => {
+            addressEditing.current = true
+            setAddressFocused(true)
+            addressInputRef.current?.focus()
+            setTimeout(() => {
+              addressInputRef.current?.setNativeProps({
+                selection: { start: 0, end: url.length }
+              })
+            }, 0)
+          }, 150)
+        }
       }
     })()
   }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -302,6 +738,29 @@ function Browser() {
     tabStore.updateTab(tabStore.activeTabId, patch)
   }, [])
 
+  /**
+   * Inject a minimal loading splash (spinner + target host) into the active
+   * WebView the instant the user commits to a navigation, before the WK
+   * native nav has produced any pixels. Eliminates the perceived dead-air
+   * between address-bar submit and the new page's first paint.
+   *
+   * Called from `onAddressSubmit` and the suggestion-tap handler — both
+   * user-initiated navigation paths. Programmatic URL changes (manifest
+   * start-url redirect, hybrid history goBack/goForward) skip the splash
+   * since those already render through other affordances.
+   */
+  const injectNavigationSplash = useCallback((url: string) => {
+    const ref = tabStore.activeTab?.webviewRef?.current
+    if (!ref) return
+    if (!/^https?:\/\//i.test(url)) return
+    try {
+      const html = navigationLoadingPage(url).replace(/`/g, '\\`')
+      ref.injectJavaScript(`document.open();document.write(\`${html}\`);document.close();`)
+    } catch {
+      // Non-fatal — splash is a UX nicety, not required.
+    }
+  }, [])
+
   /* -------------------------------------------------------------------------- */
   /*                              ADDRESS HANDLING                              */
   /* -------------------------------------------------------------------------- */
@@ -321,9 +780,12 @@ function Browser() {
     }
 
     if (!isValidUrl(entry)) entry = kNEW_TAB_URL
+
+    injectNavigationSplash(entry)
     updateActiveTab({ url: entry })
     addressEditing.current = false
-  }, [addressText, updateActiveTab])
+    cancelableNewTabId.current = null
+  }, [addressText, updateActiveTab, injectNavigationSplash])
 
   /* -------------------------------------------------------------------------- */
   /*                          ADDRESS BAR AUTOCOMPLETE                          */
@@ -339,9 +801,14 @@ function Browser() {
     fuseRef.current.setCollection([...history, ...bookmarkStore.bookmarks])
   }, [history])
 
-  const onChangeAddressText = useCallback((txt: string) => {
-    setAddressText(txt)
-    if (txt.trim().length === 0) {
+  // Keep input updates synchronous (so typing feels instant) but compute Fuse
+  // results from a deferred value. React 19 schedules the suggestion update at
+  // a lower priority, so a long Fuse pass on a big history list can never block
+  // the TextInput keystroke render.
+  const deferredAddressText = useDeferredValue(addressText)
+  useEffect(() => {
+    const txt = deferredAddressText.trim()
+    if (txt.length === 0) {
       setAddressSuggestions([])
       return
     }
@@ -353,6 +820,10 @@ function Browser() {
       .filter((item, index, self) => index === self.findIndex(t => t.url === item.url))
       .slice(0, 5)
     setAddressSuggestions(uniqueResults)
+  }, [deferredAddressText])
+
+  const onChangeAddressText = useCallback((txt: string) => {
+    setAddressText(txt)
   }, [])
 
   /* -------------------------------------------------------------------------- */
@@ -363,9 +834,32 @@ function Browser() {
     if (currentTab?.canGoBack) tabStore.goBack(currentTab.id)
   }, [])
 
-  const navFwd = useCallback(() => {
+  const navBackLongPress = useCallback(() => {
+    const currentTab = tabStore.activeTab
+    if (!currentTab) return
+    const { entries, currentIndex } = tabStore.getNavigationHistory(currentTab.id)
+    // Only open if there's at least one back entry that isn't the new-tab sentinel
+    const hasBack = entries.some((e, i) => i < currentIndex && e.url !== 'about:blank' && !e.url.includes('new-tab'))
+    if (hasBack) setHistoryPopoverDirection('back')
+  }, [])
+
+  const navForward = useCallback(() => {
     const currentTab = tabStore.activeTab
     if (currentTab?.canGoForward) tabStore.goForward(currentTab.id)
+  }, [])
+
+  const navForwardLongPress = useCallback(() => {
+    const currentTab = tabStore.activeTab
+    if (!currentTab) return
+    const { entries, currentIndex } = tabStore.getNavigationHistory(currentTab.id)
+    const hasForward = entries.some((e, i) => i > currentIndex && e.url !== 'about:blank' && !e.url.includes('new-tab'))
+    if (hasForward) setHistoryPopoverDirection('forward')
+  }, [])
+
+  const onSelectHistoryEntry = useCallback((index: number) => {
+    const currentTab = tabStore.activeTab
+    if (currentTab) tabStore.navigateToHistoryIndex(currentTab.id, index)
+    setHistoryPopoverDirection(null)
   }, [])
 
   const navReloadOrStop = useCallback(() => {
@@ -385,6 +879,215 @@ function Browser() {
       await Share.share({ message: currentTab.url })
     } catch {}
   }, [])
+
+  /* -------------------------------------------------------------------------- */
+  /*                              FIND IN PAGE                                  */
+  /* -------------------------------------------------------------------------- */
+
+  /**
+   * Find-in-page uses the CSS Custom Highlight API when available (iOS 17.2+,
+   * Android WebView 105+). This paints highlights at the rendering layer
+   * without modifying the DOM — zero layout shifts, zero style conflicts.
+   *
+   * The state stored on window:
+   *   __bsvFindRanges : Range[]   – every match range
+   *   __bsvFindIdx    : number    – index of the active match
+   */
+
+  /** Clear all find highlights (CSS Highlight API). */
+  const CLEAR_FIND_JS = `
+    if(typeof CSS!=='undefined'&&CSS.highlights){
+      CSS.highlights.delete('__bsv_find');
+      CSS.highlights.delete('__bsv_find_active');
+    }
+    window.__bsvFindRanges=null;
+    window.__bsvFindIdx=0;
+    if(window.__bsvFindSheet){
+      var idx=document.adoptedStyleSheets.indexOf(window.__bsvFindSheet);
+      if(idx>=0){var a=Array.from(document.adoptedStyleSheets);a.splice(idx,1);document.adoptedStyleSheets=a;}
+      window.__bsvFindSheet=null;
+    }`
+
+  const findInPageScript = useCallback(
+    (query: string) => {
+      if (!activeTab?.webviewRef?.current) return
+      if (!query) {
+        activeTab.webviewRef.current.injectJavaScript(`(function(){
+          ${CLEAR_FIND_JS}
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',current:0,total:0
+          }));
+        })();true;`)
+        return
+      }
+      const escaped = query
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029')
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        try{
+          ${CLEAR_FIND_JS}
+
+          // Check for CSS Custom Highlight API support
+          var hasHighlightAPI=typeof CSS!=='undefined'&&typeof CSS.highlights!=='undefined'&&typeof Highlight!=='undefined';
+          if(!hasHighlightAPI){
+            window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+              type:'FIND_IN_PAGE_RESULT',current:0,total:0,error:'no_highlight_api'
+            }));
+            return;
+          }
+
+          // Inject styles via adoptedStyleSheets (bypasses CSP)
+          if(!window.__bsvFindSheet){
+            var sheet=new CSSStyleSheet();
+            sheet.replaceSync('::highlight(__bsv_find){background-color:rgba(255,210,0,0.4);}::highlight(__bsv_find_active){background-color:rgba(255,150,0,0.6);}');
+            window.__bsvFindSheet=sheet;
+            document.adoptedStyleSheets=[].concat(Array.from(document.adoptedStyleSheets),[sheet]);
+          }
+
+          var MAX_MATCHES=1000;
+          var query='${escaped}'.toLowerCase();
+          if(!query){
+            window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+              type:'FIND_IN_PAGE_RESULT',current:0,total:0
+            }));
+            return;
+          }
+          var qLen=query.length;
+
+          // Walk text nodes and collect Range objects — no DOM modification
+          var ranges=[];
+          var capped=false;
+          var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{
+            acceptNode:function(n){
+              var tag=n.parentElement&&n.parentElement.tagName;
+              if(tag==='SCRIPT'||tag==='STYLE'||tag==='NOSCRIPT')return NodeFilter.FILTER_REJECT;
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          },false);
+          while(walker.nextNode()){
+            var node=walker.currentNode;
+            var text=(node.textContent||'').toLowerCase();
+            var pos=0;
+            while((pos=text.indexOf(query,pos))!==-1){
+              var r=new Range();
+              r.setStart(node,pos);
+              r.setEnd(node,pos+qLen);
+              ranges.push(r);
+              pos+=qLen;
+              if(ranges.length>=MAX_MATCHES){capped=true;break;}
+            }
+            if(capped)break;
+          }
+
+          window.__bsvFindRanges=ranges;
+          window.__bsvFindIdx=0;
+
+          if(ranges.length>0){
+            CSS.highlights.set('__bsv_find',new Highlight(...ranges));
+            CSS.highlights.set('__bsv_find_active',new Highlight(ranges[0]));
+            // Scroll to first match using Selection (no DOM modification)
+            var sel=window.getSelection();
+            sel.removeAllRanges();
+            var scrollRange=ranges[0].cloneRange();
+            scrollRange.collapse(true);
+            sel.addRange(scrollRange);
+            var active=document.activeElement;
+            if(active&&active.blur)active.blur();
+            sel.removeAllRanges();
+          }
+
+          var total=capped?MAX_MATCHES:ranges.length;
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',
+            current:ranges.length>0?1:0,
+            total:total,
+            capped:capped
+          }));
+        }catch(e){
+          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+            type:'FIND_IN_PAGE_RESULT',current:0,total:0,error:e.message
+          }));
+        }
+      })();true;`)
+    },
+    [activeTab]
+  )
+
+  const findInPageNavigate = useCallback(
+    (direction: 'next' | 'prev') => {
+      if (!activeTab?.webviewRef?.current) return
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        var ranges=window.__bsvFindRanges;
+        if(!ranges||ranges.length===0||typeof CSS==='undefined'||!CSS.highlights)return;
+        var idx=window.__bsvFindIdx||0;
+        idx=${direction === 'next' ? '(idx+1)%ranges.length' : '(idx-1+ranges.length)%ranges.length'};
+        window.__bsvFindIdx=idx;
+        CSS.highlights.set('__bsv_find_active',new Highlight(ranges[idx]));
+        // Scroll into view using Selection API (no DOM modification)
+        try{
+          var sel=window.getSelection();
+          sel.removeAllRanges();
+          var scrollRange=ranges[idx].cloneRange();
+          scrollRange.collapse(true);
+          sel.addRange(scrollRange);
+          var el=document.createElement('span');
+          scrollRange.insertNode(el);
+          el.scrollIntoView({block:'center'});
+          el.parentNode.removeChild(el);
+          sel.removeAllRanges();
+        }catch(e){}
+        window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+          type:'FIND_IN_PAGE_RESULT',current:idx+1,total:ranges.length
+        }));
+      })();true;`)
+    },
+    [activeTab]
+  )
+
+  const closeFindInPageRef = useRef<() => void>(() => {})
+
+  const closeFindInPage = useCallback(() => {
+    setFindInPageVisible(false)
+    setFindInPageQuery('')
+    setFindInPageCurrent(0)
+    setFindInPageTotal(0)
+    setFindInPageCapped(false)
+    if (activeTab?.webviewRef?.current) {
+      activeTab.webviewRef.current.injectJavaScript(`(function(){
+        ${CLEAR_FIND_JS}
+      })();true;`)
+    }
+  }, [activeTab])
+
+  closeFindInPageRef.current = closeFindInPage
+
+  const findInPageVisibleRef = useRef(false)
+  findInPageVisibleRef.current = findInPageVisible
+
+  /** Debounce timer for find-in-page queries */
+  const findDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const onFindInPageQueryChange = useCallback(
+    (text: string) => {
+      setFindInPageQuery(text)
+      if (findDebounceRef.current) clearTimeout(findDebounceRef.current)
+      findDebounceRef.current = setTimeout(() => {
+        findInPageScript(text)
+      }, 250)
+    },
+    [findInPageScript]
+  )
+
+  // Close find-in-page when the active tab changes
+  useEffect(() => {
+    if (findInPageVisibleRef.current) {
+      closeFindInPageRef.current()
+    }
+  }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* -------------------------------------------------------------------------- */
   /*                           WEBVIEW MESSAGE HANDLER                          */
@@ -408,11 +1111,15 @@ function Browser() {
       if(o instanceof Blob) reg.set(u,o);
       return u;
     };
+    try{Object.defineProperty(URL.createObjectURL,'toString',{value:function(){return'function createObjectURL() { [native code] }'},writable:false,configurable:false});Object.defineProperty(URL.createObjectURL,'name',{value:'createObjectURL',configurable:true})}catch(e){}
+    try{window.__spoofNative&&window.__spoofNative(URL.createObjectURL,'createObjectURL')}catch(e){}
     var or=URL.revokeObjectURL;
     URL.revokeObjectURL=function(u){
       setTimeout(function(){reg.delete(u);},30000);
       return or.call(URL,u);
     };
+    try{Object.defineProperty(URL.revokeObjectURL,'toString',{value:function(){return'function revokeObjectURL() { [native code] }'},writable:false,configurable:false});Object.defineProperty(URL.revokeObjectURL,'name',{value:'revokeObjectURL',configurable:true})}catch(e){}
+    try{window.__spoofNative&&window.__spoofNative(URL.revokeObjectURL,'revokeObjectURL')}catch(e){}
     var origClick=HTMLElement.prototype.click;
     HTMLElement.prototype.click=function(){
       var el=this;
@@ -438,6 +1145,8 @@ function Browser() {
       }
       return origClick.call(this);
     };
+    try{Object.defineProperty(HTMLElement.prototype.click,'toString',{value:function(){return'function click() { [native code] }'},writable:false,configurable:false})}catch(e){}
+    try{window.__spoofNative&&window.__spoofNative(HTMLElement.prototype.click,'click')}catch(e){}
   })();true;`
 
   const routeWebViewMessage = useMemo(
@@ -489,6 +1198,13 @@ function Browser() {
         return
       }
 
+      if (msg.type === 'FIND_IN_PAGE_RESULT') {
+        setFindInPageCurrent(msg.current ?? 0)
+        setFindInPageTotal(msg.total ?? 0)
+        setFindInPageCapped(!!msg.capped)
+        return
+      }
+
       if (msg.type === 'DL_DEBUG') {
         console.warn('[DL_DEBUG]', msg.info)
         return
@@ -516,19 +1232,67 @@ function Browser() {
         return
       }
 
+      if (msg.type === 'PAYMENT_REQUIRED' && paymentHandlerRef.current) {
+        // Skip if a payment is already being handled for this URL (e.g. onHttpError already fired)
+        if (paymentInFlightUrl.current === msg.url) return
+        paymentInFlightUrl.current = msg.url
+        if (activeTab?.webviewRef?.current) {
+          activeTab.webviewRef.current.injectJavaScript(
+            `document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`
+          )
+        }
+        paymentHandlerRef.current
+          .handle402(msg.url, msg.status, msg.headers || {})
+          .then((html: string | null) => {
+            if (html && activeTab?.webviewRef?.current) {
+              activeTab.webviewRef.current.injectJavaScript(
+                `document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`
+              )
+            }
+          })
+          .catch(() => {})
+          .finally(() => { paymentInFlightUrl.current = null })
+        return
+      }
+
       if (await routeWebViewMessage(msg)) return
 
       if (msg.call && (!wallet || isWeb2Mode)) {
-        if (msg.type === 'CWI' && msg.id) {
-          sendErrorToWebView(msg.id, isWeb2Mode ? 'Wallet is disabled in Web2 mode' : 'Wallet is not authenticated', 1)
+        if (isWeb2Mode) {
+          // Web2 mode: wallet calls are not supported, send error immediately
+          if (msg.type === 'CWI' && msg.id) {
+            sendErrorToWebView(msg.id, 'Wallet is disabled in Web2 mode', 1)
+          }
+          return
         }
-        if (!wallet && !isWeb2Mode) router.push('/auth/mnemonic')
+        if (walletBuilding) {
+          // Should not normally reach here — the WebView loads about:blank
+          // until the wallet is ready.  Guard just in case.
+          if (msg.type === 'CWI' && msg.id) {
+            sendErrorToWebView(msg.id, 'Wallet is still initializing', 1)
+          }
+          return
+        }
+        // No wallet, not building, not web2 → user has no wallet configured
+        if (msg.type === 'CWI' && msg.id) {
+          sendErrorToWebView(msg.id, 'Wallet is not authenticated', 1)
+        }
+        router.push('/auth/mnemonic')
         return
       }
 
       const origin = activeTab.url.replace(/^https?:\/\//, '').split('/')[0]
       let response: any
 
+      // Yield to any in-flight interaction (Reanimated spring on the address bar,
+      // sheet open animation, scroll gesture) before kicking off ECDSA / KeyDeriver
+      // work. Heavy wallet ops awaited inline on the JS thread used to compete with
+      // chrome animations on iPhone SE. InteractionManager.runAfterInteractions
+      // resolves immediately when the JS thread is idle, so auto-approved micros
+      // pay no extra cost.
+      await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
+
+      const perfEnd = mark(`cwi.${msg.call}`)
       try {
         switch (msg.call) {
           case 'getPublicKey':
@@ -567,19 +1331,42 @@ function Browser() {
         sendResponseToWebView(msg.id, response)
       } catch (error: any) {
         sendErrorToWebView(msg.id, error?.message || 'unknown error', error?.code || 1)
+      } finally {
+        perfEnd()
       }
     },
-    [activeTab, wallet, routeWebViewMessage, isWeb2Mode]
+    [activeTab, wallet, routeWebViewMessage, isWeb2Mode, walletBuilding]
   )
+
+  // Reload the active tab as soon as the wallet becomes available so any
+  // page that loaded before the wallet was ready gets a fresh start with
+  // the CWI provider backed by a ready wallet.
+  const walletBecameReady = useRef(false)
+  useEffect(() => {
+    if (!wallet) return
+    if (walletBecameReady.current) return
+    walletBecameReady.current = true
+    if (activeTab?.url && activeTab.url !== kNEW_TAB_URL) {
+      activeTab.webviewRef?.current?.reload()
+    }
+  }, [wallet, activeTab])
 
   /* -------------------------------------------------------------------------- */
   /*                      NAV STATE CHANGE → HISTORY TRACKING                   */
   /* -------------------------------------------------------------------------- */
-  const handleNavStateChange = (navState: WebViewNavigation) => {
+  // useCallback keeps the WebView's onNavigationStateChange prop identity stable
+  // across Browser re-renders that don't touch activeTab — otherwise every chrome
+  // animation tick reassigned this prop and the native WebView module had to
+  // re-bind its bridge listener.
+  const handleNavStateChange = useCallback((navState: WebViewNavigation) => {
     if (!activeTab) return
+    if (paymentInFlightUrl.current) return
     if (navState.url?.includes('favicon.ico') && activeTab.url === kNEW_TAB_URL) return
 
-    if (navState.url !== activeTab.url && activeCameraStreams.current.has(activeTab.id.toString())) {
+    if (
+      normalizeUrlForHistory(navState.url) !== activeTab.url &&
+      activeCameraStreams.current.has(activeTab.id.toString())
+    ) {
       activeCameraStreams.current.delete(activeTab.id.toString())
       activeTab.webviewRef?.current?.injectJavaScript(`
         (function() {
@@ -594,21 +1381,23 @@ function Browser() {
     }
 
     tabStore.handleNavigationStateChange(activeTab.id, navState)
-    if (!addressEditing.current) setAddressText(navState.url)
+    // Show the clean URL (without transient challenge tokens) in the address bar
+    const cleanUrl = normalizeUrlForHistory(navState.url)
+    if (!addressEditing.current) setAddressText(cleanUrl)
 
     // Debounce history push so that rapid onNavigationStateChange events
     // (which often carry stale titles from the *previous* page) settle before
     // we commit an entry.  Only the final event's metadata is recorded.
-    if (!navState.loading && navState.url !== kNEW_TAB_URL) {
+    if (!navState.loading && cleanUrl !== kNEW_TAB_URL) {
       if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
-      const url = navState.url
-      const title = navState.title || navState.url
+      const url = cleanUrl
+      const title = navState.title || cleanUrl
       historyDebounceTimer.current = setTimeout(() => {
         pushHistory({ title, url, timestamp: Date.now() }).catch(() => {})
         historyDebounceTimer.current = null
       }, 500)
     }
-  }
+  }, [activeTab, pushHistory])
 
   /* -------------------------------------------------------------------------- */
   /*                              MANIFEST HANDLING                             */
@@ -687,6 +1476,10 @@ function Browser() {
     )
   }
 
+  // In web3 mode, don't render the WebView until the wallet has finished
+  // building so the page never issues CWI calls before the wallet can
+  // handle them.
+  const walletReady = isWeb2Mode || !walletBuilding
   const uri = typeof activeTab?.url === 'string' && activeTab.url.length > 0 ? activeTab.url : 'about:blank'
   const isNewTab = activeTab?.url === kNEW_TAB_URL
 
@@ -694,15 +1487,31 @@ function Browser() {
     if (isNewTab) {
       return <View style={{ flex: 1, backgroundColor: colors.background }} />
     }
+    // Hold off rendering the WebView until the wallet is ready in web3 mode.
+    // This prevents the page from issuing CWI calls that can't be handled yet.
+    if (!walletReady) {
+      return (
+        <View style={[styles.loaderContainer, { backgroundColor: isDark ? '#000' : '#fff' }]}>
+          <ActivityIndicator size="large" />
+        </View>
+      )
+    }
     if (activeTab) {
       return (
         <View
+          ref={webviewContainerRef}
+          collapsable={false}
           style={{
             position: 'absolute',
             top: isFullscreen ? 0 : insets.top,
             left: 0,
             right: 0,
-            bottom: 0
+            // On Android we keep it simple: shrink the WebView frame itself when the
+            // address bar is at the bottom. This avoids any visual overlap bugs.
+            // People are less sensitive to "content under glass" on Android.
+            bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen
+              ? bottomReservedHeight
+              : 0
           }}
         >
           {isFullscreen && (
@@ -727,15 +1536,21 @@ function Browser() {
               headers: { 'Accept-Language': getAcceptLanguageHeader() }
             }}
             userAgent={
-              Platform.OS === 'ios'
-                ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1'
-                : 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+              (activeTab?.isDesktopMode ?? false)
+                ? Platform.OS === 'ios'
+                  ? DESKTOP_UA_IOS
+                  : DESKTOP_UA_ANDROID
+                : Platform.OS === 'ios'
+                  ? MOBILE_UA_IOS
+                  : MOBILE_UA_ANDROID
             }
             sharedCookiesEnabled={true}
             originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
             onMessage={handleMessage}
             injectedJavaScript={injectedJavaScript}
             injectedJavaScriptBeforeContentLoaded={
+              nativeSpoofSetup +
+              '\n' +
               buildCWIProviderScript() +
               '\n' +
               mediaSourcePolyfill +
@@ -842,22 +1657,107 @@ function Browser() {
             androidLayerType="hardware"
             androidHardwareAccelerationDisabled={false}
             onError={(e: any) => {
+              e.preventDefault()
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
+              const code = e.nativeEvent?.code
+              // Only handle native network errors (negative codes: DNS, TLS, timeout, etc.)
+              if (typeof code === 'number' && code < 0 && activeTab?.webviewRef?.current) {
+                const info = getNativeErrorInfo(code)
+                const page = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>:root{--bg:#f5f5f0;--text:#1a1a1a;--sub:#666}@media(prefers-color-scheme:dark){:root{--bg:#1a1a1a;--text:#e8e6e1;--sub:#999}}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:var(--bg);color:var(--text);text-align:center}h1{font-size:6rem;margin:0}.subtitle{font-size:1.5rem;margin:8px 0}.detail{color:var(--sub);padding:0 24px}</style></head><body><div><h1 style="color:${info.color}">${info.code}</h1><p class="subtitle">${info.title}</p><p class="detail">${info.detail}</p></div></body></html>`
+                activeTab.webviewRef.current.injectJavaScript(
+                  `document.open();document.write(\`${page.replace(/`/g, '\\`')}\`);document.close();`
+                )
+              }
             }}
             onHttpError={(e: any) => {
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
+              const status = e.nativeEvent?.statusCode || 404
+              const url = e.nativeEvent?.url || ''
+              if (status === 402 && paymentHandlerRef.current) {
+                // Skip if a payment is already being handled for this URL (e.g. fetch polyfill already fired)
+                if (paymentInFlightUrl.current === url) return
+                paymentInFlightUrl.current = url
+                if (activeTab?.webviewRef?.current) {
+                  activeTab.webviewRef.current.injectJavaScript(
+                    `document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`
+                  )
+                }
+                paymentHandlerRef.current
+                  .handle402(url, 402, e.nativeEvent.headers || {})
+                  .then((html: string | null) => {
+                    if (html && activeTab?.webviewRef?.current) {
+                      activeTab.webviewRef.current.injectJavaScript(
+                        `document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`
+                      )
+                    } else if (activeTab?.webviewRef?.current) {
+                      const fallback = getErrorPage(402)
+                      activeTab.webviewRef.current.injectJavaScript(
+                        `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
+                      )
+                    }
+                  })
+                  .catch(() => {
+                    if (activeTab?.webviewRef?.current) {
+                      const fallback = getErrorPage(402)
+                      activeTab.webviewRef.current.injectJavaScript(
+                        `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
+                      )
+                    }
+                  })
+                  .finally(() => { paymentInFlightUrl.current = null })
+              } else if (activeTab?.webviewRef?.current) {
+                // For 403, the response body is often an interactive challenge page
+                // (e.g. Cloudflare human verification). Let the WebView render it
+                // as-is instead of replacing it with our custom error page.
+                if (status === 403) return
+                const fallback = getErrorPage(status)
+                activeTab.webviewRef.current.injectJavaScript(
+                  `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
+                )
+              }
             }}
-            onLoadEnd={(event: any) =>
+            onLoadEnd={(event: any) => {
+              // Suppress state updates while 402 payment is in flight — document.write
+              // of the loading page fires onLoadEnd which re-renders and flickers the
+              // spending authorization modal.
+              if (paymentInFlightUrl.current) return
               tabStore.handleNavigationStateChange(activeTab.id, {
                 ...(event.nativeEvent ?? event),
                 loading: false
               })
-            }
+              // Thumbnail capture intentionally NOT scheduled on every onLoadEnd.
+              // Previously: setTimeout(captureActiveThumbnail, 800) ran for every page
+              // load — including video pages, dApps that navigate in-place, and
+              // micropayment auto-approve flows — causing a main-thread rasterization
+              // spike that competed with Reanimated animations and JS-thread crypto.
+              // Now capture is on-demand only, triggered by:
+              //   1. User tapping the tabs button (see ObservedMenuPopover onTabs handler)
+              //   2. AppState going inactive/background (see useEffect below)
+              // This keeps the active page hot path free of view-shot work.
+
+              // Push current browser safe area insets (CSS vars + event) to the newly loaded page.
+              // Uses bottomReservedHeight (measured from the actual address bar top edge)
+              // so the red block on the WebKit safe-areas demo aligns perfectly.
+              if (activeTab.url !== kNEW_TAB_URL && activeTab?.webviewRef?.current) {
+                const bottom = bottomReservedHeight
+                const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
+                // Resilient (try/catch); the script is idempotent and always dispatches
+                try {
+                  activeTab.webviewRef.current.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
+                } catch (e) {
+                  // transient webview unavailability is ok
+                }
+              }
+            }}
             javaScriptEnabled
             domStorageEnabled
             allowsBackForwardNavigationGestures
-            containerStyle={{ backgroundColor: isDark ? '#000' : '#fff' }}
-            style={{ flex: 1 }}
+            automaticallyAdjustContentInsets={false}
+            contentInsetAdjustmentBehavior="never"
+            contentInset={webviewContentInset}
+            scrollIndicatorInsets={webviewScrollIndicatorInsets}
+            containerStyle={webviewContainerStyle}
+            style={webviewStyle}
           />
         </View>
       )
@@ -878,15 +1778,123 @@ function Browser() {
         {/* ---- Main content: WebView lives between the safe-area bars ---- */}
         {renderMainContent()}
 
-        {/* ---- Floating Address Bar + Popover (absolutely positioned) ---- */}
-        {!isFullscreen && showAddressBar && (
+        {/* Touch blocker shield (Approach A hybrid):
+            - WebView frame is kept full-height so page backgrounds, heroes, and
+              full-bleed visuals can paint under the frosted-glass address bar.
+            - When the address bar is at the bottom, this transparent overlay
+              captures touches in the bottom (safeBottom + 48px) region, preventing
+              web content's fixed/sticky tappable elements from being hit "under"
+              the bar while still allowing the visual background to show through.
+            - On iOS, contentInset further helps the web layout engine place
+              fixed elements above the bar naturally.
+            - zIndex sits above WebView (0) but below chromeWrapper (20). */}
+        {/* Touch blocker area — full height when bar is expanded, tiny right-corner area when collapsed */}
+        {!addressBarCollapsed && bottomReservedHeight > 0 && (
+          <View
+            pointerEvents="auto"
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: bottomReservedHeight,
+              backgroundColor: 'transparent',
+              zIndex: 15
+            }}
+          />
+        )}
+
+        {/* Small right-side blocker when collapsed (only protects taps under the ... button) */}
+        {addressBarCollapsed && (
+          <View
+            pointerEvents="auto"
+            style={{
+              position: 'absolute',
+              right: spacing.md - 4,
+              bottom: 0,
+              width: 52,
+              height: safeBottomInset(insets.bottom) + 52,
+              backgroundColor: 'transparent',
+              zIndex: 15,
+            }}
+          />
+        )}
+
+        {/* Always-mounted kebab (...) pill.
+            Lives OUTSIDE the collapsing address-bar wrapper so it stays
+            visible during right-swipe collapse. Its translateY follows the
+            bar's vertical position (top vs bottom) + keyboard offset via
+            `animatedKebabStyle`, but the style emits NO opacity, NO scale,
+            NO translateX — only translateY. This is required so the
+            LiquidGlassView (UIVisualEffectView on iOS) never sees a
+            fractional-opacity ancestor (Apple's stuck-effect bug).
+            The kebab's tap action is always "open the menu popover". */}
+        {!isFullscreen && showAddressBar && !addressFocused && (
+          <Animated.View
+            style={[
+              {
+                position: 'absolute',
+                right: spacing.md,
+                top: insets.top + spacing.xs,
+                zIndex: 30,
+                width: 44,
+                height: 44,
+              },
+              animatedKebabStyle,
+            ]}
+            pointerEvents="box-none"
+          >
+            {!menuPopoverOpen && (
+              <GlassPill style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    // Collapsed bar: first tap re-expands the address bar.
+                    // Expanded bar: tap opens the menu popover.
+                    if (addressBarCollapsed) {
+                      requestExpandAddressBar()
+                      return
+                    }
+                    setHistoryPopoverDirection(null)
+                    setMenuPopoverOpen(true)
+                  }}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  activeOpacity={0.6}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
+                </TouchableOpacity>
+              </GlassPill>
+            )}
+          </Animated.View>
+        )}
+
+        {/* Address bar re-expand is now a single tap on the kebab (...) pill.
+            The previous full-width left-swipe hit area was removed because it
+            captured touches across the entire top strip, blocking taps that
+            should land on the web page beneath. */}
+
+        {/* ---- Floating Address Bar + Popover (absolutely positioned) ----
+            Stays mounted while the collapse exit animation plays (gated by
+            barExitAnimating) so the bar's UI-thread fade + scale completes
+            on screen before the wrapper unmounts. The GestureDetector is
+            still wrapped here, but during exit-animating the bar is fading
+            to opacity 0 so taps don't land on it visually. */}
+        {!isFullscreen && showAddressBar && (!addressBarCollapsed || barExitAnimating) && (
           <>
             <GestureDetector gesture={addressBarPanGesture}>
               <Animated.View
+                key={`chrome-wrapper-${glassRevision}`}
                 style={[styles.chromeWrapper, { top: insets.top }, animatedAddressBarStyle]}
-                pointerEvents="box-none"
+                // Block taps during the collapse-exit animation so the fading
+                // bar can't receive ghost touches before it unmounts.
+                pointerEvents={addressBarCollapsed ? 'none' : 'box-none'}
               >
                 <AddressBar
+                  key={`address-bar-${glassRevision}`}
                   addressText={addressText}
                   addressFocused={addressFocused}
                   isLoading={activeTab?.isLoading || false}
@@ -894,12 +1902,12 @@ function Browser() {
                   canGoForward={activeTab?.canGoForward || false}
                   isNewTab={isNewTab}
                   isHttps={activeTab?.url?.startsWith('https') || false}
-                  menuOpen={menuPopoverOpen}
-                  onMorePress={() => setMenuPopoverOpen(true)}
+                  historyPopoverOpen={historyPopoverOpen}
                   onChangeText={onChangeAddressText}
                   onSubmit={onAddressSubmit}
                   onFocus={() => {
                     setMenuPopoverOpen(false)
+                    setHistoryPopoverDirection(null)
                     addressEditing.current = true
                     setAddressFocused(true)
                     if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
@@ -917,9 +1925,24 @@ function Browser() {
                     setAddressText(activeTab?.url || kNEW_TAB_URL)
                   }}
                   onBack={navBack}
-                  onForward={navFwd}
+                  onBackLongPress={navBackLongPress}
+                  onForward={navForward}
+                  onForwardLongPress={navForwardLongPress}
                   onReloadOrStop={navReloadOrStop}
                   onClearText={() => setAddressText('')}
+                  onCancelNewTab={
+                    cancelableNewTabId.current === activeTab?.id
+                      ? () => {
+                          const tabId = cancelableNewTabId.current!
+                          cancelableNewTabId.current = null
+                          Keyboard.dismiss()
+                          addressEditing.current = false
+                          setAddressFocused(false)
+                          setAddressSuggestions([])
+                          tabStore.closeTab(tabId)
+                        }
+                      : undefined
+                  }
                   inputRef={addressInputRef}
                 />
               </Animated.View>
@@ -930,33 +1953,58 @@ function Browser() {
               <SuggestionsDropdown
                 suggestions={addressSuggestions}
                 colors={colors}
-                bottomOffset={insets.bottom}
+                bottomOffset={bottomInset}
                 onSelect={url => {
                   addressInputRef.current?.blur()
                   Keyboard.dismiss()
                   setAddressFocused(false)
                   setAddressSuggestions([])
                   setAddressText(url)
+                  injectNavigationSplash(url)
                   updateActiveTab({ url })
                   addressEditing.current = false
+                  cancelableNewTabId.current = null
                 }}
               />
             )}
           </>
         )}
 
-        {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ---- */}
+        {/* ---- Find in Page Bar ---- */}
+        {findInPageVisible && !isFullscreen && (
+          <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 30 }}>
+            <FindInPageBar
+              query={findInPageQuery}
+              currentMatch={findInPageCurrent}
+              totalMatches={findInPageTotal}
+              capped={findInPageCapped}
+              onChangeQuery={onFindInPageQueryChange}
+              onNext={() => findInPageNavigate('next')}
+              onPrevious={() => findInPageNavigate('prev')}
+              onClose={closeFindInPage}
+            />
+          </View>
+        )}
+
+        {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ----
+            Stays mounted while the close animation plays (the JS unmount only
+            fires after the UI-thread fade-out completes via runOnJS callback). */}
         {menuPopoverOpen && (
           <Animated.View
             style={[
               { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-              animatedMenuPopoverStyle
+              animatedMenuPopoverStyle,
+              animatedMenuVisibilityStyle
             ]}
           >
-            <MenuPopover
+            <ObservedMenuPopover
+              activeTabUrl={activeTab?.url ?? null}
               isNewTab={isNewTab}
               canShare={!isNewTab}
-              bottomOffset={insets.bottom}
+              addressBarAtTop={addressBarIsAtTop}
+              topOffset={8}
+              bottomOffset={bottomInset + 4}
+              isDesktopMode={activeTab?.isDesktopMode ?? false}
               onDismiss={() => setMenuPopoverOpen(false)}
               onShare={shareCurrent}
               onAddBookmark={() => {
@@ -964,18 +2012,75 @@ function Browser() {
                   addBookmark(activeTab.title || t('untitled'), activeTab.url)
                 }
               }}
+              onRemoveBookmark={() => {
+                if (activeTab) {
+                  bookmarkStore.removeBookmark(activeTab.url)
+                }
+              }}
+              onFindInPage={() => setFindInPageVisible(true)}
               onBookmarks={() => sheet.push('browser-menu')}
-              onTabs={() => setShowTabsView(true)}
+              onTabs={async () => {
+                await captureActiveThumbnail()
+                setShowTabsView(true)
+              }}
               onNewTab={() => {
-                skipHomepageOnce.current = true
+                focusAddressBarOnNewTab.current = true
                 tabStore.newTab()
+                cancelableNewTabId.current = tabStore.activeTabId
                 setShowTabsView(false)
               }}
               onSettings={() => sheet.push('settings')}
               onEnableWeb3={() => router.push('/auth/mnemonic')}
+              onConnections={() => router.push('/connections')}
+              onToggleDesktopMode={() => {
+                if (!activeTab || desktopModeCooldown.current) return
+                desktopModeCooldown.current = true
+                setMenuPopoverOpen(false)
+                tabStore.toggleDesktopMode(activeTab.id)
+                // The native layer sets customUserAgent but does not reload automatically,
+                // so we must trigger a reload explicitly after the state update propagates.
+                if (activeTab.url !== kNEW_TAB_URL) {
+                  setTimeout(() => {
+                    activeTab.webviewRef.current?.reload()
+                  }, 50)
+                }
+                setTimeout(() => {
+                  desktopModeCooldown.current = false
+                }, 1500)
+              }}
             />
           </Animated.View>
         )}
+
+        {/* ---- History Popover (full-screen layer, anchored left) ----
+            Stays mounted while the close animation plays (the JS unmount only
+            fires after the UI-thread fade-out completes via runOnJS callback,
+            same pattern as MenuPopover). */}
+        {historyPopoverOpen &&
+          activeTab &&
+          (() => {
+            const { entries, currentIndex } = tabStore.getNavigationHistory(activeTab.id)
+            return (
+              <Animated.View
+                style={[
+                  { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
+                  animatedMenuPopoverStyle,
+                  animatedHistoryVisibilityStyle
+                ]}
+              >
+                <HistoryPopover
+                  entries={entries}
+                  currentIndex={currentIndex}
+                  direction={historyPopoverDirection!}
+                  addressBarAtTop={addressBarIsAtTop}
+                  topOffset={8}
+                  bottomOffset={bottomInset + 4}
+                  onDismiss={() => setHistoryPopoverDirection(null)}
+                  onSelectEntry={onSelectHistoryEntry}
+                />
+              </Animated.View>
+            )
+          })()}
 
         {/* ---- Tabs Overview ---- */}
         {!isFullscreen && showTabsView && (
@@ -1010,7 +2115,7 @@ function Browser() {
       </View>
     </KeyboardAvoidingView>
   )
-}
+})
 
 /* -------------------------------------------------------------------------- */
 /*                                   EXPORT                                   */

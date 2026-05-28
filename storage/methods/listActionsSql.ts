@@ -78,7 +78,7 @@ export async function listActionsSql(
     ? specOp.setStatusFilter()
     : ['completed', 'unprocessed', 'sending', 'unproven', 'unsigned', 'nosend', 'nonfinal']
 
-  // Find transactions
+  // Find transactions ordered by transactionId DESC (newest first)
   const txs = await storage.findTransactions(
     {
       partial: { userId },
@@ -86,7 +86,8 @@ export async function listActionsSql(
       from: createdAtFrom,
       to: createdAtTo,
       paged: { limit, offset },
-      noRawTx: true
+      noRawTx: true,
+      orderDescending: true
     },
     labelIds.length > 0 ? labelIds : undefined,
     isQueryModeAll

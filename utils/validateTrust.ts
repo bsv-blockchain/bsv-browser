@@ -7,14 +7,21 @@ import isImageUrl from './isImageUrl'
  * @param {boolean} [obj.skipNote = false]
  * @returns
  */
-const validateTrust = async (trust, { skipNote = false } = {}) => {
+interface TrustObject {
+  name: string
+  note?: string
+  icon: string
+  publicKey: string
+}
+
+const validateTrust = async (trust: TrustObject, { skipNote = false } = {}) => {
   if (trust.name.length < 5 || trust.name.length > 30) {
     const e = new Error('Trust validation failed, name must be 5-30 characters')
     ;(e as any).field = 'name'
     throw e
   }
   if (!skipNote) {
-    if (trust.note.length < 5 || trust.note.length > 50) {
+    if (!trust.note || trust.note.length < 5 || trust.note.length > 50) {
       const e = new Error('Trust validation failed, note must be 5-50 characters')
       ;(e as any).field = 'note'
       throw e

@@ -135,25 +135,31 @@ await storage.updateOutput(outputId, {
 
 ```typescript
 // Ensure all operations succeed or fail together
-await storage.transaction(async (trx) => {
+await storage.transaction(async trx => {
   // Create transaction
-  const txId = await storage.insertTransaction({
-    userId: user.userId,
-    status: 'completed',
-    reference: 'atomic-ref',
-    satoshis: 50000
-  }, trx)
+  const txId = await storage.insertTransaction(
+    {
+      userId: user.userId,
+      status: 'completed',
+      reference: 'atomic-ref',
+      satoshis: 50000
+    },
+    trx
+  )
 
   // Create output
-  await storage.insertOutput({
-    userId: user.userId,
-    transactionId: txId,
-    vout: 0,
-    satoshis: 50000,
-    basketId: basket.basketId,
-    outpoint: 'atomic-ref:0',
-    providedBy: 'you'
-  }, trx)
+  await storage.insertOutput(
+    {
+      userId: user.userId,
+      transactionId: txId,
+      vout: 0,
+      satoshis: 50000,
+      basketId: basket.basketId,
+      outpoint: 'atomic-ref:0',
+      providedBy: 'you'
+    },
+    trx
+  )
 
   // If any operation fails, everything rolls back
 })
@@ -270,7 +276,7 @@ import type {
   TableTransaction,
   TableOutput,
   TableOutputBasket,
-  TableCertificate,
+  TableCertificate
   // ... and more
 } from './storage'
 ```
@@ -290,6 +296,7 @@ import type {
 ### Insert Methods
 
 All entities have `insert*` methods:
+
 - `insertUser(user)`
 - `insertTransaction(tx)`
 - `insertOutput(output)`
@@ -299,6 +306,7 @@ All entities have `insert*` methods:
 ### Update Methods
 
 All entities have `update*` methods:
+
 - `updateUser(id, update)`
 - `updateTransaction(id, update)`
 - `updateOutput(id, update)`
@@ -307,26 +315,29 @@ All entities have `update*` methods:
 ### Find Methods
 
 All entities have `find*` methods with filtering:
+
 - `findUsers(args)`
 - `findTransactions(args)`
 - `findOutputs(args)`
 - etc.
 
 Find arguments support:
+
 ```typescript
 interface FindArgs<T> {
-  partial: Partial<T>      // Filter by fields
-  since?: Date             // Filter by update time
-  limit?: number           // Pagination limit
-  offset?: number          // Pagination offset
+  partial: Partial<T> // Filter by fields
+  since?: Date // Filter by update time
+  limit?: number // Pagination limit
+  offset?: number // Pagination offset
   orderDescending?: boolean // Sort order
-  trx?: TrxToken          // Transaction context
+  trx?: TrxToken // Transaction context
 }
 ```
 
 ### Find By ID Methods
 
 Direct lookups by primary key:
+
 - `findUserById(id)`
 - `findTransactionById(id)`
 - `findOutputById(id)`
@@ -335,6 +346,7 @@ Direct lookups by primary key:
 ### Count Methods
 
 Count records matching criteria:
+
 - `countUsers(args)`
 - `countTransactions(args)`
 - `countOutputs(args)`
@@ -343,6 +355,7 @@ Count records matching criteria:
 ### Find Or Insert Methods
 
 Convenience methods that create if not exists:
+
 - `findOrInsertUser(identityKey)`
 - `findOrInsertTransaction(newTx)`
 - `findOrInsertOutputBasket(userId, name)`
@@ -358,41 +371,20 @@ The storage implementation handles several automatic conversions:
 - **BLOBs**: Number arrays converted to Uint8Array for storage
 - **Timestamps**: Automatically managed (created_at, updated_at)
 
-## Examples
-
-See [example.ts](./example.ts) for comprehensive usage examples including:
-- Basic CRUD operations
-- Transaction usage
-- Query and filtering
-- Labels and tags
-- Cleanup operations
-
 ## Integration with wallet-toolbox
 
-This storage implementation follows the same patterns as `@bsv/wallet-toolbox` StorageIdb and can be used as a drop-in replacement for mobile platforms. The table structures and method signatures are designed to be compatible with the wallet-toolbox ecosystem.
+This storage implementation follows the same patterns as `@bsv/wallet-toolbox` StorageIdb and can be used as a drop-in replacement for mobile platforms. The table structures and method signatures are designed to be compatible with the `@bsv/wallet-toolbox-mobile` ecosystem.
 
 ## Future Enhancements
 
 Potential areas for improvement:
+
 - Add support for advanced querying (complex WHERE clauses)
 - Implement filter methods (for streaming large result sets)
 - Add sync methods for multi-device synchronization
 - Implement storage provider interface for compatibility with WalletStorageManager
 - Add migration support for schema updates
 - Performance optimizations (indexes, query optimization)
-
-## Development
-
-To test the storage implementation:
-
-```typescript
-import { basicExample, transactionExample, queryExample } from './storage/example'
-
-// Run examples
-await basicExample()
-await transactionExample()
-await queryExample()
-```
 
 ## License
 

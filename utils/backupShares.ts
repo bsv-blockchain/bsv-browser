@@ -134,21 +134,22 @@ export async function generatePrintHTML(shares: string[], identityKey: string): 
       </div>
 
       <div class="section">
-        <div class="qr-container">
-          ${shareQRs[i]}
-        </div>
-        <div class="data-label">Backup Share</div>
-        <div class="data-value share-text">${share}</div>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="section">
         <div class="qr-container identity-qr">
           ${identityQR}
         </div>
         <div class="data-label">Identity Key</div>
         <div class="data-value">${identityKey}</div>
+        <div class="identity-caption">Scan this QR code to send BSV payments to this wallet.</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <div class="qr-container">
+          ${shareQRs[i]}
+        </div>
+        <div class="data-label">Backup Share</div>
+        <div class="data-value share-text">${share}</div>
       </div>
 
       <div class="divider"></div>
@@ -173,8 +174,9 @@ export async function generatePrintHTML(shares: string[], identityKey: string): 
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-          color: #1a1a1a;
+          font-family: 'Courier New', Courier, monospace;
+          font-weight: 700;
+          color: #000;
           background: #fff;
         }
 
@@ -201,8 +203,7 @@ export async function generatePrintHTML(shares: string[], identityKey: string): 
         }
         .date-stamp {
           font-size: 9pt;
-          color: #666;
-          font-family: 'Courier New', monospace;
+          color: #444;
         }
 
         .section {
@@ -222,19 +223,28 @@ export async function generatePrintHTML(shares: string[], identityKey: string): 
 
         .data-label {
           font-size: 11pt;
-          font-weight: 600;
-          color: #333;
+          font-weight: 700;
+          color: #000;
           margin-bottom: 1.5mm;
         }
         .data-value {
           font-size: 7pt;
-          font-family: 'Courier New', monospace;
-          color: #444;
+          font-weight: 700;
           word-break: break-all;
           line-height: 1.4;
+          color: #000;
         }
         .share-text {
-          font-size: 6.5pt;
+          font-size: 8.2pt;
+          word-break: normal;
+          white-space: nowrap;
+        }
+
+        .identity-caption {
+          margin-top: 2mm;
+          font-size: 9pt;
+          font-weight: 700;
+          color: #000;
         }
 
         .divider {
@@ -244,18 +254,14 @@ export async function generatePrintHTML(shares: string[], identityKey: string): 
 
         .instructions {
           margin-top: 4mm;
-          padding: 3mm;
-          background: #f8f8f8;
-          border: 1px solid #e0e0e0;
-          border-radius: 2mm;
-          font-size: 8pt;
-          line-height: 1.5;
-          color: #555;
+          font-size: 10pt;
+          font-weight: 700;
+          line-height: 1.6;
+          color: #000;
         }
         .instructions strong {
           display: block;
-          font-size: 9pt;
-          color: #333;
+          font-size: 11pt;
           margin-bottom: 2mm;
         }
         .instructions p {

@@ -1,9 +1,12 @@
 // Build the injected JavaScript for the WebView from readable TS code instead of a giant string
 // The function below runs inside the WebView context. Do NOT reference any RN variables directly.
-function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
-  console.log('[Polyfill] injectedPolyfills running, before=', !!(window as any).__downloadInterceptInstalled)
+function injectedPolyfills(acceptLanguage: string, isAndroid: boolean, isDev: boolean) {
+  if (isDev) console.log('[Polyfill] injectedPolyfills running, before=', !!(window as any).__downloadInterceptInstalled)
 
   // Console logging bridge: install as early as possible
+  // In production, sample `log` to 1/10 and skip `info`/`debug` entirely — pages and SDKs
+  // log per-render or per-event, which floods the JS↔native bridge and competes with
+  // Reanimated chrome animations. `warn`/`error` are always forwarded.
   if (!(window as any).__consolePatched) {
     const originalLog = console.log
     const originalWarn = console.warn
@@ -13,15 +16,16 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
 
     const send = (method: string, args: any[]) => {
       try {
-        ;(window as any).ReactNativeWebView?.postMessage(
-          JSON.stringify({ type: 'CONSOLE', method, args })
-        )
+        ;(window as any).ReactNativeWebView?.postMessage(JSON.stringify({ type: 'CONSOLE', method, args }))
       } catch {}
     }
 
+    const LOG_SAMPLE_RATE = isDev ? 1 : 10
+    let logSeq = 0
+
     console.log = function (...args: any[]) {
       originalLog.apply(console, args as any)
-      send('log', args)
+      if ((++logSeq % LOG_SAMPLE_RATE) === 0) send('log', args)
     }
 
     console.warn = function (...args: any[]) {
@@ -36,19 +40,17 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
 
     console.info = function (...args: any[]) {
       originalInfo.apply(console, args as any)
-      send('info', args)
+      if (isDev) send('info', args)
     }
 
     console.debug = function (...args: any[]) {
       originalDebug.apply(console, args as any)
-      send('debug', args)
+      if (isDev) send('debug', args)
     }
-
     ;(window as any).__consolePatched = true
-    // Boot message to confirm injection ran
-    console.log('[Injected] Console bridge installed')
+    // Boot message to confirm injection ran (always forwarded — uses warn for visibility)
+    if (isDev) console.log('[Injected] Console bridge installed (dev mode)')
   }
-
 
   // Theme-color extraction — sample meta tag or page background and post to React Native
   ;(function () {
@@ -66,9 +68,7 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
     }
     function sendThemeColor() {
       const color = getThemeColor()
-      ;(window as any).ReactNativeWebView?.postMessage(
-        JSON.stringify({ type: 'THEME_COLOR', color })
-      )
+      ;(window as any).ReactNativeWebView?.postMessage(JSON.stringify({ type: 'THEME_COLOR', color }))
     }
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
       setTimeout(sendThemeColor, 50)
@@ -77,7 +77,10 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
     }
     const observer = new MutationObserver(() => sendThemeColor())
     observer.observe(document.head || document.documentElement, {
-      childList: true, subtree: true, attributes: true, attributeFilter: ['content']
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['content']
     })
   })()
 
@@ -144,14 +147,39 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         }
         return url
       }
+      // Spoof toString so bot-detection sees native code
+      try {
+        Object.defineProperty(URL.createObjectURL, 'toString', {
+          value: () => 'function createObjectURL() { [native code] }',
+          writable: false,
+          configurable: false
+        })
+        Object.defineProperty(URL.createObjectURL, 'name', { value: 'createObjectURL', configurable: true })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(URL.createObjectURL, 'createObjectURL')
+      } catch {}
 
       URL.revokeObjectURL = function (url: string) {
         console.log('[DL] revokeObjectURL', url, 'inRegistry=', blobRegistry.has(url))
         // Delay registry removal so async handlers (e.g. onShouldStartLoadWithRequest)
         // can still read the Blob object after the URL is revoked
-        setTimeout(function () { blobRegistry.delete(url) }, 10000)
+        setTimeout(function () {
+          blobRegistry.delete(url)
+        }, 10000)
         return origRevokeObjectURL.call(URL, url)
       }
+      try {
+        Object.defineProperty(URL.revokeObjectURL, 'toString', {
+          value: () => 'function revokeObjectURL() { [native code] }',
+          writable: false,
+          configurable: false
+        })
+        Object.defineProperty(URL.revokeObjectURL, 'name', { value: 'revokeObjectURL', configurable: true })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(URL.revokeObjectURL, 'revokeObjectURL')
+      } catch {}
 
       // Helper: read a Blob as base64 and post to React Native
       function sendBlobAsBase64(blob: Blob, filename: string | null, mimeType: string) {
@@ -166,7 +194,7 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
               type: 'FILE_DOWNLOAD_BLOB',
               base64: base64,
               mimeType: mimeType || 'application/octet-stream',
-              filename: filename || null,
+              filename: filename || null
             })
           )
         }
@@ -177,6 +205,7 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
       // (e.g. `a.click()` called on an element never appended to the DOM)
       const origAnchorClick = HTMLAnchorElement.prototype.click
       HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+        const self = this
         const href = this.href
         console.log('[DL] anchor.click() intercepted href=', href)
         if (href && href.startsWith('blob:')) {
@@ -189,15 +218,28 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         }
         if (href && href.startsWith('data:')) {
           fetch(href)
-            .then(function (r) { return r.blob() })
-            .then(function (b) {
-              sendBlobAsBase64(b, (this as HTMLAnchorElement).getAttribute('download'), b.type || 'application/octet-stream')
-            }.bind(this))
+            .then(function (r: Response) {
+              return r.blob()
+            })
+            .then(function (b: Blob) {
+              sendBlobAsBase64(b, self.getAttribute('download'), b.type || 'application/octet-stream')
+            })
             .catch(function () {})
           return
         }
         return origAnchorClick.call(this)
       }
+      // Spoof toString so bot-detection sees native code
+      try {
+        Object.defineProperty(HTMLAnchorElement.prototype.click, 'toString', {
+          value: () => 'function click() { [native code] }',
+          writable: false,
+          configurable: false
+        })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(HTMLAnchorElement.prototype.click, 'click')
+      } catch {}
 
       // Intercept anchor clicks in the capture phase (for attached elements)
       document.addEventListener(
@@ -220,7 +262,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
               sendBlobAsBase64(blob, downloadAttr, blob.type || 'application/octet-stream')
             } else {
               fetch(href)
-                .then(function (r) { return r.blob() })
+                .then(function (r) {
+                  return r.blob()
+                })
                 .then(function (b) {
                   sendBlobAsBase64(b, downloadAttr, b.type || 'application/octet-stream')
                 })
@@ -234,7 +278,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
             e.preventDefault()
             e.stopImmediatePropagation()
             fetch(href)
-              .then(function (r) { return r.blob() })
+              .then(function (r) {
+                return r.blob()
+              })
               .then(function (b) {
                 sendBlobAsBase64(b, downloadAttr, b.type || 'application/octet-stream')
               })
@@ -250,7 +296,7 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
             JSON.stringify({
               type: 'FILE_DOWNLOAD_URL',
               url: href,
-              filename: downloadAttr,
+              filename: downloadAttr
             })
           )
         },
@@ -269,7 +315,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         }
         if (url && url.startsWith('data:')) {
           fetch(url)
-            .then(function (r) { return r.blob() })
+            .then(function (r) {
+              return r.blob()
+            })
             .then(function (b) {
               sendBlobAsBase64(b, null, b.type || 'application/octet-stream')
             })
@@ -278,6 +326,18 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         }
         return origOpen?.call(window, url, target, features) || null
       }
+      // Spoof toString so bot-detection sees native code
+      try {
+        Object.defineProperty((window as any).open, 'toString', {
+          value: () => 'function open() { [native code] }',
+          writable: false,
+          configurable: false
+        })
+        Object.defineProperty((window as any).open, 'name', { value: 'open', configurable: true })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.((window as any).open, 'open')
+      } catch {}
     } catch (e) {
       // Silently fail — download interception is non-critical
     }
@@ -286,63 +346,82 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
   // Camera access polyfill - provides mock streams to prevent WKWebView camera access.
   // On Android the WebView can access the camera natively via getUserMedia, so we skip
   // this polyfill and let the native path (+ onPermissionRequest) handle it instead.
-  if (!isAndroid) ;(function () {
-    if (!navigator.mediaDevices) return
+  if (!isAndroid) {
+    ;(function () {
+      if (!navigator.mediaDevices) return
 
-    const originalGetUserMedia = navigator.mediaDevices.getUserMedia?.bind(navigator.mediaDevices)
+      const originalGetUserMedia = navigator.mediaDevices.getUserMedia?.bind(navigator.mediaDevices)
 
-    function createMockMediaStream() {
-      const mockTrack = {
-        id: 'mock-video-' + Date.now(),
-        kind: 'video',
-        label: 'React Native Camera',
-        enabled: true,
-        muted: false,
-        readyState: 'live',
-        stop() {
-          this.readyState = 'ended'
-        },
-        addEventListener() {},
-        removeEventListener() {},
-        getSettings: () => ({ width: 640, height: 480, frameRate: 30 })
+      function createMockMediaStream(): MediaStream {
+        const mockTrack = {
+          id: 'mock-video-' + Date.now(),
+          kind: 'video',
+          label: 'React Native Camera',
+          enabled: true,
+          muted: false,
+          readyState: 'live',
+          stop() {
+            this.readyState = 'ended'
+          },
+          addEventListener() {},
+          removeEventListener() {},
+          getSettings: () => ({ width: 640, height: 480, frameRate: 30 })
+        }
+
+        return {
+          id: 'mock-stream-' + Date.now(),
+          active: true,
+          getTracks: () => [mockTrack],
+          getVideoTracks: () => [mockTrack],
+          getAudioTracks: () => [],
+          addEventListener() {},
+          removeEventListener() {}
+        } as unknown as MediaStream
       }
 
-      return {
-        id: 'mock-stream-' + Date.now(),
-        active: true,
-        getTracks: () => [mockTrack],
-        getVideoTracks: () => [mockTrack],
-        getAudioTracks: () => [],
-        addEventListener() {},
-        removeEventListener() {}
+      navigator.mediaDevices.getUserMedia = function (constraints) {
+        const hasVideo = constraints?.video === true || (typeof constraints?.video === 'object' && constraints.video)
+
+        if (hasVideo) {
+          // Notify React Native of camera request
+          ;(window as any).ReactNativeWebView?.postMessage(
+            JSON.stringify({
+              type: 'CAMERA_REQUEST',
+              constraints
+            })
+          )
+
+          // Return mock stream immediately to prevent native camera
+          return Promise.resolve(createMockMediaStream())
+        }
+
+        // Allow audio-only requests through original implementation
+        return originalGetUserMedia
+          ? originalGetUserMedia(constraints)
+          : Promise.reject(new Error('Media not supported'))
       }
-    }
-
-    navigator.mediaDevices.getUserMedia = function (constraints) {
-      const hasVideo = constraints?.video === true || (typeof constraints?.video === 'object' && constraints.video)
-
-      if (hasVideo) {
-        // Notify React Native of camera request
-        ;(window as any).ReactNativeWebView?.postMessage(
-          JSON.stringify({
-            type: 'CAMERA_REQUEST',
-            constraints
-          })
-        )
-
-        // Return mock stream immediately to prevent native camera
-        return Promise.resolve(createMockMediaStream())
-      }
-
-      // Allow audio-only requests through original implementation
-      return originalGetUserMedia ? originalGetUserMedia(constraints) : Promise.reject(new Error('Media not supported'))
-    }
-  })()
+      // Spoof toString so bot-detection sees native code
+      try {
+        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'toString', {
+          value: () => 'function getUserMedia() { [native code] }',
+          writable: false,
+          configurable: false
+        })
+        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'name', {
+          value: 'getUserMedia',
+          configurable: true
+        })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(navigator.mediaDevices.getUserMedia, 'getUserMedia')
+      } catch {}
+    })()
+  }
 
   // Push Notification API polyfill
   ;(function () {
     // Check if Notification API already exists
-    if ('Notification' in window) {
+    if ((window as any).Notification != null) {
       return
     }
     ;(function () {
@@ -683,6 +762,22 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         }
       }
 
+      // Spoof toString so bot-detection sees native code
+      try {
+        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'toString', {
+          value: () => 'function getUserMedia() { [native code] }',
+          writable: false,
+          configurable: false
+        })
+        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'name', {
+          value: 'getUserMedia',
+          configurable: true
+        })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(navigator.mediaDevices.getUserMedia, 'getUserMedia')
+      } catch {}
+
       // Also override the deprecated navigator.getUserMedia if it exists
       if ((navigator as any).getUserMedia) {
         ;(navigator as any).getUserMedia = function (constraints: any, success: any, error: any) {
@@ -691,75 +786,13 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
       }
     }
 
-    // Fallback: only patch if early bridge above didn't run
-    if (!(window as any).__consolePatched) {
-      const originalLog = console.log
-      const originalWarn = console.warn
-      const originalError = console.error
-      const originalInfo = console.info
-      const originalDebug = console.debug
-
-      console.log = function (...args: any[]) {
-        originalLog.apply(console, args as any)
-        ;(window as any).ReactNativeWebView?.postMessage(
-          JSON.stringify({
-            type: 'CONSOLE',
-            method: 'log',
-            args: args
-          })
-        )
-      }
-
-      console.warn = function (...args: any[]) {
-        originalWarn.apply(console, args as any)
-        ;(window as any).ReactNativeWebView?.postMessage(
-          JSON.stringify({
-            type: 'CONSOLE',
-            method: 'warn',
-            args: args
-          })
-        )
-      }
-
-      console.error = function (...args: any[]) {
-        originalError.apply(console, args as any)
-        ;(window as any).ReactNativeWebView?.postMessage(
-          JSON.stringify({
-            type: 'CONSOLE',
-            method: 'error',
-            args: args
-          })
-        )
-      }
-
-      console.info = function (...args: any[]) {
-        originalInfo.apply(console, args as any)
-        ;(window as any).ReactNativeWebView?.postMessage(
-          JSON.stringify({
-            type: 'CONSOLE',
-            method: 'info',
-            args: args
-          })
-        )
-      }
-
-      console.debug = function (...args: any[]) {
-        originalDebug.apply(console, args as any)
-        ;(window as any).ReactNativeWebView?.postMessage(
-          JSON.stringify({
-            type: 'CONSOLE',
-            method: 'debug',
-            args: args
-          })
-        )
-      }
-
-      ;(window as any).__consolePatched = true
-    }
+    // Console patch already installed above at IIFE entry; duplicate fallback removed.
+    // (Early-bridge guard makes the secondary patch redundant and previously double-wrapped
+    // console methods on Android where both paths could execute.)
 
     // Intercept fetch requests to add Accept-Language header
     const originalFetch = (window as any).fetch
-    const patchedFetch = function (input: any, init: any = {}) {
+    const patchedFetch = async function (this: any, input: any, init: any = {}) {
       // Merge headers
       const headers = new Headers(init.headers)
       if (!headers.has('Accept-Language')) {
@@ -772,7 +805,24 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         headers: headers
       }
 
-      return originalFetch.call(this, input, newInit)
+      const response = await originalFetch.call(this, input, newInit)
+
+      if (response.status === 402) {
+        const headersObj: Record<string, string> = {}
+        response.headers.forEach((v: string, k: string) => { headersObj[k] = v })
+        const reqUrl = typeof input === 'string' ? input : (input && input.url ? input.url : '')
+        ;(window as any).ReactNativeWebView?.postMessage(JSON.stringify({
+          type: 'PAYMENT_REQUIRED',
+          url: reqUrl,
+          status: 402,
+          headers: headersObj
+        }))
+        // Don't return 402 to page JS — RN handles payment and replaces page content.
+        // Never-resolving promise prevents page from retrying or reacting to 402.
+        return new Promise(() => {})
+      }
+
+      return response
     }
     // Restore native toString so bot-detection checks see "[native code]"
     try {
@@ -782,6 +832,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         configurable: false
       })
       Object.defineProperty(patchedFetch, 'name', { value: 'fetch', configurable: true })
+    } catch {}
+    try {
+      ;(window as any).__spoofNative?.(patchedFetch, 'fetch')
     } catch {}
     ;(window as any).fetch = patchedFetch
 
@@ -809,6 +862,9 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         configurable: false
       })
     } catch {}
+    try {
+      ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.open, 'open')
+    } catch {}
 
     XMLHttpRequest.prototype.send = function (this: any, data: any) {
       // Add Accept-Language header if not already set
@@ -825,11 +881,15 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean) {
         configurable: false
       })
     } catch {}
+    try {
+      ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.send, 'send')
+    } catch {}
   })()
 }
 
-export function buildInjectedJavaScript(acceptLanguage: string, isAndroid: boolean) {
-  // Serialize the function and immediately invoke it with the provided arguments
-  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)}, ${isAndroid});`
+export function buildInjectedJavaScript(acceptLanguage: string, isAndroid: boolean, isDev: boolean = __DEV__) {
+  // Serialize the function and immediately invoke it with the provided arguments.
+  // The trailing `true;` is required by react-native-webview on iOS — without it
+  // the injected script is silently discarded.
+  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)}, ${isAndroid}, ${isDev});true;`
 }
-

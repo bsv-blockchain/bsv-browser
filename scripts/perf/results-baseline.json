@@ -1,0 +1,76 @@
+{
+  "label": "baseline",
+  "when": "2026-05-21T18:43:46.697Z",
+  "results": {
+    "console.log x10k (typical dApp logging)": {
+      "median_ms": 2.3546,
+      "iterations": 10000,
+      "ops_per_sec": 4246961
+    },
+    "console.bridge_calls_for_10k_mixed": {
+      "count": 10330
+    },
+    "provider.consumer_rerenders_for_1000_parent_renders": {
+      "count": 1000
+    },
+    "provider.value_construction x1000": {
+      "median_ms": 0.0394,
+      "iterations": 1000,
+      "ops_per_sec": 25396825
+    },
+    "bookmark.root_renders_for_500_mutations": {
+      "count": 501
+    },
+    "bookmark.isolated_renders_for_500_mutations": {
+      "count": 0
+    },
+    "bookmark.add+react x500": {
+      "median_ms": 70.0969,
+      "iterations": 5,
+      "ops_per_sec": 71
+    },
+    "tab.count_after_50_opens": {
+      "count": 50
+    },
+    "wallet.value_rebuild x1000": {
+      "median_ms": 0.2174,
+      "iterations": 1000,
+      "ops_per_sec": 4599456
+    },
+    "thumbnail.schedule x500 (every onLoadEnd)": {
+      "median_ms": 0.1975,
+      "iterations": 500,
+      "ops_per_sec": 2531646
+    },
+    "thumbnail.schedule_gated x500": {
+      "median_ms": 0.0272,
+      "iterations": 500,
+      "ops_per_sec": 18376273
+    },
+    "suggestions.sync_search_50keystrokes": {
+      "median_ms": 9.5048,
+      "iterations": 500,
+      "ops_per_sec": 52605
+    },
+    "suggestions.deferred_search_50keystrokes": {
+      "median_ms": 0.1888,
+      "iterations": 500,
+      "ops_per_sec": 2647842
+    },
+    "list.measure_each_x200": {
+      "median_ms": 0.3822,
+      "iterations": 200,
+      "ops_per_sec": 523218
+    },
+    "list.getItemLayout_x200": {
+      "median_ms": 0.0017,
+      "iterations": 200,
+      "ops_per_sec": 119976005
+    },
+    "cwi.10x3ms_op": {
+      "median_ms": 3.02,
+      "iterations": 10,
+      "ops_per_sec": 0
+    }
+  }
+}

@@ -7,26 +7,51 @@ import {
   PrivilegedKeyManager,
   WalletStorageManager,
   WalletSigner,
-  Services,
   PermissionRequest,
   SimpleWalletManager,
-  Monitor,
-  ChaintracksServiceClient
+  Monitor
 } from '@bsv/wallet-toolbox-mobile'
-import { Beef, KeyDeriver, PrivateKey, Transaction } from '@bsv/sdk'
+import { KeyDeriver, PrivateKey, MerklePath, Transaction, Utils } from '@bsv/sdk'
 import {
-  DEFAULT_SETTINGS,
+  DEFAULT_SETTINGS as LIB_DEFAULT_SETTINGS,
   WalletSettings,
   WalletSettingsManager
 } from '@bsv/wallet-toolbox-mobile/out/src/WalletSettingsManager'
+
+/** App-level defaults: library defaults + additional certifiers */
+const DEFAULT_SETTINGS: WalletSettings = {
+  ...LIB_DEFAULT_SETTINGS,
+  trustSettings: {
+    ...LIB_DEFAULT_SETTINGS.trustSettings,
+    trustedCertifiers: [
+      ...LIB_DEFAULT_SETTINGS.trustSettings.trustedCertifiers,
+      {
+        name: 'Who I Am',
+        description: 'Certifies email, phone, and X account ownership',
+        iconUrl: 'https://whoiam.bsvblockchain.tech/whoiam.png',
+        identityKey: '02e7eeb3986273db6843b790a1595ed0ff1b2ae8f43ae2e7f1a0c9db4dd3fb9441',
+        trust: 5
+      }
+    ]
+  }
+}
 import { toast } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
-import { DEFAULT_WAB_URL, DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR } from './config'
+import type { AppChain } from './config'
+import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR } from './config'
+import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_COOLDOWN_MS, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { UserContext } from './UserContext'
-import { useBrowserMode } from './BrowserModeContext'
-import isImageUrl from '../utils/isImageUrl'
-import parseAppManifest from '../utils/parseAppManifest'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { usePermissionQueue } from '@/hooks/usePermissionQueue'
+import { createServices } from '@/services/walletServiceConfig'
+import {
+  createArcadeBroadcastService,
+  createTaalBroadcastService,
+  createGorillaPoolBroadcastService,
+  createWocBroadcastService
+} from '@/services/arcadeBroadcastProvider'
+import { getExchangeRate } from '@/services/exchangeRate'
 import { router } from 'expo-router'
 import { logWithTimestamp } from '@/utils/logging'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
@@ -35,14 +60,14 @@ import { StorageExpoSQLite } from '@/storage'
 import * as SQLite from 'expo-sqlite'
 import { getRegisteredDbs, registerDb, selectLatestDb } from '@/utils/walletDbRegistry'
 import { createBtmsModule } from '@bsv/btms-permission-module'
-import {
-  BsvExchangeRate,
-  WalletServicesOptions,
-  PostBeefResult,
-  PostTxResultForTxid
-} from '@bsv/wallet-toolbox-mobile/out/src/sdk'
 import { AppState, AppStateStatus } from 'react-native'
 import RNEventSource from 'react-native-sse'
+import NetInfo from '@react-native-community/netinfo'
+
+
+// Global, origin-agnostic rate limit for auto-approved spending.
+// In-memory only — resets on app restart (intentional: more secure).
+let lastAutoApproveTime = 0
 
 // -----
 // Context Types
@@ -59,7 +84,6 @@ type ConfigStatus = 'editing' | 'configured' | 'initial'
 export interface WalletContextValue {
   // Managers:
   managers: ManagerState
-  updateManagers: (newManagers: ManagerState) => void
   // Settings
   settings: WalletSettings
   updateSettings: (newSettings: WalletSettings) => Promise<void>
@@ -77,28 +101,43 @@ export interface WalletContextValue {
   advanceProtocolQueue: () => void
   advanceSpendingQueue: () => void
   advanceBtmsQueue: (approved: boolean) => void
-  recentApps: any[]
   finalizeConfig: (wabConfig: WABConfig) => boolean
   setConfigStatus: (status: ConfigStatus) => void
   configStatus: ConfigStatus
-  selectedWabUrl: string
   selectedStorageUrl: string
   selectedMethod: string
-  selectedNetwork: 'main' | 'test'
+  selectedNetwork: AppChain
   setWalletBuilt: (current: boolean) => void
   buildWalletFromMnemonic: (mnemonic?: string) => Promise<void>
   buildWalletFromRecoveredKey: (wif: string) => Promise<void>
-  switchNetwork: (network: 'main' | 'test') => Promise<void>
+  switchNetwork: (network: AppChain) => Promise<void>
   /** Tear down the current wallet and re-trigger auto-build (e.g. after DB import). */
   rebuildWallet: () => Promise<void>
   storage: StorageExpoSQLite | null
+  /** Fetch BUMP from WoC and store merkle proof, advancing tx status to completed */
+  refreshProof: (txid: string) => Promise<void>
   /** Incremented when a transaction status changes via SSE, triggers UI refresh */
   txStatusVersion: number
+  /** True while the wallet is being built (biometric auth pending, async build in progress) */
+  walletBuilding: boolean
+  /** True once the wallet has been successfully built (mnemonic/key provisioned) */
+  walletBuilt: boolean
+  /**
+   * Notification from background BLE payment processing.
+   * Set when pending payments are internalized in the background (e.g. on
+   * wallet build or when connectivity is restored). Cleared by the UI after
+   * display. null = no pending notification.
+   */
+  /** Run a named monitor task and return its log output */
+  runMonitorTask: (taskName: string) => Promise<string>
+  /** List available monitor task names */
+  getMonitorTaskNames: () => string[]
+  /** Check spendability of all UTXOs against WoC */
+  checkUtxoSpendability: () => Promise<string>
 }
 
 export const WalletContext = createContext<WalletContextValue>({
   managers: {},
-  updateManagers: () => {},
   settings: DEFAULT_SETTINGS,
   updateSettings: async () => {},
   logout: () => {},
@@ -114,11 +153,9 @@ export const WalletContext = createContext<WalletContextValue>({
   advanceProtocolQueue: () => {},
   advanceSpendingQueue: () => {},
   advanceBtmsQueue: () => {},
-  recentApps: [],
   finalizeConfig: () => false,
   setConfigStatus: () => {},
   configStatus: 'initial',
-  selectedWabUrl: '',
   selectedStorageUrl: '',
   selectedMethod: '',
   selectedNetwork: 'main',
@@ -128,7 +165,13 @@ export const WalletContext = createContext<WalletContextValue>({
   switchNetwork: async () => {},
   rebuildWallet: async () => {},
   storage: null,
-  txStatusVersion: 0
+  refreshProof: async () => {},
+  txStatusVersion: 0,
+  walletBuilding: false,
+  walletBuilt: false,
+  runMonitorTask: async () => '',
+  getMonitorTaskNames: () => [],
+  checkUtxoSpendability: async () => ''
 })
 
 type PermissionType = 'identity' | 'protocol' | 'renewal' | 'basket'
@@ -189,7 +232,7 @@ export interface WABConfig {
   wabUrl: string
   wabInfo?: any // Optional for noWAB (self-custodial) mode
   method: string
-  network: 'main' | 'test'
+  network: AppChain
   storageUrl: string
 }
 
@@ -235,9 +278,23 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [txStatusVersion, setTxStatusVersion] = useState(0)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState)
+  const monitorRef = useRef<Monitor | null>(null)
   const adminOriginator = ADMIN_ORIGINATOR
-  const [recentApps, setRecentApps] = useState<any[]>([])
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
+  const walletBuildingRef = useRef<boolean>(false)
+  const [walletBuilding, setWalletBuilding] = useState<boolean>(false)
+  // Auto-approve: cached threshold (satoshis) and managers ref for use in callback
+  const autoApproveThresholdRef = useRef<number>(DEFAULT_AUTO_APPROVE_THRESHOLD)
+  const managersRef = useRef<ManagerState>({})
+  useEffect(() => { managersRef.current = managers }, [managers])
+  useEffect(() => {
+    AsyncStorage.getItem(AUTO_APPROVE_STORAGE_KEY).then(v => {
+      if (v !== null) autoApproveThresholdRef.current = Number(v) || 0
+    })
+    AsyncStorage.getItem('walletSettings').then(v => {
+      if (v) setSettings(prev => ({ ...prev, ...JSON.parse(v) }))
+    })
+  }, [])
 
   const {
     getSnap,
@@ -251,7 +308,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     getRecoveredKey,
     deleteRecoveredKey
   } = useLocalStorage()
-  const { setWeb2Mode } = useBrowserMode()
 
   const {
     isFocused,
@@ -263,140 +319,50 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     setSpendingAuthorizationModalOpen
   } = useContext(UserContext)
 
-  // Track if we were originally focused
-  const [wasOriginallyFocused, setWasOriginallyFocused] = useState(false)
+  const focusOpts = { isFocused, onFocusRequested, onFocusRelinquished }
 
-  // Separate request queues for basket and certificate access
-  const [basketRequests, setBasketRequests] = useState<BasketAccessRequest[]>([])
-  const [certificateRequests, setCertificateRequests] = useState<CertificateAccessRequest[]>([])
-  const [protocolRequests, setProtocolRequests] = useState<ProtocolAccessRequest[]>([])
-  const [spendingRequests, setSpendingRequests] = useState<SpendingRequest[]>([])
-  const [btmsRequests, setBtmsRequests] = useState<BtmsRequest[]>([])
+  const basketQueue = usePermissionQueue<BasketAccessRequest>({
+    ...focusOpts,
+    openModal: setBasketAccessModalOpen
+  })
+  const certificateQueue = usePermissionQueue<CertificateAccessRequest>({
+    ...focusOpts,
+    openModal: setCertificateAccessModalOpen
+  })
+  const protocolQueue = usePermissionQueue<ProtocolAccessRequest>({
+    ...focusOpts,
+    openModal: setProtocolAccessModalOpen
+  })
+  const spendingQueue = usePermissionQueue<SpendingRequest>({
+    ...focusOpts,
+    openModal: setSpendingAuthorizationModalOpen
+  })
+  const btmsQueue = usePermissionQueue<BtmsRequest>(focusOpts)
 
-  /**
-   * Bridge between BasicTokenModule.requestTokenAccess (synchronous callback) and
-   * the React modal system. Each entry is a pending BTMS approval waiting for user
-   * interaction. The resolve function settles the Promise that BasicTokenModule is
-   * awaiting, continuing or aborting the underlying wallet operation.
-   */
-  const btmsPendingResolverRef = useRef<((approved: boolean) => void) | null>(null)
-
-  // Pop the first request from the basket queue, close if empty, relinquish focus if needed
-  const advanceBasketQueue = () => {
-    setBasketRequests(prev => {
-      const newQueue = prev.slice(1)
-      if (newQueue.length === 0) {
-        setBasketAccessModalOpen(false)
-        if (!wasOriginallyFocused) {
-          onFocusRelinquished()
-        }
-      }
-      return newQueue
-    })
-    logWithTimestamp(F, 'Advanced basket queue')
-  }
-
-  // Pop the first request from the certificate queue, close if empty, relinquish focus if needed
-  const advanceCertificateQueue = () => {
-    setCertificateRequests(prev => {
-      const newQueue = prev.slice(1)
-      if (newQueue.length === 0) {
-        setCertificateAccessModalOpen(false)
-        if (!wasOriginallyFocused) {
-          onFocusRelinquished()
-        }
-      }
-      return newQueue
-    })
-    logWithTimestamp(F, 'Advanced certificate queue')
-  }
-
-  // Pop the first request from the protocol queue, close if empty, relinquish focus if needed
-  const advanceProtocolQueue = () => {
-    setProtocolRequests(prev => {
-      const newQueue = prev.slice(1)
-      if (newQueue.length === 0) {
-        setProtocolAccessModalOpen(false)
-        if (!wasOriginallyFocused) {
-          onFocusRelinquished()
-        }
-      }
-      return newQueue
-    })
-    logWithTimestamp(F, 'Advanced protocol queue')
-  }
-
-  // Pop the first request from the spending queue, close if empty, relinquish focus if needed
-  const advanceSpendingQueue = () => {
-    setSpendingRequests(prev => {
-      const newQueue = prev.slice(1)
-      if (newQueue.length === 0) {
-        setSpendingAuthorizationModalOpen(false)
-        if (!wasOriginallyFocused) {
-          onFocusRelinquished()
-        }
-      }
-      return newQueue
-    })
-    logWithTimestamp(F, 'Advanced spending queue')
-  }
-
-  // Pop the first BTMS request from the queue and resolve it.
-  // The sheet visibility is driven purely by btmsRequests.length — no separate
-  // modal-open flag is needed, eliminating the cross-context timing race.
   const advanceBtmsQueue = useCallback(
     (approved: boolean) => {
-      setBtmsRequests(prev => {
-        if (prev.length > 0) {
-          // Settle the pending Promise that BasicTokenModule is awaiting
-          prev[0].resolve(approved)
-        }
-        const newQueue = prev.slice(1)
-        if (newQueue.length === 0 && !wasOriginallyFocused) {
-          onFocusRelinquished()
-        }
-        return newQueue
-      })
-      logWithTimestamp(F, 'Advanced BTMS queue')
+      btmsQueue.advance(head => head.resolve(approved))
     },
-    [wasOriginallyFocused, onFocusRelinquished]
+    [btmsQueue.advance]
   )
 
-  /**
-   * promptHandler passed to createBtmsModule.
-   * Enqueues the request — PermissionSheet opens as soon as btmsRequests.length > 0.
-   */
   const btmsPromptHandler = useCallback(
     (originator: string, message: string): Promise<boolean> => {
       return new Promise<boolean>(resolve => {
-        isFocused().then(currentlyFocused => {
-          setWasOriginallyFocused(currentlyFocused)
-          if (!currentlyFocused) {
-            onFocusRequested()
-          }
-        })
-        setBtmsRequests(prev => {
-          logWithTimestamp(F, 'BTMS permission request enqueued')
-          return [...prev, { originator, message, resolve }]
-        })
+        btmsQueue.enqueue({ originator, message, resolve })
       })
     },
-    [isFocused, onFocusRequested]
+    [btmsQueue.enqueue]
   )
 
   const updateSettings = useCallback(
     async (newSettings: WalletSettings) => {
-      if (!managers.settingsManager) {
-        throw new Error('The user must be logged in to update settings!')
-      }
-      await managers.settingsManager.set(newSettings)
       setSettings(newSettings)
-      logWithTimestamp(F, 'Settings updated')
+      AsyncStorage.setItem('walletSettings', JSON.stringify(newSettings))
     },
     [managers.settingsManager]
   )
 
-  // Provide a handler for basket-access requests that enqueues them
   const basketAccessCallback = useCallback(
     (
       incomingRequest: PermissionRequest & {
@@ -407,40 +373,19 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         renewal?: boolean
       }
     ) => {
-      // Enqueue the new request
       if (incomingRequest?.requestID) {
-        setBasketRequests(prev => {
-          const wasEmpty = prev.length === 0
-
-          // If no requests were queued, handle focusing logic right away
-          if (wasEmpty) {
-            isFocused().then(currentlyFocused => {
-              setWasOriginallyFocused(currentlyFocused)
-              if (!currentlyFocused) {
-                onFocusRequested()
-              }
-              setBasketAccessModalOpen(true)
-            })
-          }
-
-          return [
-            ...prev,
-            {
-              requestID: incomingRequest.requestID,
-              basket: incomingRequest.basket,
-              originator: incomingRequest.originator,
-              reason: incomingRequest.reason,
-              renewal: incomingRequest.renewal
-            }
-          ]
+        basketQueue.enqueue({
+          requestID: incomingRequest.requestID,
+          basket: incomingRequest.basket,
+          originator: incomingRequest.originator,
+          reason: incomingRequest.reason,
+          renewal: incomingRequest.renewal
         })
-        logWithTimestamp(F, 'Basket access request enqueued')
       }
     },
-    [isFocused, onFocusRequested]
+    [basketQueue.enqueue]
   )
 
-  // Provide a handler for certificate-access requests that enqueues them
   const certificateAccessCallback = useCallback(
     (
       incomingRequest: PermissionRequest & {
@@ -455,74 +400,35 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         renewal?: boolean
       }
     ) => {
-      // Enqueue the new request
       if (incomingRequest?.requestID) {
-        setCertificateRequests(prev => {
-          const wasEmpty = prev.length === 0
-
-          // If no requests were queued, handle focusing logic right away
-          if (wasEmpty) {
-            isFocused().then(currentlyFocused => {
-              setWasOriginallyFocused(currentlyFocused)
-              if (!currentlyFocused) {
-                onFocusRequested()
-              }
-              setCertificateAccessModalOpen(true)
-            })
-          }
-
-          // Extract certificate data, safely handling potentially undefined values
-          const certificate = incomingRequest.certificate as any
-          const certType = certificate?.certType || ''
-          const fields = certificate?.fields || []
-
-          // Extract field names as an array for the CertificateChip component
-          const fieldsArray = fields
-
-          const verifier = certificate?.verifier || ''
-
-          return [
-            ...prev,
-            {
-              requestID: incomingRequest.requestID,
-              originator: incomingRequest.originator,
-              verifierPublicKey: verifier,
-              certificateType: certType,
-              fieldsArray,
-              description: incomingRequest.reason,
-              renewal: incomingRequest.renewal
-            }
-          ]
-        })
-        logWithTimestamp(F, 'Certificate access request enqueued')
+        const certificate = incomingRequest.certificate as any
+        certificateQueue.enqueue({
+          requestID: incomingRequest.requestID,
+          originator: incomingRequest.originator,
+          verifierPublicKey: certificate?.verifier || '',
+          certificateType: certificate?.certType || '',
+          fieldsArray: certificate?.fields || [],
+          description: incomingRequest.reason,
+          renewal: incomingRequest.renewal
+        } as any)
       }
     },
-    [isFocused, onFocusRequested]
+    [certificateQueue.enqueue]
   )
 
-  // Provide a handler for protocol permission requests that enqueues them
   const protocolPermissionCallback = useCallback(
     (args: PermissionRequest & { requestID: string }): Promise<void> => {
       const { requestID, counterparty, originator, reason, renewal, protocolID } = args
-
-      if (!requestID || !protocolID) {
-        return Promise.resolve()
-      }
+      if (!requestID || !protocolID) return Promise.resolve()
 
       const [protocolSecurityLevel, protocolNameString] = protocolID
 
-      // Determine type of permission
       let permissionType: PermissionType = 'protocol'
-      if (protocolNameString === 'identity resolution') {
-        permissionType = 'identity'
-      } else if (renewal) {
-        permissionType = 'renewal'
-      } else if (protocolNameString.includes('basket')) {
-        permissionType = 'basket'
-      }
+      if (protocolNameString === 'identity resolution') permissionType = 'identity'
+      else if (renewal) permissionType = 'renewal'
+      else if (protocolNameString.includes('basket')) permissionType = 'basket'
 
-      // Create the new permission request
-      const newItem: ProtocolAccessRequest = {
+      protocolQueue.enqueue({
         requestID,
         protocolSecurityLevel,
         protocolID: protocolNameString,
@@ -531,98 +437,50 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         description: reason,
         renewal,
         type: permissionType
-      }
-
-      // Enqueue the new request
-      return new Promise<void>(resolve => {
-        setProtocolRequests(prev => {
-          const wasEmpty = prev.length === 0
-
-          // If no requests were queued, handle focusing logic right away
-          if (wasEmpty) {
-            isFocused().then(currentlyFocused => {
-              setWasOriginallyFocused(currentlyFocused)
-              if (!currentlyFocused) {
-                onFocusRequested()
-              }
-              setProtocolAccessModalOpen(true)
-            })
-          }
-
-          resolve()
-          return [...prev, newItem]
-        })
-        logWithTimestamp(F, 'Protocol permission request enqueued')
       })
+      return Promise.resolve()
     },
-    [isFocused, onFocusRequested]
+    [protocolQueue.enqueue]
   )
 
-  // Provide a handler for spending authorization requests that enqueues them
   const spendingAuthorizationCallback = useCallback(
     async (args: PermissionRequest & { requestID: string }): Promise<void> => {
       const { requestID, originator, reason, renewal, spending } = args
+      if (!requestID || !spending) return
 
-      if (!requestID || !spending) {
-        return Promise.resolve()
+      // Auto-approve small transactions if within threshold and cooldown
+      const threshold = autoApproveThresholdRef.current
+      if (threshold > 0 && spending.satoshis <= threshold) {
+        const now = Date.now()
+        if (now - lastAutoApproveTime >= AUTO_APPROVE_COOLDOWN_MS) {
+          lastAutoApproveTime = now
+          managersRef.current.permissionsManager?.grantPermission({
+            requestID,
+            ephemeral: true,
+            amount: spending.satoshis
+          })
+          return
+        }
       }
 
-      let { satoshis, lineItems } = spending
-
-      if (!lineItems) {
-        lineItems = []
-      }
-
-      // TODO: support these
-      const transactionAmount = 0
-      const totalPastSpending = 0
-      const amountPreviouslyAuthorized = 0
-
-      // Create the new permission request
-      const newItem: SpendingRequest = {
+      spendingQueue.enqueue({
         requestID,
         originator,
         description: reason,
-        transactionAmount,
-        totalPastSpending,
-        amountPreviouslyAuthorized,
-        authorizationAmount: satoshis,
+        transactionAmount: 0,
+        totalPastSpending: 0,
+        amountPreviouslyAuthorized: 0,
+        authorizationAmount: spending.satoshis,
         renewal,
-        lineItems
-      }
-
-      // DEBUG: log the full spending request object so we can capture a real example
-      console.log('[SpendingRequest] full object:', JSON.stringify(newItem, null, 2))
-
-      // Enqueue the new request
-      return new Promise<void>(resolve => {
-        setSpendingRequests(prev => {
-          const wasEmpty = prev.length === 0
-
-          // If no requests were queued, handle focusing logic right away
-          if (wasEmpty) {
-            isFocused().then(currentlyFocused => {
-              setWasOriginallyFocused(currentlyFocused)
-              if (!currentlyFocused) {
-                onFocusRequested()
-              }
-              setSpendingAuthorizationModalOpen(true)
-            })
-          }
-
-          resolve()
-          return [...prev, newItem]
-        })
-        logWithTimestamp(F, 'Spending authorization request enqueued')
+        lineItems: spending.lineItems || []
       })
     },
-    [isFocused, onFocusRequested]
+    [spendingQueue.enqueue]
   )
 
   // ---- WAB + network + storage configuration ----
-  const [selectedWabUrl, setSelectedWabUrl] = useState<string>(DEFAULT_WAB_URL)
   const [selectedMethod, setSelectedMethod] = useState<string>('')
-  const [selectedNetwork, setSelectedNetwork] = useState<'main' | 'test'>(DEFAULT_CHAIN) // "test" or "main"
+  const [selectedNetwork, setSelectedNetwork] = useState<AppChain>(DEFAULT_CHAIN)
   const [selectedStorageUrl, setSelectedStorageUrl] = useState<string>(DEFAULT_STORAGE_URL)
 
   // Flag that indicates configuration is complete. For returning users,
@@ -631,29 +489,18 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // Used to trigger a re-render after snapshot load completes.
   const [snapshotLoaded, setSnapshotLoaded] = useState<boolean>(false)
 
-  // Mark configuration complete. Auto-configured for local-only mode.
-  const finalizeConfig = (wabConfig: WABConfig): boolean => {
+  const finalizeConfig = useCallback((wabConfig: WABConfig): boolean => {
     const { method, network, storageUrl } = wabConfig
-    try {
-      if (!network) {
-        console.error('Network selection is required')
-        return false
-      }
-
-      setSelectedWabUrl('noWAB')
-      setSelectedMethod(method || 'mnemonic')
-      setSelectedNetwork(network)
-      setSelectedStorageUrl(storageUrl || 'local')
-
-      setConfigStatus('configured')
-      logWithTimestamp(F, 'Configuration finalized successfully')
-      return true
-    } catch (error: any) {
-      console.error('Error applying configuration:', error)
-      logWithTimestamp(F, 'Error applying configuration', error.message)
+    if (!network) {
+      console.error('Network selection is required')
       return false
     }
-  }
+    setSelectedMethod(method || 'mnemonic')
+    setSelectedNetwork(network)
+    setSelectedStorageUrl(storageUrl || 'local')
+    setConfigStatus('configured')
+    return true
+  }, [])
 
   // Auto-configure on first launch: if no stored config, set defaults
   useEffect(() => {
@@ -664,14 +511,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         try {
           const config = JSON.parse(storedConfig)
           finalizeConfig(config)
-          logWithTimestamp(F, 'Auto-loaded stored configuration')
-          // If mnemonic exists, auto-build wallet
-          const mnemonic = await getMnemonic()
-          if (mnemonic) {
-            logWithTimestamp(F, 'Mnemonic found, will auto-build wallet')
-          }
         } catch {
-          logWithTimestamp(F, 'Failed to parse stored config, using defaults')
           finalizeConfig({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' })
           await setItem(
             'finalConfig',
@@ -680,7 +520,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         }
       } else {
         // First launch: auto-configure with defaults
-        logWithTimestamp(F, 'No stored config found, auto-configuring with defaults')
         finalizeConfig({ wabUrl: 'noWAB', method: 'mnemonic', network: DEFAULT_CHAIN, storageUrl: 'local' })
         await setItem(
           'finalConfig',
@@ -689,25 +528,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       }
     })()
   }, [configStatus]) // Re-run whenever configStatus resets to 'initial' (e.g. after logout)
-
-  const getExchangeRate = async (): Promise<BsvExchangeRate> => {
-    try {
-      const rate = await fetch('https://api.whatsonchain.com/v1/bsv/main/exchangerate')
-      const data = await rate.json()
-      return {
-        timestamp: new Date(),
-        rate: data.rate,
-        base: 'USD'
-      }
-    } catch (error) {
-      console.error('Error fetching exchange rate:', error)
-      return {
-        rate: 16.75,
-        timestamp: new Date(),
-        base: 'USD'
-      }
-    }
-  }
 
   // Build wallet function
   const buildWallet = useCallback(
@@ -721,116 +541,89 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const signer = new WalletSigner(chain, keyDeriver, storageManager)
 
         const bsvExchangeRate = await getExchangeRate()
-
-        // Derive a stable callback token for ARC SSE event streaming
         const callbackToken = keyDeriver.identityKey.substring(0, 32)
 
-        const mainnetServices: WalletServicesOptions = {
-          chain: selectedNetwork,
-          arcUrl: process.env?.EXPO_PUBLIC_ARC_URL ?? '',
-          arcConfig: {
-            apiKey: process.env?.EXPO_PUBLIC_ARC_API_KEY ?? '',
-            callbackToken
-          },
-          bsvUpdateMsecs: 60 * 60 * 1000,
-          fiatExchangeRates: {
-            timestamp: new Date(),
-            base: 'USD',
-            rates: {
-              USD: 1
-            }
-          },
-          fiatUpdateMsecs: 60 * 60 * 1000,
-          whatsOnChainApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
-          taalApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
-          chaintracks: new ChaintracksServiceClient(
-            selectedNetwork,
-            process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://chaintracks-us-1.bsvb.tech'
-          ),
-          bsvExchangeRate
-        }
-
-        const testnetServices: WalletServicesOptions = {
-          chain: selectedNetwork,
-          chaintracks: new ChaintracksServiceClient(
-            selectedNetwork,
-            process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ?? 'https://chaintracks-testnet-us-1.bsvb.tech'
-          ),
+        const [arcUrlOverride, arcApiTokenOverride] = await Promise.all([
+          AsyncStorage.getItem(`arc_custom_url_${chain}`),
+          AsyncStorage.getItem(`arc_custom_api_token_${chain}`)
+        ])
+        const { services, serviceOptions } = createServices(
+          selectedNetwork,
+          callbackToken,
           bsvExchangeRate,
-          arcUrl: process.env?.EXPO_PUBLIC_TEST_ARC_URL ?? '',
-          arcConfig: {
-            apiKey: process.env?.EXPO_PUBLIC_TEST_ARC_API_KEY ?? '',
-            callbackToken
-          },
-          bsvUpdateMsecs: 60 * 60 * 1000000,
-          fiatExchangeRates: {
-            timestamp: new Date(),
-            base: 'USD',
-            rates: {
-              USD: 1
-            }
-          },
-          fiatUpdateMsecs: 60 * 60 * 1000000,
-          whatsOnChainApiKey: process.env?.EXPO_PUBLIC_TEST_WOC_API_KEY ?? '',
-          taalApiKey: process.env?.EXPO_PUBLIC_TEST_TAAL_API_KEY ?? ''
-        }
+          arcUrlOverride || undefined,
+          arcApiTokenOverride || undefined
+        )
 
-        const serviceOptions = selectedNetwork === 'main' ? mainnetServices : testnetServices
-        const services = new Services(serviceOptions)
-
-        // Replace all default broadcast providers with a single Arcade-specific one.
-        // Arcade expects EF format posted to /tx, and we need all broadcasts to go
-        // through our Arcade instance so SSE status events work.
-        const arcadeUrl = serviceOptions.arcUrl!
+        // Replace all default broadcast providers with EF/rawtx-only services.
+        // Order: Arcade → Taal → GorillaPool → WoC → Bitails. UntilSuccess stops at first success.
+        const bitailsService = (services as any).bitails
         services.postBeefServices.remove('GorillaPoolArcBeef')
         services.postBeefServices.remove('TaalArcBeef')
-        services.postBeefServices.add({
-          name: 'Arcade',
-          service: async (beef: Beef, txids: string[]): Promise<PostBeefResult> => {
-            const r: PostBeefResult = { name: 'Arcade', status: 'success', txidResults: [] }
+        services.postBeefServices.remove('Bitails')
+        services.postBeefServices.remove('WhatsOnChain')
+        services.postBeefServices.add(createArcadeBroadcastService(serviceOptions.arcUrl!, callbackToken))
+        const taalArcUrl = chain === 'main' ? 'https://arc.taal.com' : chain === 'test' ? 'https://arc-test.taal.com' : 'https://arc-teratest.taal.com'
+        services.postBeefServices.add(createTaalBroadcastService(taalArcUrl, serviceOptions.taalApiKey))
+        if (chain === 'main') {
+          services.postBeefServices.add(createGorillaPoolBroadcastService('https://arc.gorillapool.io'))
+        }
+        services.postBeefServices.add(createWocBroadcastService(chain, serviceOptions.whatsOnChainApiKey))
+        if (bitailsService) {
+          services.postBeefServices.add({ name: 'Bitails', service: bitailsService.postBeef.bind(bitailsService) })
+        }
+
+        // Replace WoC getMerklePath with BUMP endpoint — no TSC→BUMP conversion needed.
+        // Remove all providers then re-add in order: WoC BUMP first, Bitails fallback.
+        const wocBumpBase = chain === 'main'
+          ? 'https://api.whatsonchain.com/v1/bsv/main'
+          : chain === 'test'
+            ? 'https://api.whatsonchain.com/v1/bsv/test'
+            : 'https://woc-ttn.bsvb.tech/v1/bsv/test'
+        const wocApiKey = serviceOptions.whatsOnChainApiKey
+        const chaintracksClient = serviceOptions.chaintracks as any
+        const getMerklePathSvc = (services as any).getMerklePathServices
+        const bitailsGetMerklePath = (services as any).bitails?.getMerklePath?.bind((services as any).bitails)
+        getMerklePathSvc.remove('WhatsOnChain')
+        getMerklePathSvc.remove('Bitails')
+        getMerklePathSvc.add({
+          name: 'WhatsOnChain',
+          service: async (txid: string): Promise<any> => {
+            const r: any = { name: 'WhatsOnChain', notes: [] }
             try {
-              const tx = Transaction.fromBEEF(beef.toBinary())
-              const ef = tx.toEF()
-              const response = await fetch(`${arcadeUrl}/tx`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/octet-stream',
-                  'X-CallbackToken': callbackToken,
-                  'X-FullStatusUpdates': 'true'
-                },
-                body: new Uint8Array(ef)
-              })
-              const data = await response.json()
-              console.log(`[Arcade] POST /tx ${response.status}`, JSON.stringify(data))
-              const txResult: PostTxResultForTxid = {
-                txid: data.txid || txids[0],
-                status: response.ok ? 'success' : 'error',
-                notes: [{ when: new Date().toISOString(), what: 'arcadePostEF', txStatus: data.txStatus }]
+              const headers: Record<string, string> = {}
+              if (wocApiKey) headers['woc-api-key'] = wocApiKey
+              const res = await fetch(`${wocBumpBase}/tx/${txid}/proof/bump`, { headers })
+              if (res.status === 404) {
+                r.notes.push({ what: 'getMerklePathNoData', when: new Date().toISOString() })
+                return r
               }
-              if (data.txStatus === 'DOUBLE_SPEND_ATTEMPTED') {
-                txResult.doubleSpend = true
-                txResult.status = 'error'
+              if (!res.ok) {
+                r.notes.push({ what: 'getMerklePathBadStatus', httpStatus: res.status, when: new Date().toISOString() })
+                return r
               }
-              r.txidResults.push(txResult)
-              r.status = txResult.status
-            } catch (err: any) {
-              console.log(`[Arcade] POST /tx error: ${err.message}`)
-              r.status = 'error'
-              r.txidResults.push({
-                txid: txids[0],
-                status: 'error',
-                serviceError: true,
-                data: err.message
-              })
+              const bumpHex = (await res.text()).trim()
+              r.merklePath = MerklePath.fromHex(bumpHex)
+              const height = r.merklePath.blockHeight
+              const header = await chaintracksClient.findHeaderForHeight(height)
+              if (header) r.header = { ...header, height }
+              r.notes.push({ what: 'getMerklePathSuccess', when: new Date().toISOString() })
+            } catch (eu: any) {
+              r.error = eu
+              r.notes.push({ what: 'getMerklePathError', description: eu?.message, when: new Date().toISOString() })
             }
             return r
           }
         })
+        if (bitailsGetMerklePath) {
+          getMerklePathSvc.add({ name: 'Bitails', service: bitailsGetMerklePath })
+        }
 
         const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)
+        // Set default settings including "Who I Am" certifier before first get().
+        // config is private in the type declarations but settable at runtime.
+        ;(wallet.settingsManager as any).config = { defaultSettings: DEFAULT_SETTINGS }
         newManagers.settingsManager = wallet.settingsManager
-
-        logWithTimestamp(F, 'Wallet built successfully')
 
         // Use user-selected storage provider
         // Check if user selected local storage
@@ -889,8 +682,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         }
         // TODO: Re-add remote storage support in future version
 
-        logWithTimestamp(F, 'Storage manager built successfully')
-
         // Create BTMS permission module, wiring in the prompt handler so that
         // "p btms" operations surface a UI modal rather than silently denying.
         const btmsModule = createBtmsModule({ wallet, promptHandler: btmsPromptHandler })
@@ -919,8 +710,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           permissionModules: { btms: btmsModule }
         } as any)
 
-        logWithTimestamp(F, 'Permissions manager built successfully')
-
         if (protocolPermissionCallback) {
           permissionsManager.bindCallback('onProtocolPermissionRequested', protocolPermissionCallback)
         }
@@ -934,8 +723,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           permissionsManager.bindCallback('onCertificateAccessRequested', certificateAccessCallback)
         }
 
-        // Store in window for debugging
-        ;(window as any).permissionsManager = permissionsManager
         newManagers.permissionsManager = permissionsManager
 
         // Start background monitor for transaction status updates (sending → unproven → completed)
@@ -953,9 +740,93 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           }
           const monitor = new Monitor(monitorOptions)
           monitor.addDefaultTasks()
+
+          // Patch TaskArcadeSSE: treat REJECTED as retryable, not permanent failure.
+          // Arcade returns REJECTED with 503 "no available server" for transient infra
+          // errors — the default handler marks these as permanently invalid.
+          const sseTask = monitor._tasks.find(t => t.name === 'ArcadeSSE') as any
+          if (sseTask) {
+            const origProcess = sseTask.processStatusEvent.bind(sseTask)
+            sseTask.processStatusEvent = async (event: any) => {
+              if (event.txStatus === 'REJECTED') {
+                console.log(`[TaskArcadeSSE] REJECTED treated as retryable: txid=${event.txid}`)
+                return `SSE: txid=${event.txid} status=REJECTED (ignored — retryable)\n`
+              }
+              // ARC emits SEEN_MULTIPLE_NODES after a tx has propagated to >1 node.
+              // Library switch only knows SEEN_ON_NETWORK — normalize so req → unmined
+              // and tx → unproven instead of falling through as unhandled.
+              if (event.txStatus === 'SEEN_MULTIPLE_NODES') {
+                return origProcess({ ...event, txStatus: 'SEEN_ON_NETWORK' })
+              }
+              return origProcess(event)
+            }
+          }
+
+          // TaskReviewProvenTxs crawls all block heights looking for merkle root mismatches.
+          // TaskReorg handles reorgs in real-time via SSE; ChaintracksChainTracker does
+          // on-demand remote lookups during beef.verify(). The crawl is redundant on mobile.
+          const reviewProvenTxsIdx = monitor._tasks.findIndex((t: any) => t.name === 'ReviewProvenTxs')
+          if (reviewProvenTxsIdx !== -1) monitor._tasks.splice(reviewProvenTxsIdx, 1)
+
+          // TaskCheckForProofs.trigger() only fires when checkNow=true (set by TaskNewHeader).
+          // The periodic triggerMsecs fallback is commented out in the library. Patch it back in
+          // so proofs are still sought every 2h even when block header events are missed.
+          const checkForProofsTask = monitor._tasks.find((t: any) => t.name === 'CheckForProofs') as any
+          if (checkForProofsTask) {
+            // Re-enable periodic trigger (commented out in library — only fires on checkNow otherwise).
+            if (checkForProofsTask.triggerMsecs > 0) {
+              const origTrigger = checkForProofsTask.trigger.bind(checkForProofsTask)
+              checkForProofsTask.trigger = (nowMsecs: number) => {
+                const base = origTrigger(nowMsecs)
+                const elapsed = nowMsecs - checkForProofsTask.lastRunMsecsSinceEpoch
+                return { run: base.run || elapsed > checkForProofsTask.triggerMsecs }
+              }
+            }
+            // runTask exits immediately when monitor.lastNewHeader is undefined (only set by
+            // TaskNewHeader on successful chaintracks response). Fall back to currentHeight().
+            const origRunTask = checkForProofsTask.runTask.bind(checkForProofsTask)
+            checkForProofsTask.runTask = async () => {
+              if (checkForProofsTask.monitor.lastNewHeader === undefined) {
+                try {
+                  const ct = checkForProofsTask.monitor.chaintracksWithEvents || checkForProofsTask.monitor.chaintracks
+                  const height = await ct.currentHeight()
+                  checkForProofsTask.monitor.lastNewHeader = { height }
+                } catch {
+                  // chaintracks still down — can't proceed
+                  return ''
+                }
+              }
+              return origRunTask()
+            }
+            logWithTimestamp(F, `CheckForProofs patched: periodic fallback + lastNewHeader bootstrap`)
+          }
+
+          // TaskUnFail only processes 'unfail' status — nothing promotes 'invalid' → 'unfail'.
+          // Patch to also process 'invalid' reqs so transactions stuck due to service failures
+          // (e.g. WoC 401, chaintracks down) get retried. Attempts are NOT reset so reqs that
+          // are genuinely invalid accumulate attempts and stay invalid after repeated failures.
+          const unFailTask = monitor._tasks.find((t: any) => t.name === 'UnFail') as any
+          if (unFailTask) {
+            const origRunTask = unFailTask.runTask.bind(unFailTask)
+            unFailTask.runTask = async () => {
+              let log = await origRunTask()
+              const invalidReqs = await unFailTask.storage.findProvenTxReqs({
+                partial: {},
+                status: ['invalid'],
+                paged: { limit: 100, offset: 0 }
+              })
+              if (invalidReqs.length > 0) {
+                log += `\n${invalidReqs.length} invalid reqs — retrying proof lookup\n`
+                const r = await unFailTask.unfail(invalidReqs, 2)
+                log += r.log
+              }
+              return log
+            }
+          }
+
           // startTasks runs in background — don't await (it never resolves until stopTasks)
           monitor.startTasks().catch(e => console.error('[WalletContext] Monitor error:', e))
-          ;(window as any).walletMonitor = monitor
+          monitorRef.current = monitor
           logWithTimestamp(F, 'Monitor started with ARC SSE support')
         } catch (error: any) {
           console.warn('[WalletContext] Failed to start monitor:', error.message)
@@ -987,16 +858,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // Watch for wallet authentication state
   useEffect(() => {
     ;(async () => {
-      logWithTimestamp(F, 'Checking authentication state')
       const snap = await getSnap()
       if (managers?.walletManager?.authenticated && snap) {
         setSnapshotLoaded(true)
-        logWithTimestamp(F, 'Authentication confirmed, snapshot loaded')
       } else if (!snap && snapshotLoaded) {
         setSnapshotLoaded(false)
-        logWithTimestamp(F, 'Snapshot no longer exists, resetting snapshotLoaded state')
       }
-      logWithTimestamp(F, 'Authentication state check complete')
     })()
   }, [managers?.walletManager?.authenticated, snapshotLoaded, getSnap])
 
@@ -1004,8 +871,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   const buildWalletFromMnemonic = useCallback(
     async (providedMnemonic?: string) => {
-      // Skip if wallet already built
-      if (walletBuilt) {
+      // Skip if wallet already built or a build is already in progress
+      if (walletBuilt || walletBuildingRef.current) {
         return
       }
 
@@ -1014,58 +881,48 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         return
       }
 
-      logWithTimestamp(F, 'Checking for noWAB primary key')
+      walletBuildingRef.current = true
+      setWalletBuilding(true)
 
       try {
         // Use provided mnemonic directly (e.g. from mnemonic screen) or read from secure storage
         const mnemonic = providedMnemonic || (await getMnemonic())
         if (!mnemonic) {
-          logWithTimestamp(F, 'No noWAB mnemonic found')
+          walletBuildingRef.current = false
+          setWalletBuilding(false)
           return
         }
 
         const { rootKey, primaryKey } = recoverMnemonicWallet(mnemonic)
-        logWithTimestamp(F, 'NoWAB primary key found, building wallet')
 
         // For noWAB, we don't need a PrivilegedKeyManager from WAB
         // We can create a simple one that always returns the primary key
         const privilegedKeyManager = new PrivilegedKeyManager(async () => rootKey)
 
-        logWithTimestamp(F, 'privilegedKeyManager built successfully')
-
         // Create SimpleWalletManager and provide keys for authentication
         const snap = await getSnap()
 
-        logWithTimestamp(F, 'snap built successfully')
         const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
-
-        logWithTimestamp(F, 'SimpleWalletManager built successfully')
 
         // Provide the primary key and privileged key manager to authenticate the wallet
         await swm.providePrimaryKey(primaryKey)
 
-        logWithTimestamp(F, 'primaryKey provided successfully')
-
         await swm.providePrivilegedKeyManager(privilegedKeyManager)
-
-        logWithTimestamp(F, 'privilegedKeyManager provided successfully')
 
         setManagers(m => ({
           ...m,
           walletManager: swm
         }))
         setWalletBuilt(true)
-        setWeb2Mode(false)
+        walletBuildingRef.current = false
+        setWalletBuilding(false)
 
-        logWithTimestamp(F, 'walletManager built successfully')
-
-        // Save mnemonic for next time
         await setMnemonic(mnemonic)
-
-        logWithTimestamp(F, 'NoWAB wallet initialization completed')
+        logWithTimestamp(F, 'Mnemonic wallet build completed')
       } catch (error: any) {
-        console.error('[WalletContext] Error initializing noWAB wallet:', error)
-        logWithTimestamp(F, 'Error initializing noWAB wallet', error.message)
+        walletBuildingRef.current = false
+        setWalletBuilding(false)
+        console.error('[WalletContext] Error building mnemonic wallet:', error)
       }
     },
     [walletBuilt, configStatus, getMnemonic, getSnap, setMnemonic, buildWallet]
@@ -1074,9 +931,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // Build wallet from a recovered PrivateKey (WIF) obtained via backup share scanning
   const buildWalletFromRecoveredKey = useCallback(
     async (wif: string) => {
-      if (walletBuilt) return
+      if (walletBuilt || walletBuildingRef.current) return
       if (configStatus !== 'configured') return
 
+      walletBuildingRef.current = true
+      setWalletBuilding(true)
       logWithTimestamp(F, 'Building wallet from recovered key')
 
       try {
@@ -1086,31 +945,27 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         // Use the recovered primary key as both the signing key and the privileged key
         const privilegedKeyManager = new PrivilegedKeyManager(async () => recoveredKey)
 
-        logWithTimestamp(F, 'privilegedKeyManager built from recovered key')
-
         const snap = await getSnap()
         const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
 
         await swm.providePrimaryKey(primaryKey)
-        logWithTimestamp(F, 'recovered primaryKey provided successfully')
 
         await swm.providePrivilegedKeyManager(privilegedKeyManager)
-        logWithTimestamp(F, 'recovered privilegedKeyManager provided successfully')
 
         setManagers(m => ({
           ...m,
           walletManager: swm
         }))
         setWalletBuilt(true)
-        setWeb2Mode(false)
+        walletBuildingRef.current = false
+        setWalletBuilding(false)
 
-        // Persist the recovered key for future auto-build
         await setRecoveredKey(wif)
-
-        logWithTimestamp(F, 'Recovered key wallet initialization completed')
+        logWithTimestamp(F, 'Recovered key wallet build completed')
       } catch (error: any) {
-        console.error('[WalletContext] Error initializing wallet from recovered key:', error)
-        logWithTimestamp(F, 'Error initializing wallet from recovered key', error.message)
+        walletBuildingRef.current = false
+        setWalletBuilding(false)
+        console.error('[WalletContext] Error building wallet from recovered key:', error)
       }
     },
     [walletBuilt, configStatus, getSnap, setRecoveredKey, buildWallet]
@@ -1123,10 +978,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
     // Stop any running monitor
     try {
-      const monitor = (window as any).walletMonitor as Monitor | undefined
+      const monitor = monitorRef.current
       if (monitor) {
         await monitor.stopTasks()
-        ;(window as any).walletMonitor = undefined
+        monitorRef.current = null
       }
     } catch (e) {
       console.warn('[WalletContext] Failed to stop monitor during rebuild:', e)
@@ -1143,26 +998,28 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     // Tear down current wallet state (but keep mnemonic / config)
     setManagers({})
     setWalletBuilt(false)
+    walletBuildingRef.current = false
+    setWalletBuilding(false)
     setSnapshotLoaded(false)
 
     // Re-finalize with current config — triggers auto-build effect
     const config = { wabUrl: 'noWAB', method: 'mnemonic', network: selectedNetwork, storageUrl: 'local' }
     finalizeConfig(config)
     logWithTimestamp(F, 'Wallet rebuild triggered')
-  }, [selectedNetwork, storage])
+  }, [selectedNetwork, storage, finalizeConfig])
 
   // Switch network: tear down wallet, update config, and rebuild on new chain
   const switchNetwork = useCallback(
-    async (network: 'main' | 'test') => {
+    async (network: AppChain) => {
       if (network === selectedNetwork) return
       logWithTimestamp(F, `Switching network from ${selectedNetwork} to ${network}`)
 
       // Stop any running monitor
       try {
-        const monitor = (window as any).walletMonitor as Monitor | undefined
+        const monitor = monitorRef.current
         if (monitor) {
           await monitor.stopTasks()
-          ;(window as any).walletMonitor = undefined
+          monitorRef.current = null
         }
       } catch (e) {
         console.warn('[WalletContext] Failed to stop monitor during network switch:', e)
@@ -1178,6 +1035,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       // Tear down current wallet state (but keep mnemonic)
       setManagers({})
       setWalletBuilt(false)
+      walletBuildingRef.current = false
+      setWalletBuilding(false)
       setSnapshotLoaded(false)
 
       // Persist new config
@@ -1188,12 +1047,17 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       finalizeConfig(newConfig)
       logWithTimestamp(F, `Network switched to ${network}`)
     },
-    [selectedNetwork, setItem, storage]
+    [selectedNetwork, setItem, storage, finalizeConfig]
   )
 
-  // Auto-build wallet for returning users (mnemonic first, then recovered key)
+  // Auto-build wallet for returning users (mnemonic first, then recovered key).
+  // Sets walletBuilding=true eagerly so other parts of the app (BrowserModeContext,
+  // index.tsx navigation) know not to react as if no wallet exists.
   useEffect(() => {
     if (configStatus !== 'configured' || walletBuilt) return
+    // Signal that a build attempt is starting. buildWalletFromMnemonic /
+    // buildWalletFromRecoveredKey will clear this flag on completion or error.
+    setWalletBuilding(true)
     ;(async () => {
       // Try mnemonic-based build first (calls getMnemonic internally)
       await buildWalletFromMnemonic()
@@ -1201,31 +1065,21 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       // We check walletBuilt via a ref-like approach: buildWalletFromMnemonic
       // sets walletBuilt=true synchronously in its body, but the state update
       // won't be visible in this closure. Instead, we read from SecureStore.
-      const recoveredWif = await getRecoveredKey()
-      if (recoveredWif) {
-        await buildWalletFromRecoveredKey(recoveredWif)
+      if (!walletBuildingRef.current) {
+        // buildWalletFromMnemonic finished without building (no mnemonic found).
+        // Try recovered key as a fallback.
+        const recoveredWif = await getRecoveredKey()
+        if (recoveredWif) {
+          await buildWalletFromRecoveredKey(recoveredWif)
+        } else {
+          // No mnemonic and no recovered key — genuinely no wallet to build
+          setWalletBuilding(false)
+        }
       }
     })()
   }, [configStatus, walletBuilt, buildWalletFromMnemonic, buildWalletFromRecoveredKey, getRecoveredKey])
 
-  // When Settings manager becomes available, populate the user's settings
-  useEffect(() => {
-    logWithTimestamp(F, 'Checking settings manager availability')
-    const loadSettings = async () => {
-      if (managers.settingsManager) {
-        try {
-          const userSettings = await managers.settingsManager.get()
-          setSettings(userSettings)
-          logWithTimestamp(F, 'Settings loaded successfully')
-        } catch {
-          logWithTimestamp(F, 'Failed to load settings')
-          // Unable to load settings, defaults are already loaded.
-        }
-      }
-    }
-
-    loadSettings()
-  }, [managers])
+  // Settings are AsyncStorage-only — no on-chain sync needed
 
   // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
@@ -1234,7 +1088,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       const isNowForeground = nextAppState === 'active'
 
       if (wasBackground && isNowForeground) {
-        const monitor = (window as any).walletMonitor as Monitor | undefined
+        const monitor = monitorRef.current
         if (monitor) {
           monitor.fetchSSEEvents().then(count => {
             if (count > 0) setTxStatusVersion(v => v + 1)
@@ -1248,123 +1102,256 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     return () => subscription.remove()
   }, [])
 
-  const logout = useCallback(() => {
-    // Clear localStorage to prevent auto-login
-    logWithTimestamp(F, 'Initiating logout process')
-    deleteSnap().then(async () => {
-      // Reset manager state
-      setManagers({})
-      logWithTimestamp(F, 'Managers reset')
+  // Cleanup monitor on unmount
+  useEffect(() => {
+    return () => {
+      try { monitorRef.current?.stopTasks() } catch {}
+      monitorRef.current = null
+    }
+  }, [])
 
-      // Reset configuration state
-      // Set to 'initial' - wallet building requires 'configured' status
+  const logout = useCallback(() => {
+    logWithTimestamp(F, 'Logout')
+    deleteSnap().then(async () => {
+      setManagers({})
       setConfigStatus('initial')
       setSnapshotLoaded(false)
       setWalletBuilt(false)
+      walletBuildingRef.current = false
+      setWalletBuilding(false)
       deleteMnemonic()
       deleteRecoveredKey()
-      logWithTimestamp(F, 'Configuration and state reset')
-
-      // Clear recent apps (web3-specific data)
-      setRecentApps([])
-
-      // Set to web2 mode after logout so user can browse normally
-      // When they try to use web3 features, they'll be prompted to configure
-      await setWeb2Mode(true)
-
-      // Clear web3-related data from localStorage to ensure clean state
-      try {
-        await setItem('recentApps', JSON.stringify([])) // Clear recent web3 apps
-      } catch (error) {
-        console.warn('Failed to clear recent apps from localStorage:', error)
-      }
 
       router.dismissAll()
       router.push('/')
-      logWithTimestamp(F, 'Logout completed, navigating to home')
     })
-  }, [deleteSnap, setItem, deleteMnemonic, setWeb2Mode])
+  }, [deleteSnap, deleteMnemonic, deleteRecoveredKey])
 
-  const resolveAppDataFromDomain = async ({ appDomains }: { appDomains: string[] }) => {
-    const dataPromises = appDomains.map(async (domain, index) => {
-      let appIconImageUrl
-      let appName = domain
-      try {
-        const url = domain.startsWith('http') ? domain : `https://${domain}/favicon.ico`
-        logWithTimestamp(F, `Checking image URL for ${domain}`)
-        if (await isImageUrl(url)) {
-          appIconImageUrl = url
+  const refreshProof = useCallback(async (txid: string): Promise<void> => {
+    if (!storage) throw new Error('Storage not available')
+
+    const wocBase = selectedNetwork === 'teratest'
+      ? 'https://woc-ttn.bsvb.tech'
+      : 'https://api.whatsonchain.com'
+    const chain = selectedNetwork === 'main' ? 'main' : 'test'
+
+    const res = await fetch(`${wocBase}/v1/bsv/${chain}/tx/${txid}/proof/bump`)
+    if (!res.ok) throw new Error(`BUMP not available (HTTP ${res.status}) — transaction may not be mined yet`)
+
+    const bumpHex = (await res.text()).trim()
+    const merklePath = MerklePath.fromHex(bumpHex)
+    const merkleRoot = merklePath.computeRoot(txid)
+    const leaf = merklePath.path[0].find(l => l.txid === true && l.hash === txid)
+    if (!leaf) throw new Error('txid not found in BUMP path')
+
+    const reqs = await storage.findProvenTxReqs({ partial: { txid } })
+    if (!reqs.length) throw new Error('No pending record found for this transaction')
+
+    const req = reqs[0]
+    await storage.updateProvenTxReqWithNewProvenTx({
+      provenTxReqId: req.provenTxReqId,
+      status: req.status,
+      txid,
+      attempts: req.attempts,
+      history: req.history,
+      index: leaf.offset,
+      height: merklePath.blockHeight,
+      blockHash: '',
+      merklePath: merklePath.toBinary(),
+      merkleRoot,
+    })
+
+    setTxStatusVersion(v => v + 1)
+  }, [storage, selectedNetwork])
+
+  const runMonitorTask = useCallback(async (taskName: string): Promise<string> => {
+    const monitor = monitorRef.current
+    if (!monitor) return 'Monitor not running'
+    try {
+      return await monitor.runTask(taskName)
+    } catch (e: any) {
+      return `Error: ${e.message || 'unknown'}`
+    }
+  }, [])
+
+  const DIAGNOSTIC_TASKS = new Set([
+    'SendWaiting', 'CheckForProofs', 'CheckNoSends',
+    'ReviewStatus', 'MonitorCallHistory', 'ArcadeSSE', 'UnFail'
+  ])
+
+  const getMonitorTaskNames = useCallback((): string[] => {
+    const monitor = monitorRef.current
+    if (!monitor) return []
+    return [...monitor._tasks, ...monitor._otherTasks]
+      .map(t => t.name)
+      .filter(n => DIAGNOSTIC_TASKS.has(n))
+  }, [])
+
+  const checkUtxoSpendability = useCallback(async (): Promise<string> => {
+    if (!storage) return 'Storage not available'
+    const wallet = managers?.permissionsManager
+    if (!wallet) return 'Wallet not ready'
+    const wocBase =
+      selectedNetwork === 'main'
+        ? 'https://api.whatsonchain.com/v1/bsv/main'
+        : selectedNetwork === 'test'
+          ? 'https://api.whatsonchain.com/v1/bsv/test'
+          : 'https://api.whatsonchain.com/v1/bsv/main'
+
+    // Rate limit: max 3 requests/sec (WoC limit ~1 per 0.34s)
+    const WOC_INTERVAL = 340
+    let lastRequest = 0
+    const throttledFetch = async (url: string, init?: RequestInit): Promise<Response> => {
+      const now = Date.now()
+      const wait = WOC_INTERVAL - (now - lastRequest)
+      if (wait > 0) await new Promise(r => setTimeout(r, wait))
+      lastRequest = Date.now()
+      return fetch(url, init)
+    }
+
+    try {
+      const outputs = await storage.findOutputs({
+        partial: { spendable: true as any },
+        noScript: true,
+        txStatus: ['completed', 'unproven', 'nosend'] as any
+      })
+      if (outputs.length === 0) return 'No spendable outputs found.'
+
+      const lines: string[] = [`Found ${outputs.length} spendable output(s). Checking WoC...\n`]
+      let spentCount = 0
+      let unspentCount = 0
+      let errorCount = 0
+      let internalizedCount = 0
+
+      for (const o of outputs) {
+        if (!o.txid) {
+          lines.push(`  outputId=${o.outputId} — no txid, skipped`)
+          continue
         }
-        // Try to parse the app manifest to find the app info
-        logWithTimestamp(F, `Fetching manifest for ${domain}`)
-        const manifest = await parseAppManifest({ domain })
-        if (manifest && typeof manifest.name === 'string') {
-          appName = manifest.name
+        try {
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 10_000)
+          let resp: Response
+          try {
+            resp = await throttledFetch(`${wocBase}/tx/${o.txid}/${o.vout}/spent`, {
+              signal: controller.signal
+            })
+          } finally {
+            clearTimeout(timeout)
+          }
+          if (resp.status === 404) {
+            unspentCount++
+            continue
+          }
+          if (!resp.ok) {
+            errorCount++
+            lines.push(`  ERROR: ${o.txid}:${o.vout} — HTTP ${resp.status}`)
+            continue
+          }
+
+          const spentData = await resp.json()
+          const spendingTxid = spentData.txid
+          spentCount++
+          lines.push(`  SPENT: ${o.txid}:${o.vout} (${o.satoshis} sat) → by ${spendingTxid}`)
+
+          // Try to fetch BEEF for spending tx and internalize change outputs
+          try {
+            const beefResp = await throttledFetch(`${wocBase}/tx/${spendingTxid}/beef`)
+            if (!beefResp.ok) {
+              lines.push(`    ↳ BEEF fetch failed (HTTP ${beefResp.status}), marking unspendable`)
+              await storage.updateOutput(o.outputId, { spendable: false as any })
+              continue
+            }
+            const beefHex = await beefResp.text()
+            const beefBytes = Utils.toArray(beefHex, 'hex')
+            const tx = Transaction.fromBEEF(beefBytes)
+            const atomicBeef = tx.toAtomicBEEF()
+
+            // Find change outputs we created for this spending tx
+            const changeOutputs = await storage.findOutputs({
+              partial: { change: true as any, spendable: false as any },
+              noScript: true
+            })
+            // Match by looking up which of our change outputs belong to the spending tx
+            // via the transactions table (our tx with this on-chain txid)
+            const txRows = await storage.findTransactions({ partial: { txid: spendingTxid } })
+            const matchingTxId = txRows.length > 0 ? txRows[0].transactionId : undefined
+
+            const outputsToInternalize: any[] = []
+            if (matchingTxId) {
+              const txChangeOutputs = changeOutputs.filter(co => co.transactionId === matchingTxId)
+              for (const co of txChangeOutputs) {
+                if (co.derivationPrefix && co.derivationSuffix) {
+                  outputsToInternalize.push({
+                    outputIndex: co.vout,
+                    protocol: 'wallet payment',
+                    paymentRemittance: {
+                      derivationPrefix: co.derivationPrefix,
+                      derivationSuffix: co.derivationSuffix,
+                      senderIdentityKey: co.senderIdentityKey || (await wallet.getPublicKey({ identityKey: true }, adminOriginator)).publicKey
+                    }
+                  })
+                }
+              }
+            }
+
+            if (outputsToInternalize.length > 0) {
+              await wallet.internalizeAction({
+                tx: atomicBeef,
+                outputs: outputsToInternalize,
+                description: 'Recovered from stale UTXO check'
+              }, adminOriginator)
+              internalizedCount++
+              lines.push(`    ↳ INTERNALIZED: ${outputsToInternalize.length} change output(s) recovered`)
+            } else {
+              // No change outputs to recover, just mark input as unspendable
+              await storage.updateOutput(o.outputId, { spendable: false as any })
+              lines.push(`    ↳ No recoverable change outputs, marked unspendable`)
+            }
+          } catch (e: any) {
+            lines.push(`    ↳ Internalize failed: ${e.message}, marking unspendable`)
+            await storage.updateOutput(o.outputId, { spendable: false as any })
+          }
+        } catch (e: any) {
+          errorCount++
+          lines.push(`  ERROR: ${o.txid}:${o.vout} — ${e.message}`)
         }
-      } catch (e) {
-        console.error(e)
-        logWithTimestamp(F, `Error resolving app data for ${domain}`, (e as Error).message)
       }
 
-      return { appName, appIconImageUrl, domain }
-    })
-    return Promise.all(dataPromises)
-  }
-
-  useEffect(() => {
-    if (typeof managers?.permissionsManager === 'object') {
-      logWithTimestamp(F, 'Checking permissions manager for stored apps')
-      ;(async () => {
-        logWithTimestamp(F, 'Fetching stored apps from AsyncStorage')
-        const storedApps = await getItem('recentApps')
-        console.log('Retrieved from storage', storedApps)
-        logWithTimestamp(F, `Retrieved from storage: ${storedApps}`)
-        if (storedApps) {
-          setRecentApps(JSON.parse(storedApps))
-          logWithTimestamp(F, 'Recent apps set from storage')
-        }
-        // Parse out the app data from the domains
-        logWithTimestamp(F, 'Fetching app domains')
-        const appDomains: string[] = [] //await getApps({ permissionsManager: managers.permissionsManager!, adminOriginator })
-        logWithTimestamp(F, 'App domains fetched, resolving data')
-        const parsedAppData = await resolveAppDataFromDomain({ appDomains })
-        logWithTimestamp(F, 'App data resolved, sorting')
-        parsedAppData.sort((a, b) => a.appName.localeCompare(b.appName))
-        setRecentApps(parsedAppData)
-
-        // store for next app load
-        logWithTimestamp(F, 'Storing apps in AsyncStorage')
-        await setItem('recentApps', JSON.stringify(parsedAppData))
-        logWithTimestamp(F, 'Stored apps processing complete')
-      })()
+      lines.push(`\nSummary: ${unspentCount} unspent, ${spentCount} spent, ${internalizedCount} internalized, ${errorCount} errors`)
+      if (internalizedCount > 0) {
+        lines.push(`✓ ${internalizedCount} spending tx(s) internalized with change outputs`)
+      }
+      if (spentCount > internalizedCount) {
+        lines.push(`⚠ ${spentCount - internalizedCount} stale output(s) marked unspendable (no change to recover)`)
+      }
+      return lines.join('\n')
+    } catch (e: any) {
+      return `Error querying outputs: ${e.message}`
     }
-    logWithTimestamp(F, 'Permissions manager check complete')
-  }, [adminOriginator, managers?.permissionsManager, getItem, setItem])
+  }, [storage, selectedNetwork, managers, adminOriginator])
 
   const contextValue = useMemo<WalletContextValue>(
     () => ({
       managers,
-      updateManagers: setManagers,
       settings,
       updateSettings,
       logout,
       adminOriginator,
       snapshotLoaded,
-      basketRequests,
-      certificateRequests,
-      protocolRequests,
-      spendingRequests,
-      btmsRequests,
-      advanceBasketQueue,
-      advanceCertificateQueue,
-      advanceProtocolQueue,
-      advanceSpendingQueue,
+      basketRequests: basketQueue.requests,
+      certificateRequests: certificateQueue.requests,
+      protocolRequests: protocolQueue.requests,
+      spendingRequests: spendingQueue.requests,
+      btmsRequests: btmsQueue.requests,
+      advanceBasketQueue: basketQueue.advance,
+      advanceCertificateQueue: certificateQueue.advance,
+      advanceProtocolQueue: protocolQueue.advance,
+      advanceSpendingQueue: spendingQueue.advance,
       advanceBtmsQueue,
-      recentApps,
       finalizeConfig,
       setConfigStatus,
       configStatus,
-      selectedWabUrl,
       selectedStorageUrl,
       selectedMethod,
       selectedNetwork,
@@ -1374,7 +1361,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       switchNetwork,
       rebuildWallet,
       storage,
-      txStatusVersion
+      refreshProof,
+      txStatusVersion,
+      walletBuilding,
+      walletBuilt,
+      runMonitorTask,
+      getMonitorTaskNames,
+      checkUtxoSpendability
     }),
     [
       managers,
@@ -1383,21 +1376,19 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       logout,
       adminOriginator,
       snapshotLoaded,
-      basketRequests,
-      certificateRequests,
-      protocolRequests,
-      spendingRequests,
-      btmsRequests,
-      advanceBasketQueue,
-      advanceCertificateQueue,
-      advanceProtocolQueue,
-      advanceSpendingQueue,
+      basketQueue.requests,
+      certificateQueue.requests,
+      protocolQueue.requests,
+      spendingQueue.requests,
+      btmsQueue.requests,
+      basketQueue.advance,
+      certificateQueue.advance,
+      protocolQueue.advance,
+      spendingQueue.advance,
       advanceBtmsQueue,
-      recentApps,
       finalizeConfig,
       setConfigStatus,
       configStatus,
-      selectedWabUrl,
       selectedStorageUrl,
       selectedMethod,
       selectedNetwork,
@@ -1407,7 +1398,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       switchNetwork,
       rebuildWallet,
       storage,
-      txStatusVersion
+      refreshProof,
+      txStatusVersion,
+      walletBuilding,
+      walletBuilt,
+      runMonitorTask,
+      getMonitorTaskNames,
+      checkUtxoSpendability
     ]
   )
 
@@ -1415,3 +1412,103 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 }
 
 export const useWallet = () => useContext(WalletContext)
+
+/* -------------------------------------------------------------------------- */
+/*                          NARROW SELECTOR HOOKS                             */
+/* -------------------------------------------------------------------------- */
+//
+// `useWallet()` returns the full ~35-field context object — any consumer is
+// re-rendered every time *any* field changes (queue mutation, txStatusVersion
+// tick, settings update, SSE event, etc.). For components that only need a
+// slice (e.g. the chrome shell needs `walletBuilt` but doesn't care about
+// `txStatusVersion`), use one of the narrow selector hooks below.
+//
+// They share the same provider value, so they don't avoid the underlying
+// React context re-render — but they do clearly mark each consumer's
+// dependency surface, and provide a single seam for a future
+// `useSyncExternalStore`-based selector migration when the WalletContext
+// is finally split into independent providers.
+//
+// Returning a stable object via `useMemo` on the slice keys still means a
+// consumer that does `const { walletBuilt } = useWalletStatus()` re-renders
+// only when walletBuilt itself toggles — because the slice's identity tracks
+// just the queried fields. This is the maximum win achievable without
+// breaking the existing `useWallet()` API.
+
+export interface WalletStatusSlice {
+  walletBuilt: boolean
+  walletBuilding: boolean
+  snapshotLoaded: boolean
+  configStatus: ConfigStatus
+  selectedNetwork: AppChain
+}
+export const useWalletStatus = (): WalletStatusSlice => {
+  const ctx = useContext(WalletContext)
+  return useMemo<WalletStatusSlice>(
+    () => ({
+      walletBuilt: ctx.walletBuilt,
+      walletBuilding: ctx.walletBuilding,
+      snapshotLoaded: ctx.snapshotLoaded,
+      configStatus: ctx.configStatus,
+      selectedNetwork: ctx.selectedNetwork
+    }),
+    [ctx.walletBuilt, ctx.walletBuilding, ctx.snapshotLoaded, ctx.configStatus, ctx.selectedNetwork]
+  )
+}
+
+export interface WalletQueuesSlice {
+  basketRequests: BasketAccessRequest[]
+  certificateRequests: CertificateAccessRequest[]
+  protocolRequests: ProtocolAccessRequest[]
+  spendingRequests: SpendingRequest[]
+  btmsRequests: BtmsRequest[]
+  advanceBasketQueue: () => void
+  advanceCertificateQueue: () => void
+  advanceProtocolQueue: () => void
+  advanceSpendingQueue: () => void
+  advanceBtmsQueue: (approved: boolean) => void
+}
+export const useWalletQueues = (): WalletQueuesSlice => {
+  const ctx = useContext(WalletContext)
+  return useMemo<WalletQueuesSlice>(
+    () => ({
+      basketRequests: ctx.basketRequests,
+      certificateRequests: ctx.certificateRequests,
+      protocolRequests: ctx.protocolRequests,
+      spendingRequests: ctx.spendingRequests,
+      btmsRequests: ctx.btmsRequests,
+      advanceBasketQueue: ctx.advanceBasketQueue,
+      advanceCertificateQueue: ctx.advanceCertificateQueue,
+      advanceProtocolQueue: ctx.advanceProtocolQueue,
+      advanceSpendingQueue: ctx.advanceSpendingQueue,
+      advanceBtmsQueue: ctx.advanceBtmsQueue
+    }),
+    [
+      ctx.basketRequests,
+      ctx.certificateRequests,
+      ctx.protocolRequests,
+      ctx.spendingRequests,
+      ctx.btmsRequests,
+      ctx.advanceBasketQueue,
+      ctx.advanceCertificateQueue,
+      ctx.advanceProtocolQueue,
+      ctx.advanceSpendingQueue,
+      ctx.advanceBtmsQueue
+    ]
+  )
+}
+
+/** For consumers that only care about the SSE-driven transaction tick. */
+export const useTxStatusVersion = (): number => {
+  const ctx = useContext(WalletContext)
+  return ctx.txStatusVersion
+}
+
+/** Managers + storage — used by the WebView CWI message handler. */
+export const useWalletManagers = () => {
+  const ctx = useContext(WalletContext)
+  return useMemo(
+    () => ({ managers: ctx.managers, storage: ctx.storage, adminOriginator: ctx.adminOriginator }),
+    [ctx.managers, ctx.storage, ctx.adminOriginator]
+  )
+}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   View,
   Text,
@@ -8,14 +8,17 @@ import {
   ActivityIndicator,
   StyleSheet,
   Keyboard,
-  Image
+  Image,
+  Modal
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
+import { StatusBar } from 'expo-status-bar'
+import QRScanner from '@/components/QRScanner'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { toast } from 'react-toastify'
-import { PeerPayClient, IncomingPayment } from '@bsv/message-box-client'
+import { PeerPayClient, IncomingPayment, PaymentToken } from '@bsv/message-box-client'
 import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
 import type { DisplayableIdentity } from '@bsv/sdk'
 
@@ -23,10 +26,32 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { SatsAmountInput } from '@/components/wallet/SatsAmountInput'
+import { type PeerPayValidationResult, validatePeerPayURI } from '@/utils/parsePeerPayURI'
+import {
+  OutboxEntry,
+  getOutboxEntries,
+  saveOutboxEntry,
+  markOutboxSent,
+  updateOutboxEntry,
+  removeOutboxEntry
+} from '@/utils/peerpay/outbox'
+import { AmountInput } from '@/components/wallet/AmountInput'
+import AmountDisplay from '@/components/wallet/AmountDisplay'
+import { formatAmount } from '@/utils/amountFormatHelpers'
+import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 
 const MESSAGE_BOX_URL_KEY = 'message_box_url'
 const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
+
+const firstParam = (value: string | string[] | undefined) => {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function peerPayValidationMessage(result: PeerPayValidationResult | null) {
+  if (!result || !result.isPeerPay) return null
+  const messages = [result.errors.identityKey, result.errors.sats].filter(Boolean)
+  return messages.length ? messages.join('. ') : null
+}
 
 const unique = (results: DisplayableIdentity[]) => {
   return results.filter((identity, index) => {
@@ -88,7 +113,13 @@ async function searchIdentities(idClient: IdentityClient, text: string): Promise
   return unique(results)
 }
 
-function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
+function useIdentitySearch(
+  wallet: any,
+  adminOriginator: string | undefined,
+  initialIdentityKey?: string,
+  onPeerPayAmount?: (sats: number) => void,
+  onPeerPayError?: (message: string) => void
+) {
   const identityClientRef = useRef<IdentityClient | null>(null)
   useEffect(() => {
     if (!wallet) return
@@ -97,12 +128,26 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
     } catch {}
   }, [wallet, adminOriginator])
 
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState(initialIdentityKey ?? '')
   const [searchResults, setSearchResults] = useState<DisplayableIdentity[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [selectedIdentity, setSelectedIdentity] = useState<DisplayableIdentity | null>(null)
-  const [recipientKey, setRecipientKey] = useState('')
+  const [recipientKey, setRecipientKey] = useState(initialIdentityKey ?? '')
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const setDirectRecipient = useCallback((identityKey: string) => {
+    setSearchQuery(identityKey)
+    setRecipientKey(identityKey)
+    setSelectedIdentity(null)
+    setSearchResults([])
+  }, [])
+
+  useEffect(() => {
+    if (initialIdentityKey) setDirectRecipient(initialIdentityKey)
+  }, [initialIdentityKey, setDirectRecipient])
+
+  // ── QR scanner state ────────────────────────────────────────────────────────
+  const [scannerVisible, setScannerVisible] = useState(false)
 
   const handleSearchChange = useCallback(
     (text: string) => {
@@ -157,6 +202,43 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
     setSearchResults([])
   }, [])
 
+  // ── QR scanner handlers ─────────────────────────────────────────────────────
+  const handleQRScanned = useCallback(
+    (data: string) => {
+      const raw = data.trim()
+
+      // Try peerpay: URI first
+      if (raw.toLowerCase().startsWith('peerpay:')) {
+        const validation = validatePeerPayURI(raw)
+        const errorMessage = peerPayValidationMessage(validation)
+
+        if (validation.identityKey) setDirectRecipient(validation.identityKey)
+        if (validation.sats !== undefined) onPeerPayAmount?.(validation.sats)
+        if (errorMessage) onPeerPayError?.(errorMessage)
+
+        setScannerVisible(false)
+        return
+      }
+
+      // Fall back to raw public key
+      try {
+        PublicKey.fromString(raw)
+        setSearchQuery(raw)
+        setRecipientKey(raw)
+        setSelectedIdentity(null)
+        setSearchResults([])
+        setScannerVisible(false)
+      } catch {
+        // Not a valid compressed public key — QRScanner will auto-retry after delay
+      }
+    },
+    [onPeerPayAmount, onPeerPayError, setDirectRecipient]
+  )
+
+  const openScanner = useCallback(() => {
+    setScannerVisible(true)
+  }, [])
+
   return {
     identityClientRef,
     searchQuery,
@@ -166,15 +248,12 @@ function useIdentitySearch(wallet: any, adminOriginator: string | undefined) {
     recipientKey,
     handleSearchChange,
     handleSelectIdentity,
-    clearRecipient
+    clearRecipient,
+    scannerVisible,
+    setScannerVisible,
+    handleQRScanned,
+    openScanner
   }
-}
-
-async function sendPayment(client: PeerPayClient, recipientKey: string, sendAmount: string): Promise<{ sats: number }> {
-  const sats = Math.round(Number(sendAmount))
-  if (Number.isNaN(sats) || sats <= 0) throw new RangeError('invalid_amount')
-  await client.sendPayment({ recipient: recipientKey, amount: sats })
-  return { sats }
 }
 
 async function acceptWithRetry(
@@ -288,6 +367,102 @@ function ResultBanner({ result, onDismiss, colors }: ResultBannerProps) {
   )
 }
 
+// ── Outgoing Section ─────────────────────────────────────────────────────────
+
+interface OutgoingSectionProps {
+  readonly entries: OutboxEntry[]
+  readonly loadingOutbox: boolean
+  readonly retryingId: string | null
+  readonly colors: ReturnType<typeof import('@/context/theme/ThemeContext').useTheme>['colors']
+  readonly t: ReturnType<typeof import('react-i18next').useTranslation>['t']
+  readonly onRetry: (entry: OutboxEntry) => void
+  readonly onDismiss: (id: string) => void
+}
+
+function OutgoingSection({ entries, loadingOutbox, retryingId, colors, t, onRetry, onDismiss }: OutgoingSectionProps) {
+  if (loadingOutbox && entries.length === 0) {
+    return <ActivityIndicator size="small" color={colors.accent} style={{ marginVertical: spacing.md }} />
+  }
+  if (entries.length === 0) return null
+
+  return (
+    <>
+      <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
+        {t('outgoing_payments')}
+      </Text>
+      <View style={[styles.outgoingCard, { backgroundColor: colors.background, borderColor: colors.separator }]}>
+        {entries.map((entry, idx) => {
+          const isSent = entry.status === 'sent'
+          const isRetrying = retryingId === entry.id
+          const isLast = idx === entries.length - 1
+          const accentColor = isSent ? colors.success : colors.warning
+          const truncated = `${entry.recipient.slice(0, 8)}…${entry.recipient.slice(-4)}`
+          return (
+            <View
+              key={entry.id}
+              style={[
+                styles.outgoingRow,
+                { borderLeftColor: accentColor },
+                !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
+              ]}
+            >
+              {/* Top row: recipient key + amount */}
+              <View style={styles.outgoingInfo}>
+                <View style={styles.outgoingTopRow}>
+                  <Text style={[styles.outgoingRecipient, { color: colors.textPrimary }]} numberOfLines={1}>
+                    {truncated}
+                  </Text>
+                  <Text style={[styles.outgoingAmount, { color: accentColor }]}>
+                    <AmountDisplay>{entry.token.amount}</AmountDisplay>
+                  </Text>
+                </View>
+
+                {/* Status / error text */}
+                <Text
+                  style={[styles.outgoingStatusText, { color: isSent ? colors.success : colors.textSecondary }]}
+                  numberOfLines={2}
+                >
+                  {isSent ? t('payment_delivered') : (entry.lastError ?? t('payment_not_delivered'))}
+                </Text>
+
+                {/* Action buttons — full-width row, easy tap targets */}
+                <View style={[styles.outgoingButtons, { borderTopColor: colors.separator }]}>
+                  <TouchableOpacity
+                    onPress={() => onDismiss(entry.id)}
+                    disabled={isRetrying}
+                    style={[
+                      styles.outgoingDismissButton,
+                      isSent && { flex: 1 },
+                      !isSent && { borderRightColor: colors.separator }
+                    ]}
+                  >
+                    <Text style={[styles.outgoingDismissText, { color: colors.textSecondary }]}>{t('dismiss')}</Text>
+                  </TouchableOpacity>
+                  {!isSent && (
+                    <TouchableOpacity
+                      onPress={() => onRetry(entry)}
+                      disabled={isRetrying}
+                      style={styles.outgoingRetryButton}
+                    >
+                      {isRetrying ? (
+                        <ActivityIndicator size="small" color={colors.accent} />
+                      ) : (
+                        <Text style={[styles.outgoingRetryText, { color: colors.accent }]}>{t('retry')}</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </View>
+          )
+        })}
+      </View>
+    </>
+  )
+}
+
+// ── Incoming Section ─────────────────────────────────────────────────────────
+
 interface IncomingPaymentsSectionProps {
   readonly isConfigured: boolean
   readonly loadingPayments: boolean
@@ -356,6 +531,7 @@ function IncomingPaymentsSection({
           </TouchableOpacity>
         </View>
       </View>
+
       {loadingPayments && payments.length === 0 && (
         <View style={styles.centeredSmall}>
           <ActivityIndicator size="small" color={colors.accent} />
@@ -404,7 +580,6 @@ interface ConfigPanelProps {
   readonly t: ReturnType<typeof import('react-i18next').useTranslation>['t']
   readonly onChangeUrl: (v: string) => void
   readonly onSave: () => void
-  readonly onCancel: () => void
   readonly onReset: () => void
   readonly onNone: () => void
 }
@@ -416,12 +591,11 @@ function ConfigPanel({
   t,
   onChangeUrl,
   onSave,
-  onCancel,
   onReset,
   onNone
 }: ConfigPanelProps) {
   const hasUrl = !!urlInput.trim()
-  const isNone = urlInput === 'noMessageBox'
+  const isNonDefault = urlInput.trim() !== DEFAULT_MESSAGE_BOX_URL && urlInput !== 'noMessageBox'
   return (
     <View style={[styles.configPanel, { backgroundColor: colors.backgroundSecondary }]}>
       <Text style={[styles.configTitle, { color: colors.textPrimary }]}>{t('message_box_server')}</Text>
@@ -441,44 +615,43 @@ function ConfigPanel({
           { color: colors.textPrimary, backgroundColor: colors.background, borderColor: colors.separator }
         ]}
       />
-      <View style={styles.configActions}>
-        <TouchableOpacity
-          onPress={onSave}
-          disabled={isSaving || !hasUrl}
-          style={[
-            styles.configButton,
-            { backgroundColor: hasUrl ? colors.accent : colors.backgroundSecondary, opacity: hasUrl ? 1 : 0.5 }
-          ]}
-        >
-          {isSaving ? (
-            <ActivityIndicator size="small" color={hasUrl ? colors.background : colors.textSecondary} />
-          ) : (
-            <Text style={[styles.configButtonText, { color: hasUrl ? colors.background : colors.textSecondary }]}>
-              {t('save')}
-            </Text>
-          )}
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onCancel}
-          style={[styles.configButton, { borderColor: colors.separator, borderWidth: StyleSheet.hairlineWidth }]}
-        >
-          <Text style={[styles.configButtonText, { color: colors.textSecondary }]}>{t('cancel')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onReset}
-          style={[styles.configButton, { borderColor: colors.success + '40', borderWidth: StyleSheet.hairlineWidth }]}
-        >
-          <Text style={[styles.configButtonText, { color: colors.success }]}>Reset</Text>
-        </TouchableOpacity>
+
+      {/* Primary action: Save */}
+      <TouchableOpacity
+        onPress={onSave}
+        disabled={isSaving || !hasUrl}
+        style={[
+          styles.configButtonPrimary,
+          { backgroundColor: hasUrl ? colors.accent : colors.backgroundSecondary, opacity: hasUrl ? 1 : 0.5 }
+        ]}
+      >
+        {isSaving ? (
+          <ActivityIndicator size="small" color={hasUrl ? colors.background : colors.textSecondary} />
+        ) : (
+          <Text style={[styles.configButtonTextPrimary, { color: hasUrl ? colors.background : colors.textSecondary }]}>
+            {t('save')}
+          </Text>
+        )}
+      </TouchableOpacity>
+
+      {/* Secondary / destructive row */}
+      <View style={styles.configSecondaryActions}>
+        {isNonDefault && (
+          <TouchableOpacity
+            onPress={onReset}
+            style={[styles.configResetPill, { borderColor: colors.textSecondary }]}
+          >
+            <Ionicons name="refresh" size={12} color={colors.textSecondary} />
+            <Text style={[styles.configResetText, { color: colors.textSecondary }]}>Default</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           onPress={onNone}
           disabled={isSaving}
-          style={[
-            styles.configButton,
-            { borderColor: colors.error + '40', borderWidth: StyleSheet.hairlineWidth, opacity: isSaving ? 0.5 : 1 }
-          ]}
+          style={[styles.configNoneLink, { opacity: isSaving ? 0.4 : 1 }]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Text style={[styles.configButtonText, { color: colors.error }]}>None</Text>
+          <Text style={[styles.configNoneText, { color: colors.error }]}>Use no server</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -496,6 +669,7 @@ interface RecipientFieldProps {
   readonly onSearchChange: (v: string) => void
   readonly onSelectIdentity: (i: DisplayableIdentity) => void
   readonly onClear: () => void
+  readonly onOpenScanner: () => void
 }
 
 function RecipientField({
@@ -508,7 +682,8 @@ function RecipientField({
   t,
   onSearchChange,
   onSelectIdentity,
-  onClear
+  onClear,
+  onOpenScanner
 }: RecipientFieldProps) {
   if (selectedIdentity) {
     return (
@@ -537,23 +712,29 @@ function RecipientField({
   const showDropdown = (isSearching || searchResults.length > 0) && !recipientKey
   return (
     <>
-      <TextInput
-        value={searchQuery}
-        onChangeText={onSearchChange}
-        placeholder={t('search_name_or_key')}
-        placeholderTextColor={colors.textTertiary}
-        autoCapitalize="none"
-        autoCorrect={false}
+      <View
         style={[
-          styles.textInput,
+          styles.inputRow,
           {
-            color: colors.textPrimary,
             backgroundColor: colors.backgroundSecondary,
             borderColor: recipientKey ? colors.success : colors.separator,
             borderWidth: recipientKey ? 1 : StyleSheet.hairlineWidth
           }
         ]}
-      />
+      >
+        <TextInput
+          value={searchQuery}
+          onChangeText={onSearchChange}
+          placeholder={t('search_name_or_key')}
+          placeholderTextColor={colors.textTertiary}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[styles.recipientInput, { color: colors.textPrimary }]}
+        />
+        <TouchableOpacity onPress={onOpenScanner} style={styles.inputAction} accessibilityLabel="Scan QR code">
+          <Ionicons name="qr-code-outline" size={20} color={colors.accent} />
+        </TouchableOpacity>
+      </View>
       {!!recipientKey && (
         <View style={styles.directKeyRow}>
           <Ionicons name="key-outline" size={14} color={colors.success} />
@@ -699,7 +880,7 @@ function PaymentRow({
       {/* Right: amount + accept */}
       <View style={styles.paymentActions}>
         <Text style={[styles.paymentAmount, { color: colors.success }]}>
-          {payment.token.amount.toLocaleString()} sats
+          <AmountDisplay>{payment.token.amount}</AmountDisplay>
         </Text>
         <TouchableOpacity
           onPress={onAccept}
@@ -721,8 +902,38 @@ export default function PaymentsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator } = useWallet()
+  const { managers, adminOriginator, settings, storage, walletBuilding, walletBuilt } = useWallet()
   const wallet = managers?.permissionsManager || null
+  const { satoshisPerUSD } = React.useContext(ExchangeRateContext)
+  const currency = settings?.currency || 'BSV'
+
+  const params = useLocalSearchParams<{
+    identityKey?: string | string[]
+    sats?: string | string[]
+    peerpay?: string | string[]
+  }>()
+  const paramPeerPay = firstParam(params.peerpay)
+  const peerPayValidation = useMemo(
+    () => (paramPeerPay ? validatePeerPayURI(paramPeerPay) : null),
+    [paramPeerPay]
+  )
+  const peerPayErrorMessage = peerPayValidationMessage(peerPayValidation)
+  const routeIdentityKey = peerPayValidation?.identityKey ?? firstParam(params.identityKey)
+  const routeSats = peerPayValidation?.sats !== undefined ? String(peerPayValidation.sats) : firstParam(params.sats)
+
+  // If wallet build finishes (auth prompt resolved) and wallet is still null, auth failed — go back
+  const prevWalletBuilding = useRef(walletBuilding)
+  useEffect(() => {
+    const wasBuilding = prevWalletBuilding.current
+    prevWalletBuilding.current = walletBuilding
+    if (wasBuilding && !walletBuilding && !walletBuilt) {
+      if (router.canGoBack()) {
+        router.back()
+      } else {
+        router.replace('/')
+      }
+    }
+  }, [walletBuilding, walletBuilt])
 
   const {
     messageBoxUrl,
@@ -737,6 +948,12 @@ export default function PaymentsScreen() {
   } = useMessageBoxConfig(t)
   const isConfigured = !!messageBoxUrl
 
+  const [sendAmount, setSendAmount] = useState(() => {
+    const n = routeSats ? parseInt(routeSats, 10) : NaN
+    return !isNaN(n) && n > 0 ? String(n) : ''
+  })
+  const [peerPayNotice, setPeerPayNotice] = useState<{ type: 'error'; message: string } | null>(null)
+
   const {
     identityClientRef,
     searchQuery,
@@ -746,11 +963,51 @@ export default function PaymentsScreen() {
     recipientKey,
     handleSearchChange,
     handleSelectIdentity,
-    clearRecipient
-  } = useIdentitySearch(wallet as any, adminOriginator)
+    clearRecipient,
+    scannerVisible,
+    setScannerVisible,
+    handleQRScanned,
+    openScanner
+  } = useIdentitySearch(
+    wallet as any,
+    adminOriginator,
+    routeIdentityKey,
+    (sats) => setSendAmount(String(sats)),
+    (message) => setPeerPayNotice({ type: 'error', message })
+  )
+
+  useEffect(() => {
+    if (!paramPeerPay) return
+
+    if (peerPayValidation?.sats !== undefined) setSendAmount(String(peerPayValidation.sats))
+    else if (peerPayValidation?.errors.sats) setSendAmount('')
+
+    if (peerPayErrorMessage) {
+      if (!peerPayValidation?.identityKey) clearRecipient()
+      setPeerPayNotice({ type: 'error', message: peerPayErrorMessage })
+    } else {
+      setPeerPayNotice(null)
+    }
+  }, [paramPeerPay, peerPayErrorMessage, peerPayValidation, clearRecipient])
 
   // --- PeerPay state ---
-  const peerPayClientRef = useRef<PeerPayClient | null>(null)
+  const peerPayClient = useMemo<PeerPayClient | null>(() => {
+    if (!isConfigured || !messageBoxUrl || !wallet) return null
+    try {
+      return new PeerPayClient({
+        messageBoxHost: messageBoxUrl,
+        walletClient: wallet as any,
+        originator: adminOriginator
+      })
+    } catch {
+      return null
+    }
+    // Intentionally no eager init here. The library calls init() lazily on first
+    // use (assertInitialized). Anointing requires a funded wallet — calling init()
+    // on mount would silently fail with no balance, permanently set initialized=true,
+    // and prevent anointing from ever being retried. The 30s ARC timeout on the
+    // broadcast service ensures a stalled anoint won't hang the payment indefinitely.
+  }, [isConfigured, messageBoxUrl, wallet, adminOriginator])
   const [payments, setPayments] = useState<IncomingPayment[]>([])
   const [loadingPayments, setLoadingPayments] = useState(false)
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
@@ -762,28 +1019,15 @@ export default function PaymentsScreen() {
     setPaymentNotes(prev => ({ ...prev, [id]: text }))
   }, [])
 
+  // --- Outbox state ---
+  const [outboxEntries, setOutboxEntries] = useState<OutboxEntry[]>([])
+  const [loadingOutbox, setLoadingOutbox] = useState(false)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
+
   // --- Send / accept result state ---
-  const [sendAmount, setSendAmount] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [sendResult, setSendResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [acceptResult, setAcceptResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-
-  // --- Init PeerPayClient ---
-  useEffect(() => {
-    if (!isConfigured || !messageBoxUrl || !wallet) {
-      peerPayClientRef.current = null
-      return
-    }
-    try {
-      peerPayClientRef.current = new PeerPayClient({
-        messageBoxHost: messageBoxUrl,
-        walletClient: wallet as any,
-        originator: adminOriginator
-      })
-    } catch {
-      peerPayClientRef.current = null
-    }
-  }, [isConfigured, messageBoxUrl, wallet, adminOriginator])
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, '')
@@ -791,28 +1035,16 @@ export default function PaymentsScreen() {
       await handleSaveUrl(urlInput)
       return
     }
-    try {
-      toast.info(t('checking_connection'))
-      const tempClient = new PeerPayClient({
-        messageBoxHost: trimmed,
-        walletClient: wallet as any,
-        originator: adminOriginator
-      })
-      await tempClient.init(trimmed)
-      await handleSaveUrl(urlInput)
-    } catch (error: any) {
-      toast.error(`${t('connection_failed')}: ${error.message || 'unknown error'}`)
-    }
+    await handleSaveUrl(urlInput)
   }, [handleSaveUrl, urlInput, wallet, adminOriginator, t])
 
   const handleRemove = useCallback(async () => {
     await handleReset()
-    peerPayClientRef.current = null
   }, [handleReset])
 
   // --- Fetch incoming payments ---
   const fetchPayments = useCallback(async () => {
-    const client = peerPayClientRef.current
+    const client = peerPayClient
     if (!client || !messageBoxUrl || messageBoxUrl === 'noMessageBox') return
     setLoadingPayments(true)
     try {
@@ -834,17 +1066,29 @@ export default function PaymentsScreen() {
     }
   }, [messageBoxUrl])
 
+  // --- Load outbox entries from storage ---
+  const loadOutbox = useCallback(async () => {
+    if (!storage) return
+    setLoadingOutbox(true)
+    try {
+      setOutboxEntries(await getOutboxEntries(storage))
+    } finally {
+      setLoadingOutbox(false)
+    }
+  }, [storage])
+
   // Auto-fetch when configured
   useEffect(() => {
-    if (isConfigured && peerPayClientRef.current) {
+    if (isConfigured && peerPayClient) {
       fetchPayments()
     }
-  }, [isConfigured, fetchPayments])
+    loadOutbox()
+  }, [isConfigured, fetchPayments, loadOutbox])
 
   // --- Accept payment (with optional custom description) ---
   const internalizePayment = useCallback(
     async (payment: IncomingPayment, description: string) => {
-      const client = peerPayClientRef.current
+      const client = peerPayClient
       if (!client || !wallet) throw new Error('Not ready')
       await wallet.internalizeAction(
         {
@@ -872,7 +1116,7 @@ export default function PaymentsScreen() {
 
   const handleAcceptPayment = useCallback(
     async (payment: IncomingPayment) => {
-      const client = peerPayClientRef.current
+      const client = peerPayClient
       if (!client) return
       const id = String(payment.messageId)
       const description = paymentNotes[id]?.trim() || 'Identity Payment'
@@ -893,7 +1137,7 @@ export default function PaymentsScreen() {
   )
 
   const handleAcceptAll = useCallback(async () => {
-    const client = peerPayClientRef.current
+    const client = peerPayClient
     if (!client || payments.length === 0) return
     setAcceptingAll(true)
     setEditingNoteId(null)
@@ -929,31 +1173,103 @@ export default function PaymentsScreen() {
 
   // --- Send payment ---
   const handleSend = useCallback(async () => {
-    const client = peerPayClientRef.current
-    if (!client || !recipientKey || !sendAmount) return
+    const client = peerPayClient
+    if (!client || !recipientKey || !sendAmount || !storage) return
+    const sats = Math.round(Number(sendAmount))
+    if (Number.isNaN(sats) || sats <= 0) {
+      setSendResult({ type: 'error', message: t('enter_valid_amount') })
+      setTimeout(() => setSendResult(null), 5000)
+      return
+    }
     setIsSending(true)
+    let outboxId: string | null = null
     try {
-      const { sats } = await sendPayment(client, recipientKey, sendAmount)
-      setSendResult({ type: 'success', message: `Sent ${sats.toLocaleString()} sats successfully` })
+      // Step 1: build and broadcast the transaction — token lives in memory here
+      const token = await client.createPaymentToken({ recipient: recipientKey, amount: sats })
+      // Step 2: persist token to outbox BEFORE attempting delivery
+      outboxId = await saveOutboxEntry(storage, {
+        recipient: recipientKey,
+        token: token as PaymentToken & { transaction: number[] },
+        messageBoxUrl
+      })
+      await loadOutbox()
+      // Step 3: deliver token to recipient's MessageBox
+      await client.sendMessage({
+        recipient: recipientKey,
+        messageBox: 'payment_inbox',
+        body: JSON.stringify(token)
+      })
+      // Step 4: mark delivered
+      await markOutboxSent(storage, outboxId)
+      await loadOutbox()
+      setSendResult({ type: 'success', message: `Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully` })
       setSendAmount('')
       clearRecipient()
       fetchPayments()
     } catch (error: any) {
       const msg = error instanceof RangeError ? t('enter_valid_amount') : error.message || 'unknown error'
       setSendResult({ type: 'error', message: `Send failed: ${msg}` })
+      // outbox entry stays 'unsent' — surfaced in the Outgoing section for manual retry
     } finally {
       setIsSending(false)
       setTimeout(() => setSendResult(null), 5000)
     }
-  }, [recipientKey, sendAmount, clearRecipient, fetchPayments, t])
+  }, [
+    recipientKey,
+    sendAmount,
+    storage,
+    messageBoxUrl,
+    loadOutbox,
+    clearRecipient,
+    fetchPayments,
+    currency,
+    satoshisPerUSD,
+    t
+  ])
 
   const canSend = recipientKey.length > 0 && Number(sendAmount) > 0 && !isSending && isConfigured
+
+  // --- Retry outbox entry ---
+  const handleRetry = useCallback(
+    async (entry: OutboxEntry) => {
+      const client = peerPayClient
+      if (!client || !storage) return
+      setRetryingId(entry.id)
+      await updateOutboxEntry(storage, entry.id, { lastAttemptAt: new Date().toISOString() })
+      try {
+        await client.sendMessage({
+          recipient: entry.recipient,
+          messageBox: 'payment_inbox',
+          body: JSON.stringify(entry.token)
+        })
+        await markOutboxSent(storage, entry.id)
+        toast.success(t('payment_delivered'))
+      } catch (err: any) {
+        await updateOutboxEntry(storage, entry.id, { lastError: err?.message || 'unknown error' })
+        toast.error(`${t('retry_failed')}: ${err?.message || 'unknown error'}`)
+      } finally {
+        setRetryingId(null)
+        await loadOutbox()
+      }
+    },
+    [storage, loadOutbox, t]
+  )
+
+  // --- Dismiss outbox entry ---
+  const handleDismiss = useCallback(
+    async (id: string) => {
+      if (!storage) return
+      await removeOutboxEntry(storage, id)
+      await loadOutbox()
+    },
+    [storage, loadOutbox]
+  )
 
   return (
     <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+        <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={styles.headerButton}>
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('payments')}</Text>
@@ -994,13 +1310,13 @@ export default function PaymentsScreen() {
             t={t}
             onChangeUrl={setUrlInput}
             onSave={handleSave}
-            onCancel={() => {
-              if (messageBoxUrl !== 'noMessageBox') setShowConfig(false)
-              setUrlInput(messageBoxUrl)
-            }}
             onReset={handleRemove}
             onNone={handleNone}
           />
+        )}
+
+        {peerPayNotice && (
+          <ResultBanner result={peerPayNotice} onDismiss={() => setPeerPayNotice(null)} colors={colors} />
         )}
 
         {messageBoxUrl === 'noMessageBox' ? (
@@ -1029,13 +1345,14 @@ export default function PaymentsScreen() {
                 onSearchChange={handleSearchChange}
                 onSelectIdentity={handleSelectIdentity}
                 onClear={clearRecipient}
+                onOpenScanner={openScanner}
               />
             </View>
 
             {/* Amount */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_sats')}</Text>
-              <SatsAmountInput value={sendAmount} onChangeText={setSendAmount} />
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount')}</Text>
+              <AmountInput value={sendAmount} onChangeText={setSendAmount} />
             </View>
 
             {/* Send button */}
@@ -1064,6 +1381,16 @@ export default function PaymentsScreen() {
 
             {sendResult && <ResultBanner result={sendResult} onDismiss={() => setSendResult(null)} colors={colors} />}
 
+            <OutgoingSection
+              entries={outboxEntries}
+              loadingOutbox={loadingOutbox}
+              retryingId={retryingId}
+              colors={colors}
+              t={t}
+              onRetry={handleRetry}
+              onDismiss={handleDismiss}
+            />
+
             <IncomingPaymentsSection
               isConfigured={isConfigured}
               loadingPayments={loadingPayments}
@@ -1089,6 +1416,22 @@ export default function PaymentsScreen() {
 
         <View style={{ height: insets.bottom + 40 }} />
       </ScrollView>
+
+      {/* ── QR Scanner Modal ─────────────────────────────────────────── */}
+      <Modal
+        visible={scannerVisible}
+        animationType="slide"
+        onRequestClose={() => setScannerVisible(false)}
+        statusBarTranslucent
+      >
+        <StatusBar style="light" />
+        <QRScanner
+          multiScan
+          onScan={handleQRScanned}
+          onClose={() => setScannerVisible(false)}
+          hintText={t('scan_identity_key_hint')}
+        />
+      </Modal>
     </View>
   )
 }
@@ -1142,20 +1485,60 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: spacing.md
   },
-  configActions: {
+  // Primary action row (Save + Cancel)
+  configPrimaryActions: {
     flexDirection: 'row',
     gap: spacing.sm
   },
-  configButton: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+  configButtonSecondary: {
+    flex: 1,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radii.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  configButtonTextSecondary: {
+    ...typography.subhead,
+    fontWeight: '500'
+  },
+  configButtonPrimary: {
+    flex: 2,
+    paddingVertical: spacing.sm + 2,
     borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center'
   },
-  configButtonText: {
+  configButtonTextPrimary: {
     ...typography.subhead,
     fontWeight: '600'
+  },
+  // Secondary / destructive row (Reset pill + None link)
+  configSecondaryActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md
+  },
+  configResetPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+    borderRadius: radii.sm,
+    borderWidth: StyleSheet.hairlineWidth
+  },
+  configResetText: {
+    ...typography.caption1,
+    fontWeight: '500'
+  },
+  configNoneLink: {
+    marginLeft: 'auto' as any
+  },
+  configNoneText: {
+    ...typography.caption1,
+    fontWeight: '500'
   },
 
   // Active server indicator
@@ -1204,14 +1587,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5
   },
-  textInput: {
-    ...typography.body,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth
-  },
-
   // Selected recipient
   selectedRecipient: {
     flexDirection: 'row',
@@ -1346,6 +1721,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm
   },
+
   acceptAllButton: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -1460,5 +1836,87 @@ const styles = StyleSheet.create({
   },
   resultDismiss: {
     padding: spacing.xs
+  },
+
+  // Outgoing section
+  outgoingCard: {
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    marginBottom: spacing.lg
+  },
+  outgoingRow: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderLeftWidth: 3
+  },
+  outgoingInfo: {
+    gap: 6
+  },
+  outgoingTopRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.md
+  },
+  outgoingRecipient: {
+    ...typography.footnote,
+    fontWeight: '500',
+    fontFamily: 'monospace',
+    flex: 1
+  },
+  outgoingAmount: {
+    ...typography.subhead,
+    fontWeight: '700',
+    flexShrink: 0
+  },
+  outgoingStatusText: {
+    ...typography.caption1,
+    marginBottom: spacing.sm
+  },
+  outgoingButtons: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginHorizontal: -spacing.lg,
+    marginBottom: -spacing.md
+  },
+  outgoingDismissButton: {
+    flex: 1,
+    paddingVertical: 13,
+    alignItems: 'center',
+    borderRightWidth: StyleSheet.hairlineWidth
+  },
+  outgoingRetryButton: {
+    flex: 1,
+    paddingVertical: 13,
+    alignItems: 'center'
+  },
+  outgoingRetryText: {
+    ...typography.subhead,
+    fontWeight: '600'
+  },
+  outgoingDismissText: {
+    ...typography.subhead
+  },
+
+  // Recipient input row (text field + QR scan button)
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden'
+  },
+  recipientInput: {
+    ...typography.body,
+    flex: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md
+  },
+  inputAction: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center'
   }
 })

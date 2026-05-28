@@ -7,13 +7,13 @@ if (typeof AbortSignal !== 'undefined' && !AbortSignal.timeout) {
   }
 }
 
-import React from 'react'
+import React, { useEffect } from 'react'
 import { View, useColorScheme } from 'react-native'
 import { Stack } from 'expo-router'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'
 import packageJson from '../package.json'
-import { WalletContextProvider } from '@/context/WalletContext'
+import { WalletContextProvider, useWallet } from '@/context/WalletContext'
 import { ExchangeRateContextProvider } from '@/context/ExchangeRateContext'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
 // TODO: Re-add RecoveryKeySaver when WAB support returns
@@ -24,8 +24,12 @@ import DefaultBrowserPrompt from '@/components/onboarding/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/context/i18n/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/onboarding/Web3BenefitsModalHandler'
+import { WalletConnectionProvider } from '@/context/WalletConnectionContext'
 
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+
+export const FIRST_TOUCH_DATE_KEY = 'firstTouchDate'
 
 const nativeHandlers: NativeHandlers = {
   isFocused: async () => false,
@@ -49,11 +53,24 @@ const nativeHandlers: NativeHandlers = {
   }
 }
 
+// Record the date of first app launch (never overwritten)
+function FirstTouchRecorder() {
+  useEffect(() => {
+    AsyncStorage.getItem(FIRST_TOUCH_DATE_KEY).then(existing => {
+      if (!existing) {
+        AsyncStorage.setItem(FIRST_TOUCH_DATE_KEY, new Date().toISOString())
+      }
+    })
+  }, [])
+  return null
+}
+
 // Deep link handler component
 function DeepLinkHandler() {
   useDeepLinking()
   return null
 }
+
 
 // const DebuggerDisplay = () => {
 //   const [toggle, setToggle] = React.useState(false);
@@ -72,6 +89,7 @@ function DeepLinkHandler() {
 //   )
 // }
 
+
 export default function RootLayout() {
   const isDark = useColorScheme() === 'dark'
   const backgroundColor = isDark ? '#000000' : '#FFFFFF'
@@ -86,30 +104,35 @@ export default function RootLayout() {
                 <WalletContextProvider>
                   <BrowserModeProvider>
                     <ThemeProvider>
-                      <View style={{ flex: 1, backgroundColor }}>
-                        {/* <DebuggerDisplay /> */}
-                        <DeepLinkHandler />
-                        <Web3BenefitsModalHandler />
-                        {/* <TranslationTester /> */}
-                        <DefaultBrowserPrompt />
-                        <PermissionSheet />
-                        <Stack
-                          screenOptions={{
-                            animation: 'slide_from_right',
-                            headerShown: false,
-                            contentStyle: { backgroundColor }
-                          }}
-                        >
-                          <Stack.Screen name="index" />
-                          <Stack.Screen name="config" />
-                          <Stack.Screen name="auth/mnemonic" />
-                          <Stack.Screen name="transactions" />
-                          <Stack.Screen name="wallet-config" />
-                          <Stack.Screen name="legacy-payments" />
-                          <Stack.Screen name="payments" />
-                          <Stack.Screen name="not-found" />
-                        </Stack>
-                      </View>
+                      <WalletConnectionProvider>
+                        <View style={{ flex: 1, backgroundColor }}>
+                          {/* <DebuggerDisplay /> */}
+                          <FirstTouchRecorder />
+                          <DeepLinkHandler />
+                          <Web3BenefitsModalHandler />
+                          {/* <TranslationTester /> */}
+                          <DefaultBrowserPrompt />
+                          <PermissionSheet />
+                          <Stack
+                            screenOptions={{
+                              animation: 'slide_from_right',
+                              headerShown: false,
+                              contentStyle: { backgroundColor }
+                            }}
+                          >
+                            <Stack.Screen name="index" />
+                            <Stack.Screen name="config" />
+                            <Stack.Screen name="auth/mnemonic" />
+                            <Stack.Screen name="transactions" />
+                            <Stack.Screen name="wallet-config" />
+                            <Stack.Screen name="legacy-payments" />
+                            <Stack.Screen name="payments" />
+                            <Stack.Screen name="connections" />
+                            <Stack.Screen name="pair" />
+                            <Stack.Screen name="not-found" />
+                          </Stack>
+                        </View>
+                      </WalletConnectionProvider>
                     </ThemeProvider>
                   </BrowserModeProvider>
                 </WalletContextProvider>

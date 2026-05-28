@@ -20,6 +20,7 @@ import { useWallet } from '@/context/WalletContext'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import tabStore from '@/stores/TabStore'
 import type { WalletAction } from '@bsv/sdk'
+import { exportTransactionsAsCsv } from '@/utils/exportTransactions'
 
 const PAGE_SIZE = 30
 
@@ -44,7 +45,7 @@ export default function TransactionsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, selectedNetwork, storage, txStatusVersion } = useWallet()
+  const { managers, adminOriginator, selectedNetwork, storage, txStatusVersion, refreshProof } = useWallet()
 
   const [actions, setActions] = useState<WalletAction[]>([])
   const [totalActions, setTotalActions] = useState(0)
@@ -53,6 +54,8 @@ export default function TransactionsScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [copyingTxid, setCopyingTxid] = useState<string | null>(null)
   const [abortingTxid, setAbortingTxid] = useState<string | null>(null)
+  const [refreshingTxid, setRefreshingTxid] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
   const offsetRef = useRef(0)
 
   const fetchActions = useCallback(async (offset: number) => {
@@ -70,8 +73,7 @@ export default function TransactionsScreen() {
       if (actions.length === 0) setLoading(true)
       const result = await fetchActions(0)
       if (cancelled || !result) return
-      const reversedActions = [...result.actions].reverse()
-      setActions(reversedActions)
+      setActions(result.actions)
       setTotalActions(result.totalActions)
       offsetRef.current = result.actions.length
       setLoading(false)
@@ -84,8 +86,7 @@ export default function TransactionsScreen() {
     setLoadingMore(true)
     const result = await fetchActions(offsetRef.current)
     if (result) {
-      const reversedActions = [...result.actions].reverse()
-      setActions(prev => [...prev, ...reversedActions])
+      setActions(prev => [...prev, ...result.actions])
       setTotalActions(result.totalActions)
       offsetRef.current += result.actions.length
     }
@@ -96,8 +97,7 @@ export default function TransactionsScreen() {
     setRefreshing(true)
     const result = await fetchActions(0)
     if (result) {
-      const reversedActions = [...result.actions].reverse()
-      setActions(reversedActions)
+      setActions(result.actions)
       setTotalActions(result.totalActions)
       offsetRef.current = result.actions.length
     }
@@ -148,12 +148,49 @@ export default function TransactionsScreen() {
     }
   }, [managers.permissionsManager, adminOriginator, abortingTxid, onRefresh, t])
 
+  const handleExport = useCallback(async () => {
+    if (!managers.permissionsManager || exporting) return
+    setExporting(true)
+    try {
+      const count = await exportTransactionsAsCsv(
+        managers.permissionsManager,
+        storage,
+        adminOriginator
+      )
+      if (count === 0) {
+        toast.info(t('no_transactions'))
+      } else {
+        toast.success(t('tx_export_success', { count }))
+      }
+    } catch (e) {
+      console.error('Failed to export transactions:', e)
+      toast.error(t('tx_export_failed'))
+    } finally {
+      setExporting(false)
+    }
+  }, [managers.permissionsManager, storage, adminOriginator, exporting, t])
+
+  const handleRefreshProof = useCallback(async (txid: string) => {
+    if (refreshingTxid) return
+    setRefreshingTxid(txid)
+    try {
+      await refreshProof(txid)
+      toast.success(t('tx_proof_refreshed'))
+    } catch (e) {
+      console.info('Proof refresh:', e instanceof Error ? e.message : e)
+      toast.error(e instanceof Error ? e.message : t('tx_proof_refresh_failed'))
+    } finally {
+      setRefreshingTxid(null)
+    }
+  }, [refreshProof, refreshingTxid, t])
+
   const renderItem: ListRenderItem<WalletAction> = useCallback(({ item }) => {
     const status = getStatusInfo(item.status, colors, t)
     const isOutgoing = item.isOutgoing
     const amount = item.satoshis
     const reference = (item as any).reference as string | undefined
     const canAbort = ABORTABLE_STATUSES.has(item.status) && !!reference
+    const canRefresh = !canAbort && item.status !== 'completed' && !!item.txid
 
     return (
       <View style={[styles.row, { borderBottomColor: colors.separator }]}>
@@ -170,7 +207,7 @@ export default function TransactionsScreen() {
           </View>
         </View>
         <View style={styles.rowRight}>
-          <Text style={[styles.amount, { color: isOutgoing ? colors.error : colors.textPrimary }]}>
+          <Text style={[styles.amount, { color: colors.textPrimary }]}>
             <AmountDisplay>
               {amount}
             </AmountDisplay>
@@ -191,6 +228,20 @@ export default function TransactionsScreen() {
               </TouchableOpacity>
             ) : (
               <>
+                {canRefresh ? (
+                  <TouchableOpacity
+                    onPress={() => handleRefreshProof(item.txid)}
+                    style={styles.iconButton}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    disabled={refreshingTxid === item.txid}
+                  >
+                    <Ionicons
+                      name={refreshingTxid === item.txid ? 'hourglass-outline' : 'refresh-outline'}
+                      size={18}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                ) : <View style={styles.iconButton} />}
                 {item.txid ? (
                   <TouchableOpacity
                     onPress={() => handleExplorerLink(item.txid)}
@@ -218,7 +269,7 @@ export default function TransactionsScreen() {
         </View>
       </View>
     )
-  }, [colors, handleExplorerLink, handleCopyRawTx, handleAbort, copyingTxid, abortingTxid, t])
+  }, [colors, handleExplorerLink, handleCopyRawTx, handleAbort, handleRefreshProof, copyingTxid, abortingTxid, refreshingTxid, t])
 
   let content: React.ReactNode
   if (loading) {
@@ -261,7 +312,18 @@ export default function TransactionsScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.accent} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('transactions')}</Text>
-        <View style={styles.backButton} />
+        <TouchableOpacity
+          onPress={handleExport}
+          style={styles.backButton}
+          disabled={exporting || actions.length === 0}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons
+            name={exporting ? 'hourglass-outline' : 'download-outline'}
+            size={22}
+            color={actions.length === 0 ? colors.textQuaternary : colors.accent}
+          />
+        </TouchableOpacity>
       </View>
       {content}
     </View>

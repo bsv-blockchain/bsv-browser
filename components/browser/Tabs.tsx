@@ -1,14 +1,18 @@
 import React from 'react'
 import { ScrollView } from 'react-native'
 import BookmarkTabs from './BookmarkTabs'
-// import bookmarkStore from './BookmarkStore'
-import bookmarkStore from '../../stores/BookmarkStore'
+import tabStore from '../../stores/TabStore'
 
 const Tabs: React.FC = () => {
   return (
     <ScrollView>
-      {bookmarkStore.tabs.map((tab, index) => (
-        <BookmarkTabs key={tab.id} tab={tab} index={index} removeTab={bookmarkStore.removeTab} />
+      {tabStore.tabs.map((tab, index) => (
+        <BookmarkTabs
+          key={tab.id}
+          tab={tab}
+          index={index}
+          removeTab={(i: number) => tabStore.closeTab(tabStore.tabs[i].id)}
+        />
       ))}
     </ScrollView>
   )

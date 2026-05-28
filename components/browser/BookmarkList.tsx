@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useRef, useState } from 'react'
-import { FlatList, Image, Pressable, Text, TouchableOpacity, View, StyleSheet } from 'react-native'
+import { FlatList, Pressable, Text, TouchableOpacity, View, StyleSheet } from 'react-native'
+import { Image as ExpoImage } from 'expo-image'
 import ReanimatedSwipeable, { SwipeDirection } from 'react-native-gesture-handler/ReanimatedSwipeable'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
@@ -9,6 +10,12 @@ import { spacing, typography, radii } from '@/context/theme/tokens'
 import bookmarkStore from '@/stores/BookmarkStore'
 import { isValidUrl } from '@/utils/generalHelpers'
 import type { Bookmark } from '@/shared/types/browser'
+
+// Favicons rendered with expo-image use a shared memory+disk cache, so the
+// same icon across all bookmark rows is decoded once and reused. Raw RN
+// `<Image>` re-decodes per render and per-row, which spiked the main thread
+// when the bookmark sheet opened over a live WebView.
+const BOOKMARK_ROW_HEIGHT = 60
 
 /* -------------------------------------------------------------------------- */
 /*  Memoised row                                                              */
@@ -63,7 +70,14 @@ const BookmarkRow = memo(
         }}
       >
         <Pressable style={[styles.bookmarkItem, itemStyle]} onPress={() => onSelect(item.url)}>
-          <Image source={{ uri: faviconUrl }} style={[styles.favicon, { backgroundColor: colors.fillTertiary }]} />
+          <ExpoImage
+            source={{ uri: faviconUrl }}
+            style={[styles.favicon, { backgroundColor: colors.fillTertiary }]}
+            cachePolicy="memory-disk"
+            contentFit="contain"
+            transition={0}
+          />
+
           <View style={styles.bookmarkText}>
             <Text numberOfLines={1} style={[styles.bookmarkTitle, { color: colors.textPrimary }]}>
               {item.title || item.url}
@@ -153,6 +167,15 @@ const BookmarkListBase = ({ onSelect, hideTitle = false }: Props) => {
             keyExtractor={keyExtractor}
             renderItem={renderItem}
             ListFooterComponent={FOOTER}
+            initialNumToRender={10}
+            maxToRenderPerBatch={8}
+            windowSize={5}
+            removeClippedSubviews
+            getItemLayout={(_, index) => ({
+              length: BOOKMARK_ROW_HEIGHT,
+              offset: BOOKMARK_ROW_HEIGHT * index,
+              index
+            })}
           />
         </>
       )}
@@ -182,7 +205,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    gap: spacing.md
+    gap: spacing.md,
+    height: BOOKMARK_ROW_HEIGHT
   },
   favicon: {
     width: 28,

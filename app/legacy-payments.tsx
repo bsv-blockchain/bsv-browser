@@ -1,11 +1,25 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet } from 'react-native'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Animated
+} from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Clipboard from '@react-native-clipboard/clipboard'
-import { toast } from 'react-toastify'
+
 import QRCode from 'react-native-qrcode-svg'
+import { StatusBar } from 'expo-status-bar'
+import QRScanner from '@/components/QRScanner'
 import {
   PublicKey,
   P2PKH,
@@ -21,14 +35,27 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { SatsAmountInput } from '@/components/wallet/SatsAmountInput'
+import { AmountInput } from '@/components/wallet/AmountInput'
+import AmountDisplay from '@/components/wallet/AmountDisplay'
+import { formatAmount } from '@/utils/amountFormatHelpers'
+import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import { formatDistanceToNow } from 'date-fns'
 
 const brc29ProtocolID: WalletProtocol = [2, '3241645161d8']
+
+type Tab = 'receive' | 'send'
 
 interface Utxo {
   txid: string
   vout: number
   satoshis: number
+}
+
+interface ProcessedTx {
+  txid: string
+  satoshis: number
+  status: string
+  importedAt: Date | null
 }
 
 const getCurrentDate = (daysOffset: number): string => {
@@ -41,19 +68,78 @@ export default function LegacyPaymentsScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, selectedNetwork } = useWallet()
+  const { managers, adminOriginator, selectedNetwork, settings } = useWallet()
   const wallet = managers?.permissionsManager || null
+  const { satoshisPerUSD } = React.useContext(ExchangeRateContext)
+  const currency = settings?.currency || 'BSV'
 
+  // ── Tab state ────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<Tab>('receive')
+  const indicatorAnim = useRef(new Animated.Value(0)).current
+
+  const switchTab = useCallback(
+    (tab: Tab) => {
+      setActiveTab(tab)
+      Animated.spring(indicatorAnim, {
+        toValue: tab === 'receive' ? 0 : 1,
+        useNativeDriver: false,
+        tension: 300,
+        friction: 30
+      }).start()
+    },
+    [indicatorAnim]
+  )
+
+  // ── Receive state ────────────────────────────────────────────────────────
   const [paymentAddress, setPaymentAddress] = useState<string | null>(null)
   const [balance, setBalance] = useState<number>(-1)
   const [isLoadingAddress, setIsLoadingAddress] = useState(false)
   const [isCheckingBalance, setIsCheckingBalance] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [infoExpanded, setInfoExpanded] = useState(false)
   const [daysOffset, setDaysOffset] = useState(0)
   const [derivationPrefix, setDerivationPrefix] = useState(Utils.toBase64(Utils.toArray(getCurrentDate(0), 'utf8')))
   const derivationSuffix = Utils.toBase64(Utils.toArray('legacy', 'utf8'))
+  const [processedTxs, setProcessedTxs] = useState<ProcessedTx[]>([])
+
+  // ── Send state ───────────────────────────────────────────────────────────
+  const [recipientAddress, setRecipientAddress] = useState('')
+  const [sendAmount, setSendAmount] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  const [addressError, setAddressError] = useState<string | null>(null)
+  const [sendLog, setSendLog] = useState<{ sats: number; address: string; at: Date }[]>([])
+
+  // ── Snackbar ─────────────────────────────────────────────────────────────
+  const [snack, setSnack] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const snackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showSnack = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    if (snackTimer.current) clearTimeout(snackTimer.current)
+    setSnack({ message, type })
+    snackTimer.current = setTimeout(() => setSnack(null), 3500)
+  }, [])
+
+  // ── QR scanner state ─────────────────────────────────────────────────────
+  const [scannerVisible, setScannerVisible] = useState(false)
+
+  // ── Pulse animation for "listening" indicator ─────────────────────────────
+  const pulseAnim = useRef(new Animated.Value(1)).current
+  const pulseLoop = useRef<Animated.CompositeAnimation | null>(null)
+
+  useEffect(() => {
+    pulseLoop.current = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.25, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true })
+      ])
+    )
+    pulseLoop.current.start()
+    return () => {
+      pulseLoop.current?.stop()
+    }
+  }, [])
+
+  // ── Network config ───────────────────────────────────────────────────────
   const wocConfig = {
     main: { apiBase: 'https://api.whatsonchain.com', segment: 'main', network: 'mainnet' as const },
     test: { apiBase: 'https://api.whatsonchain.com', segment: 'test', network: 'testnet' as const },
@@ -61,15 +147,7 @@ export default function LegacyPaymentsScreen() {
   }[selectedNetwork]
   const network = wocConfig.network
 
-  // Send state
-  const [recipientAddress, setRecipientAddress] = useState('')
-  const [sendAmount, setSendAmount] = useState('')
-  const [isSending, setIsSending] = useState(false)
-
-  // Import result state
-  const [importResult, setImportResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-
-  // Derive payment address from wallet public key
+  // ── Wallet helpers ───────────────────────────────────────────────────────
   const getPaymentAddress = useCallback(
     async (prefix: string): Promise<string> => {
       if (!wallet) throw new Error('Wallet not initialized')
@@ -87,7 +165,6 @@ export default function LegacyPaymentsScreen() {
     [wallet, adminOriginator, derivationSuffix, network]
   )
 
-  // Fetch UTXOs for address from WhatsOnChain
   const getUtxosForAddress = useCallback(
     async (address: string): Promise<Utxo[]> => {
       const response = await fetch(`${wocConfig.apiBase}/v1/bsv/${wocConfig.segment}/address/${address}/unspent/all`)
@@ -99,18 +176,12 @@ export default function LegacyPaymentsScreen() {
     [wocConfig]
   )
 
-  // Get internalized UTXOs from transaction history
   const getInternalizedUtxos = useCallback(
     async (address: string): Promise<Set<string>> => {
       if (!wallet) return new Set()
       try {
         const response = await wallet.listActions(
-          {
-            labels: [address],
-            labelQueryMode: 'all',
-            includeOutputs: true,
-            limit: 1000
-          },
+          { labels: [address], labelQueryMode: 'all', includeOutputs: true, limit: 1000 },
           adminOriginator
         )
         const set = new Set<string>()
@@ -122,29 +193,56 @@ export default function LegacyPaymentsScreen() {
           }
         }
         return set
-      } catch (error) {
-        console.error('Error fetching internalized UTXOs:', error)
+      } catch {
         return new Set()
       }
     },
     [wallet, adminOriginator]
   )
 
-  // Fetch balance for address
+  const getProcessedTransactions = useCallback(
+    async (address: string): Promise<ProcessedTx[]> => {
+      if (!wallet) return []
+      try {
+        const response = await wallet.listActions(
+          { labels: [address], labelQueryMode: 'all', includeLabels: true, includeOutputs: true, limit: 1000 },
+          adminOriginator
+        )
+        return response.actions
+          .map(action => {
+            const totalSats = action.outputs ? action.outputs.reduce((sum, o) => sum + o.satoshis, 0) : action.satoshis
+            const tsLabel = action.labels?.find(l => l.startsWith('ts:'))
+            const importedAt = tsLabel ? new Date(Number(tsLabel.slice(3)) * 1000) : null
+            return {
+              txid: action.txid,
+              satoshis: totalSats,
+              status: action.status,
+              importedAt
+            }
+          })
+          .sort((a, b) => {
+            if (a.importedAt && b.importedAt) return b.importedAt.getTime() - a.importedAt.getTime()
+            if (a.importedAt) return -1
+            if (b.importedAt) return 1
+            return 0
+          })
+      } catch {
+        return []
+      }
+    },
+    [wallet, adminOriginator]
+  )
+
   const fetchBalance = useCallback(
     async (address: string): Promise<number> => {
       const allUtxos = await getUtxosForAddress(address)
       const internalizedUtxos = await getInternalizedUtxos(address)
-      const available = allUtxos.filter(utxo => {
-        const outpoint = `${utxo.txid}.${utxo.vout}`
-        return !internalizedUtxos.has(outpoint)
-      })
+      const available = allUtxos.filter(u => !internalizedUtxos.has(`${u.txid}.${u.vout}`))
       return available.reduce((acc, r) => acc + r.satoshis, 0)
     },
     [getUtxosForAddress, getInternalizedUtxos]
   )
 
-  // Show address for a given day offset
   const handleViewAddress = useCallback(
     async (offset: number = 0) => {
       setIsLoadingAddress(true)
@@ -155,8 +253,9 @@ export default function LegacyPaymentsScreen() {
         setDerivationPrefix(prefix)
         setPaymentAddress(address)
         setBalance(-1)
+        setProcessedTxs([])
       } catch (error: any) {
-        toast.error(`Error generating address: ${error.message || 'unknown error'}`)
+        showSnack(`Error generating address: ${error.message || 'unknown error'}`, 'error')
       } finally {
         setIsLoadingAddress(false)
       }
@@ -164,53 +263,6 @@ export default function LegacyPaymentsScreen() {
     [getPaymentAddress]
   )
 
-  // Auto-show today's address on mount
-  useEffect(() => {
-    if (wallet) handleViewAddress(0)
-  }, [wallet]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Poll balance every 3 seconds until non-zero, then auto-import
-  useEffect(() => {
-    if (!paymentAddress || balance > 0 || isImporting) return
-    const poll = async () => {
-      if (!paymentAddress) return
-      setIsCheckingBalance(true)
-      try {
-        const bal = await fetchBalance(paymentAddress)
-        setBalance(bal)
-      } catch {
-        // ignore polling errors
-      } finally {
-        setIsCheckingBalance(false)
-      }
-    }
-    poll()
-    const interval = setInterval(poll, 3000)
-    return () => clearInterval(interval)
-  }, [paymentAddress]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-import when balance becomes non-zero
-  useEffect(() => {
-    if (balance > 0 && !isImporting) {
-      handleImportFunds()
-    }
-  }, [balance]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Check balance
-  const handleCheckBalance = useCallback(async () => {
-    if (!paymentAddress) return
-    setIsCheckingBalance(true)
-    try {
-      const bal = await fetchBalance(paymentAddress)
-      setBalance(bal)
-    } catch (error: any) {
-      toast.error(`Error checking balance: ${error.message || 'unknown error'}`)
-    } finally {
-      setIsCheckingBalance(false)
-    }
-  }, [paymentAddress, fetchBalance])
-
-  // Copy address
   const handleCopy = useCallback(() => {
     if (!paymentAddress) return
     Clipboard.setString(paymentAddress)
@@ -218,26 +270,20 @@ export default function LegacyPaymentsScreen() {
     setTimeout(() => setCopied(false), 2000)
   }, [paymentAddress])
 
-  // Import funds
   const handleImportFunds = useCallback(async () => {
     if (!paymentAddress || !wallet || balance <= 0) return
-
     setIsImporting(true)
     try {
       const allUtxos = await getUtxosForAddress(paymentAddress)
       const internalizedUtxos = await getInternalizedUtxos(paymentAddress)
-      const utxos = allUtxos.filter(utxo => {
-        const outpoint = `${utxo.txid}.${utxo.vout}`
-        return !internalizedUtxos.has(outpoint)
-      })
+      const utxos = allUtxos.filter(u => !internalizedUtxos.has(`${u.txid}.${u.vout}`))
 
       if (utxos.length === 0) {
-        toast.info('All available funds have already been imported')
+        showSnack('All available funds have already been imported', 'info')
         setIsImporting(false)
         return
       }
 
-      // Merge BEEF for the inputs
       const beef = new Beef()
       for (const utxo of utxos) {
         if (!beef.findTxid(utxo.txid)) {
@@ -252,7 +298,6 @@ export default function LegacyPaymentsScreen() {
           const tx = beef.findAtomicTransaction(beefTx.txid)
           const relevantUtxos = utxos.filter(o => o.txid === beefTx.txid)
           if (relevantUtxos.length === 0) return null
-
           const outputs: InternalizeOutput[] = relevantUtxos.map(o => ({
             outputIndex: o.vout,
             protocol: 'wallet payment' as const,
@@ -262,14 +307,12 @@ export default function LegacyPaymentsScreen() {
               derivationSuffix
             }
           }))
-
           const satoshis = relevantUtxos.reduce((sum, o) => sum + o.satoshis, 0)
-
           const args: InternalizeActionArgs = {
             tx: tx!.toAtomicBEEF(),
             description: 'Legacy Bridge Payment',
             outputs,
-            labels: ['legacy', 'inbound', 'bsvbrowser', paymentAddress!]
+            labels: ['legacy', 'inbound', 'bsvbrowser', paymentAddress!, `ts:${Math.floor(Date.now() / 1000)}`]
           }
           return { args, satoshis }
         })
@@ -284,37 +327,30 @@ export default function LegacyPaymentsScreen() {
             importedSatoshis += satoshis
           } else {
             failureCount++
-            toast.error('Payment was rejected')
           }
         } catch (error: any) {
           failureCount++
-          console.error('Internalize error:', error)
-          toast.error(`Import failed: ${error?.message || 'unknown error'}`)
+          showSnack(`Import failed: ${error?.message || 'unknown error'}`, 'error')
         }
       }
 
-      // Show result banner
       if (importedSatoshis > 0) {
-        setImportResult({
-          type: 'success',
-          message: `Successfully imported ${importedSatoshis.toLocaleString()} sats${failureCount > 0 ? ` (${failureCount} failed)` : ''}`
-        })
+        showSnack(
+          `Successfully imported ${formatAmount(importedSatoshis, currency, satoshisPerUSD)}${failureCount > 0 ? ` (${failureCount} failed)` : ''}`,
+          'success'
+        )
       } else if (failureCount > 0) {
-        setImportResult({
-          type: 'error',
-          message: `Failed to import ${failureCount} transaction${failureCount > 1 ? 's' : ''}`
-        })
+        showSnack(`Failed to import ${failureCount} transaction${failureCount > 1 ? 's' : ''}`, 'error')
       }
 
-      // Refresh balance
-      const newBalance = await fetchBalance(paymentAddress)
+      const [newBalance, processed] = await Promise.all([
+        fetchBalance(paymentAddress),
+        getProcessedTransactions(paymentAddress)
+      ])
       setBalance(newBalance)
-
-      // Clear result banner after 5 seconds
-      setTimeout(() => setImportResult(null), 5000)
+      setProcessedTxs(processed)
     } catch (error: any) {
-      console.error(error)
-      toast.error(`Import failed: ${error.message || 'unknown error'}`)
+      showSnack(`Import failed: ${error.message || 'unknown error'}`, 'error')
     } finally {
       setIsImporting(false)
     }
@@ -331,272 +367,490 @@ export default function LegacyPaymentsScreen() {
     fetchBalance
   ])
 
-  // Send BSV to address
+  // ── Lifecycle ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (wallet) handleViewAddress(0)
+  }, [wallet]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!paymentAddress || balance > 0 || isImporting) return
+    const poll = async () => {
+      if (!paymentAddress) return
+      setIsCheckingBalance(true)
+      try {
+        const [bal, processed] = await Promise.all([
+          fetchBalance(paymentAddress),
+          getProcessedTransactions(paymentAddress)
+        ])
+        setBalance(bal)
+        setProcessedTxs(processed)
+      } catch {
+        // ignore polling errors
+      } finally {
+        setIsCheckingBalance(false)
+      }
+    }
+    poll()
+    const interval = setInterval(poll, 3000)
+    return () => clearInterval(interval)
+  }, [paymentAddress]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (balance > 0 && !isImporting) handleImportFunds()
+  }, [balance]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Address validation ───────────────────────────────────────────────────
+  const validateAddress = useCallback((address: string): boolean => {
+    if (!address) return false
+    try {
+      Utils.fromBase58Check(address)
+      return true
+    } catch {
+      return false
+    }
+  }, [])
+
+  const handleRecipientAddressChange = useCallback(
+    (text: string) => {
+      setRecipientAddress(text)
+      if (text.length === 0) {
+        setAddressError(null)
+      } else if (!validateAddress(text)) {
+        setAddressError(t('invalid_bsv_address'))
+      } else {
+        setAddressError(null)
+      }
+    },
+    [validateAddress, t]
+  )
+
+  // ── QR scanner ───────────────────────────────────────────────────────────
+  const handleQRScanned = useCallback(
+    (data: string) => {
+      const raw = data
+        .replace(/^bitcoin:/i, '')
+        .split('?')[0]
+        .trim()
+      if (validateAddress(raw)) {
+        setRecipientAddress(raw)
+        setAddressError(null)
+        setScannerVisible(false)
+      }
+      // Invalid scan — QRScanner will auto-retry after delay
+    },
+    [validateAddress]
+  )
+
+  const openScanner = useCallback(() => {
+    setScannerVisible(true)
+  }, [])
+
+  // ── Send ─────────────────────────────────────────────────────────────────
   const handleSendBSV = useCallback(async () => {
     if (!wallet || !recipientAddress || !sendAmount) return
-
     const sats = Math.round(Number(sendAmount))
     if (isNaN(sats) || sats <= 0) {
-      toast.error('Please enter a valid amount > 0')
+      showSnack('Please enter a valid amount > 0', 'error')
       return
     }
-
-    if (network === 'mainnet' && !recipientAddress.startsWith('1')) {
-      toast.error('Mainnet addresses must start with "1"')
+    if (!validateAddress(recipientAddress)) {
+      showSnack(t('invalid_bsv_address'), 'error')
       return
     }
-
     setIsSending(true)
     try {
       const lockingScript = new P2PKH().lock(recipientAddress).toHex()
       await wallet.createAction(
         {
           description: 'Send BSV to address',
-          outputs: [
-            {
-              lockingScript,
-              satoshis: sats,
-              outputDescription: 'BSV for recipient address'
-            }
-          ],
+          outputs: [{ lockingScript, satoshis: sats, outputDescription: 'BSV for recipient address' }],
           labels: ['legacy', 'outbound']
         },
         adminOriginator
       )
-      toast.success(`Sent ${sats.toLocaleString()} sats to ${recipientAddress}`)
+      showSnack(`Sent ${formatAmount(sats, currency, satoshisPerUSD)}`, 'success')
+      setSendLog(prev => [{ sats, address: recipientAddress, at: new Date() }, ...prev])
       setRecipientAddress('')
       setSendAmount('')
+      setAddressError(null)
     } catch (error: any) {
-      toast.error(`Send failed: ${error.message || 'unknown error'}`)
+      showSnack(`Send failed: ${error.message || 'unknown error'}`, 'error')
     } finally {
       setIsSending(false)
     }
-  }, [wallet, recipientAddress, sendAmount, network, adminOriginator])
+  }, [wallet, recipientAddress, sendAmount, validateAddress, t, adminOriginator])
 
-  // Date navigation
-  const handleDateChange = useCallback(
-    (offset: number) => {
-      setBalance(-1)
-      handleViewAddress(offset)
-    },
-    [handleViewAddress]
-  )
+  const canSend = !!recipientAddress && !!sendAmount && !addressError && !isSending
 
-  const renderAddressSection = () => {
-    if (isLoadingAddress) {
-      return (
-        <View style={styles.centered}>
+  // ── Receive tab content ──────────────────────────────────────────────────
+  const renderReceiveTab = () => (
+    <ScrollView style={styles.tabScroll} contentContainerStyle={styles.tabContent} keyboardShouldPersistTaps="handled">
+      {/* Date navigator */}
+      <View style={styles.dateRow}>
+        <TouchableOpacity onPress={() => handleViewAddress(daysOffset + 1)} style={styles.dateArrow} hitSlop={8}>
+          <Ionicons name="chevron-back" size={20} color={colors.accent} />
+        </TouchableOpacity>
+        <Text style={[styles.dateText, { color: colors.textSecondary }]}>{getCurrentDate(daysOffset)}</Text>
+        <TouchableOpacity
+          onPress={() => handleViewAddress(Math.max(0, daysOffset - 1))}
+          style={styles.dateArrow}
+          disabled={daysOffset === 0}
+          hitSlop={8}
+        >
+          <Ionicons name="chevron-forward" size={20} color={daysOffset === 0 ? colors.textQuaternary : colors.accent} />
+        </TouchableOpacity>
+      </View>
+
+      {isLoadingAddress ? (
+        <View style={styles.centeredBlock}>
           <ActivityIndicator size="large" color={colors.accent} />
           <Text style={[styles.loadingText, { color: colors.textSecondary }]}>{t('generating_address')}</Text>
         </View>
-      )
-    }
-
-    if (!paymentAddress) {
-      return (
-        <View style={styles.centered}>
+      ) : !paymentAddress ? (
+        <View style={styles.centeredBlock}>
           <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{t('unable_to_generate_address')}</Text>
         </View>
-      )
-    }
-
-    return (
-      <>
-        {/* QR Code */}
-        <View style={styles.qrContainer}>
-          <View style={[styles.qrWrapper, { backgroundColor: '#FFFFFF' }]}>
-            <QRCode value={paymentAddress} size={200} color="#000000" backgroundColor="#FFFFFF" />
+      ) : (
+        <>
+          {/* QR hero */}
+          <View style={styles.qrHero}>
+            <View style={[styles.qrCard, { backgroundColor: '#fff', shadowColor: colors.textPrimary }]}>
+              <QRCode value={paymentAddress} size={192} color="#000" backgroundColor="#fff" />
+            </View>
           </View>
-        </View>
 
-        {/* Address display */}
-        <View style={[styles.addressContainer, { backgroundColor: colors.backgroundSecondary }]}>
-          <Text
-            style={[styles.addressText, { color: colors.textPrimary }]}
-            selectable
-            numberOfLines={1}
-            ellipsizeMode="middle"
+          {/* Address chip */}
+          <TouchableOpacity
             onPress={handleCopy}
+            activeOpacity={0.7}
+            style={[styles.addressChip, { backgroundColor: colors.fillTertiary }]}
           >
-            {paymentAddress}
-          </Text>
-          <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
-            <Ionicons
-              name={copied ? 'checkmark' : 'copy-outline'}
-              size={20}
-              color={copied ? colors.success : colors.accent}
-            />
+            <Text
+              style={[styles.addressChipText, { color: colors.textSecondary }]}
+              numberOfLines={1}
+              ellipsizeMode="middle"
+            >
+              {paymentAddress}
+            </Text>
+            <View style={[styles.copyPill, { backgroundColor: copied ? colors.success + '20' : colors.fill }]}>
+              <Ionicons
+                name={copied ? 'checkmark' : 'copy-outline'}
+                size={16}
+                color={copied ? colors.success : colors.textSecondary}
+              />
+              <Text style={[styles.copyPillText, { color: copied ? colors.success : colors.textSecondary }]}>
+                {copied ? t('copied') : t('copy_to_clipboard')}
+              </Text>
+            </View>
           </TouchableOpacity>
-        </View>
 
-        {/* Balance */}
-        <View style={styles.balanceSection}>
-          <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>{t('available_balance')}</Text>
-          <Text style={[styles.balanceValue, { color: colors.textPrimary }]}>
-            {balance === -1 ? t('not_checked') : `${balance.toLocaleString()} sats`}
+          {/* Listening indicator */}
+          <View style={styles.listeningRow}>
+            <Animated.View
+              style={[
+                styles.listeningDot,
+                {
+                  backgroundColor: isImporting ? colors.success : colors.textQuaternary,
+                  opacity: isImporting ? pulseAnim : 1
+                }
+              ]}
+            />
+            <Text style={[styles.listeningText, { color: colors.textTertiary }]}>Listening for transactions…</Text>
+          </View>
+
+          {/* Processed transactions (already imported into wallet) */}
+          {processedTxs.length > 0 && (
+            <>
+              <View style={[styles.balanceRow, { borderTopColor: colors.separator, marginTop: spacing.lg }]}>
+                <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>{t('imported')}</Text>
+                <Text style={[styles.balanceValue, { color: colors.success }]}>
+                  <AmountDisplay>{processedTxs.reduce((sum, tx) => sum + tx.satoshis, 0)}</AmountDisplay>
+                </Text>
+              </View>
+              <View style={[styles.logContainer, { borderColor: colors.separator, marginTop: spacing.md }]}>
+                {processedTxs.map((tx, i) => (
+                  <View
+                    key={tx.txid}
+                    style={[
+                      styles.logEntry,
+                      i < processedTxs.length - 1 && {
+                        borderBottomWidth: StyleSheet.hairlineWidth,
+                        borderBottomColor: colors.separator
+                      }
+                    ]}
+                  >
+                    <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+                    <Text style={[styles.logSats, { color: colors.success }]}>
+                      +<AmountDisplay>{tx.satoshis}</AmountDisplay>
+                    </Text>
+                    {tx.importedAt ? (
+                      <Text style={[styles.logTime, { color: colors.textTertiary }]}>
+                        {formatDistanceToNow(tx.importedAt, { addSuffix: true })}
+                      </Text>
+                    ) : (
+                      <Text
+                        style={[styles.logAddress, { color: colors.textTertiary }]}
+                        numberOfLines={1}
+                        ellipsizeMode="middle"
+                      >
+                        {tx.txid}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+        </>
+      )}
+      <View style={{ height: insets.bottom + spacing.xxxl }} />
+    </ScrollView>
+  )
+
+  // ── Send tab content ─────────────────────────────────────────────────────
+  const renderSendTab = () => (
+    <ScrollView
+      style={styles.tabScroll}
+      contentContainerStyle={styles.tabContent}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
+      <View style={styles.sendForm}>
+        {/* Address field */}
+        <View style={styles.fieldGroup}>
+          <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
+            {t('recipient_address').toUpperCase()}
           </Text>
-        </View>
-
-        {/* Import result banner */}
-        {importResult && (
           <View
             style={[
-              styles.resultBanner,
+              styles.inputRow,
               {
-                backgroundColor: importResult.type === 'success' ? colors.success + '15' : colors.error + '15',
-                borderColor: importResult.type === 'success' ? colors.success : colors.error
+                backgroundColor: colors.backgroundSecondary,
+                borderColor: addressError ? colors.error : colors.separator
               }
             ]}
           >
-            <Ionicons
-              name={importResult.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
-              size={20}
-              color={importResult.type === 'success' ? colors.success : colors.error}
+            <TextInput
+              value={recipientAddress}
+              onChangeText={handleRecipientAddressChange}
+              placeholder={t('enter_bsv_address')}
+              placeholderTextColor={colors.textQuaternary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.input, { color: colors.textPrimary }]}
             />
-            <Text
-              style={[styles.resultText, { color: importResult.type === 'success' ? colors.success : colors.error }]}
-            >
-              {importResult.message}
-            </Text>
-            <TouchableOpacity onPress={() => setImportResult(null)} style={styles.resultDismiss}>
-              <Ionicons
-                name="close"
-                size={18}
-                color={importResult.type === 'success' ? colors.success : colors.error}
-              />
+            <TouchableOpacity onPress={openScanner} style={styles.inputAction} accessibilityLabel="Scan QR code">
+              <Ionicons name="qr-code-outline" size={20} color={colors.accent} />
             </TouchableOpacity>
           </View>
-        )}
-
-        {/* Polling / import status */}
-        {isImporting && (
-          <View style={styles.pollingRow}>
-            <ActivityIndicator size="small" color={colors.accent} />
-            <Text style={[styles.pollingText, { color: colors.textSecondary }]}>{t('import_funds')}…</Text>
-          </View>
-        )}
-      </>
-    )
-  }
-
-  return (
-    <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={colors.accent} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('legacy_bridge')}</Text>
-        <View style={styles.backButton} />
-      </View>
-
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.content}>
-        {/* Info banner */}
-        <TouchableOpacity
-          onPress={() => setInfoExpanded(v => !v)}
-          style={[styles.infoBanner, { backgroundColor: colors.info + '15' }]}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="information-circle" size={20} color={colors.info} style={{ marginRight: spacing.sm }} />
-          {infoExpanded && <Text style={[styles.infoText, { color: colors.info }]}>{t('legacy_info')}</Text>}
-        </TouchableOpacity>
-
-        {/* Date navigator */}
-        <View style={styles.dateRow}>
-          <TouchableOpacity onPress={() => handleDateChange(daysOffset + 1)} style={styles.dateButton}>
-            <Ionicons name="chevron-back" size={22} color={colors.accent} />
-          </TouchableOpacity>
-          <Text style={[styles.dateText, { color: colors.textPrimary }]}>{getCurrentDate(daysOffset)}</Text>
-          <TouchableOpacity
-            onPress={() => handleDateChange(Math.max(0, daysOffset - 1))}
-            style={styles.dateButton}
-            disabled={daysOffset === 0}
-          >
-            <Ionicons
-              name="chevron-forward"
-              size={22}
-              color={daysOffset === 0 ? colors.textQuaternary : colors.accent}
-            />
-          </TouchableOpacity>
+          {addressError ? (
+            <Text style={[styles.fieldError, { color: colors.error }]}>{addressError}</Text>
+          ) : recipientAddress.length > 0 ? (
+            <Text style={[styles.fieldHint, { color: colors.success }]}>
+              <Ionicons name="checkmark-circle" size={12} color={colors.success} /> Valid address
+            </Text>
+          ) : null}
         </View>
 
-        {/* Address + QR */}
-        {renderAddressSection()}
-
-        {/* Send section */}
-        <View style={[styles.sendDivider, { borderTopColor: colors.separator }]} />
-        <Text style={[styles.sendTitle, { color: colors.textPrimary }]}>{t('send_bsv')}</Text>
-
+        {/* Amount field */}
         <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('recipient_address')}</Text>
-          <TextInput
-            value={recipientAddress}
-            onChangeText={setRecipientAddress}
-            placeholder={t('enter_bsv_address')}
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[
-              styles.textInput,
-              {
-                color: colors.textPrimary,
-                backgroundColor: colors.backgroundSecondary,
-                borderColor: colors.separator
-              }
-            ]}
-          />
+          <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>{t('amount').toUpperCase()}</Text>
+          <AmountInput value={sendAmount} onChangeText={setSendAmount} />
         </View>
 
-        <View style={styles.fieldGroup}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount_sats')}</Text>
-          <SatsAmountInput value={sendAmount} onChangeText={setSendAmount} />
-        </View>
-
+        {/* Send button */}
         <TouchableOpacity
           onPress={handleSendBSV}
-          disabled={isSending || !recipientAddress || !sendAmount}
-          style={[
-            styles.sendButton,
-            {
-              backgroundColor: recipientAddress && sendAmount ? colors.accent : colors.backgroundSecondary,
-              opacity: recipientAddress && sendAmount ? 1 : 0.5
-            }
-          ]}
+          disabled={!canSend}
+          activeOpacity={0.8}
+          style={[styles.sendCTA, { backgroundColor: canSend ? colors.accent : colors.fill }]}
         >
           {isSending ? (
-            <ActivityIndicator
-              size="small"
-              color={recipientAddress && sendAmount ? colors.background : colors.textSecondary}
-            />
+            <ActivityIndicator size="small" color={canSend ? colors.background : colors.textTertiary} />
           ) : (
             <>
-              <Ionicons
-                name="send"
-                size={18}
-                color={recipientAddress && sendAmount ? colors.background : colors.textSecondary}
-              />
-              <Text
-                style={[
-                  styles.sendButtonText,
-                  { color: recipientAddress && sendAmount ? colors.background : colors.textSecondary }
-                ]}
-              >
+              <Ionicons name="arrow-up-circle" size={20} color={canSend ? colors.background : colors.textTertiary} />
+              <Text style={[styles.sendCTAText, { color: canSend ? colors.background : colors.textTertiary }]}>
                 {t('send_bsv')}
               </Text>
             </>
           )}
         </TouchableOpacity>
 
-        <View style={{ height: insets.bottom + 40 }} />
-      </ScrollView>
-    </View>
+        {/* Send log */}
+        {sendLog.length > 0 && (
+          <View style={[styles.logContainer, { borderColor: colors.separator, marginTop: spacing.xl }]}>
+            {sendLog.map((entry, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.logEntry,
+                  i < sendLog.length - 1 && {
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderBottomColor: colors.separator
+                  }
+                ]}
+              >
+                <Text style={[styles.logSats, { color: colors.error }]}>
+                  <AmountDisplay>{-entry.sats}</AmountDisplay>
+                </Text>
+                <Text
+                  style={[styles.logAddress, { color: colors.textTertiary }]}
+                  numberOfLines={1}
+                  ellipsizeMode="middle"
+                >
+                  {entry.address}
+                </Text>
+                <Text style={[styles.logTime, { color: colors.textTertiary }]}>
+                  {formatDistanceToNow(entry.at, { addSuffix: true })}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+      <View style={{ height: insets.bottom + spacing.xxxl }} />
+    </ScrollView>
+  )
+
+  // ── Tab bar ──────────────────────────────────────────────────────────────
+  const TAB_W = 120
+
+  const indicatorLeft = indicatorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [2, TAB_W + 2]
+  })
+
+  // ── Root render ──────────────────────────────────────────────────────────
+  return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={[styles.root, { backgroundColor: colors.background, paddingTop: insets.top }]}>
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <View style={[styles.header, { borderBottomColor: colors.separator }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+            <Ionicons name="chevron-back" size={24} color={colors.accent} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('legacy_bridge')}</Text>
+          <View style={styles.headerBtn} />
+        </View>
+
+        {/* ── Segmented control ───────────────────────────────────────────── */}
+        <View style={styles.segmentWrapper}>
+          <View style={[styles.segmentTrack, { backgroundColor: colors.fillTertiary }]}>
+            {/* Sliding pill */}
+            <Animated.View
+              style={[
+                styles.segmentPill,
+                {
+                  width: TAB_W,
+                  left: indicatorLeft,
+                  backgroundColor: colors.background,
+                  shadowColor: colors.textPrimary
+                }
+              ]}
+            />
+            {/* Receive */}
+            <TouchableOpacity
+              style={[styles.segmentBtn, { width: TAB_W }]}
+              onPress={() => switchTab('receive')}
+              activeOpacity={1}
+            >
+              <Ionicons
+                name={activeTab === 'receive' ? 'arrow-down-circle' : 'arrow-down-circle-outline'}
+                size={16}
+                color={activeTab === 'receive' ? colors.textPrimary : colors.textTertiary}
+              />
+              <Text
+                style={[
+                  styles.segmentLabel,
+                  { color: activeTab === 'receive' ? colors.textPrimary : colors.textTertiary }
+                ]}
+              >
+                {t('receive')}
+              </Text>
+            </TouchableOpacity>
+            {/* Send */}
+            <TouchableOpacity
+              style={[styles.segmentBtn, { width: TAB_W }]}
+              onPress={() => switchTab('send')}
+              activeOpacity={1}
+            >
+              <Ionicons
+                name={activeTab === 'send' ? 'arrow-up-circle' : 'arrow-up-circle-outline'}
+                size={16}
+                color={activeTab === 'send' ? colors.textPrimary : colors.textTertiary}
+              />
+              <Text
+                style={[
+                  styles.segmentLabel,
+                  { color: activeTab === 'send' ? colors.textPrimary : colors.textTertiary }
+                ]}
+              >
+                {t('send')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Tab content ─────────────────────────────────────────────────── */}
+        {activeTab === 'receive' ? renderReceiveTab() : renderSendTab()}
+      </View>
+
+      {/* ── Snackbar ─────────────────────────────────────────────────────── */}
+      {snack && (
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => setSnack(null)}
+          style={[
+            styles.snack,
+            {
+              backgroundColor: colors.backgroundElevated,
+              borderColor:
+                snack.type === 'success' ? colors.success : snack.type === 'error' ? colors.error : colors.separator
+            }
+          ]}
+        >
+          <Ionicons
+            name={
+              snack.type === 'success'
+                ? 'checkmark-circle'
+                : snack.type === 'error'
+                  ? 'alert-circle'
+                  : 'information-circle'
+            }
+            size={18}
+            color={snack.type === 'success' ? colors.success : snack.type === 'error' ? colors.error : colors.info}
+          />
+          <Text style={[styles.snackText, { color: colors.textPrimary }]}>{snack.message}</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* ── QR Scanner Modal ─────────────────────────────────────────────── */}
+      <Modal
+        visible={scannerVisible}
+        animationType="slide"
+        onRequestClose={() => setScannerVisible(false)}
+        statusBarTranslucent
+      >
+        <StatusBar style="light" />
+        <QRScanner
+          multiScan
+          onScan={handleQRScanned}
+          onClose={() => setScannerVisible(false)}
+          hintText={t('scan_bsv_address_hint')}
+        />
+      </Modal>
+    </KeyboardAvoidingView>
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1
   },
+
+  // ── Header ─────────────────────────────────────────────────────────────
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -605,7 +859,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth
   },
-  backButton: {
+  headerBtn: {
     width: 44,
     height: 44,
     alignItems: 'center',
@@ -615,39 +869,74 @@ const styles = StyleSheet.create({
     ...typography.headline,
     fontWeight: '600'
   },
-  content: {
+
+  // ── Segmented control ───────────────────────────────────────────────────
+  segmentWrapper: {
+    alignItems: 'center',
+    paddingVertical: spacing.lg
+  },
+  segmentTrack: {
+    flexDirection: 'row',
+    borderRadius: radii.xl,
+    padding: 2,
+    position: 'relative'
+  },
+  segmentPill: {
+    position: 'absolute',
+    top: 2,
+    bottom: 2,
+    borderRadius: radii.xl - 2,
+    // subtle shadow for the floating pill effect
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2
+  },
+  segmentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm + 2,
+    zIndex: 1
+  },
+  segmentLabel: {
+    ...typography.subhead,
+    fontWeight: '500'
+  },
+
+  // ── Shared tab scroll ───────────────────────────────────────────────────
+  tabScroll: {
+    flex: 1
+  },
+  tabContent: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg
   },
-  infoBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start'
-  },
-  infoText: {
-    ...typography.footnote,
-    flex: 1
-  },
+
+  // ── Receive tab ─────────────────────────────────────────────────────────
   dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.xl,
-    gap: spacing.lg
+    gap: spacing.md,
+    marginBottom: spacing.xxl
   },
-  dateButton: {
-    width: 36,
-    height: 36,
+  dateArrow: {
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center'
   },
   dateText: {
-    ...typography.body,
+    ...typography.footnote,
     fontFamily: 'monospace',
     fontWeight: '500',
-    minWidth: 110,
-    textAlign: 'center'
+    minWidth: 100,
+    textAlign: 'center',
+    letterSpacing: 0.3
   },
-  centered: {
+  centeredBlock: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: spacing.xxxl
@@ -656,112 +945,207 @@ const styles = StyleSheet.create({
     ...typography.subhead,
     marginTop: spacing.md
   },
-  qrContainer: {
-    alignItems: 'center',
-    marginBottom: spacing.xl
-  },
-  qrWrapper: {
-    padding: spacing.md,
-    borderRadius: radii.lg
-  },
-  addressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    borderRadius: radii.md,
-    marginBottom: spacing.lg
-  },
-  addressText: {
-    ...typography.footnote,
-    fontFamily: 'monospace',
-    flex: 1
-  },
-  copyButton: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: spacing.sm
-  },
-  balanceSection: {
-    alignItems: 'center',
-    marginBottom: spacing.xl
-  },
-  balanceLabel: {
-    ...typography.subhead,
-    marginBottom: spacing.xs
-  },
-  balanceValue: {
-    fontSize: 28,
-    fontWeight: '700'
-  },
-  pollingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.lg
-  },
-  pollingText: {
-    ...typography.subhead
-  },
   emptyText: {
     ...typography.body
   },
-  sendDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xl
+  qrHero: {
+    alignItems: 'center',
+    marginBottom: spacing.xxl
   },
-  sendTitle: {
-    ...typography.title3,
-    marginBottom: spacing.md
+  qrCard: {
+    padding: spacing.lg,
+    borderRadius: radii.xl,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 6
   },
-  fieldGroup: {
-    marginBottom: spacing.lg
-  },
-  fieldLabel: {
-    ...typography.footnote,
-    fontWeight: '500',
-    marginBottom: spacing.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5
-  },
-  textInput: {
-    ...typography.body,
+  addressChip: {
+    borderRadius: radii.lg,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.lg,
+    gap: spacing.sm
   },
-  sendButton: {
+  addressChipText: {
+    ...typography.footnote,
+    fontFamily: 'monospace',
+    textAlign: 'center',
+    marginBottom: spacing.xs
+  },
+  copyPill: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
+    gap: spacing.xs,
+    borderRadius: radii.pill,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg
+  },
+  copyPillText: {
+    ...typography.subhead,
+    fontWeight: '500'
+  },
+  balanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.lg,
+    marginBottom: spacing.md
+  },
+  balanceLabel: {
+    ...typography.subhead
+  },
+  balanceValue: {
+    ...typography.headline,
+    fontWeight: '700'
+  },
+  logContainer: {
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radii.md,
+    overflow: 'hidden',
+    marginBottom: spacing.sm
+  },
+  logEntry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     gap: spacing.sm
   },
-  sendButtonText: {
+  logSats: {
     ...typography.subhead,
     fontWeight: '600'
+  },
+  logAddress: {
+    ...typography.caption1,
+    fontFamily: 'monospace',
+    flex: 1,
+    marginHorizontal: spacing.sm
+  },
+  logTime: {
+    ...typography.caption1,
+    fontFamily: 'monospace'
+  },
+  listeningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.md
+  },
+  listeningDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4
+  },
+  listeningText: {
+    ...typography.footnote,
+    textAlign: 'center'
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm
+  },
+  statusText: {
+    ...typography.subhead
   },
   resultBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
     borderRadius: radii.md,
     borderWidth: 1,
-    marginBottom: spacing.lg
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.md
   },
   resultText: {
-    ...typography.subhead,
+    ...typography.footnote,
     fontWeight: '500',
     flex: 1
   },
-  resultDismiss: {
-    padding: spacing.xs
+
+  // ── Send tab ────────────────────────────────────────────────────────────
+  sendForm: {
+    flex: 1
+  },
+  fieldGroup: {
+    marginBottom: spacing.xl
+  },
+  fieldLabel: {
+    ...typography.caption2,
+    fontWeight: '600',
+    letterSpacing: 0.8,
+    marginBottom: spacing.sm
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden'
+  },
+  input: {
+    ...typography.body,
+    flex: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md
+  },
+  inputAction: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  fieldError: {
+    ...typography.caption1,
+    marginTop: spacing.xs
+  },
+  fieldHint: {
+    ...typography.caption1,
+    marginTop: spacing.xs
+  },
+  sendCTA: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md + 2,
+    borderRadius: radii.md,
+    marginTop: spacing.sm
+  },
+  sendCTAText: {
+    ...typography.subhead,
+    fontWeight: '600'
+  },
+
+  // ── QR Scanner ──────────────────────────────────────────────────────────
+  snack: {
+    position: 'absolute',
+    bottom: 32,
+    left: spacing.lg,
+    right: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6
+  },
+  snackText: {
+    ...typography.subhead,
+    flex: 1
   }
 })

@@ -3,17 +3,23 @@
     "name": "BSV Browser",
     "slug": "bsv-browser",
     "scheme": "bsv-browser",
-    "version": "1.2.2",
+    "version": "1.4.5",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "web": {
       "bundler": "metro",
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "./plugins/withWebBrowserEntitlement",
+      [
+        "./plugins/withXcodeLastUpgradeVersion",
+        {
+          "version": "2640"
+        }
+      ],
       "expo-router",
       [
         "expo-splash-screen",
@@ -37,7 +43,10 @@
       "expo-sqlite",
       "expo-localization",
       "expo-web-browser",
-      "expo-camera"
+      "expo-camera",
+      "expo-font",
+      "expo-image",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true
@@ -75,22 +84,48 @@
             "BROWSABLE",
             "DEFAULT"
           ]
+        },
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "peerpay"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
     "ios": {
+      "supportsTablet": true,
       "bundleIdentifier": "org.bsvassociation.browser",
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs camera access to scan QR codes.",
-        "NSPhotoLibraryUsageDescription": "This app needs photo library access to let you select images.",
+        "NSPhotoLibraryAddUsageDescription": "This app needs permission to save images to your photo library.",
         "NSMicrophoneUsageDescription": "This app needs microphone access for video recording features.",
         "NSFaceIDUsageDescription": "This app uses Face ID/Touch ID to securely authenticate you and protect your wallet.",
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
+            "CFBundleURLName": "org.bsvassociation.browser.web",
             "CFBundleURLSchemes": [
               "https",
               "http"
+            ]
+          },
+          {
+            "CFBundleURLName": "org.bsvassociation.browser.peerpay",
+            "CFBundleURLSchemes": [
+              "peerpay"
+            ]
+          },
+          {
+            "CFBundleURLName": "org.bsvassociation.browser.pair",
+            "CFBundleURLSchemes": [
+              "bsv-browser"
             ]
           }
         ],

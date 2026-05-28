@@ -7,6 +7,8 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { WalletContext } from '@/context/WalletContext'
 import { UserContext } from '@/context/UserContext'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
+import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import { formatAmount } from '@/utils/amountFormatHelpers'
 
 // ---------------------------------------------------------------------------
 // Dev preview — set to true to keep the BTMS spend sheet visible for design work
@@ -71,17 +73,20 @@ interface ActivePermission {
  * Derive the human-friendly "what is being asked" description for each
  * permission type. Technical specifics go into the expandable Details section.
  */
-function deriveActive(ctx: {
-  protocolRequests: any[]
-  basketRequests: any[]
-  certificateRequests: any[]
-  spendingRequests: any[]
-  btmsRequests: any[]
-  protocolAccessModalOpen: boolean
-  basketAccessModalOpen: boolean
-  certificateAccessModalOpen: boolean
-  spendingAuthorizationModalOpen: boolean
-}): ActivePermission | null {
+function deriveActive(
+  ctx: {
+    protocolRequests: any[]
+    basketRequests: any[]
+    certificateRequests: any[]
+    spendingRequests: any[]
+    btmsRequests: any[]
+    protocolAccessModalOpen: boolean
+    basketAccessModalOpen: boolean
+    certificateAccessModalOpen: boolean
+    spendingAuthorizationModalOpen: boolean
+  },
+  formatSats: (satoshis: number) => string
+): ActivePermission | null {
   // Dev preview — override ctx with real captured data so the description
   // logic below is exercised exactly as it would be in production.
   if (DEV_BTMS_PREVIEW) {
@@ -113,7 +118,7 @@ function deriveActive(ctx: {
     const lineItemDetails: { label: string; value: string }[] = (r.lineItems ?? []).map(
       (item: { description?: string; satoshis: number }) => ({
         label: item.description || 'Payment',
-        value: `${item.satoshis} sats`
+        value: formatSats(item.satoshis)
       })
     )
     return {
@@ -257,8 +262,16 @@ const PermissionSheet: React.FC = () => {
     advanceCertificateQueue,
     advanceSpendingQueue,
     advanceBtmsQueue,
-    managers
+    managers,
+    settings
   } = useContext(WalletContext)
+
+  const { satoshisPerUSD } = useContext(ExchangeRateContext)
+  const currency = settings?.currency || 'BSV'
+  const formatSats = useCallback(
+    (satoshis: number) => formatAmount(satoshis, currency, satoshisPerUSD),
+    [currency, satoshisPerUSD]
+  )
 
   const {
     protocolAccessModalOpen,
@@ -276,17 +289,20 @@ const PermissionSheet: React.FC = () => {
   // Derive what (if anything) we should show.
   const active = useMemo(
     () =>
-      deriveActive({
-        protocolRequests,
-        basketRequests,
-        certificateRequests,
-        spendingRequests,
-        btmsRequests,
-        protocolAccessModalOpen,
-        basketAccessModalOpen,
-        certificateAccessModalOpen,
-        spendingAuthorizationModalOpen
-      }),
+      deriveActive(
+        {
+          protocolRequests,
+          basketRequests,
+          certificateRequests,
+          spendingRequests,
+          btmsRequests,
+          protocolAccessModalOpen,
+          basketAccessModalOpen,
+          certificateAccessModalOpen,
+          spendingAuthorizationModalOpen
+        },
+        formatSats
+      ),
     [
       protocolRequests,
       basketRequests,
@@ -296,7 +312,8 @@ const PermissionSheet: React.FC = () => {
       protocolAccessModalOpen,
       basketAccessModalOpen,
       certificateAccessModalOpen,
-      spendingAuthorizationModalOpen
+      spendingAuthorizationModalOpen,
+      formatSats
     ]
   )
 

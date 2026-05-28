@@ -1,7 +1,8 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
+import React, { createContext, useCallback, useContext, useMemo, useRef } from 'react'
 import * as SecureStore from 'expo-secure-store'
 import * as LocalAuthentication from 'expo-local-authentication'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import i18n from '@/context/i18n/translations'
 
 export interface LocalStorageContextType {
   /* non-secure */
@@ -10,13 +11,13 @@ export interface LocalStorageContextType {
   deleteSnap: () => Promise<void>
 
   /* secure */
-  setPassword: (password: string) => Promise<void>
+  setPassword: (password: string) => Promise<boolean>
   getPassword: () => Promise<string | null>
   deletePassword: () => Promise<void>
-  setMnemonic: (mnemonic: string) => Promise<void>
+  setMnemonic: (mnemonic: string) => Promise<boolean>
   getMnemonic: () => Promise<string | null>
   deleteMnemonic: () => Promise<void>
-  setRecoveredKey: (wif: string) => Promise<void>
+  setRecoveredKey: (wif: string) => Promise<boolean>
   getRecoveredKey: () => Promise<string | null>
   deleteRecoveredKey: () => Promise<void>
 
@@ -30,6 +31,7 @@ const SNAP_KEY = 'snap'
 const PASSWORD_KEY = 'password'
 const MNEMONIC_KEY = 'mnemonic'
 const RECOVERED_KEY = 'recoveredKey'
+const HAS_WALLET_KEYS = 'hasWalletKeys'
 
 export const LocalStorageContext = createContext<LocalStorageContextType>({
   /* non-secure */
@@ -38,13 +40,13 @@ export const LocalStorageContext = createContext<LocalStorageContextType>({
   deleteSnap: async () => {},
 
   /* secure */
-  setPassword: async () => {},
+  setPassword: async () => false,
   getPassword: async () => null,
   deletePassword: async () => {},
-  setMnemonic: async () => {},
+  setMnemonic: async () => false,
   getMnemonic: async () => null,
   deleteMnemonic: async () => {},
-  setRecoveredKey: async () => {},
+  setRecoveredKey: async () => false,
   getRecoveredKey: async () => null,
   deleteRecoveredKey: async () => {},
 
@@ -58,32 +60,33 @@ export const useLocalStorage = () => useContext(LocalStorageContext)
 export default function LocalStorageProvider({ children }: { children: React.ReactNode }) {
   /* --------------------------------- SECURE -------------------------------- */
 
-  // keep “am I already biometrically unlocked?” in memory for this session
-  const [authenticated, setAuthenticated] = useState(false)
+  // keep "am I already biometrically unlocked?" in memory for this session
+  const authenticatedRef = useRef(false)
   const authInProgress = useRef<Promise<boolean> | null>(null)
 
-  const ensureAuth = useCallback(async (): Promise<boolean> => {
-    // If we already asked this frame, reuse the same promise so we don’t show
+  const ensureAuth = useCallback(async (promptMessage: string): Promise<boolean> => {
+    // If we already asked this frame, reuse the same promise so we don't show
     // the Face ID modal twice in parallel.
     if (authInProgress.current) return authInProgress.current
 
     const doAuth = async () => {
-      if (authenticated) return true
+      // Use ref so the check is always up-to-date, even before React re-renders.
+      if (authenticatedRef.current) return true
 
       const { success } = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Decrypt wallet keys',
+        promptMessage,
         cancelLabel: 'Cancel',
         disableDeviceFallback: false
       })
 
-      setAuthenticated(success)
+      authenticatedRef.current = success
       authInProgress.current = null // reset latch
       return success
     }
 
     authInProgress.current = doAuth()
     return authInProgress.current
-  }, [authenticated])
+  }, [])
 
   /* ------------------------------- non-secure ------------------------------ */
 
@@ -116,20 +119,28 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   /* -------------------------------- secure --------------------------------- */
 
-  const setMnemonic = useCallback(async (mnemonic: string): Promise<void> => {
-    try {
-      // we don’t force auth for setting—iOS/Android will handle any keychain UI
-      await SecureStore.setItemAsync(MNEMONIC_KEY, mnemonic, {
-        keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
-      })
-    } catch (err) {
-      console.warn('[setMnemonic]', err)
-    }
-  }, [])
+  const setMnemonic = useCallback(
+    async (mnemonic: string): Promise<boolean> => {
+      try {
+        if (!(await ensureAuth(i18n.t('biometric_store_wallet')))) return false
+        await SecureStore.setItemAsync(MNEMONIC_KEY, mnemonic, {
+          keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
+        })
+        await AsyncStorage.setItem(HAS_WALLET_KEYS, 'true')
+        return true
+      } catch (err) {
+        console.warn('[setMnemonic]', err)
+        return false
+      }
+    },
+    [ensureAuth]
+  )
 
   const getMnemonic = useCallback(async (): Promise<string | null> => {
     try {
-      if (!(await ensureAuth())) return null
+      const hasKeys = await AsyncStorage.getItem(HAS_WALLET_KEYS)
+      if (!hasKeys) return null
+      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return null
       return await SecureStore.getItemAsync(MNEMONIC_KEY)
     } catch (err) {
       console.warn('[getMnemonic]', err)
@@ -139,8 +150,9 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   const deleteMnemonic = useCallback(async (): Promise<void> => {
     try {
-      if (!(await ensureAuth())) return
+      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return
       await SecureStore.deleteItemAsync(MNEMONIC_KEY)
+      await AsyncStorage.removeItem(HAS_WALLET_KEYS)
     } catch (err) {
       console.warn('[deleteMnemonic]', err)
     }
@@ -148,20 +160,28 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   /* -------------------------------- secure --------------------------------- */
 
-  const setPassword = useCallback(async (password: string): Promise<void> => {
-    try {
-      // we don’t force auth for setting—iOS/Android will handle any keychain UI
-      await SecureStore.setItemAsync(PASSWORD_KEY, password, {
-        keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
-      })
-    } catch (err) {
-      console.warn('[setPassword]', err)
-    }
-  }, [])
+  const setPassword = useCallback(
+    async (password: string): Promise<boolean> => {
+      try {
+        if (!(await ensureAuth(i18n.t('biometric_store_wallet')))) return false
+        await SecureStore.setItemAsync(PASSWORD_KEY, password, {
+          keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
+        })
+        await AsyncStorage.setItem(HAS_WALLET_KEYS, 'true')
+        return true
+      } catch (err) {
+        console.warn('[setPassword]', err)
+        return false
+      }
+    },
+    [ensureAuth]
+  )
 
   const getPassword = useCallback(async (): Promise<string | null> => {
     try {
-      if (!(await ensureAuth())) return null
+      const hasKeys = await AsyncStorage.getItem(HAS_WALLET_KEYS)
+      if (!hasKeys) return null
+      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return null
       return await SecureStore.getItemAsync(PASSWORD_KEY)
     } catch (err) {
       console.warn('[getPassword]', err)
@@ -171,8 +191,9 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   const deletePassword = useCallback(async (): Promise<void> => {
     try {
-      if (!(await ensureAuth())) return
+      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return
       await SecureStore.deleteItemAsync(PASSWORD_KEY)
+      await AsyncStorage.removeItem(HAS_WALLET_KEYS)
     } catch (err) {
       console.warn('[deletePassword]', err)
     }
@@ -180,19 +201,28 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   /* ----------------------------- recovered key ------------------------------ */
 
-  const setRecoveredKey = useCallback(async (wif: string): Promise<void> => {
-    try {
-      await SecureStore.setItemAsync(RECOVERED_KEY, wif, {
-        keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
-      })
-    } catch (err) {
-      console.warn('[setRecoveredKey]', err)
-    }
-  }, [])
+  const setRecoveredKey = useCallback(
+    async (wif: string): Promise<boolean> => {
+      try {
+        if (!(await ensureAuth(i18n.t('biometric_store_wallet')))) return false
+        await SecureStore.setItemAsync(RECOVERED_KEY, wif, {
+          keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
+        })
+        await AsyncStorage.setItem(HAS_WALLET_KEYS, 'true')
+        return true
+      } catch (err) {
+        console.warn('[setRecoveredKey]', err)
+        return false
+      }
+    },
+    [ensureAuth]
+  )
 
   const getRecoveredKey = useCallback(async (): Promise<string | null> => {
     try {
-      if (!(await ensureAuth())) return null
+      const hasKeys = await AsyncStorage.getItem(HAS_WALLET_KEYS)
+      if (!hasKeys) return null
+      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return null
       return await SecureStore.getItemAsync(RECOVERED_KEY)
     } catch (err) {
       console.warn('[getRecoveredKey]', err)
@@ -202,8 +232,9 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
 
   const deleteRecoveredKey = useCallback(async (): Promise<void> => {
     try {
-      if (!(await ensureAuth())) return
+      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return
       await SecureStore.deleteItemAsync(RECOVERED_KEY)
+      await AsyncStorage.removeItem(HAS_WALLET_KEYS)
     } catch (err) {
       console.warn('[deleteRecoveredKey]', err)
     }
