@@ -8,6 +8,7 @@ import { kNEW_TAB_URL } from '@/shared/constants'
 import { isValidUrl } from '@/utils/generalHelpers'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
+import { devLog } from '@/utils/logging'
 export class TabStore {
   tabs: Tab[] = [] // Always initialize as an array
   activeTabId = 1
@@ -23,7 +24,7 @@ export class TabStore {
   private tabHistoryIndexes: { [tabId: number]: number } = {} // Track current position in history per tab
 
   constructor() {
-    console.log('TabStore constructor called')
+    devLog('TabStore constructor called')
     makeAutoObservable(this)
     // Preserve existing tabs during hot reload
     if (this.tabs.length === 0) {
@@ -39,7 +40,7 @@ export class TabStore {
   }
 
   createTab(url: string = kNEW_TAB_URL): Tab {
-    console.log(`createTab(): url=${url}, tabid=${this.nextId + 1}`)
+    devLog(`createTab(): url=${url}, tabid=${this.nextId + 1}`)
     const safeUrl = isValidUrl(url) ? url : kNEW_TAB_URL
     return {
       id: this.nextId++,
@@ -142,7 +143,7 @@ export class TabStore {
     const tab = this.tabs.find(t => t.id === tabId)
     const history = this.tabNavigationHistories[tabId]
     const currentIndex = this.tabHistoryIndexes[tabId]
-    console.log(
+    devLog(
       `goBack(): tabId=${tabId}, currentIndex=${currentIndex}, history=${history?.length} items, canGoBack=${tab?.canGoBack}`
     )
 
@@ -150,7 +151,7 @@ export class TabStore {
       const newIndex = currentIndex - 1
       const url = history[newIndex]
 
-      console.log(`🔙 Going back to: ${url} (index ${newIndex})`)
+      devLog(`🔙 Going back to: ${url} (index ${newIndex})`)
 
       this.tabHistoryIndexes[tabId] = newIndex
 
@@ -163,7 +164,7 @@ export class TabStore {
         tab.webviewRef.current.injectJavaScript(`window.location.href = "${url}";`)
       }
     } else {
-      console.log(`Cannot go back: tab=${!!tab}, history=${history?.length}, currentIndex=${currentIndex}`)
+      devLog(`Cannot go back: tab=${!!tab}, history=${history?.length}, currentIndex=${currentIndex}`)
     }
   }
 
@@ -171,7 +172,7 @@ export class TabStore {
     const tab = this.tabs.find(t => t.id === tabId)
     const history = this.tabNavigationHistories[tabId]
     const currentIndex = this.tabHistoryIndexes[tabId]
-    console.log(
+    devLog(
       `goForward(): tabId=${tabId}, currentIndex=${currentIndex}, history=${history?.length} items, canGoForward=${tab?.canGoForward}`
     )
 
@@ -179,7 +180,7 @@ export class TabStore {
       const newIndex = currentIndex + 1
       const url = history[newIndex]
 
-      console.log(`🔜 Going forward to: ${url} (index ${newIndex})`)
+      devLog(`🔜 Going forward to: ${url} (index ${newIndex})`)
 
       this.tabHistoryIndexes[tabId] = newIndex
 
@@ -192,7 +193,7 @@ export class TabStore {
         tab.webviewRef.current.injectJavaScript(`window.location.href = "${url}";`)
       }
     } else {
-      console.log(`Cannot go forward: tab=${!!tab}, history=${history?.length}, currentIndex=${currentIndex}`)
+      devLog(`Cannot go forward: tab=${!!tab}, history=${history?.length}, currentIndex=${currentIndex}`)
     }
   }
 
@@ -226,7 +227,7 @@ export class TabStore {
       return
     }
 
-    console.log(
+    devLog(
       `handleNavigationStateChange(): tabId=${tabId}, url=${navState.url}, webview_canGoBack=${navState.canGoBack}, webview_canGoForward=${navState.canGoForward}`
     )
 
@@ -254,11 +255,11 @@ export class TabStore {
 
         if (urlIndex !== -1) {
           // This is back/forward navigation - update index
-          console.log(`📍 Found URL in history at index ${urlIndex}, updating position`)
+          devLog(`📍 Found URL in history at index ${urlIndex}, updating position`)
           this.tabHistoryIndexes[tabId] = urlIndex
         } else {
           // This is new navigation - add to history
-          console.log(`📝 Adding new URL to history: ${navState.url}`)
+          devLog(`📝 Adding new URL to history: ${navState.url}`)
           const newHistory = currentIndex >= 0 ? history.slice(0, currentIndex + 1) : []
           newHistory.push(navState.url)
           this.tabNavigationHistories[tabId] = newHistory
@@ -276,13 +277,13 @@ export class TabStore {
       tab.canGoBack = currentIdx > 0
       tab.canGoForward = currentIdx < currentHistory.length - 1
 
-      console.log(
+      devLog(
         `🧭 Navigation state: canGoBack=${tab.canGoBack}, canGoForward=${tab.canGoForward}, historyIndex=${currentIdx}/${currentHistory.length - 1}`
       )
 
       // Log state changes
       if (prevCanGoBack !== tab.canGoBack || prevCanGoForward !== tab.canGoForward) {
-        console.log(
+        devLog(
           `🔄 Navigation state changed: canGoBack: ${prevCanGoBack} → ${tab.canGoBack}, canGoForward: ${prevCanGoForward} → ${tab.canGoForward}`
         )
       }
@@ -291,7 +292,30 @@ export class TabStore {
     }
   }
 
-  async saveTabs() {
+  // Trailing-debounced persistence. saveTabs() previously serialized every tab
+  // and wrote to AsyncStorage on every navigation state change (multiple times
+  // per page load) — needless JS-thread + bridge churn. Coalesce into one write.
+  private saveTabsTimeout: ReturnType<typeof setTimeout> | null = null
+  private static readonly SAVE_DEBOUNCE_MS = 750
+
+  saveTabs() {
+    if (this.saveTabsTimeout) clearTimeout(this.saveTabsTimeout)
+    this.saveTabsTimeout = setTimeout(() => {
+      this.saveTabsTimeout = null
+      this.persistTabs().catch(console.error)
+    }, TabStore.SAVE_DEBOUNCE_MS)
+  }
+
+  // Write immediately, bypassing the debounce (e.g. on app background/unmount).
+  async flushTabs() {
+    if (this.saveTabsTimeout) {
+      clearTimeout(this.saveTabsTimeout)
+      this.saveTabsTimeout = null
+    }
+    await this.persistTabs()
+  }
+
+  private async persistTabs() {
     if (!this.tabs) this.tabs = [] // Prevent undefined
     const serializableTabs = this.tabs.map(({ webviewRef, ...rest }) => rest)
     await AsyncStorage.setItem('tabs', JSON.stringify(serializableTabs)).catch(console.error)

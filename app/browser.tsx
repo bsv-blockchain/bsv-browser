@@ -73,7 +73,7 @@ import { getPendingUrl, clearPendingUrl } from '@/hooks/useDeepLinking'
 import { useWebAppManifest } from '@/hooks/useWebAppManifest'
 import * as Notifications from 'expo-notifications'
 import UniversalScanner, { ScannerHandle } from '@/components/UniversalScanner'
-import { logWithTimestamp } from '@/utils/logging'
+import { logWithTimestamp, isLoggingEnabled, shouldForwardWebViewLogs } from '@/utils/logging'
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
@@ -1025,12 +1025,13 @@ function Browser() {
 
   const handleMessage = useCallback(
     async (event: WebViewMessageEvent) => {
-      logWithTimestamp(F, `handleMessage:event=${JSON.stringify(event)}`)
-      logWithTimestamp(F, `handleMessage:activeTab=${JSON.stringify(activeTab)}`)
-      logWithTimestamp(
-        F,
-        `handleMessage:activeTab.webviewRef?.current=${JSON.stringify(activeTab!.webviewRef?.current)}`
-      )
+      // NOTE: do NOT JSON.stringify the event/activeTab/webview ref here — those
+      // args are built eagerly on every bridge message (before any log gate can
+      // bail) and stringifying the live WebView ref is very expensive. This was
+      // a primary cause of JS-thread jank. Guard behind the runtime switch.
+      if (isLoggingEnabled()) {
+        logWithTimestamp(F, `handleMessage:activeTabId=${activeTab?.id} url=${activeTab?.url}`)
+      }
       // Safety check - if activeTab is undefined, we cannot process messages
       if (!activeTab) {
         console.warn('Cannot process WebView message: activeTab is undefined')
@@ -1074,6 +1075,9 @@ function Browser() {
 
       // Handle console logs from WebView
       if (msg.type === 'CONSOLE') {
+        // Re-logging every web page's console.* onto the RN JS thread floods the
+        // bridge and causes jank on chatty pages. Off unless explicitly enabled.
+        if (!shouldForwardWebViewLogs()) return
         const logPrefix = '[WebView]'
         switch (msg.method) {
           case 'log':
@@ -1329,15 +1333,18 @@ function Browser() {
       return
     }
 
-    // Log navigation state changes with back/forward capabilities
-    console.log('🌐 Navigation State Change:', {
-      url: navState.url,
-      title: navState.title,
-      loading: navState.loading,
-      canGoBack: navState.canGoBack,
-      canGoForward: navState.canGoForward,
-      timestamp: new Date().toISOString()
-    })
+    // Log navigation state changes with back/forward capabilities.
+    // Guard with the runtime switch so the object literal isn't built every event.
+    if (isLoggingEnabled()) {
+      console.log('🌐 Navigation State Change:', {
+        url: navState.url,
+        title: navState.title,
+        loading: navState.loading,
+        canGoBack: navState.canGoBack,
+        canGoForward: navState.canGoForward,
+        timestamp: new Date().toISOString()
+      })
+    }
 
     // Make sure we're updating the correct tab's navigation state
     tabStore.handleNavigationStateChange(activeTab.id, navState)
@@ -1345,13 +1352,15 @@ function Browser() {
     if (!addressEditing.current) setAddressText(navState.url)
 
     if (!navState.loading && navState.url !== kNEW_TAB_URL) {
-      console.log('📄 Webpage Loaded:', {
-        url: navState.url,
-        title: navState.title,
-        canGoBack: navState.canGoBack,
-        canGoForward: navState.canGoForward,
-        timestamp: new Date().toISOString()
-      })
+      if (isLoggingEnabled()) {
+        console.log('📄 Webpage Loaded:', {
+          url: navState.url,
+          title: navState.title,
+          canGoBack: navState.canGoBack,
+          canGoForward: navState.canGoForward,
+          timestamp: new Date().toISOString()
+        })
+      }
 
       pushHistory({
         title: navState.title || navState.url,
@@ -2504,30 +2513,23 @@ const BottomToolbar = ({
   const handleStarPress = useCallback(() => toggleStarDrawer(true), [toggleStarDrawer])
   const handleTabsPress = useCallback(() => setShowTabsView(true), [setShowTabsView])
 
-  // Debug: Log activeTab state on every render
-  useEffect(() => {
-    console.log('🔧 BottomToolbar activeTab state:', {
-      id: activeTab.id,
-      url: activeTab.url,
-      canGoBack: activeTab.canGoBack,
-      canGoForward: activeTab.canGoForward,
-      isNewTab: activeTab.url === kNEW_TAB_URL,
-      kNEW_TAB_URL: kNEW_TAB_URL,
-      backButtonDisabled: !activeTab.canGoBack || activeTab.url === kNEW_TAB_URL
-    })
-  })
-
   // Calculate disabled state
   const isBackDisabled = !activeTab.canGoBack || activeTab.url === kNEW_TAB_URL
   const isForwardDisabled = !activeTab.canGoForward || activeTab.url === kNEW_TAB_URL
 
-  console.log('🔧 BottomToolbar Button States:', {
-    isBackDisabled,
-    isForwardDisabled,
-    canGoBack: activeTab.canGoBack,
-    url: activeTab.url,
-    isNewTab: activeTab.url === kNEW_TAB_URL
-  })
+  // Debug logging gated behind the runtime switch so the object literals aren't
+  // built on every render of the toolbar.
+  if (isLoggingEnabled()) {
+    console.log('🔧 BottomToolbar Button States:', {
+      id: activeTab.id,
+      isBackDisabled,
+      isForwardDisabled,
+      canGoBack: activeTab.canGoBack,
+      canGoForward: activeTab.canGoForward,
+      url: activeTab.url,
+      isNewTab: activeTab.url === kNEW_TAB_URL
+    })
+  }
 
   return (
     <View
