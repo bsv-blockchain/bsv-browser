@@ -24,10 +24,8 @@ if (__DEV__) {
       logOnDifferentValues: true,
       collapseGroups: true
     })
-    // eslint-disable-next-line no-console
     console.log('[wdyr] enabled')
   } catch {
-    // eslint-disable-next-line no-console
     console.log('[wdyr] not installed — run: npm i -D @welldone-software/why-did-you-render')
   }
 }

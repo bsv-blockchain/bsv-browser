@@ -31,7 +31,6 @@ function record(label: string, durationMs: number) {
   ring.push({ label, durationMs, at: performance.now() })
   if (ring.length > RING_SIZE) ring.shift()
   if (durationMs >= SLOW_THRESHOLD_MS) {
-    // eslint-disable-next-line no-console
     console.warn(`[perf] SLOW ${label}: ${durationMs.toFixed(1)}ms`)
   }
 }
@@ -96,10 +95,8 @@ function dump() {
   const rows = [...byLabel.entries()]
     .map(([label, g]) => ({ label, n: g.n, avg: g.total / g.n, max: g.max, total: g.total }))
     .sort((a, b) => b.total - a.total)
-  // eslint-disable-next-line no-console
   console.log('[perf] summary (ms):')
   for (const r of rows) {
-    // eslint-disable-next-line no-console
     console.log(`  ${r.label}: n=${r.n} avg=${r.avg.toFixed(1)} max=${r.max.toFixed(1)} total=${r.total.toFixed(1)}`)
   }
 }

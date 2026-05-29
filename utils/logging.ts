@@ -44,7 +44,6 @@ export const shouldForwardWebViewLogs = () => forwardWebViewLogs
  */
 export const devLog = (...args: any[]) => {
   if (!loggingEnabled) return
-  // eslint-disable-next-line no-console
   console.log(...args)
 }
 

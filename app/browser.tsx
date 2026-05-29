@@ -28,6 +28,7 @@ import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-we
 import Modal from 'react-native-modal'
 import { useRenderCount } from '@/hooks/useRenderCount'
 import { PerfProfiler } from '@/components/PerfProfiler'
+import { TabWebView } from '@/components/TabWebView'
 import { perf } from '@/utils/perf'
 import {
   GestureHandlerRootView,
@@ -1704,6 +1705,48 @@ function Browser() {
 
   const addressDisplay = addressFocused ? addressText : domainForUrl(addressText)
 
+  // Stable WebView callbacks so memoized background TabWebViews don't re-render
+  // (and never remount/reload) when the active tab changes.
+  const handleWebViewLoadEnd = useCallback(() => tabStore.clearSwitchLoading(), [])
+  const handleWebViewError = useCallback((syntheticEvent: any) => {
+    tabStore.clearSwitchLoading()
+    const { nativeEvent } = syntheticEvent
+    if (nativeEvent?.url?.includes('favicon.ico')) return // ignore favicon noise
+    console.warn('WebView error:', nativeEvent)
+  }, [])
+  const handleWebViewHttpError = useCallback((syntheticEvent: any) => {
+    const { nativeEvent } = syntheticEvent
+    if (nativeEvent?.url?.includes('favicon.ico')) return // ignore favicon noise
+    console.warn('WebView HTTP error:', nativeEvent)
+  }, [])
+
+  // Scanner bridge appended to every page's injected JS (load-time only).
+  const fullInjectedJavaScript = useMemo(
+    () =>
+      injectedJavaScript +
+      `
+                  window.scanCodeWithCamera = function(reason) {
+                    return new Promise((resolve, reject) => {
+                      const handleScanResponse = (event) => {
+                        try {
+                          const data = JSON.parse(event.data);
+                          if (data.type === 'SCAN_RESPONSE') {
+                            clearTimeout(timeout);
+                            resolve(data.data);
+                          }
+                        } catch (e) {
+                          // Ignore parsing errors
+                        }
+                      };
+                      window.addEventListener('message', handleScanResponse, { once: true });
+                      window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'REQUEST_SCAN' }));
+                      const timeout = setTimeout(() => { reject(new Error('Scan timeout')); }, 60000);
+                    });
+                  };
+                  `,
+    [injectedJavaScript]
+  )
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardAvoidingView
@@ -1722,27 +1765,56 @@ function Browser() {
         >
           <StatusBar style={isDark ? 'light' : 'dark'} hidden={isFullscreen} />
 
-          {activeTab?.url === kNEW_TAB_URL ? (
-            <RecommendedApps
-              includeBookmarks={bookmarkStore.bookmarks
-                .filter(bookmark => {
-                  return (
-                    bookmark.url &&
-                    bookmark.url !== kNEW_TAB_URL &&
-                    isValidUrl(bookmark.url) &&
-                    !bookmark.url.includes('about:blank')
-                  )
-                })
-                .reverse()}
-              setStartingUrl={url => updateActiveTab({ url })}
-              onRemoveBookmark={removeBookmark}
-              onRemoveDefaultApp={removeDefaultApp}
-              removedDefaultApps={removedDefaultApps}
-              homepageSettings={homepageSettings}
-              onUpdateHomepageSettings={updateHomepageSettings}
-            />
-          ) : activeTab ? (
+          {activeTab ? (
             <View style={{ flex: 1 }} {...responderProps}>
+              {/* Warm web-page tabs (LRU pool) stay mounted so switching back is
+                  instant and preserves page state. Inactive tabs render hidden
+                  behind the active content; cold tabs aren't rendered at all. */}
+              {tabStore.warmTabIds.map(id => {
+                const tab = tabStore.tabs.find(t => t.id === id)
+                if (!tab || tab.url === kNEW_TAB_URL || !tab.url.startsWith('http')) return null
+                return (
+                  <TabWebView
+                    key={tab.id}
+                    tab={tab}
+                    isActive={tab.id === activeTab.id}
+                    injectedJavaScript={fullInjectedJavaScript}
+                    acceptLanguage={getAcceptLanguageHeader()}
+                    userAgent={isDesktopView ? desktopUserAgent : mobileUserAgent}
+                    backgroundColor={colors.background}
+                    onMessage={handleMessage}
+                    onNavigationStateChange={handleNavStateChange}
+                    onLoadEnd={handleWebViewLoadEnd}
+                    onError={handleWebViewError}
+                    onHttpError={handleWebViewHttpError}
+                  />
+                )
+              })}
+
+              {/* Native homepage renders on top when the active tab is new-tab */}
+              {activeTab.url === kNEW_TAB_URL && (
+                <View style={StyleSheet.absoluteFill}>
+                  <RecommendedApps
+                    includeBookmarks={bookmarkStore.bookmarks
+                      .filter(bookmark => {
+                        return (
+                          bookmark.url &&
+                          bookmark.url !== kNEW_TAB_URL &&
+                          isValidUrl(bookmark.url) &&
+                          !bookmark.url.includes('about:blank')
+                        )
+                      })
+                      .reverse()}
+                    setStartingUrl={url => updateActiveTab({ url })}
+                    onRemoveBookmark={removeBookmark}
+                    onRemoveDefaultApp={removeDefaultApp}
+                    removedDefaultApps={removedDefaultApps}
+                    homepageSettings={homepageSettings}
+                    onUpdateHomepageSettings={updateHomepageSettings}
+                  />
+                </View>
+              )}
+
               {isFullscreen && (
                 <TouchableOpacity
                   style={{
@@ -1772,73 +1844,6 @@ function Browser() {
                   <Ionicons name="contract-outline" size={20} color="white" />
                 </TouchableOpacity>
               )}
-              <WebView
-                ref={activeTab?.webviewRef}
-                source={{
-                  uri: activeTab?.url,
-                  headers: {
-                    'Accept-Language': getAcceptLanguageHeader()
-                  }
-                }}
-                originWhitelist={['https://*', 'http://*']}
-                onMessage={handleMessage}
-                // Added injected scanner invocation function into webview runtime
-                injectedJavaScript={
-                  injectedJavaScript +
-                  `
-                  window.scanCodeWithCamera = function(reason) {
-                    return new Promise((resolve, reject) => {
-                      const handleScanResponse = (event) => {
-                        try {
-                          const data = JSON.parse(event.data);
-                          if (data.type === 'SCAN_RESPONSE') {
-                            clearTimeout(timeout);
-                            resolve(data.data);
-                          }
-                        } catch (e) {
-                          // Ignore parsing errors
-                        }
-                      };
-
-                      window.addEventListener('message', handleScanResponse, { once: true });
-  
-                      window.ReactNativeWebView?.postMessage(JSON.stringify({
-                        type: 'REQUEST_SCAN'
-                      }));
-
-                      const timeout = setTimeout(() => {
-                        reject(new Error('Scan timeout'));
-                      }, 60000);
-                    });
-                  };
-                  `
-                }
-                onNavigationStateChange={handleNavStateChange}
-                onLoadEnd={() => tabStore.clearSwitchLoading()}
-                userAgent={isDesktopView ? desktopUserAgent : mobileUserAgent}
-                onError={(syntheticEvent: any) => {
-                  tabStore.clearSwitchLoading()
-                  const { nativeEvent } = syntheticEvent
-                  // Ignore favicon errors for about:blank
-                  if (nativeEvent.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) {
-                    return
-                  }
-                  console.warn('WebView error:', nativeEvent)
-                }}
-                onHttpError={(syntheticEvent: any) => {
-                  const { nativeEvent } = syntheticEvent
-                  // Ignore favicon errors for about:blank
-                  if (nativeEvent.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) {
-                    return
-                  }
-                  console.warn('WebView HTTP error:', nativeEvent)
-                }}
-                javaScriptEnabled
-                domStorageEnabled
-                allowsBackForwardNavigationGestures
-                containerStyle={{ backgroundColor: colors.background }}
-                style={{ flex: 1 }}
-              />
               {tabStore.switchLoading && (
                 <View
                   pointerEvents="none"

@@ -20,6 +20,12 @@ export class TabStore {
   private nextId = 1
   private isSwitchingTabs = false
   private switchLoadingTimeout: ReturnType<typeof setTimeout> | null = null
+  // Most-recently-active tab ids, newest first. Drives the warm WebView pool so
+  // recently-used tabs stay mounted (instant switch, no reload).
+  recentTabIds: number[] = []
+  // How many tabs keep a live (mounted) WebView. Older tabs go cold and remount
+  // on next activation.
+  static readonly WARM_POOL_SIZE = 4
   private tabNavigationHistories: { [tabId: number]: string[] } = {} // Track navigation history per tab
   private tabHistoryIndexes: { [tabId: number]: number } = {} // Track current position in history per tab
 
@@ -58,6 +64,7 @@ export class TabStore {
     const newTab = this.createTab(initialUrl)
     this.tabs.push(newTab)
     this.activeTabId = newTab.id
+    this.markRecent(newTab.id)
 
     // Initialize navigation history for new tab - only add valid URLs to history
     if (initialUrl && initialUrl !== kNEW_TAB_URL && initialUrl !== 'about:blank' && isValidUrl(initialUrl)) {
@@ -94,14 +101,19 @@ export class TabStore {
     const tab = this.tabs.find(t => t.id === id)
     if (tab) {
       const isSameTab = id === this.activeTabId
+      // Warm tabs already have a mounted, loaded WebView — switching to them is
+      // instant and fires no load event, so they must NOT raise the overlay
+      // (it would hang until the safety timeout). Only cold tabs remount + load.
+      const wasWarm = this.isWarm(id)
       this.isSwitchingTabs = true
       this.activeTabId = id
+      this.markRecent(id)
 
       // Show the loading overlay immediately (same MobX commit as the active
-      // tab change) for real web pages so the old page never flashes. Homepage
-      // (kNEW_TAB_URL) renders natively with no WebView load event, so skip it.
+      // tab change) for cold real web pages so the old page never flashes.
+      // Homepage (kNEW_TAB_URL) renders natively with no WebView load event.
       const targetIsWebPage = tab.url !== kNEW_TAB_URL && tab.url.startsWith('http')
-      this.switchLoading = !isSameTab && targetIsWebPage
+      this.switchLoading = !isSameTab && targetIsWebPage && !wasWarm
 
       // Safety net: clear the overlay even if no load event fires.
       if (this.switchLoadingTimeout) clearTimeout(this.switchLoadingTimeout)
@@ -113,6 +125,24 @@ export class TabStore {
         this.isSwitchingTabs = false
       }, 100) // Reduced timeout
     }
+  }
+
+  // Move a tab id to the front of the recency list (newest first).
+  markRecent(id: number) {
+    this.recentTabIds = [id, ...this.recentTabIds.filter(t => t !== id)]
+  }
+
+  // Tab ids whose WebView should stay mounted: the WARM_POOL_SIZE most-recent
+  // tabs that still exist, with the active tab always included.
+  get warmTabIds(): number[] {
+    const existing = this.recentTabIds.filter(id => this.tabs.some(t => t.id === id))
+    const warm = existing.slice(0, TabStore.WARM_POOL_SIZE)
+    if (!warm.includes(this.activeTabId)) warm.unshift(this.activeTabId)
+    return warm
+  }
+
+  isWarm(id: number): boolean {
+    return this.warmTabIds.includes(id)
   }
 
   clearSwitchLoading() {
@@ -204,9 +234,10 @@ export class TabStore {
 
     this.tabs.splice(tabIndex, 1)
 
-    // Clear navigation history for closed tab
+    // Clear navigation history + recency for closed tab
     delete this.tabNavigationHistories[id]
     delete this.tabHistoryIndexes[id]
+    this.recentTabIds = this.recentTabIds.filter(t => t !== id)
 
     if (this.tabs.length === 0) {
       this.newTab()
@@ -215,6 +246,7 @@ export class TabStore {
 
     if (this.activeTabId === id) {
       this.activeTabId = this.tabs[Math.max(tabIndex - 1, 0)].id
+      this.markRecent(this.activeTabId)
     }
     this.saveTabs()
   }

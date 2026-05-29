@@ -15,7 +15,6 @@ export function useRenderCount(name: string): number {
   count.current += 1
   if (__DEV__) {
     perf.measure(`render:${name}`, 0)
-    // eslint-disable-next-line no-console
     console.log(`[render] ${name} #${count.current}`)
   }
   return count.current
