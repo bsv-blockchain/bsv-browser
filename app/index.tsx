@@ -75,6 +75,7 @@ import { useMemoryHygiene } from '@/hooks/useMemoryHygiene'
 import { perf } from '@/utils/perf'
 import { shouldForwardWebViewLogs } from '@/utils/logging'
 import { useRenderCount } from '@/hooks/useRenderCount'
+import { PerfProfiler } from '@/components/PerfProfiler'
 import { mark } from '@/utils/perfMarks'
 
 /* -------------------------------------------------------------------------- */
@@ -2160,7 +2161,9 @@ const Browser = observer(function Browser() {
 
 const BrowserWithSheet = observer(() => (
   <SheetProvider>
-    <Browser />
+    <PerfProfiler id="Browser">
+      <Browser />
+    </PerfProfiler>
   </SheetProvider>
 ))
 

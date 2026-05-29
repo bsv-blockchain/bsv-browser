@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
 import { maxTabsForTier } from '@/utils/deviceTier'
 import { devLog } from '@/utils/logging'
+import { perf } from '@/utils/perf'
 const STORAGE_KEYS = {
   TABS: 'tabs',
   ACTIVE: 'activeTabId',
@@ -39,6 +40,10 @@ export class TabStore {
   // never visible after the user taps a different tab.
   switchLoading = false
   private switchLoadingTimeout: ReturnType<typeof setTimeout> | null = null
+  // Ends the 'tab.switch.toPaint' perf span (tap -> target page first paint).
+  // Set when a web-page switch raises the loading overlay; called from
+  // clearSwitchLoading() once the page paints. Dev-only via perf.mark.
+  private switchPerfEnd: (() => void) | null = null
   // Debounce handle for persisting tabs. saveTabs() is called on nearly every
   // mutation (and twice per navigation via handleNavigationStateChange), each
   // doing JSON.stringify of all tabs + nav histories + AsyncStorage I/O on the
@@ -167,6 +172,8 @@ export class TabStore {
       this.switchLoading = targetIsWebPage
       if (this.switchLoadingTimeout) clearTimeout(this.switchLoadingTimeout)
       if (this.switchLoading) {
+        // Measure the user-perceived switch latency: tap -> target first paint.
+        this.switchPerfEnd = perf.mark('tab.switch.toPaint')
         this.switchLoadingTimeout = setTimeout(() => this.clearSwitchLoading(), 8000)
       }
 
@@ -182,6 +189,10 @@ export class TabStore {
     if (this.switchLoadingTimeout) {
       clearTimeout(this.switchLoadingTimeout)
       this.switchLoadingTimeout = null
+    }
+    if (this.switchPerfEnd) {
+      this.switchPerfEnd()
+      this.switchPerfEnd = null
     }
     this.switchLoading = false
   }
