@@ -33,6 +33,11 @@ export class TabStore {
   activeTabId = 1
   showTabsView = false
   isInitialized = false // Add initialization flag
+  // True while a tab switch is waiting for the target page's first paint.
+  // Drives a full-screen loading overlay so the previous tab's content is
+  // never visible after the user taps a different tab.
+  switchLoading = false
+  private switchLoadingTimeout: ReturnType<typeof setTimeout> | null = null
   private nextId = 1
   private tabNavigationHistories: { [tabId: number]: { url: string; title: string }[] } = {} // Track navigation history per tab
   private tabHistoryIndexes: { [tabId: number]: number } = {} // Track current position in history per tab
@@ -146,12 +151,32 @@ export class TabStore {
       console.log(`setActiveTab(): Setting activeTabId=${id}`)
       this.activeTabId = id
       this.lastFocusedAt.set(id, Date.now())
+
+      // Raise the loading overlay in the same MobX commit as the active-tab
+      // change so the previous tab's page never flashes while the new page
+      // loads. Only for real web pages — the homepage (kNEW_TAB_URL) renders
+      // natively with no WebView load event that would clear the overlay.
+      const targetIsWebPage = targetTab.url !== kNEW_TAB_URL && targetTab.url.startsWith('http')
+      this.switchLoading = targetIsWebPage
+      if (this.switchLoadingTimeout) clearTimeout(this.switchLoadingTimeout)
+      if (this.switchLoading) {
+        this.switchLoadingTimeout = setTimeout(() => this.clearSwitchLoading(), 8000)
+      }
+
       this.saveActive().catch(e => console.error('saveActive failed', e))
     } else if (!targetTab) {
       console.warn(`setActiveTab(): Target tab ${id} not found`)
     } else {
       console.log(`setActiveTab(): Tab ${id} is already active, no change needed`)
     }
+  }
+
+  clearSwitchLoading() {
+    if (this.switchLoadingTimeout) {
+      clearTimeout(this.switchLoadingTimeout)
+      this.switchLoadingTimeout = null
+    }
+    this.switchLoading = false
   }
 
   /** Evict the oldest non-active tab when tab count exceeds MAX_TABS. */

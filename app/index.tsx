@@ -1658,6 +1658,7 @@ const Browser = observer(function Browser() {
             androidHardwareAccelerationDisabled={false}
             onError={(e: any) => {
               e.preventDefault()
+              tabStore.clearSwitchLoading()
               if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
               const code = e.nativeEvent?.code
               // Only handle native network errors (negative codes: DNS, TLS, timeout, etc.)
@@ -1717,6 +1718,8 @@ const Browser = observer(function Browser() {
               }
             }}
             onLoadEnd={(event: any) => {
+              // Target page has painted — drop the tab-switch loading overlay.
+              tabStore.clearSwitchLoading()
               // Suppress state updates while 402 payment is in flight — document.write
               // of the loading page fires onLoadEnd which re-renders and flickers the
               // spending authorization modal.
@@ -1759,6 +1762,19 @@ const Browser = observer(function Browser() {
             containerStyle={webviewContainerStyle}
             style={webviewStyle}
           />
+          {tabStore.switchLoading && (
+            <View
+              pointerEvents="none"
+              style={{
+                ...StyleSheet.absoluteFillObject,
+                backgroundColor: colors.background,
+                justifyContent: 'center',
+                alignItems: 'center'
+              }}
+            >
+              <ActivityIndicator size="large" />
+            </View>
+          )}
         </View>
       )
     }
