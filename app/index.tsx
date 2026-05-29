@@ -72,6 +72,9 @@ import { useHistory } from '@/hooks/useHistory'
 import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useMemoryHygiene } from '@/hooks/useMemoryHygiene'
+import { perf } from '@/utils/perf'
+import { shouldForwardWebViewLogs } from '@/utils/logging'
+import { useRenderCount } from '@/hooks/useRenderCount'
 import { mark } from '@/utils/perfMarks'
 
 /* -------------------------------------------------------------------------- */
@@ -165,6 +168,7 @@ const DESKTOP_UA_ANDROID =
 /* -------------------------------------------------------------------------- */
 
 const Browser = observer(function Browser() {
+  useRenderCount('Browser') // dev-only: logs a re-render storm; zero-cost in prod
   /* --------------------------- theme / basic hooks -------------------------- */
   const { isDark, colors } = useTheme()
   const gc = useGlassColors()
@@ -295,7 +299,13 @@ const Browser = observer(function Browser() {
   // tab WebView caches. Without this the app accumulates view-shot files and
   // unbounded WK caches until the OS terminates the process.
   useMemoryHygiene({
-    onBackground: captureActiveThumbnail,
+    onBackground: () => {
+      captureActiveThumbnail()
+      // Force any pending debounced tab persist to disk before the OS can
+      // suspend/kill us, so state is never lost on a cold kill within the
+      // saveTabs() debounce window.
+      tabStore.flushTabs().catch(() => {})
+    },
     onMemoryWarning: () => {
       tabStore.purgeInactiveTabResources()
     }
@@ -363,31 +373,30 @@ const Browser = observer(function Browser() {
   // The setMenuPopoverOpen(open) API is preserved so callers don't change.
   const [menuPopoverOpen, _setMenuPopoverMounted] = useState(false)
   const menuPopoverProgress = useSharedValue(0)
-  const setMenuPopoverOpen = useCallback((open: boolean) => {
-    if (open) {
-      // Snap progress to 1 INSTANTLY on open — no fade-in. Rationale:
-      // the popover card is a LiquidGlassView (UIVisualEffectView on iOS).
-      // If the wrapper's opacity animates from 0 -> 1 on first mount, the
-      // native effect view initialises in a disabled state and stays stuck
-      // transparent (the "first open is empty" bug). By making the wrapper
-      // opaque on its FIRST paint, the effect view initialises enabled and
-      // renders correctly. Perceptual motion still comes from the existing
-      // translateY in `animatedMenuPopoverStyle`. The close path still
-      // animates 1 -> 0 so the popover can fade out before unmounting.
-      _setMenuPopoverMounted(true)
-      menuPopoverProgress.value = 1
-    } else {
-      menuPopoverProgress.value = withTiming(
-        0,
-        { duration: 160, easing: Easing.in(Easing.cubic) },
-        finished => {
+  const setMenuPopoverOpen = useCallback(
+    (open: boolean) => {
+      if (open) {
+        // Snap progress to 1 INSTANTLY on open — no fade-in. Rationale:
+        // the popover card is a LiquidGlassView (UIVisualEffectView on iOS).
+        // If the wrapper's opacity animates from 0 -> 1 on first mount, the
+        // native effect view initialises in a disabled state and stays stuck
+        // transparent (the "first open is empty" bug). By making the wrapper
+        // opaque on its FIRST paint, the effect view initialises enabled and
+        // renders correctly. Perceptual motion still comes from the existing
+        // translateY in `animatedMenuPopoverStyle`. The close path still
+        // animates 1 -> 0 so the popover can fade out before unmounting.
+        _setMenuPopoverMounted(true)
+        menuPopoverProgress.value = 1
+      } else {
+        menuPopoverProgress.value = withTiming(0, { duration: 160, easing: Easing.in(Easing.cubic) }, finished => {
           if (finished) {
             runOnJS(_setMenuPopoverMounted)(false)
           }
-        }
-      )
-    }
-  }, [menuPopoverProgress])
+        })
+      }
+    },
+    [menuPopoverProgress]
+  )
   // Binary visibility (NOT a fractional fade). The popover card is a
   // LiquidGlassView (UIVisualEffectView on iOS) and animating an ancestor's
   // opacity to fractional values triggers Apple's well-known stuck-effect
@@ -411,28 +420,27 @@ const Browser = observer(function Browser() {
   // completes via runOnJS in the withTiming callback.
   const [historyPopoverDirection, _setHistoryPopoverDirectionMounted] = useState<'back' | 'forward' | null>(null)
   const historyPopoverProgress = useSharedValue(0)
-  const setHistoryPopoverDirection = useCallback((next: 'back' | 'forward' | null) => {
-    if (next !== null) {
-      // Snap progress to 1 INSTANTLY on open — no fade-in. Same rationale as
-      // `setMenuPopoverOpen` above: the popover card is a LiquidGlassView
-      // (UIVisualEffectView on iOS), and a 0 -> 1 fade-in on first mount
-      // leaves the native effect stuck transparent. Opening with opacity
-      // already at 1 avoids the bug. Close still animates 1 -> 0 so the
-      // popover can fade out before unmounting.
-      _setHistoryPopoverDirectionMounted(next)
-      historyPopoverProgress.value = 1
-    } else {
-      historyPopoverProgress.value = withTiming(
-        0,
-        { duration: 160, easing: Easing.in(Easing.cubic) },
-        finished => {
+  const setHistoryPopoverDirection = useCallback(
+    (next: 'back' | 'forward' | null) => {
+      if (next !== null) {
+        // Snap progress to 1 INSTANTLY on open — no fade-in. Same rationale as
+        // `setMenuPopoverOpen` above: the popover card is a LiquidGlassView
+        // (UIVisualEffectView on iOS), and a 0 -> 1 fade-in on first mount
+        // leaves the native effect stuck transparent. Opening with opacity
+        // already at 1 avoids the bug. Close still animates 1 -> 0 so the
+        // popover can fade out before unmounting.
+        _setHistoryPopoverDirectionMounted(next)
+        historyPopoverProgress.value = 1
+      } else {
+        historyPopoverProgress.value = withTiming(0, { duration: 160, easing: Easing.in(Easing.cubic) }, finished => {
           if (finished) {
             runOnJS(_setHistoryPopoverDirectionMounted)(null)
           }
-        }
-      )
-    }
-  }, [historyPopoverProgress])
+        })
+      }
+    },
+    [historyPopoverProgress]
+  )
   const historyPopoverOpen = historyPopoverDirection !== null
   // Binary visibility (NOT a fractional fade) — same rationale as
   // `animatedMenuVisibilityStyle` above. The popover card is a LiquidGlassView
@@ -539,7 +547,7 @@ const Browser = observer(function Browser() {
   // Tunable visual compensation (in pixels) for any slight "overhang" of the frosted glass
   // (blur radius, border, shadow, or perceived height of the pill). Start at 0.
   // Increase if the red block on the WebKit demo still sits a pixel or two below the bar.
-  const BOTTOM_CHROME_VISUAL_EXTRA = 0;
+  const BOTTOM_CHROME_VISUAL_EXTRA = 0
 
   /**
    * The authoritative height (from device bottom) that must be reserved for the address bar
@@ -550,9 +558,10 @@ const Browser = observer(function Browser() {
    * https://webkit.org/demos/safe-area-insets/safe-areas.html will have its bottom edge
    * sit flush against the top edge of the frosted address bar.
    */
-  const bottomReservedHeight = !addressBarIsAtTop && !isFullscreen
-    ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT + BOTTOM_CHROME_VISUAL_EXTRA
-    : 0;
+  const bottomReservedHeight =
+    !addressBarIsAtTop && !isFullscreen
+      ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT + BOTTOM_CHROME_VISUAL_EXTRA
+      : 0
 
   // Memoize WebView prop objects so identical values don't churn new refs
   // each Browser re-render. Without this, every state change (menuPopoverOpen
@@ -574,10 +583,7 @@ const Browser = observer(function Browser() {
     }),
     [addressBarIsAtTop, bottomReservedHeight, bottomInset]
   )
-  const webviewContainerStyle = useMemo(
-    () => ({ backgroundColor: isDark ? '#000' : '#fff' }),
-    [isDark]
-  )
+  const webviewContainerStyle = useMemo(() => ({ backgroundColor: isDark ? '#000' : '#fff' }), [isDark])
   const webviewStyle = useMemo(() => ({ flex: 1 }), [])
 
   const activeCameraStreams = useRef<Set<string>>(new Set())
@@ -1192,11 +1198,17 @@ const Browser = observer(function Browser() {
       }
 
       let msg
+      const endParse = perf.mark('webview.message.parse')
       try {
         msg = JSON.parse(event.nativeEvent.data)
       } catch {
+        endParse()
         return
       }
+      endParse()
+      // Records frequency-per-type so a chatty page (e.g. CONSOLE flood) is
+      // obvious in perf.dump(). Zero-cost in production.
+      perf.measure(`webview.message:${msg?.type}`, 0)
 
       if (msg.type === 'FIND_IN_PAGE_RESULT') {
         setFindInPageCurrent(msg.current ?? 0)
@@ -1211,6 +1223,10 @@ const Browser = observer(function Browser() {
       }
 
       if (msg.type === 'CONSOLE') {
+        // Relaying every page console.* call onto the RN JS thread is a major
+        // jank source on chatty pages (each call serializes args + crosses the
+        // bridge). Off by default; toggle via the dev menu when debugging a page.
+        if (!shouldForwardWebViewLogs()) return
         const logPrefix = '[WebView]'
         switch (msg.method) {
           case 'log':
@@ -1251,7 +1267,9 @@ const Browser = observer(function Browser() {
             }
           })
           .catch(() => {})
-          .finally(() => { paymentInFlightUrl.current = null })
+          .finally(() => {
+            paymentInFlightUrl.current = null
+          })
         return
       }
 
@@ -1358,17 +1376,18 @@ const Browser = observer(function Browser() {
   // across Browser re-renders that don't touch activeTab — otherwise every chrome
   // animation tick reassigned this prop and the native WebView module had to
   // re-bind its bridge listener.
-  const handleNavStateChange = useCallback((navState: WebViewNavigation) => {
-    if (!activeTab) return
-    if (paymentInFlightUrl.current) return
-    if (navState.url?.includes('favicon.ico') && activeTab.url === kNEW_TAB_URL) return
+  const handleNavStateChange = useCallback(
+    (navState: WebViewNavigation) => {
+      if (!activeTab) return
+      if (paymentInFlightUrl.current) return
+      if (navState.url?.includes('favicon.ico') && activeTab.url === kNEW_TAB_URL) return
 
-    if (
-      normalizeUrlForHistory(navState.url) !== activeTab.url &&
-      activeCameraStreams.current.has(activeTab.id.toString())
-    ) {
-      activeCameraStreams.current.delete(activeTab.id.toString())
-      activeTab.webviewRef?.current?.injectJavaScript(`
+      if (
+        normalizeUrlForHistory(navState.url) !== activeTab.url &&
+        activeCameraStreams.current.has(activeTab.id.toString())
+      ) {
+        activeCameraStreams.current.delete(activeTab.id.toString())
+        activeTab.webviewRef?.current?.injectJavaScript(`
         (function() {
           if (window.__activeMediaStreams) {
             window.__activeMediaStreams.forEach(stream => {
@@ -1378,26 +1397,28 @@ const Browser = observer(function Browser() {
           }
         })();
       `)
-    }
+      }
 
-    tabStore.handleNavigationStateChange(activeTab.id, navState)
-    // Show the clean URL (without transient challenge tokens) in the address bar
-    const cleanUrl = normalizeUrlForHistory(navState.url)
-    if (!addressEditing.current) setAddressText(cleanUrl)
+      tabStore.handleNavigationStateChange(activeTab.id, navState)
+      // Show the clean URL (without transient challenge tokens) in the address bar
+      const cleanUrl = normalizeUrlForHistory(navState.url)
+      if (!addressEditing.current) setAddressText(cleanUrl)
 
-    // Debounce history push so that rapid onNavigationStateChange events
-    // (which often carry stale titles from the *previous* page) settle before
-    // we commit an entry.  Only the final event's metadata is recorded.
-    if (!navState.loading && cleanUrl !== kNEW_TAB_URL) {
-      if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
-      const url = cleanUrl
-      const title = navState.title || cleanUrl
-      historyDebounceTimer.current = setTimeout(() => {
-        pushHistory({ title, url, timestamp: Date.now() }).catch(() => {})
-        historyDebounceTimer.current = null
-      }, 500)
-    }
-  }, [activeTab, pushHistory])
+      // Debounce history push so that rapid onNavigationStateChange events
+      // (which often carry stale titles from the *previous* page) settle before
+      // we commit an entry.  Only the final event's metadata is recorded.
+      if (!navState.loading && cleanUrl !== kNEW_TAB_URL) {
+        if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
+        const url = cleanUrl
+        const title = navState.title || cleanUrl
+        historyDebounceTimer.current = setTimeout(() => {
+          pushHistory({ title, url, timestamp: Date.now() }).catch(() => {})
+          historyDebounceTimer.current = null
+        }, 500)
+      }
+    },
+    [activeTab, pushHistory]
+  )
 
   /* -------------------------------------------------------------------------- */
   /*                              MANIFEST HANDLING                             */
@@ -1509,9 +1530,7 @@ const Browser = observer(function Browser() {
             // On Android we keep it simple: shrink the WebView frame itself when the
             // address bar is at the bottom. This avoids any visual overlap bugs.
             // People are less sensitive to "content under glass" on Android.
-            bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen
-              ? bottomReservedHeight
-              : 0
+            bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0
           }}
         >
           {isFullscreen && (
@@ -1705,7 +1724,9 @@ const Browser = observer(function Browser() {
                       )
                     }
                   })
-                  .finally(() => { paymentInFlightUrl.current = null })
+                  .finally(() => {
+                    paymentInFlightUrl.current = null
+                  })
               } else if (activeTab?.webviewRef?.current) {
                 // For 403, the response body is often an interactive challenge page
                 // (e.g. Cloudflare human verification). Let the WebView render it
@@ -1831,7 +1852,7 @@ const Browser = observer(function Browser() {
               width: 52,
               height: safeBottomInset(insets.bottom) + 52,
               backgroundColor: 'transparent',
-              zIndex: 15,
+              zIndex: 15
             }}
           />
         )}
@@ -1854,9 +1875,9 @@ const Browser = observer(function Browser() {
                 top: insets.top + spacing.xs,
                 zIndex: 30,
                 width: 44,
-                height: 44,
+                height: 44
               },
-              animatedKebabStyle,
+              animatedKebabStyle
             ]}
             pointerEvents="box-none"
           >
@@ -1877,7 +1898,7 @@ const Browser = observer(function Browser() {
                     width: 44,
                     height: 44,
                     alignItems: 'center',
-                    justifyContent: 'center',
+                    justifyContent: 'center'
                   }}
                   activeOpacity={0.6}
                 >

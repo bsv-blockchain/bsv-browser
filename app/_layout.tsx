@@ -7,6 +7,9 @@ if (typeof AbortSignal !== 'undefined' && !AbortSignal.timeout) {
   }
 }
 
+import '../wdyr' // dev-only re-render tracking; must run before any component renders
+import '@/utils/devMenu' // dev-only profiling controls in the expo-dev-client menu
+
 import React, { useEffect } from 'react'
 import { View, useColorScheme } from 'react-native'
 import { Stack } from 'expo-router'
@@ -71,7 +74,6 @@ function DeepLinkHandler() {
   return null
 }
 
-
 // const DebuggerDisplay = () => {
 //   const [toggle, setToggle] = React.useState(false);
 //   const v = useWallet()
@@ -88,7 +90,6 @@ function DeepLinkHandler() {
 //   </>
 //   )
 // }
-
 
 export default function RootLayout() {
   const isDark = useColorScheme() === 'dark'
