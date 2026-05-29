@@ -1,3 +1,4 @@
+import '../wdyr' // dev-only re-render tracking; must run before any component renders
 import React, { useEffect, useState } from 'react'
 import { Stack } from 'expo-router'
 import { UserContextProvider, NativeHandlers } from '../context/UserContext'

@@ -11,6 +11,43 @@ try {
   console.warn('Failed to load logging.config.ts, using default settings:', e)
 }
 
+// ---------------------------------------------------------------------------
+// Runtime master switch
+// ---------------------------------------------------------------------------
+// Raw console.log calls scattered through the app bypass loggingConfig entirely
+// and flood the JS thread / bridge (a top cause of UI jank). This master switch
+// gates the helpers below at runtime so all app logging can be silenced with one
+// call — e.g. before profiling an interaction:  setLoggingEnabled(false)
+//
+// Defaults: on in dev, off in production.
+let loggingEnabled = typeof __DEV__ !== 'undefined' ? __DEV__ : true
+
+// Whether to forward web-page console.* messages from WebViews onto the RN JS
+// thread. Off by default — this is one of the worst offenders for jank on chatty
+// pages. Flip on only when actively debugging a specific site.
+let forwardWebViewLogs = false
+
+export const setLoggingEnabled = (enabled: boolean) => {
+  loggingEnabled = enabled
+}
+export const isLoggingEnabled = () => loggingEnabled
+
+export const setForwardWebViewLogs = (enabled: boolean) => {
+  forwardWebViewLogs = enabled
+}
+export const shouldForwardWebViewLogs = () => forwardWebViewLogs
+
+/**
+ * Gated drop-in replacement for raw `console.log`. Use this in hot paths so the
+ * master switch (and production builds) can silence the flood. Cheap when off:
+ * it returns before touching its arguments.
+ */
+export const devLog = (...args: any[]) => {
+  if (!loggingEnabled) return
+  // eslint-disable-next-line no-console
+  console.log(...args)
+}
+
 const colorize = (elapsed: number) => {
   if (elapsed > 1.0) {
     return supportsTruecolor
@@ -30,6 +67,8 @@ const colorize = (elapsed: number) => {
 }
 
 export const logWithTimestamp = (file: string = 'unknown', message: string = 'No message', ...args: any[]) => {
+  // Master runtime switch first (cheapest bail-out).
+  if (!loggingEnabled) return
   // Check if logging is enabled for this file (fall back to default if not set)
   const isEnabled = loggingConfig[file] !== undefined ? loggingConfig[file] : loggingConfig['default']
   if (!isEnabled) return

@@ -101,6 +101,7 @@
     "@expo/config-plugins": "~10.1.1",
     "@expo/prebuild-config": "~9.0.0",
     "@types/react": "~19.0.10",
+    "@welldone-software/why-did-you-render": "^10.0.1",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~9.2.0",
     "eslint-config-prettier": "^9.1.0",

@@ -26,6 +26,9 @@ import { StatusBar } from 'expo-status-bar'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import Modal from 'react-native-modal'
+import { useRenderCount } from '@/hooks/useRenderCount'
+import { PerfProfiler } from '@/components/PerfProfiler'
+import { perf } from '@/utils/perf'
 import {
   GestureHandlerRootView,
   Swipeable,
@@ -169,6 +172,7 @@ function StarDrawer({
 /* -------------------------------------------------------------------------- */
 
 function Browser() {
+  useRenderCount('Browser')
   /* --------------------------- theme / basic hooks -------------------------- */
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
@@ -1048,12 +1052,15 @@ function Browser() {
       }
 
       let msg
+      const endParse = perf.mark('webview.message.parse')
       try {
         msg = JSON.parse(event.nativeEvent.data)
       } catch (error) {
         console.error('Failed to parse WebView message:', error)
         return
       }
+      endParse()
+      perf.measure(`webview.message:${msg.type}`, 0)
       logWithTimestamp(F, `handleMessage:msg.type=${msg.type}`)
       // Checks for split-screen or fullscreen camera scanning
       if (msg.type === 'REQUEST_SCAN') {
@@ -2165,7 +2172,15 @@ function Browser() {
   )
 }
 
-export default observer(Browser)
+const ObservedBrowser = observer(Browser)
+
+export default function BrowserScreen() {
+  return (
+    <PerfProfiler id="Browser">
+      <ObservedBrowser />
+    </PerfProfiler>
+  )
+}
 
 /* -------------------------------------------------------------------------- */
 /*                               SUB-COMPONENTS                               */
@@ -2180,6 +2195,7 @@ const TabsViewBase = ({
   setAddressText: (text: string) => void
   colors: any
 }) => {
+  useRenderCount('TabsView')
   const { t } = useTranslation()
   // Use the imported tabStore directly
   const screen = Dimensions.get('window')
