@@ -2,6 +2,7 @@
 const F = 'app/browser'
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Platform,
@@ -1797,8 +1798,10 @@ function Browser() {
                   `
                 }
                 onNavigationStateChange={handleNavStateChange}
+                onLoadEnd={() => tabStore.clearSwitchLoading()}
                 userAgent={isDesktopView ? desktopUserAgent : mobileUserAgent}
                 onError={(syntheticEvent: any) => {
+                  tabStore.clearSwitchLoading()
                   const { nativeEvent } = syntheticEvent
                   // Ignore favicon errors for about:blank
                   if (nativeEvent.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) {
@@ -1820,6 +1823,19 @@ function Browser() {
                 containerStyle={{ backgroundColor: colors.background }}
                 style={{ flex: 1 }}
               />
+              {tabStore.switchLoading && (
+                <View
+                  pointerEvents="none"
+                  style={{
+                    ...StyleSheet.absoluteFillObject,
+                    backgroundColor: colors.background,
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                  }}
+                >
+                  <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+              )}
               {showScanner && (
                 <UniversalScanner
                   ref={scannerRef}

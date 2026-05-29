@@ -12,8 +12,13 @@ export class TabStore {
   tabs: Tab[] = [] // Always initialize as an array
   activeTabId = 1
   showTabsView = false
+  // True while a tab switch is waiting for the target page's first paint.
+  // Drives a full-screen loading overlay so the previous tab's content is
+  // never visible after the user taps a different tab.
+  switchLoading = false
   private nextId = 1
   private isSwitchingTabs = false
+  private switchLoadingTimeout: ReturnType<typeof setTimeout> | null = null
   private tabNavigationHistories: { [tabId: number]: string[] } = {} // Track navigation history per tab
   private tabHistoryIndexes: { [tabId: number]: number } = {} // Track current position in history per tab
 
@@ -85,14 +90,36 @@ export class TabStore {
   }
 
   setActiveTab(id: number) {
-    if (this.tabs.some(t => t.id === id)) {
+    const tab = this.tabs.find(t => t.id === id)
+    if (tab) {
+      const isSameTab = id === this.activeTabId
       this.isSwitchingTabs = true
       this.activeTabId = id
+
+      // Show the loading overlay immediately (same MobX commit as the active
+      // tab change) for real web pages so the old page never flashes. Homepage
+      // (kNEW_TAB_URL) renders natively with no WebView load event, so skip it.
+      const targetIsWebPage = tab.url !== kNEW_TAB_URL && tab.url.startsWith('http')
+      this.switchLoading = !isSameTab && targetIsWebPage
+
+      // Safety net: clear the overlay even if no load event fires.
+      if (this.switchLoadingTimeout) clearTimeout(this.switchLoadingTimeout)
+      if (this.switchLoading) {
+        this.switchLoadingTimeout = setTimeout(() => this.clearSwitchLoading(), 8000)
+      }
 
       setTimeout(() => {
         this.isSwitchingTabs = false
       }, 100) // Reduced timeout
     }
+  }
+
+  clearSwitchLoading() {
+    if (this.switchLoadingTimeout) {
+      clearTimeout(this.switchLoadingTimeout)
+      this.switchLoadingTimeout = null
+    }
+    this.switchLoading = false
   }
 
   setShowTabsView(show: boolean) {
