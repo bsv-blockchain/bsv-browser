@@ -174,6 +174,27 @@ export const WalletContext = createContext<WalletContextValue>({
   checkUtxoSpendability: async () => ''
 })
 
+/**
+ * Stable sub-context carrying ONLY the rarely-changing wallet handles
+ * (managers, storage, adminOriginator, walletBuilding). Consumers that just
+ * need the manager (e.g. the Browser screen) subscribe here instead of the
+ * full WalletContext, whose value identity changes on every queue/tx-status/SSE
+ * tick — which previously re-rendered the entire Browser tree dozens of times
+ * per second during dApp activity.
+ */
+export interface WalletManagersSlice {
+  managers: ManagerState
+  storage: StorageExpoSQLite | null
+  adminOriginator: string
+  walletBuilding: boolean
+}
+export const WalletManagersContext = createContext<WalletManagersSlice>({
+  managers: {},
+  storage: null,
+  adminOriginator: ADMIN_ORIGINATOR,
+  walletBuilding: false
+})
+
 type PermissionType = 'identity' | 'protocol' | 'renewal' | 'basket'
 
 type BasketAccessRequest = {
@@ -1408,7 +1429,18 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     ]
   )
 
-  return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>
+  // Stable handles only — identity changes solely when the managers are
+  // (re)built or the building flag flips, NOT on queue/tx-status/SSE churn.
+  const managersValue = useMemo<WalletManagersSlice>(
+    () => ({ managers, storage, adminOriginator, walletBuilding }),
+    [managers, storage, adminOriginator, walletBuilding]
+  )
+
+  return (
+    <WalletContext.Provider value={contextValue}>
+      <WalletManagersContext.Provider value={managersValue}>{children}</WalletManagersContext.Provider>
+    </WalletContext.Provider>
+  )
 }
 
 export const useWallet = () => useContext(WalletContext)
@@ -1505,10 +1537,4 @@ export const useTxStatusVersion = (): number => {
 }
 
 /** Managers + storage — used by the WebView CWI message handler. */
-export const useWalletManagers = () => {
-  const ctx = useContext(WalletContext)
-  return useMemo(
-    () => ({ managers: ctx.managers, storage: ctx.storage, adminOriginator: ctx.adminOriginator }),
-    [ctx.managers, ctx.storage, ctx.adminOriginator]
-  )
-}
+export const useWalletManagers = (): WalletManagersSlice => useContext(WalletManagersContext)

@@ -24,7 +24,7 @@ import { observer } from 'mobx-react-lite'
 import { router } from 'expo-router'
 
 import { useTheme } from '@/context/theme/ThemeContext'
-import { useWallet } from '@/context/WalletContext'
+import { useWalletManagers } from '@/context/WalletContext'
 import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
@@ -165,6 +165,337 @@ const DESKTOP_UA_ANDROID =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 
 /* -------------------------------------------------------------------------- */
+/*                               WEBVIEW HOST                                 */
+/* -------------------------------------------------------------------------- */
+/**
+ * Memoized owner of the native <WebView>. Extracted out of the Browser observer
+ * so the page-load re-render storm (isLoading / canGoBack / title churn —
+ * hundreds of MobX mutations per browse session) NO LONGER reconciles the
+ * heavy WebView subtree. It re-renders only when one of its explicit props
+ * changes: the active tab id, the URL (a real navigation), desktop/fullscreen
+ * mode, or layout insets. All event handlers read the live tab imperatively via
+ * tabStore at event time (not render time), so they never need the observable
+ * tab object as a prop.
+ */
+interface WebViewHostProps {
+  tabId: number
+  webviewRef: React.RefObject<any>
+  containerRef: React.RefObject<View | null>
+  uri: string
+  isDesktopMode: boolean
+  isFullscreen: boolean
+  onExitFullscreen: () => void
+  topInset: number
+  bottomReservedHeight: number
+  addressBarIsAtTop: boolean
+  isDark: boolean
+  acceptLanguage: string
+  injectedJavaScript: string
+  injectedJSBefore: string
+  onMessage: (event: any) => void
+  onNavStateChange: (navState: WebViewNavigation) => void
+  paymentHandlerRef: React.MutableRefObject<any>
+  paymentInFlightUrl: React.MutableRefObject<string | null>
+  webviewContentInset: any
+  webviewScrollIndicatorInsets: any
+  webviewContainerStyle: any
+  webviewStyle: any
+}
+
+const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
+  const {
+    tabId,
+    webviewRef,
+    containerRef,
+    uri,
+    isDesktopMode,
+    isFullscreen,
+    onExitFullscreen,
+    topInset,
+    bottomReservedHeight,
+    addressBarIsAtTop,
+    acceptLanguage,
+    injectedJavaScript,
+    injectedJSBefore,
+    onMessage,
+    onNavStateChange,
+    paymentHandlerRef,
+    paymentInFlightUrl,
+    webviewContentInset,
+    webviewScrollIndicatorInsets,
+    webviewContainerStyle,
+    webviewStyle
+  } = props
+
+  const getTab = () => tabStore.tabs.find(t => t.id === tabId)
+
+  return (
+    <View
+      ref={containerRef}
+      collapsable={false}
+      style={{
+        position: 'absolute',
+        top: isFullscreen ? 0 : topInset,
+        left: 0,
+        right: 0,
+        bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0
+      }}
+    >
+      {isFullscreen && (
+        <TouchableOpacity
+          style={styles.exitFullscreen}
+          onPress={() => {
+            onExitFullscreen()
+            webviewRef.current?.injectJavaScript(`
+              window.dispatchEvent(new MessageEvent('message', {
+                data: JSON.stringify({ type: 'FULLSCREEN_CHANGE', isFullscreen: false })
+              }));
+            `)
+          }}
+        >
+          <Ionicons name="contract-outline" size={20} color="white" />
+        </TouchableOpacity>
+      )}
+      <WebView
+        ref={webviewRef}
+        source={{
+          uri: uri,
+          headers: { 'Accept-Language': acceptLanguage }
+        }}
+        userAgent={
+          isDesktopMode
+            ? Platform.OS === 'ios'
+              ? DESKTOP_UA_IOS
+              : DESKTOP_UA_ANDROID
+            : Platform.OS === 'ios'
+              ? MOBILE_UA_IOS
+              : MOBILE_UA_ANDROID
+        }
+        sharedCookiesEnabled={true}
+        originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
+        onMessage={onMessage}
+        injectedJavaScript={injectedJavaScript}
+        injectedJavaScriptBeforeContentLoaded={injectedJSBefore}
+        onNavigationStateChange={onNavStateChange}
+        allowsFullscreenVideo={true}
+        mediaPlaybackRequiresUserAction={false}
+        allowsInlineMediaPlayback={true}
+        geolocationEnabled
+        onPermissionRequest={
+          Platform.OS === 'android'
+            ? (event: any) => {
+                const resources: string[] = event.nativeEvent?.resources ?? []
+                ;(async () => {
+                  try {
+                    const toGrant: string[] = []
+                    for (const resource of resources) {
+                      if (resource.includes('VIDEO_CAPTURE')) {
+                        const current = await check(PERMISSIONS.ANDROID.CAMERA)
+                        const granted =
+                          current === RESULTS.GRANTED ||
+                          (await request(PERMISSIONS.ANDROID.CAMERA)) === RESULTS.GRANTED
+                        if (granted) toGrant.push(resource)
+                      } else if (resource.includes('AUDIO_CAPTURE')) {
+                        const current = await check(PERMISSIONS.ANDROID.RECORD_AUDIO)
+                        const granted =
+                          current === RESULTS.GRANTED ||
+                          (await request(PERMISSIONS.ANDROID.RECORD_AUDIO)) === RESULTS.GRANTED
+                        if (granted) toGrant.push(resource)
+                      }
+                    }
+                    if (toGrant.length > 0) {
+                      event.nativeEvent.request.grant(toGrant)
+                    } else {
+                      event.nativeEvent.request.deny()
+                    }
+                  } catch {
+                    event.nativeEvent.request.deny()
+                  }
+                })()
+              }
+            : () => false
+        }
+        onFileDownload={
+          Platform.OS === 'ios'
+            ? ({ nativeEvent }: any) => {
+                handleUrlDownload(nativeEvent.downloadUrl).catch(() => {})
+              }
+            : undefined
+        }
+        onShouldStartLoadWithRequest={(request: any) => {
+          const { url: reqUrl, navigationType } = request
+          if (reqUrl.startsWith('blob:') || reqUrl.startsWith('data:')) {
+            const escaped = reqUrl.replace(/'/g, "\\'")
+            setTimeout(() => {
+              webviewRef.current?.injectJavaScript(`(function(){
+                try{
+                  var url='${escaped}';
+                  var reg=window.__blobReg;
+                  var blob=reg&&reg.get(url);
+                  window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type:'DL_DEBUG',info:'reg='+!!reg+' blob='+!!blob+(blob?' sz='+blob.size:'')
+                  }));
+                  if(blob){
+                    var fn=null;
+                    var rd=new FileReader();
+                    rd.onloadend=function(){
+                      if(typeof rd.result!=='string')return;
+                      var b64=rd.result.split(',')[1]||'';
+                      window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+                        type:'FILE_DOWNLOAD_BLOB',base64:b64,
+                        mimeType:blob.type||'application/octet-stream',filename:fn
+                      }));
+                    };
+                    rd.readAsDataURL(blob);
+                  }
+                }catch(e){
+                  window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type:'DL_DEBUG',info:'err:'+e
+                  }));
+                }
+              })();true;`)
+            }, 0)
+            return false
+          }
+          if (navigationType === 'click') {
+            const fileExtPattern =
+              /\.(pdf|zip|gz|tar|rar|7z|doc|docx|xls|xlsx|ppt|pptx|csv|mp3|mp4|avi|mov|dmg|exe|apk|ipa)(\?|$)/i
+            if (fileExtPattern.test(reqUrl)) {
+              handleUrlDownload(reqUrl).catch(() => {})
+              return false
+            }
+          }
+          return true
+        }}
+        androidLayerType="hardware"
+        androidHardwareAccelerationDisabled={false}
+        onError={(e: any) => {
+          e.preventDefault()
+          tabStore.clearSwitchLoading()
+          const tab = getTab()
+          if (e.nativeEvent?.url?.includes('favicon.ico') && tab?.url === kNEW_TAB_URL) return
+          const code = e.nativeEvent?.code
+          if (typeof code === 'number' && code < 0 && webviewRef.current) {
+            const info = getNativeErrorInfo(code)
+            const page = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>:root{--bg:#f5f5f0;--text:#1a1a1a;--sub:#666}@media(prefers-color-scheme:dark){:root{--bg:#1a1a1a;--text:#e8e6e1;--sub:#999}}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:var(--bg);color:var(--text);text-align:center}h1{font-size:6rem;margin:0}.subtitle{font-size:1.5rem;margin:8px 0}.detail{color:var(--sub);padding:0 24px}</style></head><body><div><h1 style="color:${info.color}">${info.code}</h1><p class="subtitle">${info.title}</p><p class="detail">${info.detail}</p></div></body></html>`
+            webviewRef.current.injectJavaScript(
+              `document.open();document.write(\`${page.replace(/`/g, '\\`')}\`);document.close();`
+            )
+          }
+        }}
+        onHttpError={(e: any) => {
+          const tab = getTab()
+          if (e.nativeEvent?.url?.includes('favicon.ico') && tab?.url === kNEW_TAB_URL) return
+          const status = e.nativeEvent?.statusCode || 404
+          const url = e.nativeEvent?.url || ''
+          if (status === 402 && paymentHandlerRef.current) {
+            if (paymentInFlightUrl.current === url) return
+            paymentInFlightUrl.current = url
+            if (webviewRef.current) {
+              webviewRef.current.injectJavaScript(
+                `document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`
+              )
+            }
+            paymentHandlerRef.current
+              .handle402(url, 402, e.nativeEvent.headers || {})
+              .then((html: string | null) => {
+                if (html && webviewRef.current) {
+                  webviewRef.current.injectJavaScript(
+                    `document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`
+                  )
+                } else if (webviewRef.current) {
+                  const fallback = getErrorPage(402)
+                  webviewRef.current.injectJavaScript(
+                    `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
+                  )
+                }
+              })
+              .catch(() => {
+                if (webviewRef.current) {
+                  const fallback = getErrorPage(402)
+                  webviewRef.current.injectJavaScript(
+                    `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
+                  )
+                }
+              })
+              .finally(() => {
+                paymentInFlightUrl.current = null
+              })
+          } else if (webviewRef.current) {
+            if (status === 403) return
+            const fallback = getErrorPage(status)
+            webviewRef.current.injectJavaScript(
+              `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
+            )
+          }
+        }}
+        onLoadEnd={(event: any) => {
+          tabStore.clearSwitchLoading()
+          if (paymentInFlightUrl.current) return
+          tabStore.handleNavigationStateChange(tabId, {
+            ...(event.nativeEvent ?? event),
+            loading: false
+          })
+          const tab = getTab()
+          if (tab && tab.url !== kNEW_TAB_URL && webviewRef.current) {
+            const bottom = bottomReservedHeight
+            const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
+            try {
+              webviewRef.current.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
+            } catch (e) {
+              // transient webview unavailability is ok
+            }
+          }
+        }}
+        javaScriptEnabled
+        domStorageEnabled
+        allowsBackForwardNavigationGestures
+        automaticallyAdjustContentInsets={false}
+        contentInsetAdjustmentBehavior="never"
+        contentInset={webviewContentInset}
+        scrollIndicatorInsets={webviewScrollIndicatorInsets}
+        containerStyle={webviewContainerStyle}
+        style={webviewStyle}
+      />
+    </View>
+  )
+})
+
+/**
+ * Tab-switch loading overlay. Its own observer so that `tabStore.switchLoading`
+ * toggling (raised on tab switch, cleared on first paint) re-renders ONLY this
+ * tiny spinner instead of the whole Browser tree + WebView. Positioned to match
+ * the WebView container bounds so it covers the page, not the chrome.
+ */
+const SwitchLoadingOverlay = observer(function SwitchLoadingOverlay(props: {
+  topInset: number
+  bottomReservedHeight: number
+  addressBarIsAtTop: boolean
+  isFullscreen: boolean
+  backgroundColor: string
+}) {
+  if (!tabStore.switchLoading) return null
+  const { topInset, bottomReservedHeight, addressBarIsAtTop, isFullscreen, backgroundColor } = props
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        top: isFullscreen ? 0 : topInset,
+        left: 0,
+        right: 0,
+        bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0,
+        backgroundColor,
+        justifyContent: 'center',
+        alignItems: 'center'
+      }}
+    >
+      <ActivityIndicator size="large" />
+    </View>
+  )
+})
+
+/* -------------------------------------------------------------------------- */
 /*                                  BROWSER                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -218,7 +549,7 @@ const Browser = observer(function Browser() {
   }, [i18n.language])
 
   /* ----------------------------- wallet context ----------------------------- */
-  const { managers, walletBuilding } = useWallet()
+  const { managers, walletBuilding } = useWalletManagers()
   const [wallet, setWallet] = useState<WalletInterface | undefined>()
   const paymentHandlerRef = useRef<any>(null)
   const paymentInFlightUrl = useRef<string | null>(null)
@@ -464,6 +795,8 @@ const Browser = observer(function Browser() {
 
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // Stable identity so passing it to the memoized WebViewHost doesn't break memo.
+  const onExitFullscreen = useCallback(() => setIsFullscreen(false), [])
 
   // Address bar collapse state (new gesture: rightward hold+swipe collapses bar into the ... button)
   const [addressBarCollapsed, setAddressBarCollapsed] = useState(false)
@@ -879,6 +1212,58 @@ const Browser = observer(function Browser() {
     }
   }, [])
 
+  // Stable AddressBar handlers so the memoized AddressBar (LiquidGlass pill)
+  // skips reconciliation on Browser re-renders that don't change its inputs.
+  // activeTab is ref-stable across in-place MobX mutations, so these stay
+  // stable across the page-load nav storm.
+  const onAddressFocus = useCallback(() => {
+    setMenuPopoverOpen(false)
+    setHistoryPopoverDirection(null)
+    addressEditing.current = true
+    setAddressFocused(true)
+    if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
+    setTimeout(() => {
+      const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
+      addressInputRef.current?.setNativeProps({
+        selection: { start: 0, end: textToSelect.length }
+      })
+    }, 0)
+  }, [activeTab, addressText, setMenuPopoverOpen, setHistoryPopoverDirection])
+
+  const onAddressBlur = useCallback(() => {
+    addressEditing.current = false
+    setAddressFocused(false)
+    setAddressSuggestions([])
+    setAddressText(activeTab?.url || kNEW_TAB_URL)
+  }, [activeTab])
+
+  const onClearAddressText = useCallback(() => setAddressText(''), [])
+
+  const onCancelNewTabFn = useCallback(() => {
+    const tabId = cancelableNewTabId.current!
+    cancelableNewTabId.current = null
+    Keyboard.dismiss()
+    addressEditing.current = false
+    setAddressFocused(false)
+    setAddressSuggestions([])
+    tabStore.closeTab(tabId)
+  }, [])
+
+  const onSuggestionSelect = useCallback(
+    (url: string) => {
+      addressInputRef.current?.blur()
+      Keyboard.dismiss()
+      setAddressFocused(false)
+      setAddressSuggestions([])
+      setAddressText(url)
+      injectNavigationSplash(url)
+      updateActiveTab({ url })
+      addressEditing.current = false
+      cancelableNewTabId.current = null
+    },
+    [injectNavigationSplash, updateActiveTab]
+  )
+
   const shareCurrent = useCallback(async () => {
     const currentTab = tabStore.activeTab
     if (!currentTab) return
@@ -1107,7 +1492,9 @@ const Browser = observer(function Browser() {
 
   // Standalone blob download intercept — plain JS string injected before content loads.
   // Must NOT rely on the polyfill (different WKWebView content world on iOS).
-  const downloadInterceptScript = `(function(){
+  // Memoized (deps: []) so this multi-KB script string is built once per mount
+  // instead of on every render.
+  const downloadInterceptScript = useMemo(() => `(function(){
     if(window.__blobDL) return;
     window.__blobDL=true;
     var reg=new Map();
@@ -1154,7 +1541,25 @@ const Browser = observer(function Browser() {
     };
     try{Object.defineProperty(HTMLElement.prototype.click,'toString',{value:function(){return'function click() { [native code] }'},writable:false,configurable:false})}catch(e){}
     try{window.__spoofNative&&window.__spoofNative(HTMLElement.prototype.click,'click')}catch(e){}
-  })();true;`
+  })();true;`, [])
+
+  // Built once per change of permission state instead of on every render. Previously
+  // this multi-KB concat (CWI provider + polyfills + permission script) ran on all
+  // ~500 renders during a browse session, feeding a fresh string into the WebView
+  // each time and forcing the whole WebView subtree to reconcile.
+  const injectedJSBefore = useMemo(
+    () =>
+      nativeSpoofSetup +
+      '\n' +
+      buildCWIProviderScript() +
+      '\n' +
+      mediaSourcePolyfill +
+      '\n' +
+      downloadInterceptScript +
+      '\n' +
+      getPermissionScript(permissionsDeniedForCurrentDomain, pendingPermission),
+    [downloadInterceptScript, permissionsDeniedForCurrentDomain, pendingPermission]
+  )
 
   const routeWebViewMessage = useMemo(
     () =>
@@ -1520,284 +1925,39 @@ const Browser = observer(function Browser() {
     }
     if (activeTab) {
       return (
-        <View
-          ref={webviewContainerRef}
-          collapsable={false}
-          style={{
-            position: 'absolute',
-            top: isFullscreen ? 0 : insets.top,
-            left: 0,
-            right: 0,
-            // On Android we keep it simple: shrink the WebView frame itself when the
-            // address bar is at the bottom. This avoids any visual overlap bugs.
-            // People are less sensitive to "content under glass" on Android.
-            bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0
-          }}
-        >
-          {isFullscreen && (
-            <TouchableOpacity
-              style={styles.exitFullscreen}
-              onPress={() => {
-                setIsFullscreen(false)
-                activeTab?.webviewRef.current?.injectJavaScript(`
-                  window.dispatchEvent(new MessageEvent('message', {
-                    data: JSON.stringify({ type: 'FULLSCREEN_CHANGE', isFullscreen: false })
-                  }));
-                `)
-              }}
-            >
-              <Ionicons name="contract-outline" size={20} color="white" />
-            </TouchableOpacity>
-          )}
-          <WebView
-            ref={activeTab?.webviewRef}
-            source={{
-              uri: uri,
-              headers: { 'Accept-Language': getAcceptLanguageHeader() }
-            }}
-            userAgent={
-              (activeTab?.isDesktopMode ?? false)
-                ? Platform.OS === 'ios'
-                  ? DESKTOP_UA_IOS
-                  : DESKTOP_UA_ANDROID
-                : Platform.OS === 'ios'
-                  ? MOBILE_UA_IOS
-                  : MOBILE_UA_ANDROID
-            }
-            sharedCookiesEnabled={true}
-            originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
-            onMessage={handleMessage}
+        <>
+          <WebViewHost
+            tabId={activeTab.id}
+            webviewRef={activeTab.webviewRef}
+            containerRef={webviewContainerRef}
+            uri={uri}
+            isDesktopMode={activeTab.isDesktopMode ?? false}
+            isFullscreen={isFullscreen}
+            onExitFullscreen={onExitFullscreen}
+            topInset={insets.top}
+            bottomReservedHeight={bottomReservedHeight}
+            addressBarIsAtTop={addressBarIsAtTop}
+            isDark={isDark}
+            acceptLanguage={getAcceptLanguageHeader()}
             injectedJavaScript={injectedJavaScript}
-            injectedJavaScriptBeforeContentLoaded={
-              nativeSpoofSetup +
-              '\n' +
-              buildCWIProviderScript() +
-              '\n' +
-              mediaSourcePolyfill +
-              '\n' +
-              downloadInterceptScript +
-              '\n' +
-              getPermissionScript(permissionsDeniedForCurrentDomain, pendingPermission)
-            }
-            onNavigationStateChange={handleNavStateChange}
-            allowsFullscreenVideo={true}
-            mediaPlaybackRequiresUserAction={false}
-            allowsInlineMediaPlayback={true}
-            geolocationEnabled
-            onPermissionRequest={
-              Platform.OS === 'android'
-                ? (event: any) => {
-                    // On Android, WebView fires this when the page calls getUserMedia.
-                    // Request the corresponding OS permission, then grant/deny the WebView.
-                    const resources: string[] = event.nativeEvent?.resources ?? []
-                    ;(async () => {
-                      try {
-                        const toGrant: string[] = []
-                        for (const resource of resources) {
-                          if (resource.includes('VIDEO_CAPTURE')) {
-                            const current = await check(PERMISSIONS.ANDROID.CAMERA)
-                            const granted =
-                              current === RESULTS.GRANTED ||
-                              (await request(PERMISSIONS.ANDROID.CAMERA)) === RESULTS.GRANTED
-                            if (granted) toGrant.push(resource)
-                          } else if (resource.includes('AUDIO_CAPTURE')) {
-                            const current = await check(PERMISSIONS.ANDROID.RECORD_AUDIO)
-                            const granted =
-                              current === RESULTS.GRANTED ||
-                              (await request(PERMISSIONS.ANDROID.RECORD_AUDIO)) === RESULTS.GRANTED
-                            if (granted) toGrant.push(resource)
-                          }
-                        }
-                        if (toGrant.length > 0) {
-                          event.nativeEvent.request.grant(toGrant)
-                        } else {
-                          event.nativeEvent.request.deny()
-                        }
-                      } catch {
-                        event.nativeEvent.request.deny()
-                      }
-                    })()
-                  }
-                : () => false
-            }
-            onFileDownload={
-              Platform.OS === 'ios'
-                ? ({ nativeEvent }: any) => {
-                    handleUrlDownload(nativeEvent.downloadUrl).catch(() => {})
-                  }
-                : undefined
-            }
-            onShouldStartLoadWithRequest={(request: any) => {
-              const { url: reqUrl, navigationType } = request
-              // Intercept blob: and data: URLs — read from __blobReg (set by downloadInterceptScript)
-              if (reqUrl.startsWith('blob:') || reqUrl.startsWith('data:')) {
-                const escaped = reqUrl.replace(/'/g, "\\'")
-                setTimeout(() => {
-                  activeTab?.webviewRef?.current?.injectJavaScript(`(function(){
-                    try{
-                      var url='${escaped}';
-                      var reg=window.__blobReg;
-                      var blob=reg&&reg.get(url);
-                      window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-                        type:'DL_DEBUG',info:'reg='+!!reg+' blob='+!!blob+(blob?' sz='+blob.size:'')
-                      }));
-                      if(blob){
-                        var fn=null;
-                        var rd=new FileReader();
-                        rd.onloadend=function(){
-                          if(typeof rd.result!=='string')return;
-                          var b64=rd.result.split(',')[1]||'';
-                          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-                            type:'FILE_DOWNLOAD_BLOB',base64:b64,
-                            mimeType:blob.type||'application/octet-stream',filename:fn
-                          }));
-                        };
-                        rd.readAsDataURL(blob);
-                      }
-                    }catch(e){
-                      window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-                        type:'DL_DEBUG',info:'err:'+e
-                      }));
-                    }
-                  })();true;`)
-                }, 0)
-                return false
-              }
-              // Detect direct file links triggered by user click
-              if (navigationType === 'click') {
-                const fileExtPattern =
-                  /\.(pdf|zip|gz|tar|rar|7z|doc|docx|xls|xlsx|ppt|pptx|csv|mp3|mp4|avi|mov|dmg|exe|apk|ipa)(\?|$)/i
-                if (fileExtPattern.test(reqUrl)) {
-                  handleUrlDownload(reqUrl).catch(() => {})
-                  return false
-                }
-              }
-              return true
-            }}
-            androidLayerType="hardware"
-            androidHardwareAccelerationDisabled={false}
-            onError={(e: any) => {
-              e.preventDefault()
-              tabStore.clearSwitchLoading()
-              if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
-              const code = e.nativeEvent?.code
-              // Only handle native network errors (negative codes: DNS, TLS, timeout, etc.)
-              if (typeof code === 'number' && code < 0 && activeTab?.webviewRef?.current) {
-                const info = getNativeErrorInfo(code)
-                const page = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>:root{--bg:#f5f5f0;--text:#1a1a1a;--sub:#666}@media(prefers-color-scheme:dark){:root{--bg:#1a1a1a;--text:#e8e6e1;--sub:#999}}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:var(--bg);color:var(--text);text-align:center}h1{font-size:6rem;margin:0}.subtitle{font-size:1.5rem;margin:8px 0}.detail{color:var(--sub);padding:0 24px}</style></head><body><div><h1 style="color:${info.color}">${info.code}</h1><p class="subtitle">${info.title}</p><p class="detail">${info.detail}</p></div></body></html>`
-                activeTab.webviewRef.current.injectJavaScript(
-                  `document.open();document.write(\`${page.replace(/`/g, '\\`')}\`);document.close();`
-                )
-              }
-            }}
-            onHttpError={(e: any) => {
-              if (e.nativeEvent?.url?.includes('favicon.ico') && activeTab?.url === kNEW_TAB_URL) return
-              const status = e.nativeEvent?.statusCode || 404
-              const url = e.nativeEvent?.url || ''
-              if (status === 402 && paymentHandlerRef.current) {
-                // Skip if a payment is already being handled for this URL (e.g. fetch polyfill already fired)
-                if (paymentInFlightUrl.current === url) return
-                paymentInFlightUrl.current = url
-                if (activeTab?.webviewRef?.current) {
-                  activeTab.webviewRef.current.injectJavaScript(
-                    `document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`
-                  )
-                }
-                paymentHandlerRef.current
-                  .handle402(url, 402, e.nativeEvent.headers || {})
-                  .then((html: string | null) => {
-                    if (html && activeTab?.webviewRef?.current) {
-                      activeTab.webviewRef.current.injectJavaScript(
-                        `document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`
-                      )
-                    } else if (activeTab?.webviewRef?.current) {
-                      const fallback = getErrorPage(402)
-                      activeTab.webviewRef.current.injectJavaScript(
-                        `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
-                      )
-                    }
-                  })
-                  .catch(() => {
-                    if (activeTab?.webviewRef?.current) {
-                      const fallback = getErrorPage(402)
-                      activeTab.webviewRef.current.injectJavaScript(
-                        `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
-                      )
-                    }
-                  })
-                  .finally(() => {
-                    paymentInFlightUrl.current = null
-                  })
-              } else if (activeTab?.webviewRef?.current) {
-                // For 403, the response body is often an interactive challenge page
-                // (e.g. Cloudflare human verification). Let the WebView render it
-                // as-is instead of replacing it with our custom error page.
-                if (status === 403) return
-                const fallback = getErrorPage(status)
-                activeTab.webviewRef.current.injectJavaScript(
-                  `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
-                )
-              }
-            }}
-            onLoadEnd={(event: any) => {
-              // Target page has painted — drop the tab-switch loading overlay.
-              tabStore.clearSwitchLoading()
-              // Suppress state updates while 402 payment is in flight — document.write
-              // of the loading page fires onLoadEnd which re-renders and flickers the
-              // spending authorization modal.
-              if (paymentInFlightUrl.current) return
-              tabStore.handleNavigationStateChange(activeTab.id, {
-                ...(event.nativeEvent ?? event),
-                loading: false
-              })
-              // Thumbnail capture intentionally NOT scheduled on every onLoadEnd.
-              // Previously: setTimeout(captureActiveThumbnail, 800) ran for every page
-              // load — including video pages, dApps that navigate in-place, and
-              // micropayment auto-approve flows — causing a main-thread rasterization
-              // spike that competed with Reanimated animations and JS-thread crypto.
-              // Now capture is on-demand only, triggered by:
-              //   1. User tapping the tabs button (see ObservedMenuPopover onTabs handler)
-              //   2. AppState going inactive/background (see useEffect below)
-              // This keeps the active page hot path free of view-shot work.
-
-              // Push current browser safe area insets (CSS vars + event) to the newly loaded page.
-              // Uses bottomReservedHeight (measured from the actual address bar top edge)
-              // so the red block on the WebKit safe-areas demo aligns perfectly.
-              if (activeTab.url !== kNEW_TAB_URL && activeTab?.webviewRef?.current) {
-                const bottom = bottomReservedHeight
-                const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
-                // Resilient (try/catch); the script is idempotent and always dispatches
-                try {
-                  activeTab.webviewRef.current.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
-                } catch (e) {
-                  // transient webview unavailability is ok
-                }
-              }
-            }}
-            javaScriptEnabled
-            domStorageEnabled
-            allowsBackForwardNavigationGestures
-            automaticallyAdjustContentInsets={false}
-            contentInsetAdjustmentBehavior="never"
-            contentInset={webviewContentInset}
-            scrollIndicatorInsets={webviewScrollIndicatorInsets}
-            containerStyle={webviewContainerStyle}
-            style={webviewStyle}
+            injectedJSBefore={injectedJSBefore}
+            onMessage={handleMessage}
+            onNavStateChange={handleNavStateChange}
+            paymentHandlerRef={paymentHandlerRef}
+            paymentInFlightUrl={paymentInFlightUrl}
+            webviewContentInset={webviewContentInset}
+            webviewScrollIndicatorInsets={webviewScrollIndicatorInsets}
+            webviewContainerStyle={webviewContainerStyle}
+            webviewStyle={webviewStyle}
           />
-          {tabStore.switchLoading && (
-            <View
-              pointerEvents="none"
-              style={{
-                ...StyleSheet.absoluteFillObject,
-                backgroundColor: colors.background,
-                justifyContent: 'center',
-                alignItems: 'center'
-              }}
-            >
-              <ActivityIndicator size="large" />
-            </View>
-          )}
-        </View>
+          <SwitchLoadingOverlay
+            topInset={insets.top}
+            bottomReservedHeight={bottomReservedHeight}
+            addressBarIsAtTop={addressBarIsAtTop}
+            isFullscreen={isFullscreen}
+            backgroundColor={colors.background}
+          />
+        </>
       )
     }
     return null
@@ -1943,44 +2103,15 @@ const Browser = observer(function Browser() {
                   historyPopoverOpen={historyPopoverOpen}
                   onChangeText={onChangeAddressText}
                   onSubmit={onAddressSubmit}
-                  onFocus={() => {
-                    setMenuPopoverOpen(false)
-                    setHistoryPopoverDirection(null)
-                    addressEditing.current = true
-                    setAddressFocused(true)
-                    if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
-                    setTimeout(() => {
-                      const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
-                      addressInputRef.current?.setNativeProps({
-                        selection: { start: 0, end: textToSelect.length }
-                      })
-                    }, 0)
-                  }}
-                  onBlur={() => {
-                    addressEditing.current = false
-                    setAddressFocused(false)
-                    setAddressSuggestions([])
-                    setAddressText(activeTab?.url || kNEW_TAB_URL)
-                  }}
+                  onFocus={onAddressFocus}
+                  onBlur={onAddressBlur}
                   onBack={navBack}
                   onBackLongPress={navBackLongPress}
                   onForward={navForward}
                   onForwardLongPress={navForwardLongPress}
                   onReloadOrStop={navReloadOrStop}
-                  onClearText={() => setAddressText('')}
-                  onCancelNewTab={
-                    cancelableNewTabId.current === activeTab?.id
-                      ? () => {
-                          const tabId = cancelableNewTabId.current!
-                          cancelableNewTabId.current = null
-                          Keyboard.dismiss()
-                          addressEditing.current = false
-                          setAddressFocused(false)
-                          setAddressSuggestions([])
-                          tabStore.closeTab(tabId)
-                        }
-                      : undefined
-                  }
+                  onClearText={onClearAddressText}
+                  onCancelNewTab={cancelableNewTabId.current === activeTab?.id ? onCancelNewTabFn : undefined}
                   inputRef={addressInputRef}
                 />
               </Animated.View>
@@ -1992,17 +2123,7 @@ const Browser = observer(function Browser() {
                 suggestions={addressSuggestions}
                 colors={colors}
                 bottomOffset={bottomInset}
-                onSelect={url => {
-                  addressInputRef.current?.blur()
-                  Keyboard.dismiss()
-                  setAddressFocused(false)
-                  setAddressSuggestions([])
-                  setAddressText(url)
-                  injectNavigationSplash(url)
-                  updateActiveTab({ url })
-                  addressEditing.current = false
-                  cancelableNewTabId.current = null
-                }}
+                onSelect={onSuggestionSelect}
               />
             )}
           </>

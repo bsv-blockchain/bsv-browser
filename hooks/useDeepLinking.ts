@@ -69,6 +69,10 @@ export function useDeepLinking() {
       // Navigate to browser if not already there
       router.push('/')
 
+      // Show the loading overlay while the WebView fetches the page, instead of
+      // a blank screen (or the +not-found flash before this handler runs).
+      tabStore.raiseLoadingForUrl(url)
+
       // Create new tab or update active tab with the URL
       const activeTab = tabStore.activeTab
       if (activeTab && activeTab.url === 'about:blank') {

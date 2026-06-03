@@ -40,7 +40,7 @@ function domainFromUrl(url: string): string {
   }
 }
 
-export const AddressBar: React.FC<AddressBarProps> = ({
+const AddressBarImpl: React.FC<AddressBarProps> = ({
   addressText,
   addressFocused,
   isLoading,
@@ -283,3 +283,12 @@ const styles = StyleSheet.create({
     ...typography.body
   }
 })
+
+/**
+ * Memoized: with stable (useCallback'd) handler props from the Browser, the
+ * address bar — including its expensive LiquidGlass pill — skips reconciliation
+ * on Browser re-renders that don't change its own inputs (chrome animation
+ * state, unrelated context churn). It still updates on addressText / focus /
+ * isLoading / canGoBack changes, which are its real inputs.
+ */
+export const AddressBar = React.memo(AddressBarImpl)

@@ -185,6 +185,22 @@ export class TabStore {
     }
   }
 
+  /**
+   * Raise the loading overlay for an externally-opened web URL (deep link).
+   * newTab()/updateTab() set activeTabId directly without going through
+   * setActiveTab(), so they never raise switchLoading on their own. Without
+   * this the browser would show a blank page while the WebView loads. Cleared
+   * on WebView load end/error like a normal tab switch.
+   */
+  raiseLoadingForUrl(url: string) {
+    const isWebPage = !!url && url !== kNEW_TAB_URL && url.startsWith('http')
+    if (this.switchLoadingTimeout) clearTimeout(this.switchLoadingTimeout)
+    this.switchLoading = isWebPage
+    if (isWebPage) {
+      this.switchLoadingTimeout = setTimeout(() => this.clearSwitchLoading(), 8000)
+    }
+  }
+
   clearSwitchLoading() {
     if (this.switchLoadingTimeout) {
       clearTimeout(this.switchLoadingTimeout)
