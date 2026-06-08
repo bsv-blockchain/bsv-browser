@@ -495,6 +495,63 @@ const SwitchLoadingOverlay = observer(function SwitchLoadingOverlay(props: {
   )
 })
 
+/**
+ * Observer wrapper that owns the high-frequency activeTab reads (isLoading,
+ * canGoBack/Forward, url) for the address bar. Because these reads live HERE
+ * instead of in the Browser observer, a page load's isLoading/canGoBack churn
+ * re-renders only this tiny subtree — NOT the 2000-line Browser tree. Browser
+ * keeps reading url/id (per-navigation, low-frequency) for the WebView, but no
+ * longer re-renders on every loading-state flip during a page load.
+ */
+interface ChromeAddressBarProps {
+  addressText: string
+  addressFocused: boolean
+  historyPopoverOpen: boolean
+  glassRevision: number
+  cancelableNewTabId: React.MutableRefObject<number | null>
+  inputRef: React.RefObject<TextInput | null>
+  onChangeText: (t: string) => void
+  onSubmit: () => void
+  onFocus: () => void
+  onBlur: () => void
+  onBack: () => void
+  onBackLongPress: () => void
+  onForward: () => void
+  onForwardLongPress: () => void
+  onReloadOrStop: () => void
+  onClearText: () => void
+  onCancelNewTabFn: () => void
+}
+
+const ChromeAddressBar = observer(function ChromeAddressBar(props: ChromeAddressBarProps) {
+  const tab = tabStore.activeTab
+  return (
+    <AddressBar
+      key={`address-bar-${props.glassRevision}`}
+      addressText={props.addressText}
+      addressFocused={props.addressFocused}
+      isLoading={tab?.isLoading || false}
+      canGoBack={tab?.canGoBack || false}
+      canGoForward={tab?.canGoForward || false}
+      isNewTab={tab?.url === kNEW_TAB_URL}
+      isHttps={tab?.url?.startsWith('https') || false}
+      historyPopoverOpen={props.historyPopoverOpen}
+      onChangeText={props.onChangeText}
+      onSubmit={props.onSubmit}
+      onFocus={props.onFocus}
+      onBlur={props.onBlur}
+      onBack={props.onBack}
+      onBackLongPress={props.onBackLongPress}
+      onForward={props.onForward}
+      onForwardLongPress={props.onForwardLongPress}
+      onReloadOrStop={props.onReloadOrStop}
+      onClearText={props.onClearText}
+      onCancelNewTab={props.cancelableNewTabId.current === tab?.id ? props.onCancelNewTabFn : undefined}
+      inputRef={props.inputRef}
+    />
+  )
+})
+
 /* -------------------------------------------------------------------------- */
 /*                                  BROWSER                                   */
 /* -------------------------------------------------------------------------- */
@@ -2091,16 +2148,13 @@ const Browser = observer(function Browser() {
                 // bar can't receive ghost touches before it unmounts.
                 pointerEvents={addressBarCollapsed ? 'none' : 'box-none'}
               >
-                <AddressBar
-                  key={`address-bar-${glassRevision}`}
+                <ChromeAddressBar
                   addressText={addressText}
                   addressFocused={addressFocused}
-                  isLoading={activeTab?.isLoading || false}
-                  canGoBack={activeTab?.canGoBack || false}
-                  canGoForward={activeTab?.canGoForward || false}
-                  isNewTab={isNewTab}
-                  isHttps={activeTab?.url?.startsWith('https') || false}
                   historyPopoverOpen={historyPopoverOpen}
+                  glassRevision={glassRevision}
+                  cancelableNewTabId={cancelableNewTabId}
+                  inputRef={addressInputRef}
                   onChangeText={onChangeAddressText}
                   onSubmit={onAddressSubmit}
                   onFocus={onAddressFocus}
@@ -2111,8 +2165,7 @@ const Browser = observer(function Browser() {
                   onForwardLongPress={navForwardLongPress}
                   onReloadOrStop={navReloadOrStop}
                   onClearText={onClearAddressText}
-                  onCancelNewTab={cancelableNewTabId.current === activeTab?.id ? onCancelNewTabFn : undefined}
-                  inputRef={addressInputRef}
+                  onCancelNewTabFn={onCancelNewTabFn}
                 />
               </Animated.View>
             </GestureDetector>

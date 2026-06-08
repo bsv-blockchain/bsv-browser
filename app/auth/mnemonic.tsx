@@ -135,8 +135,10 @@ export default function MnemonicScreen() {
   // Wallet was already built in handleGenerateNew, so just navigate.
   const handleContinueWithGenerated = () => {
     if (!hasAcknowledged) return
+    // dismissAll() returns to the existing root /index (Browser). Do NOT push('/')
+    // after — that mounts a SECOND Browser on top, leaking a duplicate that
+    // re-renders forever (2x JS work on every nav/SSE tick).
     router.dismissAll()
-    router.push('/')
   }
 
   // Validate and continue with imported mnemonic or hex private key
@@ -162,7 +164,6 @@ export default function MnemonicScreen() {
         }
         await buildWalletFromRecoveredKey(wif)
         router.dismissAll()
-        router.push('/')
       } catch (error: any) {
         console.error('[Mnemonic] Error importing hex key:', error)
         Alert.alert('Error', `Invalid private key: ${error.message}`)
@@ -203,7 +204,6 @@ export default function MnemonicScreen() {
       await buildWalletFromMnemonic(mnemonicPhrase)
       console.log('[Mnemonic] Wallet setup complete, navigating to browser')
       router.dismissAll()
-      router.push('/')
     } catch (error: any) {
       console.error('[Mnemonic] Error setting up wallet:', error)
       Alert.alert('Error', `Failed to set up wallet: ${error.message}`)

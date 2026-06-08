@@ -471,10 +471,18 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
       // Auto-approve small transactions if within threshold and cooldown
       const threshold = autoApproveThresholdRef.current
+      const now = Date.now()
+      const sinceLastMs = now - lastAutoApproveTime
+      console.log(
+        `[spend-auth] requestID=${requestID} sats=${spending.satoshis} threshold=${threshold} ` +
+          `sinceLastMs=${sinceLastMs} cooldownMs=${AUTO_APPROVE_COOLDOWN_MS} ` +
+          `eligible=${threshold > 0 && spending.satoshis <= threshold} cooldownOk=${sinceLastMs >= AUTO_APPROVE_COOLDOWN_MS} ` +
+          `managerBound=${!!managersRef.current.permissionsManager}`
+      )
       if (threshold > 0 && spending.satoshis <= threshold) {
-        const now = Date.now()
-        if (now - lastAutoApproveTime >= AUTO_APPROVE_COOLDOWN_MS) {
+        if (sinceLastMs >= AUTO_APPROVE_COOLDOWN_MS) {
           lastAutoApproveTime = now
+          console.log(`[spend-auth] AUTO-APPROVING requestID=${requestID}`)
           managersRef.current.permissionsManager?.grantPermission({
             requestID,
             ephemeral: true,
@@ -482,6 +490,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           })
           return
         }
+        console.log(`[spend-auth] cooldown blocked → manual modal requestID=${requestID}`)
+      } else {
+        console.log(`[spend-auth] not eligible → manual modal requestID=${requestID}`)
       }
 
       spendingQueue.enqueue({

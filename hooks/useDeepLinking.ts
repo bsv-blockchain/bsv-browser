@@ -66,8 +66,11 @@ export function useDeepLinking() {
         }
       }
 
-      // Navigate to browser if not already there
-      router.push('/')
+      // Navigate to browser if not already there. Use navigate() (reuses the
+      // existing /index route) NOT push() — +native-intent already routes http
+      // launches to '/', so push() here mounts a SECOND Browser on top (duplicate
+      // that re-renders forever on every WalletContext/SSE tick = the storm).
+      router.navigate('/')
 
       // Show the loading overlay while the WebView fetches the page, instead of
       // a blank screen (or the +not-found flash before this handler runs).
@@ -84,7 +87,7 @@ export function useDeepLinking() {
       }
     } catch (error) {
       console.error('[Deep Link] Error handling URL:', error)
-      router.push('/')
+      router.navigate('/')
     }
   }
 

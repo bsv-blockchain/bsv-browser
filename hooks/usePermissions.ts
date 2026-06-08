@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   PermissionType,
   PermissionState,
@@ -120,13 +120,19 @@ export function usePermissions(
     [activeTab, domainForUrl, updateDeniedPermissionsForDomain]
   )
 
-  /** Config object for the WebView message router */
-  const permissionRouterConfig = {
-    setPendingDomain: (d: string) => setPendingDomain(d),
-    setPendingPermission: (p: PermissionType) => setPendingPermission(p),
-    setPendingCallback: (cb: (granted: boolean) => void) => setPendingCallback(() => cb),
-    setPermissionModalVisible: (v: boolean) => setPermissionModalVisible(v),
-  }
+  /** Config object for the WebView message router. Memoized (deps: []) — the
+   * useState setters are stable, so this object's identity must be too; otherwise
+   * a fresh object every render re-renders/re-subscribes every consumer (it was
+   * appearing in the render-reason probe on EVERY Browser render). */
+  const permissionRouterConfig = useMemo(
+    () => ({
+      setPendingDomain: (d: string) => setPendingDomain(d),
+      setPendingPermission: (p: PermissionType) => setPendingPermission(p),
+      setPendingCallback: (cb: (granted: boolean) => void) => setPendingCallback(() => cb),
+      setPermissionModalVisible: (v: boolean) => setPermissionModalVisible(v)
+    }),
+    []
+  )
 
   return {
     permissionModalVisible,

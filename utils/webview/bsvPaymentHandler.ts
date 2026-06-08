@@ -169,7 +169,7 @@ export class BsvPaymentHandler {
 
       const { publicKey: senderIdentityKey } = await this.wallet.getPublicKey({ identityKey: true }, originator)
 
-      const actionResult = await this.wallet.createAction({
+      let actionResult = await this.wallet.createAction({
         description: `Paid Content: ${new URL(url).pathname}`,
         outputs: [{
           satoshis: satoshisRequired,
@@ -187,6 +187,29 @@ export class BsvPaymentHandler {
           randomizeOutputs: false
         }
       }, originator)
+
+      // createAction may return an unsigned `signableTransaction` instead of a
+      // final `tx` when signing is deferred. This is a documented, reachable
+      // branch (Wallet.interfaces: result is signableTransaction when
+      // options.signAndProcess is false OR an input lacks an unlockingScript).
+      // It notably surfaces through WalletPermissionsManager, which always runs
+      // the underlying createAction with signAndProcess=false (e.g. after a
+      // spending-authorization grant) and can hand the signable result back to
+      // us. We have no caller-supplied inputs — all inputs are wallet-funded —
+      // so finalize by signing with empty `spends`; the wallet signs its own
+      // inputs and broadcasts. Without this, the payment tx stays created-but-
+      // unsigned and the 402 page hangs forever on "Payment Required".
+      if (!actionResult.tx && actionResult.signableTransaction) {
+        const signed = await this.wallet.signAction({
+          reference: actionResult.signableTransaction.reference,
+          spends: {}
+        }, originator)
+        actionResult = { ...actionResult, ...signed }
+      }
+
+      if (!actionResult.tx) {
+        throw new Error('402 payment: createAction returned no signed transaction (tx undefined)')
+      }
 
       const txBase64 = Utils.toBase64(actionResult.tx as number[])
       const vout = '0'
