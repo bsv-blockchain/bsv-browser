@@ -30,6 +30,13 @@ const STORAGE_KEYS = {
 // accumulation while letting flagship devices keep more tabs warm.
 export const MAX_TABS = maxTabsForTier()
 
+// Number of tab WebViews kept mounted ("warm") at once. Switching among warm
+// tabs is instant — their WebViews stay alive with page state intact, so no
+// source reload / network round-trip. Tabs outside this set are unmounted to
+// bound memory (each live WebView holds a full page). Capped at MAX_TABS so
+// low-RAM (SE-class) devices never warm more tabs than they're allowed to open.
+export const WARM_POOL_SIZE = Math.min(4, MAX_TABS)
+
 export class TabStore {
   tabs: Tab[] = [] // Always initialize as an array
   activeTabId = 1
@@ -141,6 +148,26 @@ export class TabStore {
     this.saveTabs()
   }
 
+  /**
+   * IDs of the tabs whose WebViews should stay mounted so switching between
+   * recently-used tabs is instant. The active tab is always first; the rest are
+   * the most-recently-focused tabs, up to WARM_POOL_SIZE total. The render layer
+   * mounts a WebView per id in this set and unmounts everything else.
+   */
+  get warmTabIds(): number[] {
+    const ranked = [...this.tabs].sort((a, b) => {
+      if (a.id === this.activeTabId) return -1
+      if (b.id === this.activeTabId) return 1
+      return (this.lastFocusedAt.get(b.id) ?? 0) - (this.lastFocusedAt.get(a.id) ?? 0)
+    })
+    return ranked.slice(0, WARM_POOL_SIZE).map(t => t.id)
+  }
+
+  /** True if the tab's WebView is currently mounted (warm) — switching to it is instant. */
+  isWarm(id: number): boolean {
+    return this.warmTabIds.includes(id)
+  }
+
   get activeTab(): Tab | null {
     const tab = this.tabs.find(t => t.id === this.activeTabId)
 
@@ -161,15 +188,21 @@ export class TabStore {
 
     if (targetTab && targetTab.id !== this.activeTabId) {
       devLog(`setActiveTab(): Setting activeTabId=${id}`)
+      // Was the target already mounted (warm) BEFORE this switch? Compute with
+      // the old activeTabId — a warm tab's WebView stays alive with its page
+      // intact, so activating it is an instant swap with no reload.
+      const targetWasWarm = this.isWarm(id)
       this.activeTabId = id
       this.lastFocusedAt.set(id, Date.now())
 
       // Raise the loading overlay in the same MobX commit as the active-tab
       // change so the previous tab's page never flashes while the new page
       // loads. Only for real web pages — the homepage (kNEW_TAB_URL) renders
-      // natively with no WebView load event that would clear the overlay.
+      // natively with no WebView load event that would clear the overlay. And
+      // only for COLD tabs: a warm tab needs no reload, so showing a spinner
+      // over its already-painted page would be a pointless flash.
       const targetIsWebPage = targetTab.url !== kNEW_TAB_URL && targetTab.url.startsWith('http')
-      this.switchLoading = targetIsWebPage
+      this.switchLoading = targetIsWebPage && !targetWasWarm
       if (this.switchLoadingTimeout) clearTimeout(this.switchLoadingTimeout)
       if (this.switchLoading) {
         // Measure the user-perceived switch latency: tap -> target first paint.

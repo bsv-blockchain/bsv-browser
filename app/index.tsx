@@ -179,8 +179,12 @@ const DESKTOP_UA_ANDROID =
  */
 interface WebViewHostProps {
   tabId: number
+  // When false this host is a warm-but-hidden tab: kept mounted (page state
+  // intact) but visually behind the active tab and non-interactive. Only the
+  // active host drives the switch-loading overlay and address-bar UI.
+  isActive: boolean
   webviewRef: React.RefObject<any>
-  containerRef: React.RefObject<View | null>
+  containerRef?: React.RefObject<View | null>
   uri: string
   isDesktopMode: boolean
   isFullscreen: boolean
@@ -192,8 +196,8 @@ interface WebViewHostProps {
   acceptLanguage: string
   injectedJavaScript: string
   injectedJSBefore: string
-  onMessage: (event: any) => void
-  onNavStateChange: (navState: WebViewNavigation) => void
+  onMessage: (tabId: number, event: any) => void
+  onNavStateChange: (tabId: number, navState: WebViewNavigation) => void
   paymentHandlerRef: React.MutableRefObject<any>
   paymentInFlightUrl: React.MutableRefObject<string | null>
   webviewContentInset: any
@@ -205,6 +209,7 @@ interface WebViewHostProps {
 const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
   const {
     tabId,
+    isActive,
     webviewRef,
     containerRef,
     uri,
@@ -229,16 +234,33 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
 
   const getTab = () => tabStore.tabs.find(t => t.id === tabId)
 
+  // Stable per-tab wrappers so the app-level handlers know which tab fired the
+  // event (the warm pool mounts several WebViews; only the active one's events
+  // drive the address bar / wallet bridge). useCallback keeps the prop identity
+  // stable across re-renders so the native bridge isn't re-bound every frame.
+  const onMessageForTab = useCallback((event: any) => onMessage(tabId, event), [onMessage, tabId])
+  const onNavForTab = useCallback((navState: WebViewNavigation) => onNavStateChange(tabId, navState), [
+    onNavStateChange,
+    tabId
+  ])
+
   return (
     <View
       ref={containerRef}
       collapsable={false}
+      // Inactive warm tabs stay mounted (page alive) but hidden behind the
+      // active one and non-interactive. opacity:0 — rather than display:'none'
+      // or unmount — keeps the native WebView painted so re-activation is an
+      // instant composite swap with zero reload/reflow.
+      pointerEvents={isActive ? 'auto' : 'none'}
       style={{
         position: 'absolute',
         top: isFullscreen ? 0 : topInset,
         left: 0,
         right: 0,
-        bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0
+        bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0,
+        opacity: isActive ? 1 : 0,
+        zIndex: isActive ? 1 : 0
       }}
     >
       {isFullscreen && (
@@ -273,10 +295,10 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         }
         sharedCookiesEnabled={true}
         originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
-        onMessage={onMessage}
+        onMessage={onMessageForTab}
         injectedJavaScript={injectedJavaScript}
         injectedJavaScriptBeforeContentLoaded={injectedJSBefore}
-        onNavigationStateChange={onNavStateChange}
+        onNavigationStateChange={onNavForTab}
         allowsFullscreenVideo={true}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback={true}
@@ -371,7 +393,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         androidHardwareAccelerationDisabled={false}
         onError={(e: any) => {
           e.preventDefault()
-          tabStore.clearSwitchLoading()
+          if (isActive) tabStore.clearSwitchLoading()
           const tab = getTab()
           if (e.nativeEvent?.url?.includes('favicon.ico') && tab?.url === kNEW_TAB_URL) return
           const code = e.nativeEvent?.code
@@ -430,7 +452,9 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
           }
         }}
         onLoadEnd={(event: any) => {
-          tabStore.clearSwitchLoading()
+          // Only the active tab's first paint should clear the switch overlay —
+          // a warm background tab finishing a late load must not dismiss it.
+          if (isActive) tabStore.clearSwitchLoading()
           if (paymentInFlightUrl.current) return
           tabStore.handleNavigationStateChange(tabId, {
             ...(event.nativeEvent ?? event),
@@ -487,7 +511,10 @@ const SwitchLoadingOverlay = observer(function SwitchLoadingOverlay(props: {
         bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0,
         backgroundColor,
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
+        // Above the warm-pool WebViews (active=1) and the homepage cover (2) so
+        // a cold tab's spinner is never hidden behind its own loading page.
+        zIndex: 3
       }}
     >
       <ActivityIndicator size="large" />
@@ -1632,8 +1659,14 @@ const Browser = observer(function Browser() {
   )
 
   const handleMessage = useCallback(
-    async (event: WebViewMessageEvent) => {
+    async (tabId: number, event: WebViewMessageEvent) => {
       if (!activeTab) return
+      // Warm background tabs stay mounted and their pages keep running; ignore
+      // their messages so only the visible tab can drive wallet/CWI calls and
+      // address-bar UI. (Their messages would also resolve against the wrong
+      // origin/webviewRef.) A backgrounded page's call simply waits until the
+      // user returns to it.
+      if (tabId !== activeTab.id) return
 
       const sendResponseToWebView = (id: string, result: any) => {
         if (!activeTab?.webviewRef?.current) return
@@ -1840,8 +1873,12 @@ const Browser = observer(function Browser() {
   // animation tick reassigned this prop and the native WebView module had to
   // re-bind its bridge listener.
   const handleNavStateChange = useCallback(
-    (navState: WebViewNavigation) => {
+    (tabId: number, navState: WebViewNavigation) => {
       if (!activeTab) return
+      // Only the active tab drives the address bar / global history. Per-tab
+      // navigation history is still recorded for every tab via the WebView's
+      // onLoadEnd → tabStore.handleNavigationStateChange(tabId, …) path.
+      if (tabId !== activeTab.id) return
       if (paymentInFlightUrl.current) return
       if (navState.url?.includes('favicon.ico') && activeTab.url === kNEW_TAB_URL) return
 
@@ -1964,60 +2001,88 @@ const Browser = observer(function Browser() {
   // building so the page never issues CWI calls before the wallet can
   // handle them.
   const walletReady = isWeb2Mode || !walletBuilding
-  const uri = typeof activeTab?.url === 'string' && activeTab.url.length > 0 ? activeTab.url : 'about:blank'
   const isNewTab = activeTab?.url === kNEW_TAB_URL
 
+  const renderHost = (tab: Tab, active: boolean) => (
+    <WebViewHost
+      key={tab.id}
+      tabId={tab.id}
+      isActive={active}
+      webviewRef={tab.webviewRef}
+      // Only the active host feeds the thumbnail-capture ref — a shared ref
+      // across mounted hosts would clobber and capture the wrong tab.
+      containerRef={active ? webviewContainerRef : undefined}
+      uri={typeof tab.url === 'string' && tab.url.length > 0 ? tab.url : 'about:blank'}
+      isDesktopMode={tab.isDesktopMode ?? false}
+      isFullscreen={active && isFullscreen}
+      onExitFullscreen={onExitFullscreen}
+      topInset={insets.top}
+      bottomReservedHeight={bottomReservedHeight}
+      addressBarIsAtTop={addressBarIsAtTop}
+      isDark={isDark}
+      acceptLanguage={getAcceptLanguageHeader()}
+      injectedJavaScript={injectedJavaScript}
+      injectedJSBefore={injectedJSBefore}
+      onMessage={handleMessage}
+      onNavStateChange={handleNavStateChange}
+      paymentHandlerRef={paymentHandlerRef}
+      paymentInFlightUrl={paymentInFlightUrl}
+      webviewContentInset={webviewContentInset}
+      webviewScrollIndicatorInsets={webviewScrollIndicatorInsets}
+      webviewContainerStyle={webviewContainerStyle}
+      webviewStyle={webviewStyle}
+    />
+  )
+
   const renderMainContent = () => {
-    if (isNewTab) {
-      return <View style={{ flex: 1, backgroundColor: colors.background }} />
-    }
-    // Hold off rendering the WebView until the wallet is ready in web3 mode.
-    // This prevents the page from issuing CWI calls that can't be handled yet.
-    if (!walletReady) {
+    // Block on the wallet only when the ACTIVE tab is a web page in web3 mode —
+    // mounting it before the wallet is ready would let the page issue CWI calls
+    // too early. The homepage (new tab) needs no wallet, so it never blocks.
+    if (!walletReady && !isNewTab) {
       return (
         <View style={[styles.loaderContainer, { backgroundColor: isDark ? '#000' : '#fff' }]}>
           <ActivityIndicator size="large" />
         </View>
       )
     }
-    if (activeTab) {
-      return (
-        <>
-          <WebViewHost
-            tabId={activeTab.id}
-            webviewRef={activeTab.webviewRef}
-            containerRef={webviewContainerRef}
-            uri={uri}
-            isDesktopMode={activeTab.isDesktopMode ?? false}
-            isFullscreen={isFullscreen}
-            onExitFullscreen={onExitFullscreen}
-            topInset={insets.top}
-            bottomReservedHeight={bottomReservedHeight}
-            addressBarIsAtTop={addressBarIsAtTop}
-            isDark={isDark}
-            acceptLanguage={getAcceptLanguageHeader()}
-            injectedJavaScript={injectedJavaScript}
-            injectedJSBefore={injectedJSBefore}
-            onMessage={handleMessage}
-            onNavStateChange={handleNavStateChange}
-            paymentHandlerRef={paymentHandlerRef}
-            paymentInFlightUrl={paymentInFlightUrl}
-            webviewContentInset={webviewContentInset}
-            webviewScrollIndicatorInsets={webviewScrollIndicatorInsets}
-            webviewContainerStyle={webviewContainerStyle}
-            webviewStyle={webviewStyle}
+
+    // Warm pool: keep a WebView mounted for each recently-used web-page tab so
+    // switching between them is instant (no source reload). Only the active one
+    // is visible & interactive; the rest stay alive but hidden. Gated on
+    // walletReady so no warm tab mounts before the CWI provider is ready.
+    const warmWebTabs = walletReady
+      ? tabStore.warmTabIds
+          .map(id => tabStore.tabs.find(t => t.id === id))
+          .filter((t): t is Tab => !!t && t.url !== kNEW_TAB_URL && t.url.startsWith('http'))
+      : []
+
+    return (
+      <>
+        {warmWebTabs.map(tab => renderHost(tab, tab.id === activeTab?.id))}
+        {/* Homepage cover: when the active tab is a new tab, paint over the warm
+            background WebViews so they're invisible but stay mounted. */}
+        {isNewTab && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: colors.background,
+              zIndex: 2
+            }}
           />
-          <SwitchLoadingOverlay
-            topInset={insets.top}
-            bottomReservedHeight={bottomReservedHeight}
-            addressBarIsAtTop={addressBarIsAtTop}
-            isFullscreen={isFullscreen}
-            backgroundColor={colors.background}
-          />
-        </>
-      )
-    }
-    return null
+        )}
+        <SwitchLoadingOverlay
+          topInset={insets.top}
+          bottomReservedHeight={bottomReservedHeight}
+          addressBarIsAtTop={addressBarIsAtTop}
+          isFullscreen={isFullscreen}
+          backgroundColor={colors.background}
+        />
+      </>
+    )
   }
 
   return (
