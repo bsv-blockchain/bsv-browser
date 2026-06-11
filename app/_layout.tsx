@@ -23,6 +23,7 @@ import { ThemeProvider } from '@/context/theme/ThemeContext'
 import LocalStorageProvider from '@/context/LocalStorageProvider'
 import PermissionSheet from '@/components/ui/PermissionSheet'
 import { AlertHost } from '@/components/ui/AlertCard'
+import { ToastHost } from '@/components/ui/Toast'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
 import DefaultBrowserPrompt from '@/components/onboarding/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/context/i18n/translations'
@@ -134,6 +135,7 @@ export default function RootLayout() {
                             <Stack.Screen name="pair" />
                             <Stack.Screen name="not-found" />
                           </Stack>
+                          <ToastHost />
                         </View>
                       </WalletConnectionProvider>
                     </ThemeProvider>
