@@ -239,10 +239,10 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
   // drive the address bar / wallet bridge). useCallback keeps the prop identity
   // stable across re-renders so the native bridge isn't re-bound every frame.
   const onMessageForTab = useCallback((event: any) => onMessage(tabId, event), [onMessage, tabId])
-  const onNavForTab = useCallback((navState: WebViewNavigation) => onNavStateChange(tabId, navState), [
-    onNavStateChange,
-    tabId
-  ])
+  const onNavForTab = useCallback(
+    (navState: WebViewNavigation) => onNavStateChange(tabId, navState),
+    [onNavStateChange, tabId]
+  )
 
   return (
     <View
@@ -314,8 +314,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
                       if (resource.includes('VIDEO_CAPTURE')) {
                         const current = await check(PERMISSIONS.ANDROID.CAMERA)
                         const granted =
-                          current === RESULTS.GRANTED ||
-                          (await request(PERMISSIONS.ANDROID.CAMERA)) === RESULTS.GRANTED
+                          current === RESULTS.GRANTED || (await request(PERMISSIONS.ANDROID.CAMERA)) === RESULTS.GRANTED
                         if (granted) toGrant.push(resource)
                       } else if (resource.includes('AUDIO_CAPTURE')) {
                         const current = await check(PERMISSIONS.ANDROID.RECORD_AUDIO)
@@ -1286,21 +1285,67 @@ const Browser = observer(function Browser() {
     setHistoryPopoverDirection(null)
   }, [])
 
+  // Tabs whose last load was cancelled by the user. A cancelled provisional
+  // navigation never commits, so the WKWebView's own URL still points at the
+  // PREVIOUS document (about:blank on a fresh tab) while tab.url holds the
+  // target the user actually wanted. Native reload() would re-show the stale
+  // document — the refresh button must re-navigate to tab.url instead.
+  // Cleared the moment any new load starts for that tab.
+  const cancelledLoadTabIds = useRef<Set<number>>(new Set())
+
+  /**
+   * Cancel the active tab's in-flight load. stopLoading() alone is not enough:
+   * WebKit reports the stopped provisional navigation as NSURLErrorCancelled
+   * (-999), which react-native-webview swallows (no onError, no onLoadEnd), so
+   * the tab's isLoading flag — and the navigation splash's spinner — would
+   * otherwise stay stuck until something else navigates. Clear both ourselves.
+   */
+  const cancelActiveLoad = useCallback(() => {
+    const currentTab = tabStore.activeTab
+    if (!currentTab?.isLoading) return
+    const ref = currentTab.webviewRef?.current
+    try {
+      ref?.stopLoading()
+      // Flip the splash (if that's what's showing) to its cancelled state.
+      // No-op on real pages — __navCancel only exists on the splash document.
+      ref?.injectJavaScript('window.__navCancel && window.__navCancel();true;')
+    } catch {
+      // WebView may be mid-teardown; cancelling is best-effort.
+    }
+    tabStore.updateTab(currentTab.id, { isLoading: false })
+    tabStore.clearSwitchLoading()
+    if (currentTab.url !== kNEW_TAB_URL && currentTab.url.startsWith('http')) {
+      cancelledLoadTabIds.current.add(currentTab.id)
+    }
+  }, [])
+
   const navReloadOrStop = useCallback(() => {
     const currentTab = tabStore.activeTab
     if (!currentTab) return
     if (currentTab.isLoading) {
-      currentTab.webviewRef?.current?.stopLoading()
+      cancelActiveLoad()
+    } else if (cancelledLoadTabIds.current.has(currentTab.id)) {
+      // Retry the cancelled target rather than reloading the stale document.
+      cancelledLoadTabIds.current.delete(currentTab.id)
+      injectNavigationSplash(currentTab.url)
+      currentTab.webviewRef?.current?.injectJavaScript(`window.location.href = ${JSON.stringify(currentTab.url)};true;`)
     } else {
       currentTab.webviewRef?.current?.reload()
     }
-  }, [])
+  }, [cancelActiveLoad, injectNavigationSplash])
 
   // Stable AddressBar handlers so the memoized AddressBar (LiquidGlass pill)
   // skips reconciliation on Browser re-renders that don't change its inputs.
   // activeTab is ref-stable across in-place MobX mutations, so these stay
   // stable across the page-load nav storm.
   const onAddressFocus = useCallback(() => {
+    // A USER tap on the bar while a page is loading means they want to change
+    // course (typo'd URL, slow host). Cancel the in-flight request immediately
+    // so the correction isn't queued behind a dying load — and so the WebView
+    // isn't doing network/layout work while they type. Programmatic focuses
+    // (the new-tab homepage flow) set addressEditing BEFORE calling .focus(),
+    // so this guard keeps them from cancelling their own homepage load.
+    if (!addressEditing.current) cancelActiveLoad()
     setMenuPopoverOpen(false)
     setHistoryPopoverDirection(null)
     addressEditing.current = true
@@ -1312,7 +1357,7 @@ const Browser = observer(function Browser() {
         selection: { start: 0, end: textToSelect.length }
       })
     }, 0)
-  }, [activeTab, addressText, setMenuPopoverOpen, setHistoryPopoverDirection])
+  }, [activeTab, addressText, cancelActiveLoad, setMenuPopoverOpen, setHistoryPopoverDirection])
 
   const onAddressBlur = useCallback(() => {
     addressEditing.current = false
@@ -1578,7 +1623,8 @@ const Browser = observer(function Browser() {
   // Must NOT rely on the polyfill (different WKWebView content world on iOS).
   // Memoized (deps: []) so this multi-KB script string is built once per mount
   // instead of on every render.
-  const downloadInterceptScript = useMemo(() => `(function(){
+  const downloadInterceptScript = useMemo(
+    () => `(function(){
     if(window.__blobDL) return;
     window.__blobDL=true;
     var reg=new Map();
@@ -1625,7 +1671,9 @@ const Browser = observer(function Browser() {
     };
     try{Object.defineProperty(HTMLElement.prototype.click,'toString',{value:function(){return'function click() { [native code] }'},writable:false,configurable:false})}catch(e){}
     try{window.__spoofNative&&window.__spoofNative(HTMLElement.prototype.click,'click')}catch(e){}
-  })();true;`, [])
+  })();true;`,
+    []
+  )
 
   // Built once per change of permission state instead of on every render. Previously
   // this multi-KB concat (CWI provider + polyfills + permission script) ran on all
@@ -1874,6 +1922,10 @@ const Browser = observer(function Browser() {
   // re-bind its bridge listener.
   const handleNavStateChange = useCallback(
     (tabId: number, navState: WebViewNavigation) => {
+      // Any new load supersedes a user-cancelled one — refresh goes back to
+      // meaning native reload() for this tab. Runs before the active-tab
+      // filter so background tabs clear their flag too.
+      if (navState.loading) cancelledLoadTabIds.current.delete(tabId)
       if (!activeTab) return
       // Only the active tab drives the address bar / global history. Per-tab
       // navigation history is still recorded for every tab via the WebView's
@@ -2086,19 +2138,29 @@ const Browser = observer(function Browser() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      enabled={Platform.OS === 'ios' && addressFocused}
-      behavior="padding"
-      keyboardVerticalOffset={0}
-    >
-      <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
-        <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
+    <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
+      <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
 
-        {/* ---- Main content: WebView lives between the safe-area bars ---- */}
-        {renderMainContent()}
+      {/* ---- Main content: WebView lives between the safe-area bars ----
+          Deliberately OUTSIDE the KeyboardAvoidingView below. When the KAV
+          wrapped the whole tree, focusing the address bar padded the entire
+          screen by the keyboard height — synchronously resizing every warm
+          WKWebView (up to WARM_POOL_SIZE full pages reflowing on the main
+          thread, one possibly mid-load). That was a multi-second UI hang on
+          address-bar tap. Only the chrome needs to avoid the keyboard; the
+          page can sit under it, exactly like Safari. */}
+      {renderMainContent()}
 
-        {/* Touch blocker shield (Approach A hybrid):
+      {/* ---- Chrome layer: everything that must rise above the keyboard ---- */}
+      <KeyboardAvoidingView
+        style={StyleSheet.absoluteFill}
+        pointerEvents="box-none"
+        enabled={Platform.OS === 'ios' && addressFocused}
+        behavior="padding"
+        keyboardVerticalOffset={0}
+      >
+        <View style={styles.chromeLayer} pointerEvents="box-none">
+          {/* Touch blocker shield (Approach A hybrid):
             - WebView frame is kept full-height so page backgrounds, heroes, and
               full-bleed visuals can paint under the frosted-glass address bar.
             - When the address bar is at the bottom, this transparent overlay
@@ -2108,39 +2170,39 @@ const Browser = observer(function Browser() {
             - On iOS, contentInset further helps the web layout engine place
               fixed elements above the bar naturally.
             - zIndex sits above WebView (0) but below chromeWrapper (20). */}
-        {/* Touch blocker area — full height when bar is expanded, tiny right-corner area when collapsed */}
-        {!addressBarCollapsed && bottomReservedHeight > 0 && (
-          <View
-            pointerEvents="auto"
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: bottomReservedHeight,
-              backgroundColor: 'transparent',
-              zIndex: 15
-            }}
-          />
-        )}
+          {/* Touch blocker area — full height when bar is expanded, tiny right-corner area when collapsed */}
+          {!addressBarCollapsed && bottomReservedHeight > 0 && (
+            <View
+              pointerEvents="auto"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: bottomReservedHeight,
+                backgroundColor: 'transparent',
+                zIndex: 15
+              }}
+            />
+          )}
 
-        {/* Small right-side blocker when collapsed (only protects taps under the ... button) */}
-        {addressBarCollapsed && (
-          <View
-            pointerEvents="auto"
-            style={{
-              position: 'absolute',
-              right: spacing.md - 4,
-              bottom: 0,
-              width: 52,
-              height: safeBottomInset(insets.bottom) + 52,
-              backgroundColor: 'transparent',
-              zIndex: 15
-            }}
-          />
-        )}
+          {/* Small right-side blocker when collapsed (only protects taps under the ... button) */}
+          {addressBarCollapsed && (
+            <View
+              pointerEvents="auto"
+              style={{
+                position: 'absolute',
+                right: spacing.md - 4,
+                bottom: 0,
+                width: 52,
+                height: safeBottomInset(insets.bottom) + 52,
+                backgroundColor: 'transparent',
+                zIndex: 15
+              }}
+            />
+          )}
 
-        {/* Always-mounted kebab (...) pill.
+          {/* Always-mounted kebab (...) pill.
             Lives OUTSIDE the collapsing address-bar wrapper so it stays
             visible during right-swipe collapse. Its translateY follows the
             bar's vertical position (top vs bottom) + keyboard offset via
@@ -2149,248 +2211,249 @@ const Browser = observer(function Browser() {
             LiquidGlassView (UIVisualEffectView on iOS) never sees a
             fractional-opacity ancestor (Apple's stuck-effect bug).
             The kebab's tap action is always "open the menu popover". */}
-        {!isFullscreen && showAddressBar && !addressFocused && (
-          <Animated.View
-            style={[
-              {
-                position: 'absolute',
-                right: spacing.md,
-                top: insets.top + spacing.xs,
-                zIndex: 30,
-                width: 44,
-                height: 44
-              },
-              animatedKebabStyle
-            ]}
-            pointerEvents="box-none"
-          >
-            {!menuPopoverOpen && (
-              <GlassPill style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-                <TouchableOpacity
-                  onPress={() => {
-                    // Collapsed bar: first tap re-expands the address bar.
-                    // Expanded bar: tap opens the menu popover.
-                    if (addressBarCollapsed) {
-                      requestExpandAddressBar()
-                      return
-                    }
-                    setHistoryPopoverDirection(null)
-                    setMenuPopoverOpen(true)
-                  }}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                  activeOpacity={0.6}
-                >
-                  <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
-                </TouchableOpacity>
-              </GlassPill>
-            )}
-          </Animated.View>
-        )}
+          {!isFullscreen && showAddressBar && !addressFocused && (
+            <Animated.View
+              style={[
+                {
+                  position: 'absolute',
+                  right: spacing.md,
+                  top: insets.top + spacing.xs,
+                  zIndex: 30,
+                  width: 44,
+                  height: 44
+                },
+                animatedKebabStyle
+              ]}
+              pointerEvents="box-none"
+            >
+              {!menuPopoverOpen && (
+                <GlassPill style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      // Collapsed bar: first tap re-expands the address bar.
+                      // Expanded bar: tap opens the menu popover.
+                      if (addressBarCollapsed) {
+                        requestExpandAddressBar()
+                        return
+                      }
+                      setHistoryPopoverDirection(null)
+                      setMenuPopoverOpen(true)
+                    }}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    activeOpacity={0.6}
+                  >
+                    <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
+                  </TouchableOpacity>
+                </GlassPill>
+              )}
+            </Animated.View>
+          )}
 
-        {/* Address bar re-expand is now a single tap on the kebab (...) pill.
+          {/* Address bar re-expand is now a single tap on the kebab (...) pill.
             The previous full-width left-swipe hit area was removed because it
             captured touches across the entire top strip, blocking taps that
             should land on the web page beneath. */}
 
-        {/* ---- Floating Address Bar + Popover (absolutely positioned) ----
+          {/* ---- Floating Address Bar + Popover (absolutely positioned) ----
             Stays mounted while the collapse exit animation plays (gated by
             barExitAnimating) so the bar's UI-thread fade + scale completes
             on screen before the wrapper unmounts. The GestureDetector is
             still wrapped here, but during exit-animating the bar is fading
             to opacity 0 so taps don't land on it visually. */}
-        {!isFullscreen && showAddressBar && (!addressBarCollapsed || barExitAnimating) && (
-          <>
-            <GestureDetector gesture={addressBarPanGesture}>
-              <Animated.View
-                key={`chrome-wrapper-${glassRevision}`}
-                style={[styles.chromeWrapper, { top: insets.top }, animatedAddressBarStyle]}
-                // Block taps during the collapse-exit animation so the fading
-                // bar can't receive ghost touches before it unmounts.
-                pointerEvents={addressBarCollapsed ? 'none' : 'box-none'}
-              >
-                <ChromeAddressBar
-                  addressText={addressText}
-                  addressFocused={addressFocused}
-                  historyPopoverOpen={historyPopoverOpen}
-                  glassRevision={glassRevision}
-                  cancelableNewTabId={cancelableNewTabId}
-                  inputRef={addressInputRef}
-                  onChangeText={onChangeAddressText}
-                  onSubmit={onAddressSubmit}
-                  onFocus={onAddressFocus}
-                  onBlur={onAddressBlur}
-                  onBack={navBack}
-                  onBackLongPress={navBackLongPress}
-                  onForward={navForward}
-                  onForwardLongPress={navForwardLongPress}
-                  onReloadOrStop={navReloadOrStop}
-                  onClearText={onClearAddressText}
-                  onCancelNewTabFn={onCancelNewTabFn}
+          {!isFullscreen && showAddressBar && (!addressBarCollapsed || barExitAnimating) && (
+            <>
+              <GestureDetector gesture={addressBarPanGesture}>
+                <Animated.View
+                  key={`chrome-wrapper-${glassRevision}`}
+                  style={[styles.chromeWrapper, { top: insets.top }, animatedAddressBarStyle]}
+                  // Block taps during the collapse-exit animation so the fading
+                  // bar can't receive ghost touches before it unmounts.
+                  pointerEvents={addressBarCollapsed ? 'none' : 'box-none'}
+                >
+                  <ChromeAddressBar
+                    addressText={addressText}
+                    addressFocused={addressFocused}
+                    historyPopoverOpen={historyPopoverOpen}
+                    glassRevision={glassRevision}
+                    cancelableNewTabId={cancelableNewTabId}
+                    inputRef={addressInputRef}
+                    onChangeText={onChangeAddressText}
+                    onSubmit={onAddressSubmit}
+                    onFocus={onAddressFocus}
+                    onBlur={onAddressBlur}
+                    onBack={navBack}
+                    onBackLongPress={navBackLongPress}
+                    onForward={navForward}
+                    onForwardLongPress={navForwardLongPress}
+                    onReloadOrStop={navReloadOrStop}
+                    onClearText={onClearAddressText}
+                    onCancelNewTabFn={onCancelNewTabFn}
+                  />
+                </Animated.View>
+              </GestureDetector>
+
+              {/* ---- Suggestions ---- */}
+              {addressFocused && (
+                <SuggestionsDropdown
+                  suggestions={addressSuggestions}
+                  colors={colors}
+                  bottomOffset={bottomInset}
+                  onSelect={onSuggestionSelect}
                 />
-              </Animated.View>
-            </GestureDetector>
+              )}
+            </>
+          )}
 
-            {/* ---- Suggestions ---- */}
-            {addressFocused && (
-              <SuggestionsDropdown
-                suggestions={addressSuggestions}
-                colors={colors}
-                bottomOffset={bottomInset}
-                onSelect={onSuggestionSelect}
+          {/* ---- Find in Page Bar ---- */}
+          {findInPageVisible && !isFullscreen && (
+            <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 30 }}>
+              <FindInPageBar
+                query={findInPageQuery}
+                currentMatch={findInPageCurrent}
+                totalMatches={findInPageTotal}
+                capped={findInPageCapped}
+                onChangeQuery={onFindInPageQueryChange}
+                onNext={() => findInPageNavigate('next')}
+                onPrevious={() => findInPageNavigate('prev')}
+                onClose={closeFindInPage}
               />
-            )}
-          </>
-        )}
+            </View>
+          )}
 
-        {/* ---- Find in Page Bar ---- */}
-        {findInPageVisible && !isFullscreen && (
-          <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 30 }}>
-            <FindInPageBar
-              query={findInPageQuery}
-              currentMatch={findInPageCurrent}
-              totalMatches={findInPageTotal}
-              capped={findInPageCapped}
-              onChangeQuery={onFindInPageQueryChange}
-              onNext={() => findInPageNavigate('next')}
-              onPrevious={() => findInPageNavigate('prev')}
-              onClose={closeFindInPage}
-            />
-          </View>
-        )}
-
-        {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ----
+          {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ----
             Stays mounted while the close animation plays (the JS unmount only
             fires after the UI-thread fade-out completes via runOnJS callback). */}
-        {menuPopoverOpen && (
-          <Animated.View
-            style={[
-              { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-              animatedMenuPopoverStyle,
-              animatedMenuVisibilityStyle
-            ]}
-          >
-            <ObservedMenuPopover
-              activeTabUrl={activeTab?.url ?? null}
-              isNewTab={isNewTab}
-              canShare={!isNewTab}
-              addressBarAtTop={addressBarIsAtTop}
-              topOffset={8}
-              bottomOffset={bottomInset + 4}
-              isDesktopMode={activeTab?.isDesktopMode ?? false}
-              onDismiss={() => setMenuPopoverOpen(false)}
-              onShare={shareCurrent}
-              onAddBookmark={() => {
-                if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
-                  addBookmark(activeTab.title || t('untitled'), activeTab.url)
-                }
-              }}
-              onRemoveBookmark={() => {
-                if (activeTab) {
-                  bookmarkStore.removeBookmark(activeTab.url)
-                }
-              }}
-              onFindInPage={() => setFindInPageVisible(true)}
-              onBookmarks={() => sheet.push('browser-menu')}
-              onTabs={async () => {
-                await captureActiveThumbnail()
-                setShowTabsView(true)
-              }}
-              onNewTab={() => {
-                focusAddressBarOnNewTab.current = true
-                tabStore.newTab()
-                cancelableNewTabId.current = tabStore.activeTabId
-                setShowTabsView(false)
-              }}
-              onSettings={() => sheet.push('settings')}
-              onEnableWeb3={() => router.push('/auth/mnemonic')}
-              onConnections={() => router.push('/connections')}
-              onToggleDesktopMode={() => {
-                if (!activeTab || desktopModeCooldown.current) return
-                desktopModeCooldown.current = true
-                setMenuPopoverOpen(false)
-                tabStore.toggleDesktopMode(activeTab.id)
-                // The native layer sets customUserAgent but does not reload automatically,
-                // so we must trigger a reload explicitly after the state update propagates.
-                if (activeTab.url !== kNEW_TAB_URL) {
+          {menuPopoverOpen && (
+            <Animated.View
+              style={[
+                { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
+                animatedMenuPopoverStyle,
+                animatedMenuVisibilityStyle
+              ]}
+            >
+              <ObservedMenuPopover
+                activeTabUrl={activeTab?.url ?? null}
+                isNewTab={isNewTab}
+                canShare={!isNewTab}
+                addressBarAtTop={addressBarIsAtTop}
+                topOffset={8}
+                bottomOffset={bottomInset + 4}
+                isDesktopMode={activeTab?.isDesktopMode ?? false}
+                onDismiss={() => setMenuPopoverOpen(false)}
+                onShare={shareCurrent}
+                onAddBookmark={() => {
+                  if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
+                    addBookmark(activeTab.title || t('untitled'), activeTab.url)
+                  }
+                }}
+                onRemoveBookmark={() => {
+                  if (activeTab) {
+                    bookmarkStore.removeBookmark(activeTab.url)
+                  }
+                }}
+                onFindInPage={() => setFindInPageVisible(true)}
+                onBookmarks={() => sheet.push('browser-menu')}
+                onTabs={async () => {
+                  await captureActiveThumbnail()
+                  setShowTabsView(true)
+                }}
+                onNewTab={() => {
+                  focusAddressBarOnNewTab.current = true
+                  tabStore.newTab()
+                  cancelableNewTabId.current = tabStore.activeTabId
+                  setShowTabsView(false)
+                }}
+                onSettings={() => sheet.push('settings')}
+                onEnableWeb3={() => router.push('/auth/mnemonic')}
+                onConnections={() => router.push('/connections')}
+                onToggleDesktopMode={() => {
+                  if (!activeTab || desktopModeCooldown.current) return
+                  desktopModeCooldown.current = true
+                  setMenuPopoverOpen(false)
+                  tabStore.toggleDesktopMode(activeTab.id)
+                  // The native layer sets customUserAgent but does not reload automatically,
+                  // so we must trigger a reload explicitly after the state update propagates.
+                  if (activeTab.url !== kNEW_TAB_URL) {
+                    setTimeout(() => {
+                      activeTab.webviewRef.current?.reload()
+                    }, 50)
+                  }
                   setTimeout(() => {
-                    activeTab.webviewRef.current?.reload()
-                  }, 50)
-                }
-                setTimeout(() => {
-                  desktopModeCooldown.current = false
-                }, 1500)
-              }}
-            />
-          </Animated.View>
-        )}
+                    desktopModeCooldown.current = false
+                  }, 1500)
+                }}
+              />
+            </Animated.View>
+          )}
 
-        {/* ---- History Popover (full-screen layer, anchored left) ----
+          {/* ---- History Popover (full-screen layer, anchored left) ----
             Stays mounted while the close animation plays (the JS unmount only
             fires after the UI-thread fade-out completes via runOnJS callback,
             same pattern as MenuPopover). */}
-        {historyPopoverOpen &&
-          activeTab &&
-          (() => {
-            const { entries, currentIndex } = tabStore.getNavigationHistory(activeTab.id)
-            return (
-              <Animated.View
-                style={[
-                  { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-                  animatedMenuPopoverStyle,
-                  animatedHistoryVisibilityStyle
-                ]}
-              >
-                <HistoryPopover
-                  entries={entries}
-                  currentIndex={currentIndex}
-                  direction={historyPopoverDirection!}
-                  addressBarAtTop={addressBarIsAtTop}
-                  topOffset={8}
-                  bottomOffset={bottomInset + 4}
-                  onDismiss={() => setHistoryPopoverDirection(null)}
-                  onSelectEntry={onSelectHistoryEntry}
-                />
-              </Animated.View>
-            )
-          })()}
+          {historyPopoverOpen &&
+            activeTab &&
+            (() => {
+              const { entries, currentIndex } = tabStore.getNavigationHistory(activeTab.id)
+              return (
+                <Animated.View
+                  style={[
+                    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
+                    animatedMenuPopoverStyle,
+                    animatedHistoryVisibilityStyle
+                  ]}
+                >
+                  <HistoryPopover
+                    entries={entries}
+                    currentIndex={currentIndex}
+                    direction={historyPopoverDirection!}
+                    addressBarAtTop={addressBarIsAtTop}
+                    topOffset={8}
+                    bottomOffset={bottomInset + 4}
+                    onDismiss={() => setHistoryPopoverDirection(null)}
+                    onSelectEntry={onSelectHistoryEntry}
+                  />
+                </Animated.View>
+              )
+            })()}
 
-        {/* ---- Tabs Overview ---- */}
-        {!isFullscreen && showTabsView && (
-          <TabsOverview onDismiss={() => setShowTabsView(false)} setAddressFocused={setAddressFocused} />
-        )}
+          {/* ---- Tabs Overview ---- */}
+          {!isFullscreen && showTabsView && (
+            <TabsOverview onDismiss={() => setShowTabsView(false)} setAddressFocused={setAddressFocused} />
+          )}
 
-        {/* ---- Unified Sheet System ---- */}
-        <SheetRouter
-          sheet={sheet}
-          activeTab={activeTab}
-          domainForUrl={domainForUrl}
-          homepageUrl={homepageUrl}
-          updateActiveTab={updateActiveTab}
-          setAddressText={setAddressText}
-          history={history}
-          clearHistory={clearHistory}
-          removeHistoryItem={removeHistoryItem}
-          handlePermissionChange={handlePermissionChange}
-          addBookmark={addBookmark}
-        />
-
-        {/* ---- Permission Modal ---- */}
-        {pendingPermission && pendingDomain && (
-          <PermissionModal
-            key={pendingPermission}
-            visible={permissionModalVisible}
-            domain={pendingDomain}
-            permission={pendingPermission}
-            onDecision={onDecision}
+          {/* ---- Unified Sheet System ---- */}
+          <SheetRouter
+            sheet={sheet}
+            activeTab={activeTab}
+            domainForUrl={domainForUrl}
+            homepageUrl={homepageUrl}
+            updateActiveTab={updateActiveTab}
+            setAddressText={setAddressText}
+            history={history}
+            clearHistory={clearHistory}
+            removeHistoryItem={removeHistoryItem}
+            handlePermissionChange={handlePermissionChange}
+            addBookmark={addBookmark}
           />
-        )}
-      </View>
-    </KeyboardAvoidingView>
+
+          {/* ---- Permission Modal ---- */}
+          {pendingPermission && pendingDomain && (
+            <PermissionModal
+              key={pendingPermission}
+              visible={permissionModalVisible}
+              domain={pendingDomain}
+              permission={pendingPermission}
+              onDecision={onDecision}
+            />
+          )}
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   )
 })
 
@@ -2419,6 +2482,11 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   container: {
+    flex: 1
+  },
+  // Fills the keyboard-avoiding chrome overlay; box-none so page touches pass
+  // through everywhere the chrome isn't.
+  chromeLayer: {
     flex: 1
   },
   exitFullscreen: {

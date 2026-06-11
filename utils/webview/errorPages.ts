@@ -40,25 +40,90 @@ export interface NativeErrorInfo {
 /** Maps iOS NSURLError codes and Android WebViewClient error constants to user-friendly info. */
 const nativeErrors: Record<string, NativeErrorInfo> = {
   // DNS resolution failed
-  '-1003': { code: 'DNS', color: '#999', title: 'Server Not Found', detail: "The site's address couldn't be resolved. Check the URL and try again." },
-  '-6':    { code: 'DNS', color: '#999', title: 'Server Not Found', detail: "The site's address couldn't be resolved. Check the URL and try again." },
+  '-1003': {
+    code: 'DNS',
+    color: '#999',
+    title: 'Server Not Found',
+    detail: "The site's address couldn't be resolved. Check the URL and try again."
+  },
+  '-6': {
+    code: 'DNS',
+    color: '#999',
+    title: 'Server Not Found',
+    detail: "The site's address couldn't be resolved. Check the URL and try again."
+  },
   // Connection refused / cannot connect
-  '-1004': { code: ':(', color: '#999', title: 'Connection Failed', detail: 'The server refused the connection. It may be offline or unreachable.' },
-  '-2':    { code: ':(', color: '#999', title: 'Connection Failed', detail: 'The server refused the connection. It may be offline or unreachable.' },
+  '-1004': {
+    code: ':(',
+    color: '#999',
+    title: 'Connection Failed',
+    detail: 'The server refused the connection. It may be offline or unreachable.'
+  },
+  '-2': {
+    code: ':(',
+    color: '#999',
+    title: 'Connection Failed',
+    detail: 'The server refused the connection. It may be offline or unreachable.'
+  },
   // Timed out
-  '-1001': { code: ':(', color: '#999', title: 'Connection Timed Out', detail: 'The server took too long to respond. Try again later.' },
-  '-8':    { code: ':(', color: '#999', title: 'Connection Timed Out', detail: 'The server took too long to respond. Try again later.' },
+  '-1001': {
+    code: ':(',
+    color: '#999',
+    title: 'Connection Timed Out',
+    detail: 'The server took too long to respond. Try again later.'
+  },
+  '-8': {
+    code: ':(',
+    color: '#999',
+    title: 'Connection Timed Out',
+    detail: 'The server took too long to respond. Try again later.'
+  },
   // TLS / SSL errors
-  '-1200': { code: 'TLS', color: '#e74c3c', title: 'Secure Connection Failed', detail: 'A TLS error prevented a secure connection to this site.' },
-  '-1201': { code: 'TLS', color: '#e74c3c', title: 'Certificate Invalid', detail: "The server's certificate is not trusted. The connection is not secure." },
-  '-1202': { code: 'TLS', color: '#e74c3c', title: 'Certificate Invalid', detail: "The server's certificate is not trusted. The connection is not secure." },
-  '-5':    { code: 'TLS', color: '#e74c3c', title: 'Secure Connection Failed', detail: 'A TLS error prevented a secure connection to this site.' },
+  '-1200': {
+    code: 'TLS',
+    color: '#e74c3c',
+    title: 'Secure Connection Failed',
+    detail: 'A TLS error prevented a secure connection to this site.'
+  },
+  '-1201': {
+    code: 'TLS',
+    color: '#e74c3c',
+    title: 'Certificate Invalid',
+    detail: "The server's certificate is not trusted. The connection is not secure."
+  },
+  '-1202': {
+    code: 'TLS',
+    color: '#e74c3c',
+    title: 'Certificate Invalid',
+    detail: "The server's certificate is not trusted. The connection is not secure."
+  },
+  '-5': {
+    code: 'TLS',
+    color: '#e74c3c',
+    title: 'Secure Connection Failed',
+    detail: 'A TLS error prevented a secure connection to this site.'
+  },
   // Network lost / not connected
-  '-1009': { code: ':(', color: '#999', title: 'No Internet Connection', detail: 'You appear to be offline. Check your connection and try again.' },
-  '-1005': { code: ':(', color: '#999', title: 'Connection Lost', detail: 'The network connection was lost. Try again.' },
+  '-1009': {
+    code: ':(',
+    color: '#999',
+    title: 'No Internet Connection',
+    detail: 'You appear to be offline. Check your connection and try again.'
+  },
+  '-1005': {
+    code: ':(',
+    color: '#999',
+    title: 'Connection Lost',
+    detail: 'The network connection was lost. Try again.'
+  }
 }
 
-const genericNativeError: NativeErrorInfo = { code: ':(', color: '#999', title: 'Page Could Not Be Loaded', detail: 'Something went wrong loading this page. Check the URL and try again.' }
+const genericNativeError: NativeErrorInfo = {
+  code: ':(',
+  color: '#999',
+  title: 'Page Could Not Be Loaded',
+  detail: 'Something went wrong loading this page. Check the URL and try again.'
+}
 
 export function getErrorPage(status: number | string): string {
   const key = String(status)
@@ -104,6 +169,9 @@ export function navigationLoadingPage(targetUrl: string): string {
   }
   // Escape host for safe HTML embedding (display only — never reflected as JS).
   const safeHost = host.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  // NOTE: this HTML is re-embedded inside a backtick template literal by
+  // injectNavigationSplash (only backticks are escaped there), so the inline
+  // script below must never contain a "${" sequence.
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>Loading…</title>${baseStyle}
@@ -112,10 +180,33 @@ export function navigationLoadingPage(targetUrl: string): string {
   .spinner { width: 28px; height: 28px; border: 3px solid var(--sub); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; opacity: 0.7; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .host { color: var(--sub); font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; letter-spacing: 0.2px; }
+  .hint { color: var(--sub); font-size: 12px; opacity: 0.8; min-height: 16px; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
 </style></head>
 <body>
-  <div class="spinner"></div>
+  <div class="spinner" id="__nav_spinner"></div>
   <div class="host">${safeHost}</div>
+  <div class="hint" id="__nav_hint"></div>
+  <script>
+    (function () {
+      var cancelled = false;
+      // Called from the app when the user cancels the navigation (stop button
+      // or refocusing the address bar). The native cancel error (-999) is
+      // swallowed by the WebView layer, so without this the spinner would
+      // spin forever on a stopped provisional load.
+      window.__navCancel = function () {
+        cancelled = true;
+        var sp = document.getElementById('__nav_spinner');
+        if (sp) sp.style.display = 'none';
+        var h = document.getElementById('__nav_hint');
+        if (h) h.textContent = 'Load cancelled';
+      };
+      setTimeout(function () {
+        if (cancelled) return;
+        var h = document.getElementById('__nav_hint');
+        if (h && !h.textContent) h.textContent = 'Still trying to connect\\u2026 tap the address bar to edit or cancel';
+      }, 5000);
+    })();
+  </script>
 </body>
 </html>`
 }
