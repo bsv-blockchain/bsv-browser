@@ -4,7 +4,6 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  Alert,
   TextInput,
   ActivityIndicator,
   StyleSheet,
@@ -26,6 +25,8 @@ import * as Print from 'expo-print'
 import { Paths, File as ExpoFile } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { showAlert } from '@/components/ui/AlertCard'
+import { showToast } from '@/components/ui/Toast'
 
 type MnemonicMode = 'choose' | 'generate' | 'import'
 
@@ -64,21 +65,23 @@ export default function MnemonicScreen() {
       console.log('[Mnemonic] Building wallet eagerly after mnemonic generation')
       const stored = await storeMnemonic(wallet.mnemonic)
       if (!stored) {
-        Alert.alert(
-          'Biometric Access Required',
-          'Biometric access is needed to protect your wallet keys. Please try again.',
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => setMode('choose') },
-            { text: 'Try Again', onPress: () => handleGenerateNew() }
-          ]
-        )
+        const choice = await showAlert({
+          title: 'Biometric Access Required',
+          message: 'Biometric access is needed to protect your wallet keys. Please try again.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', key: 'cancel' },
+            { text: 'Try Again', key: 'retry' },
+          ],
+        })
+        if (choice === 'cancel') setMode('choose')
+        else handleGenerateNew()
         return
       }
       await buildWalletFromMnemonic(wallet.mnemonic)
       console.log('[Mnemonic] Wallet built successfully during generate flow')
     } catch (error: any) {
       console.error('Error generating mnemonic:', error)
-      Alert.alert('Error', 'Failed to generate mnemonic. Please try again.')
+      showToast('Failed to generate mnemonic. Please try again.', { type: 'error' })
     }
   }
 
@@ -152,21 +155,22 @@ export default function MnemonicScreen() {
         const wif = PrivateKey.fromHex(trimmed).toWif()
         const stored = await setRecoveredKey(wif)
         if (!stored) {
-          Alert.alert(
-            'Biometric Access Required',
-            'Biometric access is needed to protect your wallet keys. Please try again.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Try Again', onPress: () => handleContinueWithImported() }
-            ]
-          )
+          const choice = await showAlert({
+            title: 'Biometric Access Required',
+            message: 'Biometric access is needed to protect your wallet keys. Please try again.',
+            buttons: [
+              { text: 'Cancel', style: 'cancel', key: 'cancel' },
+              { text: 'Try Again', key: 'retry' },
+            ],
+          })
+          if (choice === 'retry') handleContinueWithImported()
           return
         }
         await buildWalletFromRecoveredKey(wif)
         router.dismissAll()
       } catch (error: any) {
         console.error('[Mnemonic] Error importing hex key:', error)
-        Alert.alert('Error', `Invalid private key: ${error.message}`)
+        showToast(`Invalid private key: ${error.message}`, { type: 'error' })
       } finally {
         setLoading(false)
       }
@@ -174,10 +178,10 @@ export default function MnemonicScreen() {
     }
 
     if (!validateMnemonic(trimmed)) {
-      Alert.alert(
-        'Invalid Input',
-        'Please enter a valid recovery phrase (12–24 words) or a 64-character hex private key.'
-      )
+      await showAlert({
+        title: 'Invalid Input',
+        message: 'Please enter a valid recovery phrase (12–24 words) or a 64-character hex private key.',
+      })
       return
     }
 
@@ -191,14 +195,15 @@ export default function MnemonicScreen() {
       console.log('[Mnemonic] Starting wallet initialization with mnemonic')
       const stored = await storeMnemonic(mnemonicPhrase)
       if (!stored) {
-        Alert.alert(
-          'Biometric Access Required',
-          'Biometric access is needed to protect your wallet keys. Please try again.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Try Again', onPress: () => initializeWallet(mnemonicPhrase) }
-          ]
-        )
+        const choice = await showAlert({
+          title: 'Biometric Access Required',
+          message: 'Biometric access is needed to protect your wallet keys. Please try again.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', key: 'cancel' },
+            { text: 'Try Again', key: 'retry' },
+          ],
+        })
+        if (choice === 'retry') initializeWallet(mnemonicPhrase)
         return
       }
       await buildWalletFromMnemonic(mnemonicPhrase)
@@ -206,7 +211,7 @@ export default function MnemonicScreen() {
       router.dismissAll()
     } catch (error: any) {
       console.error('[Mnemonic] Error setting up wallet:', error)
-      Alert.alert('Error', `Failed to set up wallet: ${error.message}`)
+      showToast(`Failed to set up wallet: ${error.message}`, { type: 'error' })
     } finally {
       setLoading(false)
     }
