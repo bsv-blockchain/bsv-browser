@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Alert } from 'react-native'
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { observer } from 'mobx-react-lite'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -14,6 +14,7 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
 import { useWallet } from '@/context/WalletContext'
+import { showToast } from '@/components/ui/Toast'
 import connectionStore, { type Connection } from '@/stores/ConnectionStore'
 import QRScanner from '@/components/QRScanner'
 import { useWalletConnection, lastSeqKey } from '@/context/WalletConnectionContext'
@@ -109,11 +110,11 @@ export default observer(function ConnectionsScreen() {
     setScanning(false)
     const result = parsePairingUri(data)
     if (!result.params) {
-      Alert.alert(t('invalid_qr_code'), result.error)
+      showToast(`${t('invalid_qr_code')}: ${result.error}`, { type: 'error' })
       return
     }
     if (!managers.permissionsManager) {
-      Alert.alert(t('wallet_not_ready'), t('please_log_in_first'))
+      showToast(`${t('wallet_not_ready')}: ${t('please_log_in_first')}`, { type: 'error' })
       return
     }
     const originator = domainFromOrigin(result.params.origin)
@@ -121,7 +122,7 @@ export default observer(function ConnectionsScreen() {
     try {
       await connect(result.params, wallet)
     } catch (err) {
-      Alert.alert(t('connection_failed'), err instanceof Error ? err.message : t('unknown_error'))
+      showToast(`${t('connection_failed')}: ${err instanceof Error ? err.message : t('unknown_error')}`, { type: 'error' })
     }
   }
 
@@ -173,7 +174,7 @@ export default observer(function ConnectionsScreen() {
     try {
       await reconnect(conn, wallet)
     } catch (err) {
-      Alert.alert(t('reconnect_failed'), err instanceof Error ? err.message : t('unknown_error'))
+      showToast(`${t('reconnect_failed')}: ${err instanceof Error ? err.message : t('unknown_error')}`, { type: 'error' })
     }
   }
 

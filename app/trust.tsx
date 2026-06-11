@@ -7,7 +7,6 @@ import {
   TextInput,
   TouchableOpacity,
   Image,
-  Alert,
   Modal,
   ActivityIndicator
 } from 'react-native'
@@ -21,6 +20,7 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import validateTrust from '@/utils/validateTrust'
+import { showAlert } from '@/components/ui/AlertCard'
 
 // -------------------- Types --------------------
 export type Certifier = {
@@ -136,19 +136,17 @@ export default function TrustScreen() {
     })
   }
 
-  const onRemove = (identityKey: string) => {
-    Alert.alert(
-      t('confirm_delete'),
-      t('confirm_delete_body'),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('delete'),
-          style: 'destructive',
-          onPress: () => setTrustedEntities(prev => prev.filter(c => c.identityKey !== identityKey))
-        }
-      ]
-    )
+  const onRemove = async (identityKey: string) => {
+    const choice = await showAlert({
+      title: t('confirm_delete'),
+      message: t('confirm_delete_body'),
+      buttons: [
+        { text: t('cancel'), style: 'cancel', key: 'cancel' },
+        { text: t('delete'), style: 'destructive', key: 'delete' },
+      ],
+    })
+    if (choice !== 'delete') return
+    setTrustedEntities(prev => prev.filter(c => c.identityKey !== identityKey))
   }
 
   return (

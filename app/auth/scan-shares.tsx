@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react'
-import { View, Text, Alert, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { useWallet } from '@/context/WalletContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { parseShare, validateShareCompatibility, recoverKeyFromShares, ParsedShare } from '@/utils/backupShares'
+import { showAlert } from '@/components/ui/AlertCard'
 import { haptics } from '@/hooks/useHaptics'
 import QRScanner from '@/components/QRScanner'
 
@@ -82,22 +83,21 @@ export default function ScanSharesScreen() {
       // Store the recovered key and build the wallet
       const stored = await setRecoveredKey(wif)
       if (!stored) {
-        Alert.alert(
-          'Biometric Access Required',
-          'Biometric access is needed to protect your wallet keys. Please try again.',
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-              onPress: () => {
-                setScannedShares([])
-                setThreshold(null)
-                lastScannedRef.current = ''
-              }
-            },
-            { text: 'Try Again', onPress: () => handleRecovery(shareStrings) }
-          ]
-        )
+        const choice = await showAlert({
+          title: 'Biometric Access Required',
+          message: 'Biometric access is needed to protect your wallet keys. Please try again.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', key: 'cancel' },
+            { text: 'Try Again', key: 'retry' },
+          ],
+        })
+        if (choice === 'cancel') {
+          setScannedShares([])
+          setThreshold(null)
+          lastScannedRef.current = ''
+        } else {
+          handleRecovery(shareStrings)
+        }
         return
       }
 
