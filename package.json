@@ -155,7 +155,7 @@
     ],
     "modulePathIgnorePatterns": ["<rootDir>/.worktrees/"],
     "moduleNameMapper": {
-      "^react-native-reanimated$": "<rootDir>/node_modules/react-native-reanimated/mock.js",
+      "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
       "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js"
     },
     "transformIgnorePatterns": [
