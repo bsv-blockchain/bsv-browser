@@ -96,7 +96,7 @@ export default function ScanSharesScreen() {
           setThreshold(null)
           lastScannedRef.current = ''
         } else {
-          handleRecovery(shareStrings)
+          await handleRecovery(shareStrings)
         }
         return
       }

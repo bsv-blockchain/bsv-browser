@@ -163,7 +163,7 @@ export default function MnemonicScreen() {
               { text: 'Try Again', key: 'retry' },
             ],
           })
-          if (choice === 'retry') handleContinueWithImported()
+          if (choice === 'retry') await handleContinueWithImported()
           return
         }
         await buildWalletFromRecoveredKey(wif)
@@ -203,7 +203,7 @@ export default function MnemonicScreen() {
             { text: 'Try Again', key: 'retry' },
           ],
         })
-        if (choice === 'retry') initializeWallet(mnemonicPhrase)
+        if (choice === 'retry') await initializeWallet(mnemonicPhrase)
         return
       }
       await buildWalletFromMnemonic(mnemonicPhrase)

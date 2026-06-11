@@ -61,7 +61,7 @@ const openDefaultBrowserSettings = async () => {
     await markPromptShown()
   } catch (error) {
     console.error('Error opening settings:', error)
-    showToast('Could not open settings. Set BSV Browser as default in device settings.', { type: 'error' })
+    showToast('Could not open settings. Please manually set BSV Browser as your default browser in your device settings.', { type: 'error' })
     await markPromptShown()
   }
 }
@@ -76,7 +76,7 @@ const showDefaultBrowserPrompt = async () => {
     ],
   })
   if (choice === 'set') await openDefaultBrowserSettings()
-  else await markPromptShown()
+  else if (choice === 'later') await markPromptShown()
 }
 
 export default function DefaultBrowserPrompt() {

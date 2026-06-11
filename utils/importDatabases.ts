@@ -52,6 +52,7 @@ export async function importWalletDatabase(storage: StorageExpoSQLite | null): P
     await showAlert({
       title: i18n.t('import_invalid_file'),
       message: i18n.t('import_invalid_file_detail'),
+      buttons: [{ text: i18n.t('done'), key: 'ok' }],
     })
     return { imported: false }
   }
