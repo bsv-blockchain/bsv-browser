@@ -65,9 +65,14 @@ export default function PressableScale({
     if (reducedMotion) {
       return {}
     }
+    if (animateOpacity) {
+      return {
+        transform: [{ scale: 1 - (1 - scaleTo) * pressed.value }],
+        opacity: 1 - 0.15 * pressed.value,
+      }
+    }
     return {
       transform: [{ scale: 1 - (1 - scaleTo) * pressed.value }],
-      opacity: animateOpacity ? 1 - 0.15 * pressed.value : 1,
     }
   }, [scaleTo, animateOpacity, reducedMotion])
 
