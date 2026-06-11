@@ -51,6 +51,7 @@ export function ToastHost() {
   useEffect(() => {
     push = (message, type) => {
       if (hideTimer.current) clearTimeout(hideTimer.current)
+      progress.value = 0
       setToast({ id: nextId++, message, type })
     }
     return () => { push = null }
