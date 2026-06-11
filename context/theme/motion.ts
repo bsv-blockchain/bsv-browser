@@ -15,13 +15,16 @@
  *  - A stuck UIVisualEffectView is cured by remounting via a changed `key`.
  */
 
+import type { WithSpringConfig } from 'react-native-reanimated'
+
 export const springs = {
-  /** Buttons, small elements, alert cards. */
-  snappy: { mass: 1, stiffness: 380, damping: 36 },
+  /** Buttons, small elements, alert cards. Custom-tuned — NOT Reanimated's built-in presets. */
+  snappy: { mass: 1, stiffness: 380, damping: 36 } satisfies WithSpringConfig,
   /** Larger surfaces: sheets, popovers, dropdowns. */
-  settle: { mass: 1, stiffness: 280, damping: 32 },
+  settle: { mass: 1, stiffness: 280, damping: 32 } satisfies WithSpringConfig,
 } as const
 
+/** All values in milliseconds. */
 export const durations = {
   /** Crossfades, press feedback. */
   instant: 150,
