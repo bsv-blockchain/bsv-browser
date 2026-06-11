@@ -28,7 +28,8 @@
     "prebuild": "expo prebuild --clean",
     "prebuild:ios": "expo prebuild --platform ios --clean",
     "prebuild:android": "expo prebuild --platform android --clean",
-    "postinstall": "patch-package && node -e \"const fs=require('fs'),p=require('path'),t=p.join('node_modules','expo','node_modules','@expo','cli','node_modules'),s=p.join('node_modules','@expo','cli','node_modules','glob');fs.mkdirSync(t,{recursive:true});try{fs.symlinkSync(p.resolve(s),p.join(t,'glob'))}catch(e){if(e.code!=='EEXIST')throw e}\""
+    "postinstall": "patch-package && node -e \"const fs=require('fs'),p=require('path'),t=p.join('node_modules','expo','node_modules','@expo','cli','node_modules'),s=p.join('node_modules','@expo','cli','node_modules','glob');fs.mkdirSync(t,{recursive:true});try{fs.symlinkSync(p.resolve(s),p.join(t,'glob'))}catch(e){if(e.code!=='EEXIST')throw e}\"",
+    "test": "jest"
   },
   "dependencies": {
     "@bsv/btms": "^1.0.2",
@@ -74,6 +75,7 @@
     "expo-linking": "~55.0.15",
     "expo-local-authentication": "~55.0.14",
     "expo-localization": "~55.0.15",
+    "expo-modules-core": "^55.0.25",
     "expo-print": "~55.0.15",
     "expo-router": "~55.0.16",
     "expo-secure-store": "~55.0.14",
@@ -120,10 +122,15 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@testing-library/react-native": "^13.3.3",
+    "@types/jest": "^29.5.14",
     "@types/react": "~19.2.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~55.0.1",
+    "jest": "~29.7.0",
+    "jest-expo": "~55.0.0",
     "patch-package": "^8.0.1",
+    "react-test-renderer": "^19.2.0",
     "typescript": "~5.9.2",
     "ws": "^8.20.0"
   },
@@ -138,5 +145,13 @@
         "listUnknownPackages": false
       }
     }
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "testMatch": ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.test.tsx"],
+    "modulePathIgnorePatterns": ["<rootDir>/.worktrees/"],
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|expo-modules-core)/)"
+    ]
   }
 }
