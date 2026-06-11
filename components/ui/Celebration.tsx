@@ -16,7 +16,7 @@ import Animated, {
   useReducedMotion,
 } from 'react-native-reanimated'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { springs } from '@/context/theme/motion'
+import { springs, durations } from '@/context/theme/motion'
 import { haptics } from '@/hooks/useHaptics'
 
 const AnimatedPath = Animated.createAnimatedComponent(Path)
@@ -45,7 +45,7 @@ export default function Celebration({ size = 88, onDone }: CelebrationProps) {
     haptics.success()
     if (!reducedMotion) {
       scale.value = withSpring(1, springs.snappy)
-      opacity.value = withTiming(1, { duration: 150 })
+      opacity.value = withTiming(1, { duration: durations.instant })
       draw.value = withDelay(120, withTiming(0, { duration: 320 }))
     }
     if (onDone) {

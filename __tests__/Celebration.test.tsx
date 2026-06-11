@@ -12,6 +12,7 @@ jest.mock('react-native-svg', () => {
   const Svg = ({ children }: { children?: React.ReactNode }) => React.createElement(View, null, children)
   const Circle = () => null
   const Path = React.forwardRef((_props: object, _ref: unknown) => null)
+  Path.displayName = 'Path'
   return { __esModule: true, default: Svg, Svg, Circle, Path }
 })
 
