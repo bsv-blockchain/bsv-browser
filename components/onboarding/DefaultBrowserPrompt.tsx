@@ -1,7 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { Alert, Linking, Platform } from 'react-native'
+import { Linking, Platform } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { FIRST_TOUCH_DATE_KEY } from '@/app/_layout'
+import { showAlert } from '@/components/ui/AlertCard'
+import { showToast } from '@/components/ui/Toast'
 
 const DEFAULT_BROWSER_PROMPT_KEY = 'hasShownDefaultBrowserPrompt'
 
@@ -45,49 +47,36 @@ const openDefaultBrowserSettings = async () => {
       }
     } else if (Platform.OS === 'ios') {
       // Show iOS instructions
-      Alert.alert(
-        'Set Default Browser',
-        'To set BSV Browser as your default browser:\n\n1. Go to Settings\n2. Scroll down to BSV Browser\n3. Tap "Default Browser App"\n4. Select BSV Browser',
-        [
-          {
-            text: 'Open Settings',
-            onPress: () => Linking.openSettings()
-          },
-          {
-            text: 'Cancel',
-            style: 'cancel'
-          }
-        ]
-      )
+      const choice = await showAlert({
+        title: 'Set Default Browser',
+        message: 'To set BSV Browser as your default browser:\n\n1. Go to Settings\n2. Scroll down to BSV Browser\n3. Tap "Default Browser App"\n4. Select BSV Browser',
+        buttons: [
+          { text: 'Cancel', style: 'cancel', key: 'cancel' },
+          { text: 'Open Settings', key: 'open' },
+        ],
+      })
+      if (choice === 'open') Linking.openSettings()
     }
 
     await markPromptShown()
   } catch (error) {
     console.error('Error opening settings:', error)
-    Alert.alert(
-      'Error',
-      'Could not open settings. Please manually set BSV Browser as your default browser in your device settings.'
-    )
+    showToast('Could not open settings. Set BSV Browser as default in device settings.', { type: 'error' })
     await markPromptShown()
   }
 }
 
-const showDefaultBrowserPrompt = () => {
-  Alert.alert(
-    'Set as Default Browser',
-    'Would you like to set BSV Browser as your default browser? This will allow you to open web links directly in BSV Browser.',
-    [
-      {
-        text: 'Not Now',
-        style: 'cancel',
-        onPress: markPromptShown
-      },
-      {
-        text: 'Set as Default',
-        onPress: openDefaultBrowserSettings
-      }
-    ]
-  )
+const showDefaultBrowserPrompt = async () => {
+  const choice = await showAlert({
+    title: 'Set as Default Browser',
+    message: 'Would you like to set BSV Browser as your default browser? This will allow you to open web links directly in BSV Browser.',
+    buttons: [
+      { text: 'Not Now', style: 'cancel', key: 'later' },
+      { text: 'Set as Default', key: 'set' },
+    ],
+  })
+  if (choice === 'set') await openDefaultBrowserSettings()
+  else await markPromptShown()
 }
 
 export default function DefaultBrowserPrompt() {
@@ -125,38 +114,28 @@ export default function DefaultBrowserPrompt() {
   return null
 }
 
-export const showManualDefaultBrowserPrompt = () => {
-  Alert.alert(
-    'Set as Default Browser',
-    'Set BSV Browser as your default browser to open web links directly in the app.',
-    [
-      {
-        text: 'Cancel',
-        style: 'cancel'
-      },
-      {
-        text: 'Open Settings',
-        onPress: () => {
-          if (Platform.OS === 'android') {
-            Linking.openSettings()
-          } else {
-            Alert.alert(
-              'Set Default Browser',
-              'To set BSV Browser as your default browser:\n\n1. Go to Settings\n2. Scroll down to BSV Browser\n3. Tap "Default Browser App"\n4. Select BSV Browser',
-              [
-                {
-                  text: 'Open Settings',
-                  onPress: () => Linking.openSettings()
-                },
-                {
-                  text: 'Cancel',
-                  style: 'cancel'
-                }
-              ]
-            )
-          }
-        }
-      }
-    ]
-  )
+export const showManualDefaultBrowserPrompt = async () => {
+  const choice = await showAlert({
+    title: 'Set as Default Browser',
+    message: 'Set BSV Browser as your default browser to open web links directly in the app.',
+    buttons: [
+      { text: 'Cancel', style: 'cancel', key: 'cancel' },
+      { text: 'Open Settings', key: 'open' },
+    ],
+  })
+  if (choice !== 'open') return
+
+  if (Platform.OS === 'android') {
+    Linking.openSettings()
+  } else {
+    const iosChoice = await showAlert({
+      title: 'Set Default Browser',
+      message: 'To set BSV Browser as your default browser:\n\n1. Go to Settings\n2. Scroll down to BSV Browser\n3. Tap "Default Browser App"\n4. Select BSV Browser',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', key: 'cancel' },
+        { text: 'Open Settings', key: 'open' },
+      ],
+    })
+    if (iosChoice === 'open') Linking.openSettings()
+  }
 }
