@@ -1,5 +1,5 @@
 import { File, Paths } from 'expo-file-system'
-import { Platform, Alert } from 'react-native'
+import { Platform } from 'react-native'
 import * as DocumentPicker from 'expo-document-picker'
 import * as SQLite from 'expo-sqlite'
 import type { StorageExpoSQLite } from '@/storage'
@@ -11,6 +11,8 @@ import {
   parseTimestampFromFilename
 } from './walletDbRegistry'
 import i18n from '@/context/i18n/translations'
+import { showAlert } from '@/components/ui/AlertCard'
+import { showToast } from '@/components/ui/Toast'
 
 export interface ImportResult {
   imported: boolean
@@ -47,11 +49,11 @@ export async function importWalletDatabase(storage: StorageExpoSQLite | null): P
   // ── 2. Validate filename ──────────────────────────────────────────────────
   const parsed = parseDbFilename(pickedName)
   if (!parsed) {
-    return new Promise(resolve => {
-      Alert.alert(i18n.t('import_invalid_file'), i18n.t('import_invalid_file_detail'), [
-        { text: i18n.t('done'), onPress: () => resolve({ imported: false }) }
-      ])
+    await showAlert({
+      title: i18n.t('import_invalid_file'),
+      message: i18n.t('import_invalid_file_detail'),
     })
+    return { imported: false }
   }
 
   const { keySuffix, chain } = parsed
@@ -77,22 +79,26 @@ export async function importWalletDatabase(storage: StorageExpoSQLite | null): P
     if (currentBestTs >= importTs) {
       // Existing DB has a higher or equal timestamp — imported file will NOT
       // become the active database.
-      const proceed = await new Promise<boolean>(resolve => {
-        Alert.alert(i18n.t('import_conflict_title'), i18n.t('import_conflict_message'), [
-          { text: i18n.t('cancel'), style: 'cancel', onPress: () => resolve(false) },
-          { text: i18n.t('import_anyway'), onPress: () => resolve(true) }
-        ])
+      const choice = await showAlert({
+        title: i18n.t('import_conflict_title'),
+        message: i18n.t('import_conflict_message'),
+        buttons: [
+          { text: i18n.t('cancel'), style: 'cancel', key: 'cancel' },
+          { text: i18n.t('import_anyway'), style: 'destructive', key: 'import' },
+        ],
       })
-      if (!proceed) return { imported: false }
+      if (choice !== 'import') return { imported: false }
     } else {
       // Imported file will become the active database.
-      const proceed = await new Promise<boolean>(resolve => {
-        Alert.alert(i18n.t('import_confirm_title'), i18n.t('import_confirm_message'), [
-          { text: i18n.t('cancel'), style: 'cancel', onPress: () => resolve(false) },
-          { text: i18n.t('import_wallet_data'), onPress: () => resolve(true) }
-        ])
+      const choice = await showAlert({
+        title: i18n.t('import_confirm_title'),
+        message: i18n.t('import_confirm_message'),
+        buttons: [
+          { text: i18n.t('cancel'), style: 'cancel', key: 'cancel' },
+          { text: i18n.t('import_wallet_data'), key: 'import' },
+        ],
       })
-      if (!proceed) return { imported: false }
+      if (choice !== 'import') return { imported: false }
     }
   }
 
@@ -103,7 +109,7 @@ export async function importWalletDatabase(storage: StorageExpoSQLite | null): P
     bytes = await pickedFile.bytes()
   } catch (e: any) {
     console.error('[importDatabases] Failed to read picked file:', e.message)
-    Alert.alert(i18n.t('import_invalid_file'), e.message)
+    showToast(e.message, { type: 'error' })
     return { imported: false }
   }
 
@@ -125,7 +131,7 @@ export async function importWalletDatabase(storage: StorageExpoSQLite | null): P
     })
   } catch (e: any) {
     console.error('[importDatabases] Failed to place database:', e.message)
-    Alert.alert(i18n.t('import_invalid_file'), e.message)
+    showToast(e.message, { type: 'error' })
     return { imported: false }
   } finally {
     try {
