@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext, useRef, useCallback } from 'react'
-import { ActivityIndicator, Alert, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
+import { ActivityIndicator, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
@@ -22,6 +22,8 @@ import { formatAmount, parseDisplayToSatoshis, getUnitLabel } from '@/utils/amou
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
+import { showAlert } from '@/components/ui/AlertCard'
+import { showToast } from '@/components/ui/Toast'
 import { router } from 'expo-router'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { exportAllWalletDatabases } from '@/utils/exportDatabases'
@@ -144,7 +146,7 @@ export default function WalletConfigScreen() {
       }
 
       if (!primaryKeyBytes) {
-        Alert.alert('Error', 'Unable to access wallet key. Please authenticate and try again.')
+        showToast('Unable to access wallet key. Please authenticate and try again.', { type: 'error' })
         return
       }
 
@@ -176,7 +178,7 @@ export default function WalletConfigScreen() {
     try {
       const result = await importWalletDatabase(storage)
       if (result.imported) {
-        Alert.alert(t('import_confirm_title'), t('import_success'))
+        showToast(t('import_success'), { type: 'success' })
         await rebuildWallet()
       }
     } catch (e) {
@@ -549,12 +551,17 @@ export default function WalletConfigScreen() {
             label={t('delete_wallet')}
             icon="trash-outline"
             iconColor={colors.error}
-            onPress={() =>
-              Alert.alert(t('delete_wallet_warning_title'), t('delete_wallet_warning_body'), [
-                { text: t('cancel'), style: 'cancel' },
-                { text: t('delete_wallet_confirm'), style: 'destructive', onPress: logout }
-              ])
-            }
+            onPress={async () => {
+              const choice = await showAlert({
+                title: t('delete_wallet_warning_title'),
+                message: t('delete_wallet_warning_body'),
+                buttons: [
+                  { text: t('cancel'), style: 'cancel', key: 'cancel' },
+                  { text: t('delete_wallet_confirm'), style: 'destructive', key: 'delete' },
+                ],
+              })
+              if (choice === 'delete') logout()
+            }}
             destructive
             showChevron={false}
             isLast
