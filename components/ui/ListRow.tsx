@@ -1,8 +1,9 @@
 import React from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
+import PressableScale from '@/components/ui/PressableScale'
 
 interface ListRowProps {
   label: string
@@ -72,13 +73,13 @@ export const ListRow: React.FC<ListRowProps> = ({
 
   if (onPress) {
     return (
-      <Pressable
+      <PressableScale
         onPress={onPress}
-        style={({ pressed }) => pressed && { opacity: 0.6 }}
-        accessibilityRole="button"
+        scaleTo={0.98}
+        haptic="tap"
       >
         {content}
-      </Pressable>
+      </PressableScale>
     )
   }
 
