@@ -13,26 +13,44 @@ import { haptics } from '@/hooks/useHaptics'
 describe('haptic vocabulary', () => {
   beforeEach(() => jest.clearAllMocks())
 
-  it('maps semantics to the iOS APIs from the spec', () => {
-    Platform.OS = 'ios'
-    haptics.tap()
-    expect(Haptics.selectionAsync).toHaveBeenCalled()
-    haptics.confirm()
-    expect(Haptics.impactAsync).toHaveBeenCalledWith('light')
-    haptics.success()
-    expect(Haptics.notificationAsync).toHaveBeenCalledWith('success')
-    haptics.warning()
-    expect(Haptics.notificationAsync).toHaveBeenCalledWith('warning')
-    haptics.error()
-    expect(Haptics.notificationAsync).toHaveBeenCalledWith('error')
+  describe('iOS', () => {
+    beforeEach(() => { Platform.OS = 'ios' })
+    afterEach(() => { Platform.OS = 'ios' })
+
+    it('maps semantics to the iOS APIs from the spec', () => {
+      haptics.tap()
+      expect(Haptics.selectionAsync).toHaveBeenCalled()
+      haptics.confirm()
+      expect(Haptics.impactAsync).toHaveBeenCalledWith('light')
+      haptics.success()
+      expect(Haptics.notificationAsync).toHaveBeenCalledWith('success')
+      haptics.warning()
+      expect(Haptics.notificationAsync).toHaveBeenCalledWith('warning')
+      haptics.error()
+      expect(Haptics.notificationAsync).toHaveBeenCalledWith('error')
+    })
   })
 
-  it('no-ops tap/confirm on android', () => {
-    Platform.OS = 'android'
-    haptics.tap()
-    haptics.confirm()
-    expect(Haptics.selectionAsync).not.toHaveBeenCalled()
-    expect(Haptics.impactAsync).not.toHaveBeenCalled()
-    Platform.OS = 'ios'
+  describe('Android', () => {
+    beforeEach(() => { Platform.OS = 'android' })
+    afterEach(() => { Platform.OS = 'ios' })
+
+    it('no-ops tap/confirm on android', () => {
+      haptics.tap()
+      haptics.confirm()
+      expect(Haptics.selectionAsync).not.toHaveBeenCalled()
+      expect(Haptics.impactAsync).not.toHaveBeenCalled()
+    })
+
+    it('success/warning/error still call notificationAsync on android', () => {
+      haptics.success()
+      expect(Haptics.notificationAsync).toHaveBeenCalledWith('success')
+      haptics.warning()
+      expect(Haptics.notificationAsync).toHaveBeenCalledWith('warning')
+      haptics.error()
+      expect(Haptics.notificationAsync).toHaveBeenCalledWith('error')
+      expect(Haptics.selectionAsync).not.toHaveBeenCalled()
+      expect(Haptics.impactAsync).not.toHaveBeenCalled()
+    })
   })
 })
