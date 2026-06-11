@@ -75,7 +75,7 @@
     "expo-linking": "~55.0.15",
     "expo-local-authentication": "~55.0.14",
     "expo-localization": "~55.0.15",
-    "expo-modules-core": "^55.0.25",
+
     "expo-print": "~55.0.15",
     "expo-router": "~55.0.16",
     "expo-secure-store": "~55.0.14",
@@ -128,9 +128,10 @@
     "eslint": "^9.25.0",
     "eslint-config-expo": "~55.0.1",
     "jest": "~29.7.0",
+    "expo-modules-core": "^55.0.25",
     "jest-expo": "~55.0.0",
     "patch-package": "^8.0.1",
-    "react-test-renderer": "^19.2.0",
+    "react-test-renderer": "19.2.0",
     "typescript": "~5.9.2",
     "ws": "^8.20.0"
   },
@@ -148,10 +149,18 @@
   },
   "jest": {
     "preset": "jest-expo",
-    "testMatch": ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.test.tsx"],
+    "testMatch": [
+      "**/__tests__/**/*.test.[jt]s?(x)",
+      "**/?(*.)+(spec|test).[jt]s?(x)"
+    ],
     "modulePathIgnorePatterns": ["<rootDir>/.worktrees/"],
+    "moduleNameMapper": {
+      "^react-native-reanimated$": "<rootDir>/node_modules/react-native-reanimated/mock.js",
+      "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js"
+    },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|expo-modules-core)/)"
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core)/)",
+      "/node_modules/react-native-reanimated/plugin/"
     ]
   }
 }

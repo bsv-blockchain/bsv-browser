@@ -9,6 +9,6 @@ describe('render sanity', () => {
         <Text>Hello BSV</Text>
       </View>
     )
-    expect(screen.getByText('Hello BSV')).toBeTruthy()
+    expect(screen.getByText('Hello BSV')).toBeOnTheScreen()
   })
 })
