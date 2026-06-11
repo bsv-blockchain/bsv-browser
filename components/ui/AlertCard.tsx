@@ -15,8 +15,8 @@
  * Background is near-solid sheetBackground — deliberately NOT BlurView/LiquidGlass
  * (fractional-opacity-over-effect-view guardrail in context/theme/motion.ts).
  */
-import React, { useCallback, useEffect, useState } from 'react'
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -67,15 +67,33 @@ export function AlertHost() {
   const current = queue[0] ?? null
 
   const progress = useSharedValue(0)
+  const exiting = useRef(false)
+  const lastHapticAlert = useRef<ActiveAlert | null>(null)
 
   useEffect(() => {
     enqueue = (a: ActiveAlert) => setQueue(q => [...q, a])
-    return () => { enqueue = null }
+    return () => {
+      enqueue = null
+      // Resolve all queued alerts with 'cancel' on unmount.
+      setQueue(q => {
+        q.forEach(a => a.resolve('cancel'))
+        return []
+      })
+    }
   }, [])
 
   useEffect(() => {
     if (current) {
-      if (current.buttons?.some(b => b.style === 'destructive')) haptics.warning()
+      // Reset progress to 0 before animating in to avoid stale values.
+      progress.value = 0
+      // Fire warning haptic at most once per distinct alert object.
+      if (
+        current.buttons?.some(b => b.style === 'destructive') &&
+        lastHapticAlert.current !== current
+      ) {
+        lastHapticAlert.current = current
+        haptics.warning()
+      }
       progress.value = reducedMotion
         ? withTiming(1, { duration: durations.instant })
         : withSpring(1, springs.snappy)
@@ -83,11 +101,12 @@ export function AlertHost() {
   }, [current, progress, reducedMotion])
 
   const dismiss = useCallback((key: string) => {
-    if (!current) return
+    if (!current || exiting.current) return
+    exiting.current = true
     current.resolve(key)
     progress.value = withTiming(0, { duration: durations.instant })
     // Unmount after the exit fade completes.
-    setTimeout(() => setQueue(q => q.slice(1)), durations.instant)
+    setTimeout(() => { exiting.current = false; setQueue(q => q.slice(1)) }, durations.instant)
   }, [current, progress])
 
   const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }))
@@ -106,7 +125,14 @@ export function AlertHost() {
     : colors.info
 
   return (
-    <Modal transparent visible animationType="none" onRequestClose={() => dismiss('cancel')}>
+    <Modal
+      transparent
+      visible
+      animationType="none"
+      onRequestClose={() => dismiss('cancel')}
+      statusBarTranslucent={Platform.OS === 'android'}
+      navigationBarTranslucent={Platform.OS === 'android'}
+    >
       <Animated.View style={[styles.backdrop, backdropStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={() => dismiss('cancel')} />
         <Animated.View

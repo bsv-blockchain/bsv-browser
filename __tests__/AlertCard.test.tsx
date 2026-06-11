@@ -40,4 +40,42 @@ describe('showAlert', () => {
     fireEvent.press(screen.getByText('OK'))
     await expect(result).resolves.toBe('ok')
   })
+
+  it('double-dismiss within exit window: second alert renders and resolves', async () => {
+    jest.useFakeTimers()
+    const screen = host()
+
+    let resultA!: Promise<string>
+    let resultB!: Promise<string>
+
+    act(() => {
+      resultA = showAlert({
+        title: 'Alert A',
+        buttons: [{ text: 'Confirm', key: 'confirm' }],
+      })
+      resultB = showAlert({
+        title: 'Alert B',
+        buttons: [{ text: 'OK', key: 'ok' }],
+      })
+    })
+
+    // First press — valid dismiss.
+    fireEvent.press(screen.getByText('Confirm'))
+    await expect(resultA).resolves.toBe('confirm')
+
+    // Second press within exit window — must be ignored (exiting.current guard).
+    fireEvent.press(screen.getByText('Confirm'))
+
+    // Advance timers past durations.instant (150ms) so the queue slice fires.
+    act(() => { jest.advanceTimersByTime(200) })
+
+    // Alert B should now be visible.
+    expect(screen.getByText('Alert B')).toBeTruthy()
+
+    // Pressing Alert B's button should resolve its promise.
+    fireEvent.press(screen.getByText('OK'))
+    await expect(resultB).resolves.toBe('ok')
+
+    jest.useRealTimers()
+  })
 })
