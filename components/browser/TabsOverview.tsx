@@ -5,7 +5,6 @@ import {
   FlatList,
   InteractionManager,
   Keyboard,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -17,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { Swipeable } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image'
-import * as Haptics from 'expo-haptics'
+import { haptics } from '@/hooks/useHaptics'
 import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -175,9 +174,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
         <TouchableOpacity
           style={styles.clearAllButton}
           onPress={() => {
-            if (Platform.OS === 'ios') {
-              try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium) } catch {}
-            }
+            haptics.confirm()
             onDismiss()
             setAddressFocused(false)
             Keyboard.dismiss()

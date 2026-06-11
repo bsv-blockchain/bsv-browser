@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { useWallet } from '@/context/WalletContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { parseShare, validateShareCompatibility, recoverKeyFromShares, ParsedShare } from '@/utils/backupShares'
-import * as Haptics from 'expo-haptics'
+import { haptics } from '@/hooks/useHaptics'
 import QRScanner from '@/components/QRScanner'
 
 export default function ScanSharesScreen() {
@@ -48,12 +48,12 @@ export default function ScanSharesScreen() {
       const compatError = validateShareCompatibility(parsed, scannedShares)
       if (compatError) {
         setError(compatError)
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+        haptics.error()
         return
       }
 
       // Valid new share — haptic feedback
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      haptics.success()
 
       const updatedShares = [...scannedShares, parsed]
       setScannedShares(updatedShares)
@@ -110,7 +110,7 @@ export default function ScanSharesScreen() {
     } catch (err: any) {
       console.error('[ScanShares] Recovery failed:', err)
       setError(err.message || t('scan_shares_recovery_failed'))
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      haptics.error()
       // Allow re-scanning
       setScannedShares([])
       setThreshold(null)
