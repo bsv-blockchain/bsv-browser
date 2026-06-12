@@ -473,6 +473,8 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         javaScriptEnabled
         domStorageEnabled
         allowsBackForwardNavigationGestures
+        pullToRefreshEnabled
+        allowsLinkPreview
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
         contentInset={webviewContentInset}
