@@ -1,6 +1,11 @@
-import React from 'react'
-import { View, Text, Modal, StyleSheet, TouchableOpacity } from 'react-native'
+import React, { useRef } from 'react'
+import { View, Text, StyleSheet } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
+import Sheet from '@/components/ui/Sheet'
+import PressableScale from '@/components/ui/PressableScale'
+import { useHaptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
+import { spacing, radii, typography, hitTargets } from '@/context/theme/tokens'
 import { PermissionType } from '@/utils/permissionsManager'
 
 interface PermissionModalProps {
@@ -10,12 +15,42 @@ interface PermissionModalProps {
     onDecision: (granted: boolean) => void
 }
 
+function iconForPermission(permission: PermissionType): React.ComponentProps<typeof Ionicons>['name'] {
+    switch (permission) {
+        case 'CAMERA':
+            return 'camera'
+        case 'RECORD_AUDIO':
+            return 'mic'
+        case 'NOTIFICATIONS':
+            return 'notifications'
+        case 'ACCESS_FINE_LOCATION':
+        case 'ACCESS_COARSE_LOCATION':
+            return 'location'
+        default:
+            return 'shield-checkmark'
+    }
+}
+
 const PermissionModal: React.FC<PermissionModalProps> = ({ visible, domain, permission, onDecision }) => {
     const { colors } = useTheme()
+    const haptics = useHaptics()
+    // Guard against double-fire: once onDecision is called, further calls are no-ops
+    // until the component remounts (parent uses key={pendingPermission}).
+    const decidedRef = useRef(false)
 
-    const friendlyLabelFor = (permission: PermissionType) => {
-        console.log('Gettting friendly label for', permission)
-        switch (permission) {
+    const decide = (granted: boolean) => {
+        if (decidedRef.current) return
+        decidedRef.current = true
+        if (granted) {
+            haptics.confirm()
+        } else {
+            haptics.warning()
+        }
+        onDecision(granted)
+    }
+
+    const friendlyLabelFor = (perm: PermissionType): string => {
+        switch (perm) {
             case 'CAMERA':
                 return 'Camera'
             case 'RECORD_AUDIO':
@@ -26,8 +61,7 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ visible, domain, perm
             case 'ACCESS_COARSE_LOCATION':
                 return 'Location'
             default: {
-                // Fallback: transform KEY_NAMES to Title Case words
-                const pretty = permission
+                const pretty = perm
                     .toLowerCase()
                     .replace(/_/g, ' ')
                     .replace(/\b\w/g, c => c.toUpperCase())
@@ -37,74 +71,123 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ visible, domain, perm
     }
 
     return (
-        <Modal
-            transparent
+        <Sheet
             visible={visible}
-            animationType="fade"
-            onRequestClose={() => onDecision(false)}
+            onClose={() => {
+                // Swipe-dismiss or backdrop tap — treat as deny but skip haptic
+                // (decide() would fire warning; to avoid double-fire when deny
+                // button was already pressed we use the decidedRef guard).
+                if (!decidedRef.current) {
+                    decidedRef.current = true
+                    onDecision(false)
+                }
+            }}
+            fitContent
         >
-            <View style={styles.overlay}>
-                <View style={[styles.container, { backgroundColor: colors.background }]}>
-                    <Text style={[styles.title, { color: colors.textPrimary }]}>Permission Request</Text>
-                    <Text style={[styles.message, { color: colors.textSecondary }]}>
-                        The website {domain} is requesting access to your {friendlyLabelFor(permission)}.
-                    </Text>
+            <View style={styles.body}>
+                {/* Permission icon circle */}
+                <View style={[styles.iconCircle, { backgroundColor: colors.fillTertiary }]}>
+                    <Ionicons
+                        name={iconForPermission(permission)}
+                        size={26}
+                        color={colors.textPrimary}
+                    />
+                </View>
 
-                    <View style={styles.buttonRow}>
-                        <TouchableOpacity
-                            onPress={() => onDecision(false)}
-                            style={[styles.button, { backgroundColor: colors.buttonBackgroundDisabled }]}
-                        >
-                            <Text style={styles.buttonText}>Deny</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={() => onDecision(true)}
-                            style={[styles.button, { backgroundColor: colors.buttonBackgroundDisabled }]}
-                        >
-                            <Text style={styles.buttonText}>Allow</Text>
-                        </TouchableOpacity>
-                    </View>
+                {/* Title */}
+                <Text style={[styles.title, { color: colors.textPrimary }]}>
+                    Permission Request
+                </Text>
+
+                {/* Message */}
+                <Text style={[styles.message, { color: colors.textSecondary }]}>
+                    {domain} is requesting access to your {friendlyLabelFor(permission)}.
+                </Text>
+
+                {/* Button row */}
+                <View style={styles.buttonRow}>
+                    <PressableScale
+                        style={[
+                            styles.buttonDeny,
+                            {
+                                borderColor: colors.separator,
+                                minHeight: hitTargets.minimum
+                            }
+                        ]}
+                        onPress={() => decide(false)}
+                    >
+                        <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>
+                            Deny
+                        </Text>
+                    </PressableScale>
+
+                    <PressableScale
+                        style={[
+                            styles.buttonAllow,
+                            {
+                                backgroundColor: colors.accent,
+                                minHeight: hitTargets.minimum
+                            }
+                        ]}
+                        onPress={() => decide(true)}
+                    >
+                        <Text style={[styles.buttonAllowText, { color: colors.textOnAccent }]}>
+                            Allow
+                        </Text>
+                    </PressableScale>
                 </View>
             </View>
-        </Modal>
+        </Sheet>
     )
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center',
+    body: {
+        paddingHorizontal: spacing.xl,
+        paddingBottom: spacing.xl,
         alignItems: 'center'
     },
-    container: {
-        width: '85%',
-        borderRadius: 12,
-        padding: 20,
-        elevation: 4
+    iconCircle: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: spacing.md
     },
     title: {
-        fontSize: 18,
-        fontWeight: '600',
-        marginBottom: 12,
+        ...typography.headline,
         textAlign: 'center'
     },
     message: {
-        fontSize: 16,
-        marginBottom: 20,
-        textAlign: 'center'
+        ...typography.subhead,
+        textAlign: 'center',
+        marginTop: spacing.xs
     },
     buttonRow: {
         flexDirection: 'row',
-        justifyContent: 'space-evenly'
+        gap: spacing.md,
+        marginTop: spacing.xl,
+        width: '100%'
     },
-    button: {
-        paddingVertical: 10,
-        paddingHorizontal: 25,
-        borderRadius: 8
+    buttonDeny: {
+        flex: 1,
+        borderRadius: radii.lg,
+        borderWidth: StyleSheet.hairlineWidth,
+        alignItems: 'center',
+        justifyContent: 'center'
     },
-    buttonText: {
-        color: 'white',
+    buttonDenyText: {
+        ...typography.body
+    },
+    buttonAllow: {
+        flex: 1,
+        borderRadius: radii.lg,
+        alignItems: 'center',
+        justifyContent: 'center'
+    },
+    buttonAllowText: {
+        ...typography.body,
         fontWeight: '600'
     }
 })
