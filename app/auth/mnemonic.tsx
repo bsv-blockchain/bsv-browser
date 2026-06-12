@@ -27,6 +27,7 @@ import * as Sharing from 'expo-sharing'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { showAlert } from '@/components/ui/AlertCard'
 import { showToast } from '@/components/ui/Toast'
+import Celebration from '@/components/ui/Celebration'
 
 type MnemonicMode = 'choose' | 'generate' | 'import'
 
@@ -45,6 +46,7 @@ export default function MnemonicScreen() {
   const [copied, setCopied] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
   const [identityKey, setIdentityKey] = useState('')
+  const [celebrating, setCelebrating] = useState(false)
 
   // Fetch identity key (needed for print recovery shares)
   useEffect(() => {
@@ -138,10 +140,7 @@ export default function MnemonicScreen() {
   // Wallet was already built in handleGenerateNew, so just navigate.
   const handleContinueWithGenerated = () => {
     if (!hasAcknowledged) return
-    // dismissAll() returns to the existing root /index (Browser). Do NOT push('/')
-    // after — that mounts a SECOND Browser on top, leaking a duplicate that
-    // re-renders forever (2x JS work on every nav/SSE tick).
-    router.dismissAll()
+    setCelebrating(true)
   }
 
   // Validate and continue with imported mnemonic or hex private key
@@ -167,7 +166,7 @@ export default function MnemonicScreen() {
           return
         }
         await buildWalletFromRecoveredKey(wif)
-        router.dismissAll()
+        setCelebrating(true)
       } catch (error: any) {
         console.error('[Mnemonic] Error importing hex key:', error)
         showToast(`Invalid private key: ${error.message}`, { type: 'error' })
@@ -207,14 +206,30 @@ export default function MnemonicScreen() {
         return
       }
       await buildWalletFromMnemonic(mnemonicPhrase)
-      console.log('[Mnemonic] Wallet setup complete, navigating to browser')
-      router.dismissAll()
+      setCelebrating(true)
     } catch (error: any) {
       console.error('[Mnemonic] Error setting up wallet:', error)
       showToast(`Failed to set up wallet: ${error.message}`, { type: 'error' })
     } finally {
       setLoading(false)
     }
+  }
+
+  // ─── Celebration overlay (wallet created) ────────────────────────────
+  if (celebrating) {
+    return (
+      <View style={[s.screen, s.celebrationScreen, { backgroundColor: colors.background }]}>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <Celebration
+          onDone={() => {
+            // dismissAll() returns to the existing root /index (Browser). Do NOT push('/')
+            // after — that mounts a SECOND Browser on top, leaking a duplicate that
+            // re-renders forever (2x JS work on every nav/SSE tick).
+            router.dismissAll()
+          }}
+        />
+      </View>
+    )
   }
 
   // ─── Choose mode ──────────────────────────────────────────────────────
@@ -565,6 +580,10 @@ export default function MnemonicScreen() {
 const s = StyleSheet.create({
   screen: {
     flex: 1
+  },
+  celebrationScreen: {
+    alignItems: 'center',
+    justifyContent: 'center'
   },
 
   // Centered layout for the choose screen

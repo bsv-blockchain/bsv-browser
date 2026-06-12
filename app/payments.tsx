@@ -39,9 +39,11 @@ import { AmountInput } from '@/components/wallet/AmountInput'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { formatAmount } from '@/utils/amountFormatHelpers'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import Celebration from '@/components/ui/Celebration'
 
 const MESSAGE_BOX_URL_KEY = 'message_box_url'
 const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
+const FIRST_PAYMENT_KEY = 'hasSentFirstPayment'
 
 const firstParam = (value: string | string[] | undefined) => {
   return Array.isArray(value) ? value[0] : value
@@ -1028,6 +1030,7 @@ export default function PaymentsScreen() {
   const [isSending, setIsSending] = useState(false)
   const [sendResult, setSendResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [acceptResult, setAcceptResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [celebratingFirstPayment, setCelebratingFirstPayment] = useState(false)
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, '')
@@ -1202,7 +1205,13 @@ export default function PaymentsScreen() {
       // Step 4: mark delivered
       await markOutboxSent(storage, outboxId)
       await loadOutbox()
-      setSendResult({ type: 'success', message: `Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully` })
+      const isFirst = !(await AsyncStorage.getItem(FIRST_PAYMENT_KEY))
+      if (isFirst) {
+        await AsyncStorage.setItem(FIRST_PAYMENT_KEY, '1')
+        setCelebratingFirstPayment(true)
+      } else {
+        setSendResult({ type: 'success', message: `Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully` })
+      }
       setSendAmount('')
       clearRecipient()
       fetchPayments()
@@ -1432,6 +1441,13 @@ export default function PaymentsScreen() {
           hintText={t('scan_identity_key_hint')}
         />
       </Modal>
+
+      {/* ── First-payment celebration overlay ───────────────────────── */}
+      {celebratingFirstPayment && (
+        <View style={styles.celebrationOverlay} pointerEvents="none">
+          <Celebration onDone={() => setCelebratingFirstPayment(false)} />
+        </View>
+      )}
     </View>
   )
 }
@@ -1897,6 +1913,14 @@ const styles = StyleSheet.create({
   },
   outgoingDismissText: {
     ...typography.subhead
+  },
+
+  // First-payment celebration overlay
+  celebrationOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100
   },
 
   // Recipient input row (text field + QR scan button)

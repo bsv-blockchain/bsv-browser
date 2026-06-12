@@ -12,6 +12,7 @@ import { parseShare, validateShareCompatibility, recoverKeyFromShares, ParsedSha
 import { showAlert } from '@/components/ui/AlertCard'
 import { haptics } from '@/hooks/useHaptics'
 import QRScanner from '@/components/QRScanner'
+import Celebration from '@/components/ui/Celebration'
 
 export default function ScanSharesScreen() {
   const { t } = useTranslation()
@@ -23,6 +24,7 @@ export default function ScanSharesScreen() {
   const [threshold, setThreshold] = useState<number | null>(null)
   const [recovering, setRecovering] = useState(false)
   const [recovered, setRecovered] = useState(false)
+  const [celebrating, setCelebrating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Prevent re-processing the exact same QR content
@@ -53,10 +55,14 @@ export default function ScanSharesScreen() {
         return
       }
 
-      // Valid new share — haptic feedback
-      haptics.success()
-
       const updatedShares = [...scannedShares, parsed]
+      const isComplete = updatedShares.length >= parsed.threshold
+
+      // Haptic for intermediate shares only — Celebration fires haptics.success() on completion
+      if (!isComplete) {
+        haptics.success()
+      }
+
       setScannedShares(updatedShares)
 
       if (!threshold) {
@@ -64,7 +70,7 @@ export default function ScanSharesScreen() {
       }
 
       // Check if we have enough shares to recover
-      if (updatedShares.length >= parsed.threshold) {
+      if (isComplete) {
         handleRecovery(updatedShares.map(s => s.raw))
       } else {
         // Clear last scanned so the next different share can be read
@@ -103,10 +109,7 @@ export default function ScanSharesScreen() {
 
       setRecovered(true)
       await buildWalletFromRecoveredKey(wif)
-
-      // Navigate to the browser
-      router.dismissAll()
-      router.push('/')
+      setCelebrating(true)
     } catch (err: any) {
       console.error('[ScanShares] Recovery failed:', err)
       setError(err.message || t('scan_shares_recovery_failed'))
@@ -127,6 +130,21 @@ export default function ScanSharesScreen() {
         <StatusBar style={isDark ? 'light' : 'dark'} />
         <ActivityIndicator size="large" color={colors.accent} />
         <Text style={[styles.recoveringText, { color: colors.textPrimary }]}>{t('scan_shares_recovering')}</Text>
+      </View>
+    )
+  }
+
+  // ── Celebration overlay (backup verified) ─────────────────────────────
+  if (celebrating) {
+    return (
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <Celebration
+          onDone={() => {
+            router.dismissAll()
+            router.push('/')
+          }}
+        />
       </View>
     )
   }
