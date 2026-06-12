@@ -1415,6 +1415,14 @@ const Browser = observer(function Browser() {
     tabStore.closeTab(tabId)
   }, [])
 
+  const handleNewTab = useCallback(() => {
+    focusAddressBarOnNewTab.current = true
+    tabStore.newTab()
+    cancelableNewTabId.current = tabStore.activeTabId
+    setShowTabsView(false)
+    setMenuPopoverOpen(false)
+  }, [setMenuPopoverOpen])
+
   const onSuggestionSelect = useCallback(
     (url: string) => {
       addressInputRef.current?.blur()
@@ -2401,12 +2409,7 @@ const Browser = observer(function Browser() {
                   await captureActiveThumbnail()
                   setShowTabsView(true)
                 }}
-                onNewTab={() => {
-                  focusAddressBarOnNewTab.current = true
-                  tabStore.newTab()
-                  cancelableNewTabId.current = tabStore.activeTabId
-                  setShowTabsView(false)
-                }}
+                onNewTab={handleNewTab}
                 onSettings={() => sheet.push('settings')}
                 onEnableWeb3={() => router.push('/auth/mnemonic')}
                 onConnections={() => router.push('/connections')}
@@ -2462,7 +2465,7 @@ const Browser = observer(function Browser() {
 
           {/* ---- Tabs Overview ---- */}
           {!isFullscreen && showTabsView && (
-            <TabsOverview onDismiss={() => setShowTabsView(false)} setAddressFocused={setAddressFocused} />
+            <TabsOverview onDismiss={() => setShowTabsView(false)} setAddressFocused={setAddressFocused} onNewTab={handleNewTab} />
           )}
 
           {/* ---- Unified Sheet System ---- */}

@@ -33,11 +33,13 @@ const kNEW_TAB_URL = 'about:blank'
 interface TabsOverviewProps {
   onDismiss: () => void
   setAddressFocused: (focused: boolean) => void
+  onNewTab?: () => void
 }
 
 const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
   onDismiss,
-  setAddressFocused
+  setAddressFocused,
+  onNewTab
 }) => {
   const { colors } = useTheme()
   const { t } = useTranslation()
@@ -193,18 +195,18 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
           <Ionicons name="trash-outline" size={20} color={colors.accent} />
           <Text style={[styles.clearAllText, { color: colors.accent }]}>{t('clear_all_tabs')}</Text>
         </TouchableOpacity>
-        <IconButton
-          name="add"
-          onPress={() => {
-            haptics.confirm()
-            tabStore.newTab()
-            onDismiss()
-            setAddressFocused(true)
-          }}
-          size={24}
-          color={colors.accent}
-          accessibilityLabel="New tab"
-        />
+        {onNewTab && (
+          <IconButton
+            name="add"
+            onPress={() => {
+              haptics.confirm()
+              onNewTab()
+            }}
+            size={24}
+            color={colors.accent}
+            accessibilityLabel="New tab"
+          />
+        )}
         <IconButton
           name="close"
           onPress={onDismiss}
