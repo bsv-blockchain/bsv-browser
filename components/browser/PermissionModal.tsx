@@ -117,7 +117,7 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ visible, domain, perm
                         onPress={() => decide(false)}
                     >
                         <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>
-                            Deny
+                            Don't Allow
                         </Text>
                     </PressableScale>
 
