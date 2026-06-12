@@ -1,8 +1,10 @@
 import React from 'react'
 import { Keyboard, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
+import Animated, { FadeIn, FadeOut, useReducedMotion } from 'react-native-reanimated'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
 import { spacing, typography } from '@/context/theme/tokens'
+import { durations } from '@/context/theme/motion'
 import { GlassPill, useGlassColors, PILL_RADIUS } from '@/components/browser/GlassPill'
 
 interface AddressBarProps {
@@ -64,6 +66,7 @@ const AddressBarImpl: React.FC<AddressBarProps> = ({
 }) => {
   const { t } = useTranslation()
   const gc = useGlassColors()
+  const reducedMotion = useReducedMotion()
 
   const displayText = addressFocused ? addressText : domainFromUrl(addressText)
   const isBackDisabled = !canGoBack || isNewTab
@@ -117,12 +120,17 @@ const AddressBarImpl: React.FC<AddressBarProps> = ({
         {/* URL pill */}
         <GlassPill flex={1} style={styles.urlPill}>
           {!addressFocused && isHttps && !isNewTab && (
-            <Ionicons
-              name="lock-closed"
-              size={12}
-              color={gc.secondary}
-              style={styles.lockIcon}
-            />
+            <Animated.View
+              entering={reducedMotion ? undefined : FadeIn.duration(durations.instant)}
+              exiting={reducedMotion ? undefined : FadeOut.duration(durations.instant)}
+            >
+              <Ionicons
+                name="lock-closed"
+                size={12}
+                color={gc.secondary}
+                style={styles.lockIcon}
+              />
+            </Animated.View>
           )}
           <TextInput
             ref={inputRef}

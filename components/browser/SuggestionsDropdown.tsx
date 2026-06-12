@@ -1,7 +1,9 @@
 import React, { memo, useCallback, useMemo, useRef } from 'react'
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import Animated, { FadeInDown, FadeOut, useReducedMotion } from 'react-native-reanimated'
 import type { HistoryEntry, Bookmark } from '@/shared/types/browser'
 import { spacing, radii, typography } from '@/context/theme/tokens'
+import { durations, springs } from '@/context/theme/motion'
 
 type Suggestion = HistoryEntry | Bookmark
 
@@ -58,6 +60,7 @@ export function SuggestionsDropdown({ suggestions, colors, bottomOffset, onSelec
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
   const stableSelect = useCallback((url: string) => onSelectRef.current(url), [])
+  const reducedMotion = useReducedMotion()
 
   const rowColors = useMemo<RowColors>(
     () => ({
@@ -85,8 +88,20 @@ export function SuggestionsDropdown({ suggestions, colors, bottomOffset, onSelec
 
   if (suggestions.length === 0) return null
 
+  const enteringAnim = reducedMotion
+    ? FadeInDown.duration(durations.instant)
+    : FadeInDown.duration(durations.quick)
+        .springify()
+        .stiffness(springs.settle.stiffness)
+        .damping(springs.settle.damping)
+
   return (
-    <View style={[styles.suggestionsWrapper, { bottom: bottomOffset + 60 }]} pointerEvents="box-none">
+    <Animated.View
+      style={[styles.suggestionsWrapper, { bottom: bottomOffset + 60 }]}
+      pointerEvents="box-none"
+      entering={enteringAnim}
+      exiting={FadeOut.duration(durations.instant)}
+    >
       <View style={[styles.suggestions, { backgroundColor: colors.backgroundElevated }]}>
         <FlatList
           data={suggestions}
@@ -100,7 +115,7 @@ export function SuggestionsDropdown({ suggestions, colors, bottomOffset, onSelec
           removeClippedSubviews
         />
       </View>
-    </View>
+    </Animated.View>
   )
 }
 
