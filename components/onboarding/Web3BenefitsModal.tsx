@@ -1,7 +1,9 @@
 import React from 'react'
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
+import { StyleSheet, Text, View } from 'react-native'
 import { useTheme } from '@/context/theme/ThemeContext'
+import { radii, spacing, typography } from '@/context/theme/tokens'
+import Sheet from '@/components/ui/Sheet'
+import PressableScale from '@/components/ui/PressableScale'
 
 interface Web3BenefitsModalProps {
   visible: boolean
@@ -19,131 +21,106 @@ const Web3BenefitsModal: React.FC<Web3BenefitsModalProps> = ({
   const { colors } = useTheme()
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onDismiss}>
-      <View style={styles.modalContainer}>
-        <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={[styles.title, { color: colors.textPrimary }]}>Are you sure?</Text>
-            <TouchableOpacity onPress={onDismiss} style={styles.closeButton}>
-              <Ionicons name="close" size={24} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
+    <Sheet visible={visible} onClose={onDismiss} title="Are you sure?" fitContent>
+      {/* Content */}
+      <View style={styles.content}>
+        <Text style={[styles.intro, { color: colors.textPrimary }]}>
+          A Web3 identity brings you:
+        </Text>
 
-          {/* Content - Simple approach */}
-          <View style={{ padding: 20 }}>
-            <Text style={[{ fontSize: 16, marginBottom: 16, color: colors.textPrimary }]}>
-              A Web3 identity brings you:
-            </Text>
-
-            <Text style={[{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>Micropayments</Text>
-            <Text style={[{ fontSize: 14, lineHeight: 20, marginBottom: 8, color: colors.textPrimary }]}>
-              where creators to earn directly.
-            </Text>
-            <Text style={[{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>Private Identity</Text>
-            <Text style={[{ fontSize: 14, lineHeight: 20, marginBottom: 8, color: colors.textPrimary }]}>
-              with mutual auth means no signups or logins.
-            </Text>
-            <Text style={[{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>Data Sovereignty</Text>
-            <Text style={[{ fontSize: 14, lineHeight: 20, marginBottom: 8, color: colors.textPrimary }]}>
-             you&apos;re in control, with no 3rd party tracking.
-            </Text>
-          </View>
-
-          <Text style={[{ padding: 20, fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>Become an early adopter and lead your peers to the future of everything.</Text>
-
-          {/* Action Buttons */}
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={onGoToLogin}>
-              <Text style={[styles.primaryButtonText, { color: colors.buttonText }]}>
-                Get Started
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.secondaryButton} onPress={onContinueWithoutLogin}>
-              <Text style={[styles.secondaryButtonText, { color: colors.textPrimary }]}>Maybe Later</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <Text style={[styles.benefitTitle, { color: colors.textPrimary }]}>Micropayments</Text>
+        <Text style={[styles.benefitBody, { color: colors.textPrimary }]}>
+          where creators to earn directly.
+        </Text>
+        <Text style={[styles.benefitTitle, { color: colors.textPrimary }]}>Private Identity</Text>
+        <Text style={[styles.benefitBody, { color: colors.textPrimary }]}>
+          with mutual auth means no signups or logins.
+        </Text>
+        <Text style={[styles.benefitTitle, { color: colors.textPrimary }]}>Data Sovereignty</Text>
+        <Text style={[styles.benefitBody, { color: colors.textPrimary }]}>
+          you&apos;re in control, with no 3rd party tracking.
+        </Text>
       </View>
-    </Modal>
+
+      <Text style={[styles.cta, { color: colors.textPrimary }]}>
+        Become an early adopter and lead your peers to the future of everything.
+      </Text>
+
+      {/* Action Buttons */}
+      <View style={styles.buttonContainer}>
+        <PressableScale
+          haptic="confirm"
+          style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+          onPress={onGoToLogin}
+        >
+          <Text style={[styles.primaryButtonText, { color: colors.textOnAccent }]}>
+            Get Started
+          </Text>
+        </PressableScale>
+
+        <PressableScale
+          style={[styles.secondaryButton, { borderColor: colors.separator }]}
+          onPress={onContinueWithoutLogin}
+        >
+          <Text style={[styles.secondaryButtonText, { color: colors.textSecondary }]}>
+            Maybe Later
+          </Text>
+        </PressableScale>
+      </View>
+    </Sheet>
   )
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20
+  content: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
-  modalContent: {
-    width: '100%',
-    maxWidth: 350,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 10
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10
+  intro: {
+    ...typography.callout,
+    marginBottom: spacing.lg,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    paddingBottom: 10
+  benefitTitle: {
+    ...typography.headline,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    flex: 1
+  benefitBody: {
+    ...typography.subhead,
+    lineHeight: 20,
+    marginBottom: spacing.sm,
   },
-  closeButton: {
-    padding: 5
+  cta: {
+    ...typography.headline,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.lg,
   },
   buttonContainer: {
-    padding: 20,
-    paddingTop: 10
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
   },
   primaryButton: {
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xxl,
+    borderRadius: radii.xl,
     alignItems: 'center',
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3
+    marginBottom: spacing.md,
   },
   primaryButtonText: {
-    fontSize: 16,
-    fontWeight: '600'
+    ...typography.callout,
+    fontWeight: '600',
   },
   secondaryButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     alignItems: 'center',
     alignSelf: 'center',
-    marginTop: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#666'
+    marginTop: spacing.sm,
+    borderRadius: radii.xl,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   secondaryButtonText: {
-    fontSize: 14,
-    fontWeight: '300',
-    opacity: 0.5
-  }
+    ...typography.subhead,
+  },
 })
 
 export default Web3BenefitsModal
