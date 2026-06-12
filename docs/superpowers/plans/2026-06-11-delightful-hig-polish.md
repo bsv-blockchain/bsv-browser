@@ -1372,4 +1372,5 @@ Read the file first. Presentation only — zero flow/logic changes:
 - New-tab zoom-from-+ (spec Part 4) trimmed to + button with confirm haptic wired through canonical new-tab flow.
 - Wallet-created identicon spring (spec Part 5) trimmed: Celebration checkmark only.
 - Send button terminal check state (plan Task 19) trimmed: success surfaces via ResultBanner/Celebration instead of in-button checkmark.
+- Address-bar focus crossfade (spec Part 4) reverted post-device-test: any fractional-alpha animation inside a LiquidGlassView subtree (even on children) sticks UIVisualEffectView transparent. Instant swap is the glass-safe behavior. See commit 8b112a8.
 - Type consistency: `showAlert(options): Promise<string>`, `showToast(message, { type })`, `haptics.<semantic>()`, `springs.snappy/settle`, `durations.instant/quick/moderate` used uniformly across tasks.
