@@ -25,6 +25,7 @@ import type { DisplayableIdentity } from '@bsv/sdk'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
+import { durations, springs } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
 import { type PeerPayValidationResult, validatePeerPayURI } from '@/utils/parsePeerPayURI'
 import {
@@ -40,6 +41,14 @@ import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { formatAmount } from '@/utils/amountFormatHelpers'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 import Celebration from '@/components/ui/Celebration'
+import Animated, {
+  FadeIn,
+  FadeOut,
+  FadeInDown,
+  useReducedMotion
+} from 'react-native-reanimated'
+import PressableScale from '@/components/ui/PressableScale'
+import { haptics } from '@/hooks/useHaptics'
 
 const MESSAGE_BOX_URL_KEY = 'message_box_url'
 const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
@@ -687,9 +696,16 @@ function RecipientField({
   onClear,
   onOpenScanner
 }: RecipientFieldProps) {
+  const reducedMotion = useReducedMotion()
   if (selectedIdentity) {
+    const identityEntering = reducedMotion
+      ? undefined
+      : FadeInDown.springify().stiffness(springs.snappy.stiffness).damping(springs.snappy.damping)
     return (
-      <View style={[styles.selectedRecipient, { backgroundColor: colors.backgroundSecondary }]}>
+      <Animated.View
+        entering={identityEntering}
+        style={[styles.selectedRecipient, { backgroundColor: colors.backgroundSecondary }]}
+      >
         {selectedIdentity.avatarURL ? (
           <Image source={{ uri: selectedIdentity.avatarURL }} style={styles.avatar} />
         ) : (
@@ -708,7 +724,7 @@ function RecipientField({
         <TouchableOpacity onPress={onClear} style={styles.clearButton}>
           <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     )
   }
   const showDropdown = (isSearching || searchResults.length > 0) && !recipientKey
@@ -1185,6 +1201,7 @@ export default function PaymentsScreen() {
       setTimeout(() => setSendResult(null), 5000)
       return
     }
+    haptics.confirm()
     setIsSending(true)
     let outboxId: string | null = null
     try {
@@ -1212,6 +1229,7 @@ export default function PaymentsScreen() {
         setCelebrationMessage(`Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully`)
         setCelebratingFirstPayment(true)
       } else {
+        haptics.success()
         setSendResult({ type: 'success', message: `Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully` })
       }
       setSendAmount('')
@@ -1367,7 +1385,7 @@ export default function PaymentsScreen() {
             </View>
 
             {/* Send button */}
-            <TouchableOpacity
+            <PressableScale
               onPress={handleSend}
               disabled={!canSend}
               style={[
@@ -1378,17 +1396,31 @@ export default function PaymentsScreen() {
                 }
               ]}
             >
-              {isSending ? (
-                <ActivityIndicator size="small" color={canSend ? colors.background : colors.textSecondary} />
-              ) : (
-                <>
-                  <Ionicons name="send" size={18} color={canSend ? colors.background : colors.textSecondary} />
-                  <Text style={[styles.sendButtonText, { color: canSend ? colors.background : colors.textSecondary }]}>
-                    {t('send_payment')}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
+              <View style={styles.sendButtonContents}>
+                {isSending ? (
+                  <Animated.View
+                    key="sending"
+                    entering={FadeIn.duration(durations.instant)}
+                    exiting={FadeOut.duration(durations.instant)}
+                    style={styles.sendButtonInner}
+                  >
+                    <ActivityIndicator size="small" color={canSend ? colors.background : colors.textSecondary} />
+                  </Animated.View>
+                ) : (
+                  <Animated.View
+                    key="idle"
+                    entering={FadeIn.duration(durations.instant)}
+                    exiting={FadeOut.duration(durations.instant)}
+                    style={styles.sendButtonInner}
+                  >
+                    <Ionicons name="send" size={18} color={canSend ? colors.background : colors.textSecondary} />
+                    <Text style={[styles.sendButtonText, { color: canSend ? colors.background : colors.textSecondary }]}>
+                      {t('send_payment')}
+                    </Text>
+                  </Animated.View>
+                )}
+              </View>
+            </PressableScale>
 
             {sendResult && <ResultBanner result={sendResult} onDismiss={() => setSendResult(null)} colors={colors} />}
 
@@ -1717,13 +1749,24 @@ const styles = StyleSheet.create({
 
   // Send button
   sendButton: {
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.md,
+    marginBottom: spacing.xxxl,
+    overflow: 'hidden'
+  },
+  sendButtonContents: {
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  sendButtonInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
     gap: spacing.sm,
-    marginBottom: spacing.xxxl
+    paddingHorizontal: spacing.lg
   },
   sendButtonText: {
     ...typography.subhead,
