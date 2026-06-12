@@ -1369,4 +1369,7 @@ Read the file first. Presentation only — zero flow/logic changes:
 - Spec coverage: Part 1 → Tasks 2-3; Part 2 → Tasks 4, 6, 7, 8; Part 3 → Tasks 5, 9, 10, 11, 12, 23; Part 4 → Tasks 13, 14, 15, 16, 22 (scroll-collapse correctly absent — cut by owner); Part 5 → Tasks 17, 18, 19, 20, 21; Part 6 → Tasks 1, 24 + reduced-motion built into every primitive.
 - `allowsBackForwardNavigationGestures` was in the spec's "verify not already set" list — verified already present (`app/index.tsx:475`), so Task 13 only adds the two genuinely missing props.
 - Tab-count badge "numeric roll" from spec Part 4 dropped deliberately: badge is in IconButton; a roll animation there is low-value vs. risk in perf-critical chrome. Noted as conscious scope trim.
+- New-tab zoom-from-+ (spec Part 4) trimmed to + button with confirm haptic wired through canonical new-tab flow.
+- Wallet-created identicon spring (spec Part 5) trimmed: Celebration checkmark only.
+- Send button terminal check state (plan Task 19) trimmed: success surfaces via ResultBanner/Celebration instead of in-button checkmark.
 - Type consistency: `showAlert(options): Promise<string>`, `showToast(message, { type })`, `haptics.<semantic>()`, `springs.snappy/settle`, `durations.instant/quick/moderate` used uniformly across tasks.
