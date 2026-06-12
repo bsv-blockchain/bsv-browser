@@ -163,6 +163,8 @@ const AddressBarImpl: React.FC<AddressBarProps> = ({
                 numberOfLines={1}
                 style={[styles.domainOverlay, { color: gc.primary }]}
                 pointerEvents="none"
+                accessibilityElementsHidden={true}
+                importantForAccessibility="no"
               >
                 {domainFromUrl(addressText) || ''}
               </Animated.Text>

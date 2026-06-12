@@ -1156,6 +1156,7 @@ const Browser = observer(function Browser() {
       const tabId = activeTab.id
       const timer = setTimeout(() => {
         if (tabStore.activeTab?.id === tabId && tabStore.activeTab?.url === kNEW_TAB_URL) {
+          setAddressFocused(true)
           addressInputRef.current?.focus()
         }
       }, 100)
