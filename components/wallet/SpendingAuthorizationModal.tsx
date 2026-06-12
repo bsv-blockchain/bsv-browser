@@ -87,10 +87,10 @@ const SpendingAuthorizationModal = () => {
                 <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>Deny</Text>
               </PressableScale>
               <PressableScale
-                style={[styles.buttonAllow, { backgroundColor: colors.permissionSpending }]}
+                style={[styles.buttonAllow, { backgroundColor: colors.accent }]}
                 onPress={() => { haptics.confirm(); handleGrant({ singular: true, amount: authorizationAmount }) }}
               >
-                <Text style={styles.buttonAllowText}>Approve</Text>
+                <Text style={[styles.buttonAllowText, { color: colors.textOnAccent }]}>Approve</Text>
               </PressableScale>
             </View>
           </ScrollView>
@@ -194,7 +194,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   buttonAllowText: {
-    color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 17
   },
