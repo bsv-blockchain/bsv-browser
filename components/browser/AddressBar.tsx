@@ -68,7 +68,6 @@ const AddressBarImpl: React.FC<AddressBarProps> = ({
   const gc = useGlassColors()
   const reducedMotion = useReducedMotion()
 
-  const displayText = addressFocused ? addressText : domainFromUrl(addressText)
   const isBackDisabled = !canGoBack || isNewTab
   // Show both back and forward buttons whenever forward navigation is available.
   // This replaces the single back button so the user can recover forward after going back.
@@ -132,29 +131,43 @@ const AddressBarImpl: React.FC<AddressBarProps> = ({
               />
             </Animated.View>
           )}
-          <TextInput
-            ref={inputRef}
-            editable
-            value={displayText === 'new-tab-page' ? '' : displayText}
-            onChangeText={onChangeText}
-            onFocus={onFocus}
-            onBlur={onBlur}
-            onSubmitEditing={onSubmit}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType={Platform.select({ ios: 'web-search', default: 'url' })}
-            returnKeyType="go"
-            style={[
-              styles.urlInput,
-              {
-                color: gc.primary,
-                textAlign: addressFocused ? 'left' : 'center'
-              }
-            ]}
-            placeholder={t('search_or_enter_website')}
-            placeholderTextColor={gc.tertiary}
-            selectTextOnFocus
-          />
+          <View style={styles.urlInputWrapper}>
+            <TextInput
+              ref={inputRef}
+              editable
+              value={addressFocused ? addressText : domainFromUrl(addressText)}
+              onChangeText={onChangeText}
+              onFocus={onFocus}
+              onBlur={onBlur}
+              onSubmitEditing={onSubmit}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType={Platform.select({ ios: 'web-search', default: 'url' })}
+              returnKeyType="go"
+              style={[
+                styles.urlInput,
+                {
+                  color: addressFocused ? gc.primary : 'transparent',
+                  textAlign: addressFocused ? 'left' : 'center'
+                }
+              ]}
+              placeholder={t('search_or_enter_website')}
+              placeholderTextColor={addressFocused ? gc.tertiary : 'transparent'}
+              selectTextOnFocus
+            />
+            {!addressFocused && (
+              <Animated.Text
+                key="domain-overlay"
+                entering={reducedMotion ? undefined : FadeIn.duration(durations.instant)}
+                exiting={reducedMotion ? undefined : FadeOut.duration(durations.instant)}
+                numberOfLines={1}
+                style={[styles.domainOverlay, { color: gc.primary }]}
+                pointerEvents="none"
+              >
+                {domainFromUrl(addressText) || ''}
+              </Animated.Text>
+            )}
+          </View>
           {addressFocused ? (
             <TouchableOpacity onPress={onClearText} style={styles.inputAction}>
               <Ionicons name="close-circle" size={18} color={gc.tertiary} />
@@ -255,12 +268,25 @@ const styles = StyleSheet.create({
   lockIcon: {
     marginRight: spacing.xs
   },
+  urlInputWrapper: {
+    flex: 1,
+    position: 'relative',
+    justifyContent: 'center'
+  },
   urlInput: {
     flex: 1,
     fontSize: typography.subhead.fontSize,
     fontWeight: typography.subhead.fontWeight,
     // No explicit lineHeight — lets iOS scale it correctly with Dynamic Type
     paddingVertical: 0
+  },
+  domainOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    fontSize: typography.subhead.fontSize,
+    fontWeight: typography.subhead.fontWeight,
+    textAlign: 'center'
   },
   inputAction: {
     width: 28,
