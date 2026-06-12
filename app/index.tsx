@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
 import { router } from 'expo-router'
 
+import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useWalletManagers } from '@/context/WalletContext'
 import { WalletInterface } from '@bsv/sdk'
@@ -2406,6 +2407,7 @@ const Browser = observer(function Browser() {
                 onFindInPage={() => setFindInPageVisible(true)}
                 onBookmarks={() => sheet.push('browser-menu')}
                 onTabs={async () => {
+                  haptics.tap()
                   await captureActiveThumbnail()
                   setShowTabsView(true)
                 }}

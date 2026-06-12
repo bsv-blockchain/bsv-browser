@@ -5,6 +5,7 @@ import ReanimatedSwipeable, { SwipeDirection } from 'react-native-gesture-handle
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
+import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import bookmarkStore from '@/stores/BookmarkStore'
@@ -66,7 +67,7 @@ const BookmarkRow = memo(
           </View>
         )}
         onSwipeableOpen={direction => {
-          if (direction === SwipeDirection.RIGHT) onDelete(item.url)
+          if (direction === SwipeDirection.RIGHT) { haptics.warning(); onDelete(item.url) }
         }}
       >
         <Pressable style={[styles.bookmarkItem, itemStyle]} onPress={() => onSelect(item.url)}>

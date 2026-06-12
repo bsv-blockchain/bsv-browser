@@ -2,6 +2,7 @@ import React, { useRef, useCallback } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { Ionicons } from '@expo/vector-icons'
+import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { spacing, typography } from '@/context/theme/tokens'
@@ -58,6 +59,9 @@ export default function QRScanner({ onScan, onClose, hintText, multiScan = false
       if (scanLockRef.current || stoppedRef.current) return
       scanLockRef.current = true
 
+      // tap = recognition pulse; avoids double-fire with callers that fire
+      // their own success/error haptic in onScan (e.g. scan-shares.tsx)
+      haptics.tap()
       onScan(data)
 
       if (!multiScan) {

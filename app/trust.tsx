@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
-
+import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
@@ -117,6 +117,7 @@ export default function TrustScreen() {
   const isSearching = query.trim().length > 0
 
   const onMoveUp = (identityKey: string) => {
+    haptics.tap()
     setTrustedEntities(prev => {
       const idx = prev.findIndex(c => c.identityKey === identityKey)
       if (idx <= 0) return prev
@@ -127,6 +128,7 @@ export default function TrustScreen() {
   }
 
   const onMoveDown = (identityKey: string) => {
+    haptics.tap()
     setTrustedEntities(prev => {
       const idx = prev.findIndex(c => c.identityKey === identityKey)
       if (idx < 0 || idx >= prev.length - 1) return prev
