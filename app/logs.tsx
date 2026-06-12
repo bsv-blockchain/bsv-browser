@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Clipboard from '@react-native-clipboard/clipboard'
-import { toast } from 'react-toastify'
+import { showToast } from '@/components/ui/Toast'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
@@ -110,7 +110,7 @@ export default function MonitorLogsScreen() {
       .map(e => `[${e.timestamp}] ${e.taskName}\n${e.output}`)
       .join('\n\n')
     Clipboard.setString(text)
-    toast.success('Copied all logs')
+    showToast('Copied all logs', { type: 'success' })
   }, [logs])
 
   const clearLogs = useCallback(() => {

@@ -75,7 +75,6 @@
     "expo-linking": "~55.0.15",
     "expo-local-authentication": "~55.0.14",
     "expo-localization": "~55.0.15",
-
     "expo-print": "~55.0.15",
     "expo-router": "~55.0.16",
     "expo-secure-store": "~55.0.14",
@@ -116,7 +115,6 @@
     "react-native-web": "^0.21.0",
     "react-native-webview": "13.16.0",
     "react-native-worklets": "0.7.4",
-    "react-toastify": "^11.0.5",
     "stream-browserify": "^3.0.0",
     "watchman": "^1.0.0"
   },
@@ -127,8 +125,8 @@
     "@types/react": "~19.2.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~55.0.1",
-    "jest": "~29.7.0",
     "expo-modules-core": "^55.0.25",
+    "jest": "~29.7.0",
     "jest-expo": "~55.0.0",
     "patch-package": "^8.0.1",
     "react-test-renderer": "19.2.0",
@@ -153,7 +151,9 @@
       "**/__tests__/**/*.test.[jt]s?(x)",
       "**/?(*.)+(spec|test).[jt]s?(x)"
     ],
-    "modulePathIgnorePatterns": ["<rootDir>/.worktrees/"],
+    "modulePathIgnorePatterns": [
+      "<rootDir>/.worktrees/"
+    ],
     "moduleNameMapper": {
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
       "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js"

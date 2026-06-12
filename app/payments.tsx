@@ -17,7 +17,7 @@ import { StatusBar } from 'expo-status-bar'
 import QRScanner from '@/components/QRScanner'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { toast } from 'react-toastify'
+import { showToast } from '@/components/ui/Toast'
 import { PeerPayClient, IncomingPayment, PaymentToken } from '@bsv/message-box-client'
 import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
 import type { DisplayableIdentity } from '@bsv/sdk'
@@ -293,7 +293,7 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
     async (input: string) => {
       const trimmed = input.trim().replace(/\/+$/, '')
       if (!trimmed) {
-        toast.error(t('enter_valid_url'))
+        showToast(t('enter_valid_url'), { type: 'error' })
         return
       }
       setIsSaving(true)
@@ -301,9 +301,9 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
         await AsyncStorage.setItem(MESSAGE_BOX_URL_KEY, trimmed)
         setMessageBoxUrl(trimmed)
         setShowConfig(false)
-        toast.success(t('message_box_saved'))
+        showToast(t('message_box_saved'), { type: 'success' })
       } catch (error: any) {
-        toast.error(`Failed to save: ${error.message || 'unknown error'}`)
+        showToast(`Failed to save: ${error.message || 'unknown error'}`, { type: 'error' })
       } finally {
         setIsSaving(false)
       }
@@ -316,7 +316,7 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
     setMessageBoxUrl(DEFAULT_MESSAGE_BOX_URL)
     setUrlInput(DEFAULT_MESSAGE_BOX_URL)
     setShowConfig(false)
-    toast.success(t('message_box_removed'))
+    showToast(t('message_box_removed'), { type: 'success' })
   }, [t])
 
   const handleNone = useCallback(async () => {
@@ -327,9 +327,9 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
       setMessageBoxUrl(noneValue)
       setUrlInput(noneValue)
       setShowConfig(true)
-      toast.success(t('message_box_removed'))
+      showToast(t('message_box_removed'), { type: 'success' })
     } catch (error: any) {
-      toast.error(`Failed to save: ${error.message || 'unknown error'}`)
+      showToast(`Failed to save: ${error.message || 'unknown error'}`, { type: 'error' })
     } finally {
       setIsSaving(false)
     }
@@ -1060,7 +1060,7 @@ export default function PaymentsScreen() {
       }
     } catch (error: any) {
       console.error('Failed to fetch payments:', error)
-      toast.error(`Failed to load payments: ${error.message || 'unknown error'}`)
+      showToast(`Failed to load payments: ${error.message || 'unknown error'}`, { type: 'error' })
     } finally {
       setLoadingPayments(false)
     }
@@ -1243,10 +1243,10 @@ export default function PaymentsScreen() {
           body: JSON.stringify(entry.token)
         })
         await markOutboxSent(storage, entry.id)
-        toast.success(t('payment_delivered'))
+        showToast(t('payment_delivered'), { type: 'success' })
       } catch (err: any) {
         await updateOutboxEntry(storage, entry.id, { lastError: err?.message || 'unknown error' })
-        toast.error(`${t('retry_failed')}: ${err?.message || 'unknown error'}`)
+        showToast(`${t('retry_failed')}: ${err?.message || 'unknown error'}`, { type: 'error' })
       } finally {
         setRetryingId(null)
         await loadOutbox()

@@ -35,8 +35,7 @@ const DEFAULT_SETTINGS: WalletSettings = {
     ]
   }
 }
-import { toast } from 'react-toastify'
-import 'react-toastify/dist/ReactToastify.css'
+import { showToast } from '@/components/ui/Toast'
 import type { AppChain } from './config'
 import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR } from './config'
 import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_COOLDOWN_MS, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
@@ -870,7 +869,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         return permissionsManager
       } catch (error: any) {
         console.error('Error building wallet:', error)
-        toast.error('Failed to build wallet: ' + error.message)
+        showToast('Failed to build wallet: ' + error.message, { type: 'error' })
         logWithTimestamp(F, 'Error building wallet', error.message)
         return null
       }
