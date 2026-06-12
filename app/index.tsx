@@ -17,7 +17,7 @@ import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import { GestureDetector } from 'react-native-gesture-handler'
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated'
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, runOnJS, Easing, SharedValue } from 'react-native-reanimated'
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
@@ -67,6 +67,8 @@ import { SheetRouter } from '@/components/browser/SheetRouter'
 import { FindInPageBar } from '@/components/browser/FindInPageBar'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { spacing, radii, typography } from '@/context/theme/tokens'
+import { durations } from '@/context/theme/motion'
+import LoadProgressBar from '@/components/browser/LoadProgressBar'
 
 import { useHistory } from '@/hooks/useHistory'
 import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
@@ -204,6 +206,7 @@ interface WebViewHostProps {
   webviewScrollIndicatorInsets: any
   webviewContainerStyle: any
   webviewStyle: any
+  loadProgress: SharedValue<number>
 }
 
 const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
@@ -229,7 +232,8 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     webviewContentInset,
     webviewScrollIndicatorInsets,
     webviewContainerStyle,
-    webviewStyle
+    webviewStyle,
+    loadProgress
   } = props
 
   const getTab = () => tabStore.tabs.find(t => t.id === tabId)
@@ -450,10 +454,19 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             )
           }
         }}
+        onLoadProgress={({ nativeEvent }: any) => {
+          if (!isActive) return
+          const next = nativeEvent.progress * 0.9
+          if (next > loadProgress.value) loadProgress.value = withTiming(next, { duration: durations.quick })
+        }}
         onLoadEnd={(event: any) => {
           // Only the active tab's first paint should clear the switch overlay —
           // a warm background tab finishing a late load must not dismiss it.
           if (isActive) tabStore.clearSwitchLoading()
+          if (isActive) {
+            loadProgress.value = withTiming(1, { duration: durations.instant })
+            loadProgress.value = withDelay(300, withTiming(0, { duration: 0 }))
+          }
           if (paymentInFlightUrl.current) return
           tabStore.handleNavigationStateChange(tabId, {
             ...(event.nativeEvent ?? event),
@@ -782,6 +795,9 @@ const Browser = observer(function Browser() {
 
   const [showTabsView, setShowTabsView] = useState(false)
 
+  // Page-load progress bar: 0 = idle/hidden, 0..0.9 = loading, 1 = done (fades out).
+  const loadProgress = useSharedValue(0)
+
   // Menu popover visibility — driven by a shared value so the open/close
   // animation runs entirely on the UI thread (and stays smooth even while the
   // JS thread is blocked, e.g. parsing large BEEF payloads). React state
@@ -1083,6 +1099,11 @@ const Browser = observer(function Browser() {
   // The tab ID of a tab opened via the new tab button that can be "cancelled" (closed to go back)
   const cancelableNewTabId = useRef<number | null>(null)
 
+  // Reset progress bar on tab switch so stale progress from the old tab never bleeds into the new one.
+  useEffect(() => {
+    loadProgress.value = 0
+  }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Navigate to homepage whenever a blank tab becomes active
   useEffect(() => {
     if (!activeTab || activeTab.url !== kNEW_TAB_URL) return
@@ -1316,10 +1337,11 @@ const Browser = observer(function Browser() {
     }
     tabStore.updateTab(currentTab.id, { isLoading: false })
     tabStore.clearSwitchLoading()
+    loadProgress.value = 0
     if (currentTab.url !== kNEW_TAB_URL && currentTab.url.startsWith('http')) {
       cancelledLoadTabIds.current.add(currentTab.id)
     }
-  }, [])
+  }, [loadProgress])
 
   const navReloadOrStop = useCallback(() => {
     const currentTab = tabStore.activeTab
@@ -2085,6 +2107,7 @@ const Browser = observer(function Browser() {
       webviewScrollIndicatorInsets={webviewScrollIndicatorInsets}
       webviewContainerStyle={webviewContainerStyle}
       webviewStyle={webviewStyle}
+      loadProgress={loadProgress}
     />
   )
 
@@ -2296,6 +2319,7 @@ const Browser = observer(function Browser() {
                     onClearText={onClearAddressText}
                     onCancelNewTabFn={onCancelNewTabFn}
                   />
+                  <LoadProgressBar progress={loadProgress} />
                 </Animated.View>
               </GestureDetector>
 
