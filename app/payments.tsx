@@ -1031,6 +1031,7 @@ export default function PaymentsScreen() {
   const [sendResult, setSendResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [acceptResult, setAcceptResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [celebratingFirstPayment, setCelebratingFirstPayment] = useState(false)
+  const [celebrationMessage, setCelebrationMessage] = useState('')
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, '')
@@ -1208,6 +1209,7 @@ export default function PaymentsScreen() {
       const isFirst = !(await AsyncStorage.getItem(FIRST_PAYMENT_KEY))
       if (isFirst) {
         await AsyncStorage.setItem(FIRST_PAYMENT_KEY, '1')
+        setCelebrationMessage(`Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully`)
         setCelebratingFirstPayment(true)
       } else {
         setSendResult({ type: 'success', message: `Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully` })
@@ -1445,7 +1447,10 @@ export default function PaymentsScreen() {
       {/* ── First-payment celebration overlay ───────────────────────── */}
       {celebratingFirstPayment && (
         <View style={styles.celebrationOverlay} pointerEvents="none">
-          <Celebration onDone={() => setCelebratingFirstPayment(false)} />
+          <Celebration onDone={() => {
+            setCelebratingFirstPayment(false)
+            setSendResult({ type: 'success', message: celebrationMessage })
+          }} />
         </View>
       )}
     </View>

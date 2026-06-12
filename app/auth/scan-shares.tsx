@@ -107,14 +107,15 @@ export default function ScanSharesScreen() {
         return
       }
 
-      setRecovered(true)
       await buildWalletFromRecoveredKey(wif)
+      setRecovered(true)
       setCelebrating(true)
     } catch (err: any) {
       console.error('[ScanShares] Recovery failed:', err)
       setError(err.message || t('scan_shares_recovery_failed'))
       haptics.error()
       // Allow re-scanning
+      setRecovered(false)
       setScannedShares([])
       setThreshold(null)
       lastScannedRef.current = ''
@@ -142,7 +143,6 @@ export default function ScanSharesScreen() {
         <Celebration
           onDone={() => {
             router.dismissAll()
-            router.push('/')
           }}
         />
       </View>
