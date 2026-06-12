@@ -12,6 +12,7 @@ import {
   TouchableWithoutFeedback,
   View
 } from 'react-native'
+import Reanimated, { FadeInDown, useReducedMotion } from 'react-native-reanimated'
 import { Ionicons } from '@expo/vector-icons'
 import { Swipeable } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -23,6 +24,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { IconButton } from '@/components/ui/IconButton'
 import { spacing, radii } from '@/context/theme/tokens'
+import { springs, durations } from '@/context/theme/motion'
 import tabStore from '@/stores/TabStore'
 import type { Tab } from '@/shared/types/browser'
 
@@ -39,12 +41,13 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
 }) => {
   const { colors } = useTheme()
   const { t } = useTranslation()
+  const reducedMotion = useReducedMotion()
   const screen = Dimensions.get('window')
   const ITEM_W = screen.width * 0.42
   const ITEM_H = screen.height * 0.28
   const insets = useSafeAreaInsets()
 
-  const renderItem = ({ item }: { item: Tab }) => {
+  const renderItem = ({ item, index }: { item: Tab; index: number }) => {
     const renderSwipeAction = (
       _progress: Animated.AnimatedInterpolation<number>,
       dragX: Animated.AnimatedInterpolation<number>,
@@ -63,6 +66,9 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
     }
 
     return (
+      <Reanimated.View
+        entering={reducedMotion ? undefined : FadeInDown.duration(durations.quick).delay(Math.min(index * 20, 160)).springify().stiffness(springs.settle.stiffness).damping(springs.settle.damping)}
+      >
       <Swipeable
         renderRightActions={(p, d) => renderSwipeAction(p, d, 'right')}
         renderLeftActions={(p, d) => renderSwipeAction(p, d, 'left')}
@@ -91,6 +97,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
             }
           ]}
           onPress={() => {
+            haptics.tap()
             tabStore.setActiveTab(item.id)
             onDismiss()
           }}
@@ -134,6 +141,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
           </View>
         </Pressable>
       </Swipeable>
+      </Reanimated.View>
     )
   }
 
@@ -185,6 +193,18 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
           <Ionicons name="trash-outline" size={20} color={colors.accent} />
           <Text style={[styles.clearAllText, { color: colors.accent }]}>{t('clear_all_tabs')}</Text>
         </TouchableOpacity>
+        <IconButton
+          name="add"
+          onPress={() => {
+            haptics.confirm()
+            tabStore.newTab()
+            onDismiss()
+            setAddressFocused(true)
+          }}
+          size={24}
+          color={colors.accent}
+          accessibilityLabel="New tab"
+        />
         <IconButton
           name="close"
           onPress={onDismiss}
