@@ -67,7 +67,7 @@ const BookmarkRow = memo(
           </View>
         )}
         onSwipeableOpen={direction => {
-          if (direction === SwipeDirection.RIGHT) { haptics.warning(); onDelete(item.url) }
+          if (direction === SwipeDirection.LEFT) { haptics.warning(); onDelete(item.url) }
         }}
       >
         <Pressable style={[styles.bookmarkItem, itemStyle]} onPress={() => onSelect(item.url)}>
