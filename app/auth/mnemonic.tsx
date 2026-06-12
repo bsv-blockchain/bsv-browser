@@ -216,24 +216,6 @@ export default function MnemonicScreen() {
     }
   }
 
-  // ─── Mnemonic word chips (2-column grid) ─────────────────────────────────
-  const renderMnemonicChips = (phrase: string) => {
-    const words = phrase.trim().split(/\s+/)
-    return (
-      <View style={s.mnemonicGrid}>
-        {words.map((word, index) => (
-          <View
-            key={index}
-            style={[s.mnemonicChip, { backgroundColor: colors.fillTertiary }]}
-          >
-            <Text style={[s.chipNumber, { color: colors.textTertiary }]}>{index + 1}</Text>
-            <Text style={[s.chipWord, { color: colors.textPrimary }]}>{word}</Text>
-          </View>
-        ))}
-      </View>
-    )
-  }
-
   // ─── Celebration overlay (wallet created) ────────────────────────────
   if (celebrating) {
     return (
@@ -368,7 +350,7 @@ export default function MnemonicScreen() {
             </Text>
           </View>
 
-          {/* Mnemonic display — numbered word chips */}
+          {/* Mnemonic display — compact selectable block */}
           <View
             style={[
               s.mnemonicDisplay,
@@ -378,7 +360,9 @@ export default function MnemonicScreen() {
               }
             ]}
           >
-            {renderMnemonicChips(mnemonic)}
+            <Text style={[s.mnemonicDisplayText, { color: colors.textPrimary }]} selectable>
+              {mnemonic}
+            </Text>
           </View>
 
           {/* Action buttons */}
@@ -678,35 +662,18 @@ const s = StyleSheet.create({
     lineHeight: 21
   },
 
-  // ─── Mnemonic grid ─────────────────────────────────────────────────
+  // ─── Mnemonic display ──────────────────────────────────────────────
   mnemonicDisplay: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radii.md,
     padding: spacing.lg,
     marginBottom: spacing.xxl
   },
-  mnemonicGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm
-  },
-  mnemonicChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '48%',
-    borderRadius: radii.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    gap: spacing.sm
-  },
-  chipNumber: {
-    ...typography.footnote,
-    minWidth: 18,
-    textAlign: 'right'
-  },
-  chipWord: {
+  mnemonicDisplayText: {
     ...typography.callout,
-    flex: 1
+    fontFamily: 'monospace',
+    lineHeight: 24,
+    textAlign: 'center'
   },
 
   // ─── Biometric note ────────────────────────────────────────────────
