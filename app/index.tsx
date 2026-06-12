@@ -17,7 +17,7 @@ import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import { GestureDetector } from 'react-native-gesture-handler'
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, runOnJS, Easing, SharedValue } from 'react-native-reanimated'
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, withSequence, runOnJS, Easing, SharedValue } from 'react-native-reanimated'
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
@@ -463,9 +463,11 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
           // Only the active tab's first paint should clear the switch overlay —
           // a warm background tab finishing a late load must not dismiss it.
           if (isActive) tabStore.clearSwitchLoading()
-          if (isActive) {
-            loadProgress.value = withTiming(1, { duration: durations.instant })
-            loadProgress.value = withDelay(300, withTiming(0, { duration: 0 }))
+          if (isActive && loadProgress.value > 0) {
+            loadProgress.value = withSequence(
+              withTiming(1, { duration: durations.instant }),
+              withDelay(300, withTiming(0, { duration: 0 }))
+            )
           }
           if (paymentInFlightUrl.current) return
           tabStore.handleNavigationStateChange(tabId, {

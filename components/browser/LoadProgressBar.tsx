@@ -1,7 +1,7 @@
 /**
  * 2px page-load progress line under the address bar. Driven by a Reanimated
  * shared value (0..1) owned by the parent; renders nothing when idle.
- * Eases ahead so it never appears stalled; snaps to 1 then fades on finish.
+ * Eases ahead so it never appears stalled; snaps to 1, holds briefly, then hides instantly.
  */
 import React from 'react'
 import { StyleSheet } from 'react-native'
@@ -9,7 +9,7 @@ import Animated, { useAnimatedStyle, SharedValue } from 'react-native-reanimated
 import { useTheme } from '@/context/theme/ThemeContext'
 
 interface Props {
-  /** 0..1 load progress; set to 0 when idle, 1 triggers fade-out. */
+  /** 0..1 load progress; set to 0 when idle, 1 triggers instant hide. */
   progress: SharedValue<number>
 }
 
