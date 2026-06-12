@@ -250,7 +250,11 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
 
   const activeOpacity = useSharedValue(isActive ? 1 : 0)
   useEffect(() => {
-    activeOpacity.value = withTiming(isActive ? 1 : 0, { duration: 200 })
+    // Incoming tab fades in over the still-painted outgoing tab; outgoing snaps
+    // hidden after the fade completes (no background bleed from composite dip).
+    activeOpacity.value = isActive
+      ? withTiming(1, { duration: 200 })
+      : withDelay(200, withTiming(0, { duration: 0 }))
   }, [isActive, activeOpacity])
   const fadeStyle = useAnimatedStyle(() => ({ opacity: activeOpacity.value }))
 
@@ -259,11 +263,11 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
       ref={containerRef}
       collapsable={false}
       // Inactive warm tabs stay mounted (page alive) but hidden behind the
-      // active one and non-interactive. opacity transitions over 200ms for a
-      // smooth crossfade on tab switch — rather than display:'none' or unmount
-      // — keeps the native WebView painted so re-activation is instant with no
-      // reload/reflow. pointerEvents and zIndex remain instant for interaction
-      // correctness (the incoming tab is interactive as soon as the switch fires).
+      // active one and non-interactive. Incoming tab fades in (200ms) over the
+      // still-painted outgoing tab; outgoing snaps to opacity 0 only after the
+      // fade completes — asymmetric to avoid background bleed from composite
+      // coverage dipping mid-crossfade. pointerEvents and zIndex switch
+      // instantly for interaction correctness.
       pointerEvents={isActive ? 'auto' : 'none'}
       style={[{
         position: 'absolute',
