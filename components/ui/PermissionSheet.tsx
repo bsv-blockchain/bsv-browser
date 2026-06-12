@@ -290,12 +290,20 @@ const PermissionSheet: React.FC = () => {
   const [detailsExpanded, setDetailsExpanded] = useState(false)
   const [granted, setGranted] = useState(false)
   const grantTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Stores the executeGrant closure that is scheduled but not yet fired, so it
+  // can be flushed synchronously if a higher-priority request preempts.
+  const pendingGrantRef = useRef<(() => void) | null>(null)
 
-  // Clear the pending grant timer on unmount to prevent stale handler calls.
+  // Clear the pending grant timer (or flush it) on unmount to prevent stale handler calls.
   useEffect(() => {
     return () => {
       if (grantTimerRef.current !== null) {
         clearTimeout(grantTimerRef.current)
+        grantTimerRef.current = null
+      }
+      if (pendingGrantRef.current !== null) {
+        pendingGrantRef.current()
+        pendingGrantRef.current = null
       }
     }
   }, [])
@@ -335,19 +343,26 @@ const PermissionSheet: React.FC = () => {
 
   // Reset granted morph whenever a new permission request arrives.
   // Keyed on requestID so repeated requests (even same kind) each start fresh.
+  // If a grant was pending (400 ms timer still running), flush it synchronously
+  // before switching to the new request so the user's confirmation is honoured.
   const activeRequestID = active?.requestID
   useEffect(() => {
-    setGranted(false)
     if (grantTimerRef.current !== null) {
       clearTimeout(grantTimerRef.current)
       grantTimerRef.current = null
     }
+    if (pendingGrantRef.current !== null) {
+      pendingGrantRef.current()
+      pendingGrantRef.current = null
+    }
+    setGranted(false)
   }, [activeRequestID])
 
   // ---- Deny ----
   const handleDeny = useCallback(async () => {
-    haptics.warning()
+    if (granted) return
     if (!active) return
+    haptics.warning()
     if (active.kind === 'btms') {
       // BTMS uses its own promise-based resolution — no permissionsManager.denyPermission
       advanceBtmsQueue(false)
@@ -378,6 +393,7 @@ const PermissionSheet: React.FC = () => {
     }
     setDetailsExpanded(false)
   }, [
+    granted,
     active,
     managers.permissionsManager,
     advanceProtocolQueue,
@@ -394,23 +410,27 @@ const PermissionSheet: React.FC = () => {
   // ---- Grant ----
   // Runs the actual grant logic (queue advance + modal close). Separated so
   // the UI can show the checkmark morph for 400 ms before dismissal.
-  const executeGrant = useCallback(() => {
-    if (!active) return
-    if (active.kind === 'btms') {
+  // Takes an explicit snapshot of the request to act on so it is safe to call
+  // from the flush-on-preempt path where `active` may have already changed.
+  const executeGrant = useCallback((request: ActivePermission) => {
+    // Clear the pending ref so flush-on-preempt guards don't double-fire.
+    pendingGrantRef.current = null
+
+    if (request.kind === 'btms') {
       advanceBtmsQueue(true)
-    } else if (active.kind === 'spending') {
+    } else if (request.kind === 'spending') {
       managers.permissionsManager?.grantPermission({
-        requestID: active.requestID,
+        requestID: request.requestID,
         ephemeral: true,
-        amount: active.amount
+        amount: request.amount
       })
       advanceSpendingQueue()
       setSpendingAuthorizationModalOpen(false)
     } else {
       managers.permissionsManager?.grantPermission({
-        requestID: active.requestID
+        requestID: request.requestID
       })
-      switch (active.kind) {
+      switch (request.kind) {
         case 'protocol':
           advanceProtocolQueue()
           setProtocolAccessModalOpen(false)
@@ -426,8 +446,10 @@ const PermissionSheet: React.FC = () => {
       }
     }
     setDetailsExpanded(false)
+    // Reset granted so that consecutive BTMS requests (sharing sentinel requestID '')
+    // don't leave the sheet permanently in granted state / deadlocked.
+    setGranted(false)
   }, [
-    active,
     managers.permissionsManager,
     advanceProtocolQueue,
     advanceBasketQueue,
@@ -447,9 +469,13 @@ const PermissionSheet: React.FC = () => {
     if (grantTimerRef.current !== null) {
       clearTimeout(grantTimerRef.current)
     }
+    // Capture the request at grant time — executeGrant now takes it explicitly.
+    const requestSnapshot = active
+    const pendingFn = () => executeGrant(requestSnapshot)
+    pendingGrantRef.current = pendingFn
     grantTimerRef.current = setTimeout(() => {
       grantTimerRef.current = null
-      executeGrant()
+      pendingFn()
     }, 400)
   }, [active, granted, executeGrant])
 
