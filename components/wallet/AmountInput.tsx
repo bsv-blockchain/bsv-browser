@@ -9,7 +9,6 @@ import { durations } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 import { parseDisplayToSatoshis, formatAmount } from '@/utils/amountFormatHelpers'
-import PressableScale from '@/components/ui/PressableScale'
 
 export const SEND_MAX_VALUE = '2099999999999999'
 
@@ -108,7 +107,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText })
   // Secondary converted-currency line
   const satsForConversion = value ? parseInt(value, 10) : 0
   const secondaryText = isUSD
-    ? (satsForConversion > 0 ? formatAmount(satsForConversion, 'BSV', satoshisPerUSD) + ' satoshis' : null)
+    ? (satsForConversion > 0 ? formatAmount(satsForConversion, 'BSV', satoshisPerUSD) : null)
     : (satsForConversion > 0 && satoshisPerUSD > 0 ? formatAmount(satsForConversion, 'USD', satoshisPerUSD) : null)
 
   const entering = reducedMotion ? undefined : FadeInUp.duration(durations.instant)
@@ -126,11 +125,11 @@ export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText })
           returnKeyType="done"
           style={[styles.input, { color: colors.textPrimary }]}
         />
-        <PressableScale haptic="tap" style={styles.unitLabelPressable}>
+        <View style={styles.unitLabelPressable}>
           <Animated.View key={unitLabel} entering={entering} exiting={exiting}>
             <Text style={[styles.unitLabel, { color: colors.textSecondary }]}>{unitLabel}</Text>
           </Animated.View>
-        </PressableScale>
+        </View>
         <TouchableOpacity
           onPress={() => onChangeText(SEND_MAX_VALUE)}
           style={[styles.maxButton, { backgroundColor: colors.accent + '15' }]}
