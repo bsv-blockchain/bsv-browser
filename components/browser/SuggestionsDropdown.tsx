@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useMemo, useRef } from 'react'
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import Animated, { FadeInDown, FadeOut, useReducedMotion } from 'react-native-reanimated'
+import Animated, { FadeIn, FadeInDown, FadeOut, useReducedMotion } from 'react-native-reanimated'
 import type { HistoryEntry, Bookmark } from '@/shared/types/browser'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { durations, springs } from '@/context/theme/motion'
@@ -89,7 +89,7 @@ export function SuggestionsDropdown({ suggestions, colors, bottomOffset, onSelec
   if (suggestions.length === 0) return null
 
   const enteringAnim = reducedMotion
-    ? FadeInDown.duration(durations.instant)
+    ? FadeIn.duration(durations.instant)
     : FadeInDown.duration(durations.quick)
         .springify()
         .stiffness(springs.settle.stiffness)
