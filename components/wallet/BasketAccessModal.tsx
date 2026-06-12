@@ -1,14 +1,19 @@
 import React, { useContext } from 'react'
-import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native'
+import { View, Text, StyleSheet, Modal } from 'react-native'
 import { WalletContext } from '../../context/WalletContext'
 import { UserContext } from '../../context/UserContext'
 import { useThemeStyles } from '../../context/theme/useThemeStyles'
+import { useTheme } from '../../context/theme/ThemeContext'
+import { spacing, radii } from '../../context/theme/tokens'
 import { deterministicColor } from '../../utils/deterministicColor'
+import PressableScale from '../ui/PressableScale'
+import { haptics } from '../../hooks/useHaptics'
 
 const BasketAccessModal = () => {
   const { basketRequests, advanceBasketQueue, managers } = useContext(WalletContext)
   const { basketAccessModalOpen, setBasketAccessModalOpen } = useContext(UserContext)
   const themeStyles = useThemeStyles()
+  const { colors } = useTheme()
 
   // Handle denying the top request in the queue
   const handleDeny = async () => {
@@ -82,12 +87,18 @@ const BasketAccessModal = () => {
 
           {/* Action buttons */}
           <View style={styles.buttonContainer}>
-            <TouchableOpacity style={themeStyles.buttonSecondary} onPress={handleDeny}>
-              <Text style={themeStyles.buttonSecondaryText}>Deny</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={themeStyles.button} onPress={handleGrant}>
-              <Text style={themeStyles.buttonText}>Grant Access</Text>
-            </TouchableOpacity>
+            <PressableScale
+              style={[styles.buttonDeny, { borderColor: colors.separator }]}
+              onPress={() => { haptics.warning(); handleDeny() }}
+            >
+              <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>Deny</Text>
+            </PressableScale>
+            <PressableScale
+              style={[styles.buttonAllow, { backgroundColor: colors.accent }]}
+              onPress={() => { haptics.confirm(); handleGrant() }}
+            >
+              <Text style={[styles.buttonAllowText, { color: colors.textOnAccent }]}>Grant Access</Text>
+            </PressableScale>
           </View>
         </View>
       </View>
@@ -141,22 +152,32 @@ const styles = StyleSheet.create({
     borderRadius: 2
   },
   buttonContainer: {
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-    marginTop: 10
+    flexDirection: 'row',
+    marginTop: 10,
+    gap: spacing.md
   },
-  button: {
+  buttonDeny: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8
+    minHeight: 44,
+    borderRadius: radii.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  denyButton: {
-    borderWidth: 1
+  buttonDenyText: {
+    fontWeight: '600',
+    fontSize: 17
   },
-  grantButton: {},
-  buttonText: {
-    textAlign: 'center',
-    fontWeight: '600'
+  buttonAllow: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: radii.lg,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  buttonAllowText: {
+    fontWeight: '600',
+    fontSize: 17
   }
 })
 
