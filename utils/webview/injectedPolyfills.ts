@@ -1,13 +1,19 @@
 // Build the injected JavaScript for the WebView from readable TS code instead of a giant string
 // The function below runs inside the WebView context. Do NOT reference any RN variables directly.
-function injectedPolyfills(acceptLanguage: string, isAndroid: boolean, isDev: boolean) {
-  if (isDev) console.log('[Polyfill] injectedPolyfills running, before=', !!(window as any).__downloadInterceptInstalled)
+function injectedPolyfills(
+  acceptLanguage: string,
+  isAndroid: boolean,
+  isDev: boolean,
+  enableWalletFeatures: boolean,
+  forwardConsoleLogs: boolean
+) {
+  if (isDev)
+    console.log('[Polyfill] injectedPolyfills running, before=', !!(window as any).__downloadInterceptInstalled)
 
   // Console logging bridge: install as early as possible
-  // In production, sample `log` to 1/10 and skip `info`/`debug` entirely — pages and SDKs
-  // log per-render or per-event, which floods the JS↔native bridge and competes with
-  // Reanimated chrome animations. `warn`/`error` are always forwarded.
-  if (!(window as any).__consolePatched) {
+  // Only install when explicitly requested. Patching every page console and
+  // discarding the messages on the RN side still floods the native bridge.
+  if (forwardConsoleLogs && !(window as any).__consolePatched) {
     const originalLog = console.log
     const originalWarn = console.warn
     const originalError = console.error
@@ -25,7 +31,7 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean, isDev: bo
 
     console.log = function (...args: any[]) {
       originalLog.apply(console, args as any)
-      if ((++logSeq % LOG_SAMPLE_RATE) === 0) send('log', args)
+      if (++logSeq % LOG_SAMPLE_RATE === 0) send('log', args)
     }
 
     console.warn = function (...args: any[]) {
@@ -51,38 +57,6 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean, isDev: bo
     // Boot message to confirm injection ran (always forwarded — uses warn for visibility)
     if (isDev) console.log('[Injected] Console bridge installed (dev mode)')
   }
-
-  // Theme-color extraction — sample meta tag or page background and post to React Native
-  ;(function () {
-    function getThemeColor(): string | null {
-      const meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
-      if (meta?.content) return meta.content.trim()
-      const body = document.body
-      const html = document.documentElement
-      for (const el of [body, html]) {
-        if (!el) continue
-        const bg = getComputedStyle(el).backgroundColor
-        if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg
-      }
-      return null
-    }
-    function sendThemeColor() {
-      const color = getThemeColor()
-      ;(window as any).ReactNativeWebView?.postMessage(JSON.stringify({ type: 'THEME_COLOR', color }))
-    }
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-      setTimeout(sendThemeColor, 50)
-    } else {
-      window.addEventListener('DOMContentLoaded', () => setTimeout(sendThemeColor, 50))
-    }
-    const observer = new MutationObserver(() => sendThemeColor())
-    observer.observe(document.head || document.documentElement, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['content']
-    })
-  })()
 
   // Global active media streams tracker for cleanup on navigation
   ;(function () {
@@ -790,106 +764,119 @@ function injectedPolyfills(acceptLanguage: string, isAndroid: boolean, isDev: bo
     // (Early-bridge guard makes the secondary patch redundant and previously double-wrapped
     // console methods on Android where both paths could execute.)
 
-    // Intercept fetch requests to add Accept-Language header
-    const originalFetch = (window as any).fetch
-    const patchedFetch = async function (this: any, input: any, init: any = {}) {
-      // Merge headers
-      const headers = new Headers(init.headers)
-      if (!headers.has('Accept-Language')) {
-        headers.set('Accept-Language', acceptLanguage)
+    // Web2 pages should keep the browser's native fetch/XHR implementations.
+    // Wallet mode needs interception only so HTTP 402 can be handed to RN.
+    if (enableWalletFeatures) {
+      const originalFetch = (window as any).fetch
+      const patchedFetch = async function (this: any, input: any, init: any = {}) {
+        // Merge headers
+        const headers = new Headers(init.headers)
+        if (!headers.has('Accept-Language')) {
+          headers.set('Accept-Language', acceptLanguage)
+        }
+
+        // Update init with new headers
+        const newInit = {
+          ...init,
+          headers: headers
+        }
+
+        const response = await originalFetch.call(this, input, newInit)
+
+        if (response.status === 402) {
+          const headersObj: Record<string, string> = {}
+          response.headers.forEach((v: string, k: string) => {
+            headersObj[k] = v
+          })
+          const reqUrl = typeof input === 'string' ? input : input && input.url ? input.url : ''
+          ;(window as any).ReactNativeWebView?.postMessage(
+            JSON.stringify({
+              type: 'PAYMENT_REQUIRED',
+              url: reqUrl,
+              status: 402,
+              headers: headersObj
+            })
+          )
+          // Don't return 402 to page JS — RN handles payment and replaces page content.
+          // Never-resolving promise prevents page from retrying or reacting to 402.
+          return new Promise(() => {})
+        }
+
+        return response
       }
+      // Restore native toString so bot-detection checks see "[native code]"
+      try {
+        Object.defineProperty(patchedFetch, 'toString', {
+          value: () => 'function fetch() { [native code] }',
+          writable: false,
+          configurable: false
+        })
+        Object.defineProperty(patchedFetch, 'name', { value: 'fetch', configurable: true })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(patchedFetch, 'fetch')
+      } catch {}
+      ;(window as any).fetch = patchedFetch
 
-      // Update init with new headers
-      const newInit = {
-        ...init,
-        headers: headers
+      // Also intercept XMLHttpRequest for older APIs
+      const originalXHROpen = XMLHttpRequest.prototype.open
+      const originalXHRSend = XMLHttpRequest.prototype.send
+
+      XMLHttpRequest.prototype.open = function (
+        this: any,
+        method: any,
+        url: any,
+        async?: any,
+        user?: any,
+        password?: any
+      ) {
+        ;(this as any)._method = method
+        ;(this as any)._url = url
+        return originalXHROpen.call(this, method, url, async, user, password)
       }
+      // Restore native toString on patched XHR prototype methods
+      try {
+        Object.defineProperty(XMLHttpRequest.prototype.open, 'toString', {
+          value: () => 'function open() { [native code] }',
+          writable: false,
+          configurable: false
+        })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.open, 'open')
+      } catch {}
 
-      const response = await originalFetch.call(this, input, newInit)
-
-      if (response.status === 402) {
-        const headersObj: Record<string, string> = {}
-        response.headers.forEach((v: string, k: string) => { headersObj[k] = v })
-        const reqUrl = typeof input === 'string' ? input : (input && input.url ? input.url : '')
-        ;(window as any).ReactNativeWebView?.postMessage(JSON.stringify({
-          type: 'PAYMENT_REQUIRED',
-          url: reqUrl,
-          status: 402,
-          headers: headersObj
-        }))
-        // Don't return 402 to page JS — RN handles payment and replaces page content.
-        // Never-resolving promise prevents page from retrying or reacting to 402.
-        return new Promise(() => {})
+      XMLHttpRequest.prototype.send = function (this: any, data: any) {
+        // Add Accept-Language header if not already set
+        // Note: getRequestHeader does not exist on standard XHR; this matches the previous behavior
+        if (!(this as any).getRequestHeader || !(this as any).getRequestHeader('Accept-Language')) {
+          ;(this as any).setRequestHeader('Accept-Language', acceptLanguage)
+        }
+        return originalXHRSend.call(this, data)
       }
-
-      return response
+      try {
+        Object.defineProperty(XMLHttpRequest.prototype.send, 'toString', {
+          value: () => 'function send() { [native code] }',
+          writable: false,
+          configurable: false
+        })
+      } catch {}
+      try {
+        ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.send, 'send')
+      } catch {}
     }
-    // Restore native toString so bot-detection checks see "[native code]"
-    try {
-      Object.defineProperty(patchedFetch, 'toString', {
-        value: () => 'function fetch() { [native code] }',
-        writable: false,
-        configurable: false
-      })
-      Object.defineProperty(patchedFetch, 'name', { value: 'fetch', configurable: true })
-    } catch {}
-    try {
-      ;(window as any).__spoofNative?.(patchedFetch, 'fetch')
-    } catch {}
-    ;(window as any).fetch = patchedFetch
-
-    // Also intercept XMLHttpRequest for older APIs
-    const originalXHROpen = XMLHttpRequest.prototype.open
-    const originalXHRSend = XMLHttpRequest.prototype.send
-
-    XMLHttpRequest.prototype.open = function (
-      this: any,
-      method: any,
-      url: any,
-      async?: any,
-      user?: any,
-      password?: any
-    ) {
-      ;(this as any)._method = method
-      ;(this as any)._url = url
-      return originalXHROpen.call(this, method, url, async, user, password)
-    }
-    // Restore native toString on patched XHR prototype methods
-    try {
-      Object.defineProperty(XMLHttpRequest.prototype.open, 'toString', {
-        value: () => 'function open() { [native code] }',
-        writable: false,
-        configurable: false
-      })
-    } catch {}
-    try {
-      ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.open, 'open')
-    } catch {}
-
-    XMLHttpRequest.prototype.send = function (this: any, data: any) {
-      // Add Accept-Language header if not already set
-      // Note: getRequestHeader does not exist on standard XHR; this matches the previous behavior
-      if (!(this as any).getRequestHeader || !(this as any).getRequestHeader('Accept-Language')) {
-        ;(this as any).setRequestHeader('Accept-Language', acceptLanguage)
-      }
-      return originalXHRSend.call(this, data)
-    }
-    try {
-      Object.defineProperty(XMLHttpRequest.prototype.send, 'toString', {
-        value: () => 'function send() { [native code] }',
-        writable: false,
-        configurable: false
-      })
-    } catch {}
-    try {
-      ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.send, 'send')
-    } catch {}
   })()
 }
 
-export function buildInjectedJavaScript(acceptLanguage: string, isAndroid: boolean, isDev: boolean = __DEV__) {
+export function buildInjectedJavaScript(
+  acceptLanguage: string,
+  isAndroid: boolean,
+  isDev: boolean = __DEV__,
+  enableWalletFeatures = true,
+  forwardConsoleLogs = false
+) {
   // Serialize the function and immediately invoke it with the provided arguments.
   // The trailing `true;` is required by react-native-webview on iOS — without it
   // the injected script is silently discarded.
-  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)}, ${isAndroid}, ${isDev});true;`
+  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)}, ${isAndroid}, ${isDev}, ${enableWalletFeatures}, ${forwardConsoleLogs});true;`
 }

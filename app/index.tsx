@@ -17,7 +17,16 @@ import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import { GestureDetector } from 'react-native-gesture-handler'
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, withSequence, runOnJS, Easing, SharedValue } from 'react-native-reanimated'
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withDelay,
+  withSequence,
+  runOnJS,
+  Easing,
+  SharedValue
+} from 'react-native-reanimated'
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
@@ -237,7 +246,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     loadProgress
   } = props
 
-  const getTab = () => tabStore.tabs.find(t => t.id === tabId)
+  const getTab = useCallback(() => tabStore.tabs.find(t => t.id === tabId), [tabId])
 
   // Stable per-tab wrappers so the app-level handlers know which tab fired the
   // event (the warm pool mounts several WebViews; only the active one's events
@@ -248,14 +257,37 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     (navState: WebViewNavigation) => onNavStateChange(tabId, navState),
     [onNavStateChange, tabId]
   )
+  const lastProcessRecoveryAt = useRef(0)
+  const recoverTerminatedProcess = useCallback(
+    (reason: string) => {
+      const tab = getTab()
+      console.warn(`[WebView] ${reason}; tab=${tabId} active=${isActive} url=${tab?.url ?? uri}`)
+      if (tab) tabStore.updateTab(tabId, { isLoading: false })
+      if (!isActive) return
+
+      tabStore.clearSwitchLoading()
+      loadProgress.value = 0
+
+      // Avoid a reload loop if WebKit repeatedly kills the same heavy page.
+      const now = Date.now()
+      if (now - lastProcessRecoveryAt.current < 5000) return
+      lastProcessRecoveryAt.current = now
+
+      setTimeout(() => {
+        if (tabStore.activeTabId !== tabId) return
+        const activeUrl = tabStore.activeTab?.url
+        if (activeUrl?.startsWith('http')) tabStore.raiseLoadingForUrl(activeUrl)
+        webviewRef.current?.reload()
+      }, 100)
+    },
+    [getTab, isActive, loadProgress, tabId, uri, webviewRef]
+  )
 
   const activeOpacity = useSharedValue(isActive ? 1 : 0)
   useEffect(() => {
     // Incoming tab fades in over the still-painted outgoing tab; outgoing snaps
     // hidden after the fade completes (no background bleed from composite dip).
-    activeOpacity.value = isActive
-      ? withTiming(1, { duration: 200 })
-      : withDelay(200, withTiming(0, { duration: 0 }))
+    activeOpacity.value = isActive ? withTiming(1, { duration: 200 }) : withDelay(200, withTiming(0, { duration: 0 }))
   }, [isActive, activeOpacity])
   const fadeStyle = useAnimatedStyle(() => ({ opacity: activeOpacity.value }))
 
@@ -270,14 +302,17 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
       // coverage dipping mid-crossfade. pointerEvents and zIndex switch
       // instantly for interaction correctness.
       pointerEvents={isActive ? 'auto' : 'none'}
-      style={[{
-        position: 'absolute',
-        top: isFullscreen ? 0 : topInset,
-        left: 0,
-        right: 0,
-        bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0,
-        zIndex: isActive ? 1 : 0
-      }, fadeStyle]}
+      style={[
+        {
+          position: 'absolute',
+          top: isFullscreen ? 0 : topInset,
+          left: 0,
+          right: 0,
+          bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0,
+          zIndex: isActive ? 1 : 0
+        },
+        fadeStyle
+      ]}
     >
       {isFullscreen && (
         <TouchableOpacity
@@ -310,6 +345,10 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
               : MOBILE_UA_ANDROID
         }
         sharedCookiesEnabled={true}
+        // The default static WKProcessPool keeps old site processes alive even
+        // after their tab's WebView unmounts. A per-WebView pool lets iOS release
+        // those processes when external-link navigation replaces the active tab.
+        useSharedProcessPool={Platform.OS !== 'ios'}
         originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
         onMessage={onMessageForTab}
         injectedJavaScript={injectedJavaScript}
@@ -420,6 +459,12 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             )
           }
         }}
+        onContentProcessDidTerminate={() => recoverTerminatedProcess('iOS WebContent process terminated')}
+        onRenderProcessGone={(event: any) =>
+          recoverTerminatedProcess(
+            event.nativeEvent?.didCrash ? 'Android WebView renderer crashed' : 'Android WebView renderer exited'
+          )
+        }
         onHttpError={(e: any) => {
           const tab = getTab()
           if (e.nativeEvent?.url?.includes('favicon.ico') && tab?.url === kNEW_TAB_URL) return
@@ -1662,8 +1707,15 @@ const Browser = observer(function Browser() {
   /* -------------------------------------------------------------------------- */
 
   const injectedJavaScript = useMemo(
-    () => buildInjectedJavaScript(getAcceptLanguageHeader(), Platform.OS === 'android'),
-    [getAcceptLanguageHeader]
+    () =>
+      buildInjectedJavaScript(
+        getAcceptLanguageHeader(),
+        Platform.OS === 'android',
+        __DEV__,
+        !isWeb2Mode,
+        shouldForwardWebViewLogs()
+      ),
+    [getAcceptLanguageHeader, isWeb2Mode]
   )
 
   // Standalone blob download intercept — plain JS string injected before content loads.
@@ -1730,14 +1782,13 @@ const Browser = observer(function Browser() {
     () =>
       nativeSpoofSetup +
       '\n' +
-      buildCWIProviderScript() +
-      '\n' +
+      (isWeb2Mode ? '' : buildCWIProviderScript() + '\n') +
       mediaSourcePolyfill +
       '\n' +
       downloadInterceptScript +
       '\n' +
       getPermissionScript(permissionsDeniedForCurrentDomain, pendingPermission),
-    [downloadInterceptScript, permissionsDeniedForCurrentDomain, pendingPermission]
+    [downloadInterceptScript, isWeb2Mode, permissionsDeniedForCurrentDomain, pendingPermission]
   )
 
   const routeWebViewMessage = useMemo(
@@ -2468,7 +2519,11 @@ const Browser = observer(function Browser() {
 
           {/* ---- Tabs Overview ---- */}
           {!isFullscreen && showTabsView && (
-            <TabsOverview onDismiss={() => setShowTabsView(false)} setAddressFocused={setAddressFocused} onNewTab={handleNewTab} />
+            <TabsOverview
+              onDismiss={() => setShowTabsView(false)}
+              setAddressFocused={setAddressFocused}
+              onNewTab={handleNewTab}
+            />
           )}
 
           {/* ---- Unified Sheet System ---- */}

@@ -1,54 +1,22 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { Linking } from 'react-native'
 import { router } from 'expo-router'
 import tabStore from '@/stores/TabStore'
+import {
+  consumePendingInitialBrowserUrl,
+  externalUrlsMatch,
+  isExternalBrowserUrl,
+  shouldHandleExternalBrowserUrl
+} from '@/utils/externalUrlRouter'
 
 /**
  * Simplified deep linking: when app receives http/https URL, navigate browser directly to it.
  * Also handles bsv-browser://pair?... URIs for wallet pairing QR codes scanned via the camera app.
  */
 export function useDeepLinking() {
-  useEffect(() => {
-    // Handle app opened from deep link while closed.
-    // Note: peerpay: initial URLs are already handled by +native-intent.ts which
-    // maps them to /payments?peerpay=... as the initial route. Calling router.replace
-    // here too would remount the payments screen mid-wallet-build and cause a flicker.
-    const getInitialURL = async () => {
-      const url = await Linking.getInitialURL()
-      if (!url) return
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        console.log('[Deep Link] Opening URL directly:', url)
-        handleBrowserLink(url)
-      } else if (url.startsWith('bsv-browser://pair')) {
-        console.log('[Deep Link] Opening pairing screen:', url)
-        handlePairingLink(url)
-      }
-      // peerpay: intentionally omitted — handled by +native-intent.ts on cold start
-    }
+  const browserLinkQueue = useRef<Promise<void>>(Promise.resolve())
 
-    // Handle app opened from deep link while running
-    const handleUrl = (event: { url: string }) => {
-      const url = event.url
-      if (!url) return
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        console.log('[Deep Link] Opening URL directly:', url)
-        handleBrowserLink(url)
-      } else if (url.startsWith('bsv-browser://pair')) {
-        console.log('[Deep Link] Opening pairing screen:', url)
-        handlePairingLink(url)
-      } else if (url.toLowerCase().startsWith('peerpay:')) {
-        console.log('[Deep Link] Opening payments screen:', url)
-        handlePeerPayLink(url)
-      }
-    }
-
-    getInitialURL()
-    const subscription = Linking.addEventListener('url', handleUrl)
-
-    return () => subscription?.remove()
-  }, [])
-
-  const handleBrowserLink = async (url: string) => {
+  const handleBrowserLink = useCallback(async (url: string) => {
     try {
       // Wait for tabStore to initialize before attempting to handle deep link
       if (!tabStore.isInitialized) {
@@ -72,12 +40,18 @@ export function useDeepLinking() {
       // that re-renders forever on every WalletContext/SSE tick = the storm).
       router.navigate('/')
 
+      // Create new tab or update active tab with the URL
+      const activeTab = tabStore.activeTab
+      if (activeTab && externalUrlsMatch(activeTab.url, url)) {
+        // The same cold-start URL can arrive through both native-intent and
+        // Linking. Keep the already-open page instead of spawning another tab.
+        return
+      }
+
       // Show the loading overlay while the WebView fetches the page, instead of
       // a blank screen (or the +not-found flash before this handler runs).
       tabStore.raiseLoadingForUrl(url)
 
-      // Create new tab or update active tab with the URL
-      const activeTab = tabStore.activeTab
       if (activeTab && activeTab.url === 'about:blank') {
         // Update existing blank tab
         tabStore.updateTab(activeTab.id, { url })
@@ -89,11 +63,25 @@ export function useDeepLinking() {
       console.error('[Deep Link] Error handling URL:', error)
       router.navigate('/')
     }
-  }
+  }, [])
 
-  const handlePeerPayLink = (url: string) => {
+  const enqueueBrowserLink = useCallback(
+    (url: string) => {
+      if (!shouldHandleExternalBrowserUrl(url)) {
+        console.log('[Deep Link] Ignoring duplicate URL delivery:', url)
+        return
+      }
+
+      // Serialize URL deliveries so two nearly-simultaneous app-open events
+      // cannot both inspect the same active tab and create duplicate WebViews.
+      browserLinkQueue.current = browserLinkQueue.current.catch(() => {}).then(() => handleBrowserLink(url))
+    },
+    [handleBrowserLink]
+  )
+
+  const handlePeerPayLink = useCallback((url: string) => {
     router.replace({ pathname: '/payments', params: { peerpay: url } })
-  }
+  }, [])
 
   /**
    * Handle bsv-browser://pair?topic=...&backendIdentityKey=...&protocolID=...&origin=...&expiry=...&sig=...
@@ -102,7 +90,7 @@ export function useDeepLinking() {
    * parameters from the URI and navigates directly to /pair, bypassing the connections screen.
    * The connections screen is reserved for pairing initiated manually within the app.
    */
-  const handlePairingLink = (url: string) => {
+  const handlePairingLink = useCallback((url: string) => {
     try {
       // bsv-browser://pair?topic=... — URL constructor needs a valid base
       const parsed = new URL(url.replace('bsv-browser://', 'bsv-browser://host/'))
@@ -127,7 +115,45 @@ export function useDeepLinking() {
     } catch (error) {
       console.error('[Deep Link] Error handling pairing link:', error)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const handleUrl = (url: string) => {
+      if (!url) return
+      if (isExternalBrowserUrl(url)) {
+        console.log('[Deep Link] Opening URL directly:', url)
+        enqueueBrowserLink(url)
+      } else if (url.startsWith('bsv-browser://pair')) {
+        console.log('[Deep Link] Opening pairing screen:', url)
+        handlePairingLink(url)
+      } else if (url.toLowerCase().startsWith('peerpay:')) {
+        console.log('[Deep Link] Opening payments screen:', url)
+        handlePeerPayLink(url)
+      }
+    }
+
+    // Expo Router captures the initial browser URL first. Consume that value
+    // when available; retain Linking.getInitialURL as a fallback for platforms
+    // where redirectSystemPath did not run.
+    const pendingInitialUrl = consumePendingInitialBrowserUrl()
+    if (pendingInitialUrl) {
+      handleUrl(pendingInitialUrl)
+    } else {
+      Linking.getInitialURL()
+        .then(url => {
+          if (active && url) handleUrl(url)
+        })
+        .catch(error => console.error('[Deep Link] Failed to read initial URL:', error))
+    }
+
+    const subscription = Linking.addEventListener('url', event => handleUrl(event.url))
+    return () => {
+      active = false
+      subscription.remove()
+    }
+  }, [enqueueBrowserLink, handlePairingLink, handlePeerPayLink])
 }
 
 // Legacy exports - no longer used but kept for backward compatibility

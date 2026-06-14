@@ -2,7 +2,7 @@
 import { createRef } from 'react'
 import { makeAutoObservable, runInAction } from 'mobx'
 import { WebView } from 'react-native-webview'
-import { LayoutAnimation } from 'react-native'
+import { LayoutAnimation, Platform } from 'react-native'
 import { Tab } from '@/shared/types/browser'
 import { kNEW_TAB_URL } from '@/shared/constants'
 import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
@@ -30,12 +30,12 @@ const STORAGE_KEYS = {
 // accumulation while letting flagship devices keep more tabs warm.
 export const MAX_TABS = maxTabsForTier()
 
-// Number of tab WebViews kept mounted ("warm") at once. Switching among warm
-// tabs is instant — their WebViews stay alive with page state intact, so no
-// source reload / network round-trip. Tabs outside this set are unmounted to
-// bound memory (each live WebView holds a full page). Capped at MAX_TABS so
-// low-RAM (SE-class) devices never warm more tabs than they're allowed to open.
-export const WARM_POOL_SIZE = Math.min(4, MAX_TABS)
+// iOS WKWebViews each retain one or more WebContent processes. Keeping four
+// hidden pages alive caused multi-gigabyte simulator footprints and frequent
+// content-process termination when an external URL opened a fifth page. Keep
+// only the active iOS tab mounted. Android retains one recent background tab,
+// where process sharing is substantially cheaper.
+export const WARM_POOL_SIZE = Platform.OS === 'ios' ? 1 : Math.min(2, MAX_TABS)
 
 export class TabStore {
   tabs: Tab[] = [] // Always initialize as an array
