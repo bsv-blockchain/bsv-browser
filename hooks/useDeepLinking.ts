@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { Linking } from 'react-native'
-import { router } from 'expo-router'
+import { router, usePathname } from 'expo-router'
 import tabStore from '@/stores/TabStore'
 import {
   consumePendingInitialBrowserUrl,
@@ -15,6 +15,12 @@ import {
  */
 export function useDeepLinking() {
   const browserLinkQueue = useRef<Promise<void>>(Promise.resolve())
+  const pathname = usePathname()
+  const pathnameRef = useRef(pathname)
+
+  useEffect(() => {
+    pathnameRef.current = pathname
+  }, [pathname])
 
   const handleBrowserLink = useCallback(async (url: string) => {
     try {
@@ -38,7 +44,9 @@ export function useDeepLinking() {
       // existing /index route) NOT push() — +native-intent already routes http
       // launches to '/', so push() here mounts a SECOND Browser on top (duplicate
       // that re-renders forever on every WalletContext/SSE tick = the storm).
-      router.navigate('/')
+      if (pathnameRef.current !== '/') {
+        router.navigate('/')
+      }
 
       // Create new tab or update active tab with the URL
       const activeTab = tabStore.activeTab

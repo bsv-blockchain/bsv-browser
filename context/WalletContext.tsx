@@ -44,6 +44,7 @@ import { UserContext } from './UserContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { usePermissionQueue } from '@/hooks/usePermissionQueue'
 import { createServices } from '@/services/walletServiceConfig'
+import { configureNewHeaderPolling } from '@/utils/walletMonitor'
 import {
   createArcadeBroadcastService,
   createTaalBroadcastService,
@@ -779,6 +780,18 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           }
           const monitor = new Monitor(monitorOptions)
           monitor.addDefaultTasks()
+
+          const newHeaderTask = monitor._tasks.find((t: any) => t.name === 'NewHeader') as any
+          if (newHeaderTask) {
+            configureNewHeaderPolling(newHeaderTask, {
+              onFailure: (error, retryAt) => {
+                const message = error instanceof Error ? error.message : String(error)
+                console.warn(
+                  `[TaskNewHeader] Chaintracks request failed; retrying after ${new Date(retryAt).toISOString()}: ${message}`
+                )
+              }
+            })
+          }
 
           // Patch TaskArcadeSSE: treat REJECTED as retryable, not permanent failure.
           // Arcade returns REJECTED with 503 "no available server" for transient infra

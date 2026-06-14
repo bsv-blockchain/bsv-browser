@@ -123,46 +123,6 @@ function getInjectableJSMessage(message: any = {}) {
   `
 }
 
-/**
- * Builds a small injection script that exposes the current browser chrome
- * safe area insets (including address-bar reservations) to the web page via
- * CSS custom properties, a global object, and a CustomEvent.
- *
- *   padding-bottom: calc(
- *     env(safe-area-inset-bottom) +
- *     var(--browser-safe-area-inset-bottom, 0px)
- *   );
- *
- * The bottom value is driven by `bottomReservedHeight` (coordinated name with
- * the measurement agent responsible for precise on-layout / keyboard /
- * orientation measurements). Re-dispatch of the event and updates to
- * window.__browserSafeAreaInsets.bottom occur on every call (initial load,
- * bar reposition, measurement change, orientation, keyboard).
- *
- * The generated script is resilient (inner try/catch) and idempotent
- * (repeated sets / dispatches are harmless).
- */
-function buildBrowserSafeAreaScript(bottomReservedHeight: number, topReservedHeight: number) {
-  return `
-    (function(){
-      try {
-        var root = document.documentElement;
-        root.style.setProperty('--browser-safe-area-inset-bottom', '${bottomReservedHeight}px');
-        root.style.setProperty('--browser-safe-area-inset-top', '${topReservedHeight}px');
-        root.style.setProperty('--browser-address-bar-height', '${ADDRESS_BAR_HEIGHT}px');
-
-        // Expose current values for JS access (precise measured bottomReservedHeight)
-        window.__browserSafeAreaInsets = { bottom: ${bottomReservedHeight}, top: ${topReservedHeight} };
-
-        // Notify any listeners (pages can addEventListener('browser-safe-area-change', ...))
-        window.dispatchEvent(new CustomEvent('browser-safe-area-change', {
-          detail: window.__browserSafeAreaInsets
-        }));
-      } catch (e) {}
-    })();
-  `
-}
-
 /* -------------------------------------------------------------------------- */
 /*                               USER AGENTS                                  */
 /* -------------------------------------------------------------------------- */
@@ -195,6 +155,9 @@ interface WebViewHostProps {
   // intact) but visually behind the active tab and non-interactive. Only the
   // active host drives the switch-loading overlay and address-bar UI.
   isActive: boolean
+  // True when this tab's WebView is in the warm pool — activation skips the
+  // 200ms crossfade so recently-used tab switches feel instant.
+  isWarm: boolean
   webviewRef: React.RefObject<any>
   containerRef?: React.RefObject<View | null>
   uri: string
@@ -202,8 +165,6 @@ interface WebViewHostProps {
   isFullscreen: boolean
   onExitFullscreen: () => void
   topInset: number
-  bottomReservedHeight: number
-  addressBarIsAtTop: boolean
   isDark: boolean
   acceptLanguage: string
   injectedJavaScript: string
@@ -212,7 +173,6 @@ interface WebViewHostProps {
   onNavStateChange: (tabId: number, navState: WebViewNavigation) => void
   paymentHandlerRef: React.MutableRefObject<any>
   paymentInFlightUrl: React.MutableRefObject<string | null>
-  webviewContentInset: any
   webviewScrollIndicatorInsets: any
   webviewContainerStyle: any
   webviewStyle: any
@@ -223,6 +183,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
   const {
     tabId,
     isActive,
+    isWarm,
     webviewRef,
     containerRef,
     uri,
@@ -230,8 +191,6 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     isFullscreen,
     onExitFullscreen,
     topInset,
-    bottomReservedHeight,
-    addressBarIsAtTop,
     acceptLanguage,
     injectedJavaScript,
     injectedJSBefore,
@@ -239,7 +198,6 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     onNavStateChange,
     paymentHandlerRef,
     paymentInFlightUrl,
-    webviewContentInset,
     webviewScrollIndicatorInsets,
     webviewContainerStyle,
     webviewStyle,
@@ -285,10 +243,15 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
 
   const activeOpacity = useSharedValue(isActive ? 1 : 0)
   useEffect(() => {
-    // Incoming tab fades in over the still-painted outgoing tab; outgoing snaps
-    // hidden after the fade completes (no background bleed from composite dip).
-    activeOpacity.value = isActive ? withTiming(1, { duration: 200 }) : withDelay(200, withTiming(0, { duration: 0 }))
-  }, [isActive, activeOpacity])
+    // Warm tabs already have a painted page — snap visible instantly so tab
+    // switches stay under the 100ms interaction budget. Cold tabs (fresh mount)
+    // fade in over the outgoing page to avoid a flash of empty chrome.
+    if (isActive) {
+      activeOpacity.value = isWarm ? 1 : withTiming(1, { duration: 100 })
+    } else {
+      activeOpacity.value = withDelay(isWarm ? 0 : 100, withTiming(0, { duration: 0 }))
+    }
+  }, [isActive, isWarm, activeOpacity])
   const fadeStyle = useAnimatedStyle(() => ({ opacity: activeOpacity.value }))
 
   return (
@@ -308,7 +271,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
           top: isFullscreen ? 0 : topInset,
           left: 0,
           right: 0,
-          bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0,
+          bottom: 0,
           zIndex: isActive ? 1 : 0
         },
         fadeStyle
@@ -531,16 +494,6 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             ...(event.nativeEvent ?? event),
             loading: false
           })
-          const tab = getTab()
-          if (tab && tab.url !== kNEW_TAB_URL && webviewRef.current) {
-            const bottom = bottomReservedHeight
-            const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
-            try {
-              webviewRef.current.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
-            } catch (e) {
-              // transient webview unavailability is ok
-            }
-          }
         }}
         javaScriptEnabled
         domStorageEnabled
@@ -549,7 +502,6 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         allowsLinkPreview
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
-        contentInset={webviewContentInset}
         scrollIndicatorInsets={webviewScrollIndicatorInsets}
         containerStyle={webviewContainerStyle}
         style={webviewStyle}
@@ -1031,43 +983,14 @@ const Browser = observer(function Browser() {
     expandRef.current = expandAddressBar
   }, [expandAddressBar])
 
-  /**
-   * Approach A: When the address bar is positioned at the bottom, inset the
-   * WebView content area from the bottom so that fixed/sticky elements on
-   * websites (nav bars, banners, etc.) do not get visually overlapped by
-   * the address bar. The WebView viewport shrinks instead of the bar being
-   * a floating overlay on top of full-height content.
-   */
-  // Tunable visual compensation (in pixels) for any slight "overhang" of the frosted glass
-  // (blur radius, border, shadow, or perceived height of the pill). Start at 0.
-  // Increase if the red block on the WebKit demo still sits a pixel or two below the bar.
-  const BOTTOM_CHROME_VISUAL_EXTRA = 0
-
-  /**
-   * The authoritative height (from device bottom) that must be reserved for the address bar
-   * when it is positioned at the bottom.
-   *
-   * We use the *exact same math* the animation hook already uses to place the bar.
-   * This guarantees the red safe-area visualization on
-   * https://webkit.org/demos/safe-area-insets/safe-areas.html will have its bottom edge
-   * sit flush against the top edge of the frosted address bar.
-   */
+  // Geometry used by native chrome overlays and scroll indicators. The WebView
+  // itself remains full-height; users can collapse the address bar when it
+  // covers page controls.
   const bottomReservedHeight =
-    !addressBarIsAtTop && !isFullscreen
-      ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT + BOTTOM_CHROME_VISUAL_EXTRA
-      : 0
+    !addressBarIsAtTop && !isFullscreen ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT : 0
 
-  // Memoize WebView prop objects so identical values don't churn new refs
-  // each Browser re-render. Without this, every state change (menuPopoverOpen
-  // toggle, suggestions list, gesture-driven address bar position state, etc.)
-  // produces a new contentInset/scrollIndicatorInsets reference. RN-WebView
-  // forwards inline object props to the bridge on each diff, triggering
-  // WKWebView contentInset updates and a full UIScrollView re-layout. On
-  // heavy pages that cascade was stalling the JS bridge for several seconds.
-  const webviewContentInset = useMemo(
-    () => ({ top: 0, left: 0, bottom: bottomReservedHeight, right: 0 }),
-    [bottomReservedHeight]
-  )
+  // Keep scroll bars visible around the floating chrome without changing the
+  // webpage viewport or injecting layout styles into the document.
   const webviewScrollIndicatorInsets = useMemo(
     () => ({
       top: addressBarIsAtTop ? ADDRESS_BAR_HEIGHT : 0,
@@ -1088,32 +1011,6 @@ const Browser = observer(function Browser() {
       if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
     }
   }, [])
-
-  /* ------------------ Push browser safe-area CSS vars to web content -------- */
-  // Track last-injected values so we skip redundant injections on re-renders
-  // that don't actually change the safe-area numbers (e.g. menu popover open,
-  // suggestion list updates). Re-injection on stale state used to fire on
-  // every Browser re-render that touched any dep, even when bottom/top hadn't
-  // moved — contributing to the WKWebView main-thread stalls.
-  const lastInjectedInsets = useRef<{ bottom: number; top: number; tabId: number | null } | null>(null)
-  useEffect(() => {
-    const webview = activeTab?.webviewRef?.current
-    if (!webview || activeTab?.url === kNEW_TAB_URL) return
-
-    const bottom = bottomReservedHeight
-    const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
-    const tabId = activeTab?.id ?? null
-
-    const prev = lastInjectedInsets.current
-    if (prev && prev.bottom === bottom && prev.top === top && prev.tabId === tabId) return
-    lastInjectedInsets.current = { bottom, top, tabId }
-
-    try {
-      webview.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
-    } catch {
-      // WebView may be transiently unavailable (unmount, etc.); safe to ignore
-    }
-  }, [addressBarIsAtTop, isFullscreen, bottomReservedHeight, activeTab?.id, activeTab?.url])
 
   /* -------------------------------- permissions ----------------------------- */
   const domainForUrl = useCallback((u: string): string => {
@@ -2073,20 +1970,24 @@ const Browser = observer(function Browser() {
   /* -------------------------------------------------------------------------- */
   /*                              MANIFEST HANDLING                             */
   /* -------------------------------------------------------------------------- */
+  const manifestTabId = activeTab?.id
+  const manifestTabUrl = activeTab?.url
+  const manifestTabIsLoading = activeTab?.isLoading
+
   useEffect(() => {
-    if (!activeTab) return
+    if (manifestTabId === undefined || !manifestTabUrl) return
     let isCancelled = false
 
     const handleManifest = async () => {
-      if (activeTab.url === kNEW_TAB_URL || !activeTab.url.startsWith('http') || activeTab.isLoading) return
+      const currentUrl = manifestTabUrl
+      if (currentUrl === kNEW_TAB_URL || !currentUrl.startsWith('http') || manifestTabIsLoading) return
       if (isCancelled) return
       try {
-        const manifestData = await fetchManifest(activeTab.url)
+        const manifestData = await fetchManifest(currentUrl)
         if (isCancelled) return
         if (manifestData) {
-          const url = new URL(activeTab.url)
-          if (shouldRedirectToStartUrl(manifestData, activeTab.url) && url.pathname === '/') {
-            const startUrl = getStartUrl(manifestData, activeTab.url)
+          if (shouldRedirectToStartUrl(manifestData, currentUrl)) {
+            const startUrl = getStartUrl(manifestData, currentUrl)
             updateActiveTab({ url: startUrl })
             setAddressText(startUrl)
           }
@@ -2095,8 +1996,12 @@ const Browser = observer(function Browser() {
     }
 
     const timeoutId = setTimeout(() => {
-      if (activeTab && !activeTab.isLoading && activeTab.url !== kNEW_TAB_URL && activeTab.url.startsWith('http')) {
-        handleManifest()
+      if (!manifestTabIsLoading && manifestTabUrl !== kNEW_TAB_URL && manifestTabUrl.startsWith('http')) {
+        // Defer manifest probing until chrome interactions settle — the fetch
+        // + JSON parse on the JS thread was competing with tab-switch taps.
+        InteractionManager.runAfterInteractions(() => {
+          if (!isCancelled) handleManifest()
+        })
       }
     }, 1000)
 
@@ -2104,7 +2009,15 @@ const Browser = observer(function Browser() {
       isCancelled = true
       clearTimeout(timeoutId)
     }
-  }, [activeTab, fetchManifest, getStartUrl, shouldRedirectToStartUrl, updateActiveTab])
+  }, [
+    manifestTabId,
+    manifestTabIsLoading,
+    manifestTabUrl,
+    fetchManifest,
+    getStartUrl,
+    shouldRedirectToStartUrl,
+    updateActiveTab
+  ])
 
   /* -------------------------------------------------------------------------- */
   /*                              FULLSCREEN HANDLER                            */
@@ -2158,6 +2071,7 @@ const Browser = observer(function Browser() {
       key={tab.id}
       tabId={tab.id}
       isActive={active}
+      isWarm={tabStore.isWarm(tab.id)}
       webviewRef={tab.webviewRef}
       // Only the active host feeds the thumbnail-capture ref — a shared ref
       // across mounted hosts would clobber and capture the wrong tab.
@@ -2167,8 +2081,6 @@ const Browser = observer(function Browser() {
       isFullscreen={active && isFullscreen}
       onExitFullscreen={onExitFullscreen}
       topInset={insets.top}
-      bottomReservedHeight={bottomReservedHeight}
-      addressBarIsAtTop={addressBarIsAtTop}
       isDark={isDark}
       acceptLanguage={getAcceptLanguageHeader()}
       injectedJavaScript={injectedJavaScript}
@@ -2177,7 +2089,6 @@ const Browser = observer(function Browser() {
       onNavStateChange={handleNavStateChange}
       paymentHandlerRef={paymentHandlerRef}
       paymentInFlightUrl={paymentInFlightUrl}
-      webviewContentInset={webviewContentInset}
       webviewScrollIndicatorInsets={webviewScrollIndicatorInsets}
       webviewContainerStyle={webviewContainerStyle}
       webviewStyle={webviewStyle}
@@ -2259,15 +2170,13 @@ const Browser = observer(function Browser() {
         keyboardVerticalOffset={0}
       >
         <View style={styles.chromeLayer} pointerEvents="box-none">
-          {/* Touch blocker shield (Approach A hybrid):
+          {/* Touch blocker shield:
             - WebView frame is kept full-height so page backgrounds, heroes, and
               full-bleed visuals can paint under the frosted-glass address bar.
             - When the address bar is at the bottom, this transparent overlay
               captures touches in the bottom (safeBottom + 48px) region, preventing
               web content's fixed/sticky tappable elements from being hit "under"
               the bar while still allowing the visual background to show through.
-            - On iOS, contentInset further helps the web layout engine place
-              fixed elements above the bar naturally.
             - zIndex sits above WebView (0) but below chromeWrapper (20). */}
           {/* Touch blocker area — full height when bar is expanded, tiny right-corner area when collapsed */}
           {!addressBarCollapsed && bottomReservedHeight > 0 && (

@@ -44,9 +44,30 @@ export function getDeviceTier(): DeviceTier {
 /** Tab cap by tier — keeps SE-class within OOM-safe memory. */
 export function maxTabsForTier(tier: DeviceTier = getDeviceTier()): number {
   switch (tier) {
-    case 'low': return 4
-    case 'mid': return 8
-    case 'high': return 12
+    case 'low':
+      return 4
+    case 'mid':
+      return 8
+    case 'high':
+      return 12
+  }
+}
+
+/**
+ * How many WebViews to keep mounted for instant tab switching.
+ * iOS keeps one WebContent process per mounted page — four warm tabs on
+ * SE-class hardware caused multi-GB footprints and process termination.
+ * Flagship devices can afford 2–3 without the same pressure.
+ */
+export function warmPoolSizeForTier(tier: DeviceTier = getDeviceTier()): number {
+  if (Platform.OS !== 'ios') return Math.min(2, maxTabsForTier(tier))
+  switch (tier) {
+    case 'low':
+      return 1
+    case 'mid':
+      return 2
+    case 'high':
+      return 3
   }
 }
 
@@ -58,8 +79,11 @@ export function shouldUseLiquidGlass(tier: DeviceTier = getDeviceTier()): boolea
 /** Thumbnail capture quality — lowered on low tier to skip the rasterization spike. */
 export function thumbnailQualityForTier(tier: DeviceTier = getDeviceTier()): number {
   switch (tier) {
-    case 'low': return 0.35
-    case 'mid': return 0.5
-    case 'high': return 0.7
+    case 'low':
+      return 0.35
+    case 'mid':
+      return 0.5
+    case 'high':
+      return 0.7
   }
 }

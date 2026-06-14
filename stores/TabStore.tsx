@@ -9,7 +9,7 @@ import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import { deleteThumbnail } from '@/utils/thumbnailService'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
-import { maxTabsForTier } from '@/utils/deviceTier'
+import { maxTabsForTier, warmPoolSizeForTier } from '@/utils/deviceTier'
 import { devLog } from '@/utils/logging'
 import { perf } from '@/utils/perf'
 const STORAGE_KEYS = {
@@ -30,12 +30,9 @@ const STORAGE_KEYS = {
 // accumulation while letting flagship devices keep more tabs warm.
 export const MAX_TABS = maxTabsForTier()
 
-// iOS WKWebViews each retain one or more WebContent processes. Keeping four
-// hidden pages alive caused multi-gigabyte simulator footprints and frequent
-// content-process termination when an external URL opened a fifth page. Keep
-// only the active iOS tab mounted. Android retains one recent background tab,
-// where process sharing is substantially cheaper.
-export const WARM_POOL_SIZE = Platform.OS === 'ios' ? 1 : Math.min(2, MAX_TABS)
+// Tier-aware warm pool — see warmPoolSizeForTier(). Low-tier iOS keeps one
+// mounted WebView; flagship iOS keeps three so recent tab switches are instant.
+export const WARM_POOL_SIZE = warmPoolSizeForTier()
 
 export class TabStore {
   tabs: Tab[] = [] // Always initialize as an array
@@ -96,7 +93,7 @@ export class TabStore {
 
   createTab(url?: string | null): Tab {
     // Ensure url is never null or undefined
-    const safeUrl = url && isValidUrl(url) ? url : kNEW_TAB_URL
+    const safeUrl = url && isValidUrl(url) ? normalizeUrlForHistory(url) : kNEW_TAB_URL
     return {
       id: this.nextId++,
       url: safeUrl,
@@ -288,6 +285,8 @@ export class TabStore {
         const newUrl = patch.url
         if (!newUrl || newUrl === null || newUrl === undefined || !isValidUrl(newUrl)) {
           patch.url = kNEW_TAB_URL
+        } else {
+          patch.url = normalizeUrlForHistory(newUrl)
         }
       }
 

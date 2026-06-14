@@ -32,14 +32,16 @@ const TRANSIENT_QUERY_PARAMS = [
 export function normalizeUrlForHistory(url: string): string {
   try {
     const parsed = new URL(url)
-    let changed = false
     for (const param of TRANSIENT_QUERY_PARAMS) {
       if (parsed.searchParams.has(param)) {
         parsed.searchParams.delete(param)
-        changed = true
       }
     }
-    if (!changed) return url
+
+    // URL.toString() also canonicalizes equivalent spellings such as
+    // `https://example.com/.?x=1` and `https://example.com/?x=1`. Keeping the
+    // controlled WebView source in that canonical form prevents websites and
+    // manifests from bouncing between equivalent URLs forever.
     return parsed.toString()
   } catch {
     return url
