@@ -49,6 +49,14 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
   const ITEM_H = screen.height * 0.28
   const insets = useSafeAreaInsets()
 
+  // Tabs are stored oldest-first, so the newest tab lands in the bottom-right of
+  // the grid. Open the overview scrolled to the bottom so the most-recent tab is
+  // what the user sees first; older tabs are a scroll up. One-shot: only the
+  // initial layout snaps to the end — later content changes (e.g. closing a tab)
+  // must not yank the scroll position.
+  const listRef = React.useRef<FlatList<Tab>>(null)
+  const didInitialScroll = React.useRef(false)
+
   const renderItem = ({ item, index }: { item: Tab; index: number }) => {
     const renderSwipeAction = (
       _progress: Animated.AnimatedInterpolation<number>,
@@ -154,6 +162,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
       </TouchableWithoutFeedback>
 
       <FlatList
+        ref={listRef}
         data={tabStore.tabs.slice()}
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
@@ -164,6 +173,12 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
         initialNumToRender={6}
         windowSize={10}
         extraData={tabStore.activeTabId}
+        onContentSizeChange={() => {
+          if (!didInitialScroll.current) {
+            didInitialScroll.current = true
+            listRef.current?.scrollToEnd({ animated: false })
+          }
+        }}
         contentContainerStyle={{
           padding: spacing.md,
           paddingTop: insets.top + spacing.md,
