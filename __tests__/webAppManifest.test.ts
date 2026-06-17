@@ -24,4 +24,11 @@ describe('web app manifest start URL handling', () => {
     expect(shouldRedirectToManifestStartUrl(weatherManifest, 'https://weather.com/weather/today')).toBe(false)
     expect(shouldRedirectToManifestStartUrl({ start_url: '.' }, 'https://example.com/')).toBe(false)
   })
+
+  it('does not redirect a hash/deep-link route (preserves the fragment)', () => {
+    // Regression: pathname is '/' for a hash route, so the old guard let it
+    // redirect and strip the fragment (teragun.com/#leaderboard -> /).
+    expect(shouldRedirectToManifestStartUrl(weatherManifest, 'https://weather.com/#leaderboard')).toBe(false)
+    expect(shouldRedirectToManifestStartUrl(weatherManifest, 'https://weather.com/?tab=videos')).toBe(false)
+  })
 })

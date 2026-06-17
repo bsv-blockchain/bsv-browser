@@ -40,7 +40,10 @@ export function shouldRedirectToManifestStartUrl(manifest: WebAppManifest | null
 
   try {
     const current = new URL(currentUrl)
-    if (current.pathname !== '/') return false
+    // Only redirect a bare root entry to the PWA start_url. A hash route or query
+    // (e.g. teragun.com/#leaderboard) means the user deep-linked into the app —
+    // redirecting to start_url would strip their fragment and yank them away.
+    if (current.pathname !== '/' || current.hash || current.search) return false
     return resolveManifestStartUrl(manifest, currentUrl) !== current.toString()
   } catch {
     return false
