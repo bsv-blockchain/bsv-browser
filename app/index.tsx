@@ -65,7 +65,7 @@ import { captureThumbnail, cleanupOrphanedThumbnails, thumbnailExists } from '@/
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
-import { getErrorPage, getNativeErrorInfo, paymentLoadingPage, navigationLoadingPage } from '@/utils/webview/errorPages'
+import { getErrorPage, getNativeErrorInfo, paymentLoadingPage, navigationLoadingPage, escapeForTemplateLiteral, escapeForJsSingleQuote } from '@/utils/webview/errorPages'
 
 import { AddressBar } from '@/components/browser/AddressBar'
 import { GlassPill, useGlassColors } from '@/components/browser/GlassPill'
@@ -364,7 +364,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         onShouldStartLoadWithRequest={(request: any) => {
           const { url: reqUrl, navigationType } = request
           if (reqUrl.startsWith('blob:') || reqUrl.startsWith('data:')) {
-            const escaped = reqUrl.replace(/'/g, "\\'")
+            const escaped = escapeForJsSingleQuote(reqUrl)
             setTimeout(() => {
               webviewRef.current?.injectJavaScript(`(function(){
                 try{
@@ -418,7 +418,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             const info = getNativeErrorInfo(code)
             const page = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>:root{--bg:#f5f5f0;--text:#1a1a1a;--sub:#666}@media(prefers-color-scheme:dark){:root{--bg:#1a1a1a;--text:#e8e6e1;--sub:#999}}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:var(--bg);color:var(--text);text-align:center}h1{font-size:6rem;margin:0}.subtitle{font-size:1.5rem;margin:8px 0}.detail{color:var(--sub);padding:0 24px}</style></head><body><div><h1 style="color:${info.color}">${info.code}</h1><p class="subtitle">${info.title}</p><p class="detail">${info.detail}</p></div></body></html>`
             webviewRef.current.injectJavaScript(
-              `document.open();document.write(\`${page.replace(/`/g, '\\`')}\`);document.close();`
+              `document.open();document.write(\`${escapeForTemplateLiteral(page)}\`);document.close();`
             )
           }
         }}
@@ -438,7 +438,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             paymentInFlightUrl.current = url
             if (webviewRef.current) {
               webviewRef.current.injectJavaScript(
-                `document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`
+                `document.open();document.write(\`${escapeForTemplateLiteral(paymentLoadingPage)}\`);document.close();`
               )
             }
             paymentHandlerRef.current
@@ -446,12 +446,12 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
               .then((html: string | null) => {
                 if (html && webviewRef.current) {
                   webviewRef.current.injectJavaScript(
-                    `document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`
+                    `document.open();document.write(\`${escapeForTemplateLiteral(html)}\`);document.close();`
                   )
                 } else if (webviewRef.current) {
                   const fallback = getErrorPage(402)
                   webviewRef.current.injectJavaScript(
-                    `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
+                    `document.open();document.write(\`${escapeForTemplateLiteral(fallback)}\`);document.close();`
                   )
                 }
               })
@@ -459,7 +459,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
                 if (webviewRef.current) {
                   const fallback = getErrorPage(402)
                   webviewRef.current.injectJavaScript(
-                    `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
+                    `document.open();document.write(\`${escapeForTemplateLiteral(fallback)}\`);document.close();`
                   )
                 }
               })
@@ -470,7 +470,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             if (status === 403) return
             const fallback = getErrorPage(status)
             webviewRef.current.injectJavaScript(
-              `document.open();document.write(\`${fallback.replace(/`/g, '\\`')}\`);document.close();`
+              `document.open();document.write(\`${escapeForTemplateLiteral(fallback)}\`);document.close();`
             )
           }
         }}
@@ -1210,7 +1210,7 @@ const Browser = observer(function Browser() {
     if (!ref) return
     if (!/^https?:\/\//i.test(url)) return
     try {
-      const html = navigationLoadingPage(url).replace(/`/g, '\\`')
+      const html = escapeForTemplateLiteral(navigationLoadingPage(url))
       ref.injectJavaScript(`document.open();document.write(\`${html}\`);document.close();`)
     } catch {
       // Non-fatal — splash is a UX nicety, not required.
@@ -1483,13 +1483,7 @@ const Browser = observer(function Browser() {
         })();true;`)
         return
       }
-      const escaped = query
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'")
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r')
-        .replace(/\u2028/g, '\\u2028')
-        .replace(/\u2029/g, '\\u2029')
+      const escaped = escapeForJsSingleQuote(query)
       activeTab.webviewRef.current.injectJavaScript(`(function(){
         try{
           ${CLEAR_FIND_JS}
@@ -1846,7 +1840,7 @@ const Browser = observer(function Browser() {
         paymentInFlightUrl.current = msg.url
         if (activeTab?.webviewRef?.current) {
           activeTab.webviewRef.current.injectJavaScript(
-            `document.open();document.write(\`${paymentLoadingPage.replace(/`/g, '\\`')}\`);document.close();`
+            `document.open();document.write(\`${escapeForTemplateLiteral(paymentLoadingPage)}\`);document.close();`
           )
         }
         paymentHandlerRef.current
@@ -1854,7 +1848,7 @@ const Browser = observer(function Browser() {
           .then((html: string | null) => {
             if (html && activeTab?.webviewRef?.current) {
               activeTab.webviewRef.current.injectJavaScript(
-                `document.open();document.write(\`${html.replace(/`/g, '\\`')}\`);document.close();`
+                `document.open();document.write(\`${escapeForTemplateLiteral(html)}\`);document.close();`
               )
             }
           })

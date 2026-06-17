@@ -1,3 +1,32 @@
+/**
+ * Escape a string for safe embedding inside a backtick template literal that is
+ * itself injected into a WebView via injectJavaScript. Backslash MUST be escaped
+ * first, otherwise a trailing backslash in the input would escape our own added
+ * escape char and let the payload break out of the literal. `$` is neutralized
+ * so `${...}` cannot trigger interpolation.
+ */
+export function escapeForTemplateLiteral(input: string): string {
+  return input
+    .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`')
+    .replace(/\$/g, '\\$')
+}
+
+/**
+ * Escape a string for safe embedding inside a single-quoted JS string that is
+ * injected into a WebView. Backslash first (see above), then the quote and the
+ * line terminators that would otherwise terminate the string.
+ */
+export function escapeForJsSingleQuote(input: string): string {
+  return input
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+}
+
 const baseStyle = `
 <meta name="color-scheme" content="light dark">
 <style>
