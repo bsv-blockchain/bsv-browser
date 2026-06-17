@@ -608,6 +608,60 @@ const ChromeAddressBar = observer(function ChromeAddressBar(props: ChromeAddress
 /*                                  BROWSER                                   */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Isolated manifest/PWA-redirect watcher. It reads the active tab's churny
+ * `isLoading` (plus id/url) so the SUBSCRIPTION lives here, not in Browser — a
+ * streaming page that toggles isLoading on every nav-state tick would otherwise
+ * re-render the entire Browser tree (and starve the JS thread when the menu
+ * popover is opening). Renders nothing.
+ */
+const ManifestWatcher = observer(function ManifestWatcher({
+  onRedirect
+}: {
+  onRedirect: (startUrl: string) => void
+}) {
+  const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
+  const activeTab = tabStore.activeTab
+  const tabId = activeTab?.id
+  const tabUrl = activeTab?.url
+  const isLoading = activeTab?.isLoading
+
+  useEffect(() => {
+    if (tabId === undefined || !tabUrl) return
+    let isCancelled = false
+
+    const handleManifest = async () => {
+      const currentUrl = tabUrl
+      if (currentUrl === kNEW_TAB_URL || !currentUrl.startsWith('http') || isLoading) return
+      if (isCancelled) return
+      try {
+        const manifestData = await fetchManifest(currentUrl)
+        if (isCancelled) return
+        if (manifestData && shouldRedirectToStartUrl(manifestData, currentUrl)) {
+          onRedirect(getStartUrl(manifestData, currentUrl))
+        }
+      } catch {}
+    }
+
+    const timeoutId = setTimeout(() => {
+      if (!isLoading && tabUrl !== kNEW_TAB_URL && tabUrl.startsWith('http')) {
+        // Defer manifest probing until chrome interactions settle — the fetch
+        // + JSON parse on the JS thread was competing with tab-switch taps.
+        InteractionManager.runAfterInteractions(() => {
+          if (!isCancelled) handleManifest()
+        })
+      }
+    }, 1000)
+
+    return () => {
+      isCancelled = true
+      clearTimeout(timeoutId)
+    }
+  }, [tabId, isLoading, tabUrl, fetchManifest, getStartUrl, shouldRedirectToStartUrl, onRedirect])
+
+  return null
+})
+
 const Browser = observer(function Browser() {
   useRenderCount('Browser') // dev-only: logs a re-render storm; zero-cost in prod
   /* --------------------------- theme / basic hooks -------------------------- */
@@ -905,7 +959,6 @@ const Browser = observer(function Browser() {
   const [findInPageTotal, setFindInPageTotal] = useState(0)
   const [findInPageCapped, setFindInPageCapped] = useState(false)
 
-  const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
   // Stable identity so passing it to the memoized WebViewHost doesn't break memo.
   const onExitFullscreen = useCallback(() => setIsFullscreen(false), [])
@@ -1970,54 +2023,13 @@ const Browser = observer(function Browser() {
   /* -------------------------------------------------------------------------- */
   /*                              MANIFEST HANDLING                             */
   /* -------------------------------------------------------------------------- */
-  const manifestTabId = activeTab?.id
-  const manifestTabUrl = activeTab?.url
-  const manifestTabIsLoading = activeTab?.isLoading
-
-  useEffect(() => {
-    if (manifestTabId === undefined || !manifestTabUrl) return
-    let isCancelled = false
-
-    const handleManifest = async () => {
-      const currentUrl = manifestTabUrl
-      if (currentUrl === kNEW_TAB_URL || !currentUrl.startsWith('http') || manifestTabIsLoading) return
-      if (isCancelled) return
-      try {
-        const manifestData = await fetchManifest(currentUrl)
-        if (isCancelled) return
-        if (manifestData) {
-          if (shouldRedirectToStartUrl(manifestData, currentUrl)) {
-            const startUrl = getStartUrl(manifestData, currentUrl)
-            updateActiveTab({ url: startUrl })
-            setAddressText(startUrl)
-          }
-        }
-      } catch {}
-    }
-
-    const timeoutId = setTimeout(() => {
-      if (!manifestTabIsLoading && manifestTabUrl !== kNEW_TAB_URL && manifestTabUrl.startsWith('http')) {
-        // Defer manifest probing until chrome interactions settle — the fetch
-        // + JSON parse on the JS thread was competing with tab-switch taps.
-        InteractionManager.runAfterInteractions(() => {
-          if (!isCancelled) handleManifest()
-        })
-      }
-    }, 1000)
-
-    return () => {
-      isCancelled = true
-      clearTimeout(timeoutId)
-    }
-  }, [
-    manifestTabId,
-    manifestTabIsLoading,
-    manifestTabUrl,
-    fetchManifest,
-    getStartUrl,
-    shouldRedirectToStartUrl,
-    updateActiveTab
-  ])
+  // The reactive isLoading/url subscription lives in <ManifestWatcher/> (rendered
+  // below) so Browser doesn't re-render on every nav-state tick. This is just the
+  // redirect sink it calls back into.
+  const handleManifestRedirect = useCallback((startUrl: string) => {
+    updateActiveTab({ url: startUrl })
+    setAddressText(startUrl)
+  }, [updateActiveTab])
 
   /* -------------------------------------------------------------------------- */
   /*                              FULLSCREEN HANDLER                            */
@@ -2076,7 +2088,15 @@ const Browser = observer(function Browser() {
       // Only the active host feeds the thumbnail-capture ref — a shared ref
       // across mounted hosts would clobber and capture the wrong tab.
       containerRef={active ? webviewContainerRef : undefined}
-      uri={typeof tab.url === 'string' && tab.url.length > 0 ? tab.url : 'about:blank'}
+      uri={(() => {
+        // Drive the WebView source from sourceUrl (the last explicitly-commanded
+        // URL), NOT the live tab.url. This is what stops passive nav-state
+        // updates — SPA fragment/route changes WK reports as the base URL — from
+        // reloading the WebView and navigating the page away. Fall back to url
+        // for any tab persisted before the split.
+        const src = tab.sourceUrl ?? tab.url
+        return typeof src === 'string' && src.length > 0 ? src : 'about:blank'
+      })()}
       isDesktopMode={tab.isDesktopMode ?? false}
       isFullscreen={active && isFullscreen}
       onExitFullscreen={onExitFullscreen}
@@ -2150,6 +2170,7 @@ const Browser = observer(function Browser() {
   return (
     <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
+      <ManifestWatcher onRedirect={handleManifestRedirect} />
 
       {/* ---- Main content: WebView lives between the safe-area bars ----
           Deliberately OUTSIDE the KeyboardAvoidingView below. When the KAV
