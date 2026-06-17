@@ -47,15 +47,20 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
   const screen = Dimensions.get('window')
   const ITEM_W = screen.width * 0.42
   const ITEM_H = screen.height * 0.28
+  // Deterministic row pitch lets getItemLayout report exact offsets without
+  // measuring/rendering every row — FlatList knows the full content height up
+  // front, so scrollToEnd lands at the true bottom while virtualization keeps
+  // only the bottom window mounted (memory conscious).
+  const ROW_GUTTER = spacing.sm
+  const ROW_H = ITEM_H + ROW_GUTTER * 2
   const insets = useSafeAreaInsets()
 
-  // Tabs are stored oldest-first, so the newest tab lands in the bottom-right of
-  // the grid. Open the overview scrolled to the bottom so the most-recent tab is
-  // what the user sees first; older tabs are a scroll up. One-shot: only the
-  // initial layout snaps to the end — later content changes (e.g. closing a tab)
-  // must not yank the scroll position.
+  // Tabs are stored oldest-first → newest fills the bottom-right of the grid.
+  // Open anchored at the bottom (newest in view); scroll up reaches older tabs.
+  // Stop auto-anchoring once the user drags, so closing/relayout never yanks
+  // their scroll position. Remounts per open (showTabsView toggle) reset this.
   const listRef = React.useRef<FlatList<Tab>>(null)
-  const didInitialScroll = React.useRef(false)
+  const userScrolled = React.useRef(false)
 
   const renderItem = ({ item, index }: { item: Tab; index: number }) => {
     const renderSwipeAction = (
@@ -173,13 +178,17 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
         initialNumToRender={6}
         windowSize={10}
         extraData={tabStore.activeTabId}
+        getItemLayout={(_, index) => {
+          const row = Math.floor(index / 2)
+          return { length: ROW_H, offset: ROW_H * row, index }
+        }}
+        onScrollBeginDrag={() => { userScrolled.current = true }}
         onContentSizeChange={() => {
-          if (!didInitialScroll.current) {
-            didInitialScroll.current = true
-            listRef.current?.scrollToEnd({ animated: false })
-          }
+          if (!userScrolled.current) listRef.current?.scrollToEnd({ animated: false })
         }}
         contentContainerStyle={{
+          flexGrow: 1,
+          justifyContent: 'flex-end',
           padding: spacing.md,
           paddingTop: insets.top + spacing.md,
           paddingBottom: 100,
@@ -242,7 +251,10 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   tabPreview: {
-    margin: '4%',
+    // marginVertical is numeric (spacing.sm) so it matches ROW_H exactly for
+    // getItemLayout; horizontal stays percentage to center the 2-col grid.
+    marginVertical: spacing.sm,
+    marginHorizontal: '4%',
     borderRadius: radii.md,
     overflow: 'hidden',
   },
