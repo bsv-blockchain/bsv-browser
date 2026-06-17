@@ -135,7 +135,9 @@
   },
   "overrides": {
     "minimatch": "^10.2.2",
-    "postcss": "^8.5.10"
+    "postcss": "^8.5.10",
+    "uuid": "^11.1.1",
+    "js-yaml": "^4.2.0"
   },
   "private": true,
   "expo": {
