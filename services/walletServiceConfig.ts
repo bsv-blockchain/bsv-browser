@@ -43,7 +43,7 @@ export function createServiceOptions(
       taalApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
       chaintracks: new ChaintracksServiceClient(
         network,
-        process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://chaintracks-us-1.bsvb.tech'
+        process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://arcade-v2-us-1.bsvblockchain.tech/chaintracks/v1'
       )
     }
   }
@@ -62,7 +62,7 @@ export function createServiceOptions(
       taalApiKey: process.env?.EXPO_PUBLIC_TEST_TAAL_API_KEY ?? '',
       chaintracks: new ChaintracksServiceClient(
         network,
-        process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ?? 'https://chaintracks-testnet-us-1.bsvb.tech'
+        process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ?? 'https://arcade-v2-testnet-us-1.bsvblockchain.tech/chaintracks/v1'
       )
     }
   }
@@ -81,7 +81,7 @@ export function createServiceOptions(
     taalApiKey: process.env?.EXPO_PUBLIC_TERATEST_WOC_API_KEY ?? '',
     chaintracks: new ChaintracksServiceClient(
       network,
-      process.env?.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL ?? 'https://chaintracks-testnet-us-1.bsvb.tech'
+      process.env?.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL ?? 'https://arcade-v2-ttn-us-1.bsvblockchain.tech/chaintracks/v1'
     )
   }
 }

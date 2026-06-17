@@ -1,12 +1,14 @@
 import React, { useContext, useState, useEffect, useRef } from 'react'
 import { View, TextInput, TouchableOpacity, Text, StyleSheet } from 'react-native'
+import Animated, { FadeInUp, FadeOutDown, useReducedMotion } from 'react-native-reanimated'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
+import { durations } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
-import { parseDisplayToSatoshis } from '@/utils/amountFormatHelpers'
+import { parseDisplayToSatoshis, formatAmount } from '@/utils/amountFormatHelpers'
 
 export const SEND_MAX_VALUE = '2099999999999999'
 
@@ -30,6 +32,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText })
   const { colors } = useTheme()
   const { settings } = useWallet()
   const { satoshisPerUSD } = useContext(ExchangeRateContext)
+  const reducedMotion = useReducedMotion()
 
   const currency = settings?.currency || 'BSV'
   const isUSD = currency === 'USD'
@@ -101,24 +104,42 @@ export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText })
   const keyboardType = isUSD ? ('decimal-pad' as const) : ('number-pad' as const)
   const unitLabel = isUSD ? 'USD' : 'satoshis'
 
+  // Secondary converted-currency line
+  const satsForConversion = value ? parseInt(value, 10) : 0
+  const secondaryText = isUSD
+    ? (satsForConversion > 0 ? formatAmount(satsForConversion, 'BSV', satoshisPerUSD) : null)
+    : (satsForConversion > 0 && satoshisPerUSD > 0 ? formatAmount(satsForConversion, 'USD', satoshisPerUSD) : null)
+
+  const entering = reducedMotion ? undefined : FadeInUp.duration(durations.instant)
+  const exiting = reducedMotion ? undefined : FadeOutDown.duration(durations.instant)
+
   return (
-    <View style={[styles.row, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator }]}>
-      <TextInput
-        value={displayValue}
-        onChangeText={handleChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.textTertiary}
-        keyboardType={keyboardType}
-        returnKeyType="done"
-        style={[styles.input, { color: colors.textPrimary }]}
-      />
-      <Text style={[styles.unitLabel, { color: colors.textSecondary }]}>{unitLabel}</Text>
-      <TouchableOpacity
-        onPress={() => onChangeText(SEND_MAX_VALUE)}
-        style={[styles.maxButton, { backgroundColor: colors.accent + '15' }]}
-      >
-        <Text style={[styles.maxText, { color: colors.accent }]}>{t('send_max')}</Text>
-      </TouchableOpacity>
+    <View>
+      <View style={[styles.row, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator }]}>
+        <TextInput
+          value={displayValue}
+          onChangeText={handleChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textTertiary}
+          keyboardType={keyboardType}
+          returnKeyType="done"
+          style={[styles.input, { color: colors.textPrimary }]}
+        />
+        <View style={styles.unitLabelPressable}>
+          <Animated.View key={unitLabel} entering={entering} exiting={exiting}>
+            <Text style={[styles.unitLabel, { color: colors.textSecondary }]}>{unitLabel}</Text>
+          </Animated.View>
+        </View>
+        <TouchableOpacity
+          onPress={() => onChangeText(SEND_MAX_VALUE)}
+          style={[styles.maxButton, { backgroundColor: colors.accent + '15' }]}
+        >
+          <Text style={[styles.maxText, { color: colors.accent }]}>{t('send_max')}</Text>
+        </TouchableOpacity>
+      </View>
+      {secondaryText != null && (
+        <Text style={[styles.secondaryAmount, { color: colors.textSecondary }]}>{secondaryText}</Text>
+      )}
     </View>
   )
 }
@@ -134,14 +155,22 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth
   },
   input: {
-    ...typography.body,
+    ...typography.largeTitle,
+    fontVariant: ['tabular-nums'],
     flex: 1,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md
   },
-  unitLabel: {
-    ...typography.footnote,
+  unitLabelPressable: {
     paddingRight: spacing.sm
+  },
+  unitLabel: {
+    ...typography.footnote
+  },
+  secondaryAmount: {
+    ...typography.title3,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.xs
   },
   maxButton: {
     paddingHorizontal: spacing.md,

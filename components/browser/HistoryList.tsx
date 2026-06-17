@@ -3,6 +3,7 @@ import { FlatList, Pressable, Text, TouchableOpacity, View, StyleSheet } from 'r
 import ReanimatedSwipeable, { SwipeDirection } from 'react-native-gesture-handler/ReanimatedSwipeable'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
+import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 
@@ -62,7 +63,7 @@ const HistoryRow = memo(
           </View>
         )}
         onSwipeableOpen={direction => {
-          if (direction === SwipeDirection.LEFT) onDelete(item.url)
+          if (direction === SwipeDirection.LEFT) { haptics.warning(); onDelete(item.url) }
         }}
       >
         <Pressable style={[styles.historyItem, itemStyle]} onPress={() => onSelect(item.url)}>

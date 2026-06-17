@@ -1,6 +1,8 @@
-import React, { useContext, useState, useCallback, useMemo } from 'react'
+import React, { useContext, useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
 import Sheet from '@/components/ui/Sheet'
+import PressableScale from '@/components/ui/PressableScale'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -9,6 +11,7 @@ import { UserContext } from '@/context/UserContext'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 import { formatAmount } from '@/utils/amountFormatHelpers'
+import { haptics } from '@/hooks/useHaptics'
 
 // ---------------------------------------------------------------------------
 // Dev preview — set to true to keep the BTMS spend sheet visible for design work
@@ -285,6 +288,25 @@ const PermissionSheet: React.FC = () => {
   } = useContext(UserContext)
 
   const [detailsExpanded, setDetailsExpanded] = useState(false)
+  const [granted, setGranted] = useState(false)
+  const grantTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Stores the executeGrant closure that is scheduled but not yet fired, so it
+  // can be flushed synchronously if a higher-priority request preempts.
+  const pendingGrantRef = useRef<(() => void) | null>(null)
+
+  // Clear the pending grant timer (or flush it) on unmount to prevent stale handler calls.
+  useEffect(() => {
+    return () => {
+      if (grantTimerRef.current !== null) {
+        clearTimeout(grantTimerRef.current)
+        grantTimerRef.current = null
+      }
+      if (pendingGrantRef.current !== null) {
+        pendingGrantRef.current()
+        pendingGrantRef.current = null
+      }
+    }
+  }, [])
 
   // Derive what (if anything) we should show.
   const active = useMemo(
@@ -319,9 +341,28 @@ const PermissionSheet: React.FC = () => {
 
   const visible = active !== null
 
+  // Reset granted morph whenever a new permission request arrives.
+  // Keyed on requestID so repeated requests (even same kind) each start fresh.
+  // If a grant was pending (400 ms timer still running), flush it synchronously
+  // before switching to the new request so the user's confirmation is honoured.
+  const activeRequestID = active?.requestID
+  useEffect(() => {
+    if (grantTimerRef.current !== null) {
+      clearTimeout(grantTimerRef.current)
+      grantTimerRef.current = null
+    }
+    if (pendingGrantRef.current !== null) {
+      pendingGrantRef.current()
+      pendingGrantRef.current = null
+    }
+    setGranted(false)
+  }, [activeRequestID])
+
   // ---- Deny ----
   const handleDeny = useCallback(async () => {
+    if (granted) return
     if (!active) return
+    haptics.warning()
     if (active.kind === 'btms') {
       // BTMS uses its own promise-based resolution — no permissionsManager.denyPermission
       advanceBtmsQueue(false)
@@ -352,6 +393,7 @@ const PermissionSheet: React.FC = () => {
     }
     setDetailsExpanded(false)
   }, [
+    granted,
     active,
     managers.permissionsManager,
     advanceProtocolQueue,
@@ -366,24 +408,29 @@ const PermissionSheet: React.FC = () => {
   ])
 
   // ---- Grant ----
-  const handleGrant = useCallback(async () => {
-    if (!active) return
-    if (active.kind === 'btms') {
-      // BTMS uses its own promise-based resolution — no permissionsManager.grantPermission
+  // Runs the actual grant logic (queue advance + modal close). Separated so
+  // the UI can show the checkmark morph for 400 ms before dismissal.
+  // Takes an explicit snapshot of the request to act on so it is safe to call
+  // from the flush-on-preempt path where `active` may have already changed.
+  const executeGrant = useCallback((request: ActivePermission) => {
+    // Clear the pending ref so flush-on-preempt guards don't double-fire.
+    pendingGrantRef.current = null
+
+    if (request.kind === 'btms') {
       advanceBtmsQueue(true)
-    } else if (active.kind === 'spending') {
+    } else if (request.kind === 'spending') {
       managers.permissionsManager?.grantPermission({
-        requestID: active.requestID,
+        requestID: request.requestID,
         ephemeral: true,
-        amount: active.amount
+        amount: request.amount
       })
       advanceSpendingQueue()
       setSpendingAuthorizationModalOpen(false)
     } else {
       managers.permissionsManager?.grantPermission({
-        requestID: active.requestID
+        requestID: request.requestID
       })
-      switch (active.kind) {
+      switch (request.kind) {
         case 'protocol':
           advanceProtocolQueue()
           setProtocolAccessModalOpen(false)
@@ -399,8 +446,10 @@ const PermissionSheet: React.FC = () => {
       }
     }
     setDetailsExpanded(false)
+    // Reset granted so that consecutive BTMS requests (sharing sentinel requestID '')
+    // don't leave the sheet permanently in granted state / deadlocked.
+    setGranted(false)
   }, [
-    active,
     managers.permissionsManager,
     advanceProtocolQueue,
     advanceBasketQueue,
@@ -412,6 +461,23 @@ const PermissionSheet: React.FC = () => {
     setCertificateAccessModalOpen,
     setSpendingAuthorizationModalOpen
   ])
+
+  const handleGrant = useCallback(() => {
+    if (!active || granted) return
+    haptics.success()
+    setGranted(true)
+    if (grantTimerRef.current !== null) {
+      clearTimeout(grantTimerRef.current)
+    }
+    // Capture the request at grant time — executeGrant now takes it explicitly.
+    const requestSnapshot = active
+    const pendingFn = () => executeGrant(requestSnapshot)
+    pendingGrantRef.current = pendingFn
+    grantTimerRef.current = setTimeout(() => {
+      grantTimerRef.current = null
+      pendingFn()
+    }, 400)
+  }, [active, granted, executeGrant])
 
   return (
     <Sheet visible={visible} onClose={handleDeny} heightPercent={0.92} fitContent={active?.kind !== 'group'}>
@@ -569,21 +635,24 @@ const PermissionSheet: React.FC = () => {
 
           {/* -------- Action buttons — pinned at bottom, never move -------- */}
           <View style={[styles.buttonRow, { borderTopColor: colors.separator }]}>
-            <TouchableOpacity
+            <PressableScale
               style={[styles.buttonDeny, { borderColor: colors.separator }]}
               onPress={handleDeny}
-              activeOpacity={0.7}
+              disabled={granted}
             >
               <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>{t('reject')}</Text>
-            </TouchableOpacity>
+            </PressableScale>
 
-            <TouchableOpacity
+            <PressableScale
               style={[styles.buttonAllow, { backgroundColor: colors.protocolApproval }]}
               onPress={handleGrant}
-              activeOpacity={0.7}
+              disabled={granted}
             >
-              <Text style={[styles.buttonAllowText, { color: '#FFFFFF' }]}>{t('authorize')}</Text>
-            </TouchableOpacity>
+              {granted
+                ? <Ionicons name="checkmark" size={22} color="#FFFFFF" />
+                : <Text style={[styles.buttonAllowText, { color: '#FFFFFF' }]}>{t('authorize')}</Text>
+              }
+            </PressableScale>
           </View>
         </View>
       )}

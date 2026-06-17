@@ -114,7 +114,13 @@ const AddressBarImpl: React.FC<AddressBarProps> = ({
           <View style={showDualNav ? styles.navPlaceholderDual : styles.navPlaceholder} />
         )}
 
-        {/* URL pill */}
+        {/* URL pill.
+            GLASS CONSTRAINT: no Reanimated entering/exiting (or any fractional
+            alpha animation) on ANYTHING inside this GlassPill. UIVisualEffectView
+            snaps to transparent and sticks when alpha < 1 animations run in its
+            subtree (see glassRevision comment in app/index.tsx). The focus
+            crossfade from the polish spec was reverted for this reason —
+            instant swap is the glass-safe behavior. */}
         <GlassPill flex={1} style={styles.urlPill}>
           {!addressFocused && isHttps && !isNewTab && (
             <Ionicons

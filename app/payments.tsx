@@ -17,7 +17,7 @@ import { StatusBar } from 'expo-status-bar'
 import QRScanner from '@/components/QRScanner'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { toast } from 'react-toastify'
+import { showToast } from '@/components/ui/Toast'
 import { PeerPayClient, IncomingPayment, PaymentToken } from '@bsv/message-box-client'
 import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
 import type { DisplayableIdentity } from '@bsv/sdk'
@@ -25,6 +25,7 @@ import type { DisplayableIdentity } from '@bsv/sdk'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
+import { durations, springs } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
 import { type PeerPayValidationResult, validatePeerPayURI } from '@/utils/parsePeerPayURI'
 import {
@@ -39,9 +40,19 @@ import { AmountInput } from '@/components/wallet/AmountInput'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { formatAmount } from '@/utils/amountFormatHelpers'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import Celebration from '@/components/ui/Celebration'
+import Animated, {
+  FadeIn,
+  FadeOut,
+  FadeInDown,
+  useReducedMotion
+} from 'react-native-reanimated'
+import PressableScale from '@/components/ui/PressableScale'
+import { haptics } from '@/hooks/useHaptics'
 
 const MESSAGE_BOX_URL_KEY = 'message_box_url'
 const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
+const FIRST_PAYMENT_KEY = 'hasSentFirstPayment'
 
 const firstParam = (value: string | string[] | undefined) => {
   return Array.isArray(value) ? value[0] : value
@@ -293,7 +304,7 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
     async (input: string) => {
       const trimmed = input.trim().replace(/\/+$/, '')
       if (!trimmed) {
-        toast.error(t('enter_valid_url'))
+        showToast(t('enter_valid_url'), { type: 'error' })
         return
       }
       setIsSaving(true)
@@ -301,9 +312,9 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
         await AsyncStorage.setItem(MESSAGE_BOX_URL_KEY, trimmed)
         setMessageBoxUrl(trimmed)
         setShowConfig(false)
-        toast.success(t('message_box_saved'))
+        showToast(t('message_box_saved'), { type: 'success' })
       } catch (error: any) {
-        toast.error(`Failed to save: ${error.message || 'unknown error'}`)
+        showToast(`Failed to save: ${error.message || 'unknown error'}`, { type: 'error' })
       } finally {
         setIsSaving(false)
       }
@@ -316,7 +327,7 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
     setMessageBoxUrl(DEFAULT_MESSAGE_BOX_URL)
     setUrlInput(DEFAULT_MESSAGE_BOX_URL)
     setShowConfig(false)
-    toast.success(t('message_box_removed'))
+    showToast(t('message_box_removed'), { type: 'success' })
   }, [t])
 
   const handleNone = useCallback(async () => {
@@ -327,9 +338,9 @@ function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTra
       setMessageBoxUrl(noneValue)
       setUrlInput(noneValue)
       setShowConfig(true)
-      toast.success(t('message_box_removed'))
+      showToast(t('message_box_removed'), { type: 'success' })
     } catch (error: any) {
-      toast.error(`Failed to save: ${error.message || 'unknown error'}`)
+      showToast(`Failed to save: ${error.message || 'unknown error'}`, { type: 'error' })
     } finally {
       setIsSaving(false)
     }
@@ -685,9 +696,16 @@ function RecipientField({
   onClear,
   onOpenScanner
 }: RecipientFieldProps) {
+  const reducedMotion = useReducedMotion()
   if (selectedIdentity) {
+    const identityEntering = reducedMotion
+      ? undefined
+      : FadeInDown.springify().stiffness(springs.snappy.stiffness).damping(springs.snappy.damping)
     return (
-      <View style={[styles.selectedRecipient, { backgroundColor: colors.backgroundSecondary }]}>
+      <Animated.View
+        entering={identityEntering}
+        style={[styles.selectedRecipient, { backgroundColor: colors.backgroundSecondary }]}
+      >
         {selectedIdentity.avatarURL ? (
           <Image source={{ uri: selectedIdentity.avatarURL }} style={styles.avatar} />
         ) : (
@@ -706,7 +724,7 @@ function RecipientField({
         <TouchableOpacity onPress={onClear} style={styles.clearButton}>
           <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     )
   }
   const showDropdown = (isSearching || searchResults.length > 0) && !recipientKey
@@ -1028,6 +1046,8 @@ export default function PaymentsScreen() {
   const [isSending, setIsSending] = useState(false)
   const [sendResult, setSendResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [acceptResult, setAcceptResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [celebratingFirstPayment, setCelebratingFirstPayment] = useState(false)
+  const [celebrationMessage, setCelebrationMessage] = useState('')
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, '')
@@ -1060,7 +1080,7 @@ export default function PaymentsScreen() {
       }
     } catch (error: any) {
       console.error('Failed to fetch payments:', error)
-      toast.error(`Failed to load payments: ${error.message || 'unknown error'}`)
+      showToast(`Failed to load payments: ${error.message || 'unknown error'}`, { type: 'error' })
     } finally {
       setLoadingPayments(false)
     }
@@ -1181,6 +1201,7 @@ export default function PaymentsScreen() {
       setTimeout(() => setSendResult(null), 5000)
       return
     }
+    haptics.confirm()
     setIsSending(true)
     let outboxId: string | null = null
     try {
@@ -1202,7 +1223,15 @@ export default function PaymentsScreen() {
       // Step 4: mark delivered
       await markOutboxSent(storage, outboxId)
       await loadOutbox()
-      setSendResult({ type: 'success', message: `Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully` })
+      const isFirst = !(await AsyncStorage.getItem(FIRST_PAYMENT_KEY))
+      if (isFirst) {
+        await AsyncStorage.setItem(FIRST_PAYMENT_KEY, '1')
+        setCelebrationMessage(`Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully`)
+        setCelebratingFirstPayment(true)
+      } else {
+        haptics.success()
+        setSendResult({ type: 'success', message: `Sent ${formatAmount(sats, currency, satoshisPerUSD)} successfully` })
+      }
       setSendAmount('')
       clearRecipient()
       fetchPayments()
@@ -1243,10 +1272,10 @@ export default function PaymentsScreen() {
           body: JSON.stringify(entry.token)
         })
         await markOutboxSent(storage, entry.id)
-        toast.success(t('payment_delivered'))
+        showToast(t('payment_delivered'), { type: 'success' })
       } catch (err: any) {
         await updateOutboxEntry(storage, entry.id, { lastError: err?.message || 'unknown error' })
-        toast.error(`${t('retry_failed')}: ${err?.message || 'unknown error'}`)
+        showToast(`${t('retry_failed')}: ${err?.message || 'unknown error'}`, { type: 'error' })
       } finally {
         setRetryingId(null)
         await loadOutbox()
@@ -1356,7 +1385,7 @@ export default function PaymentsScreen() {
             </View>
 
             {/* Send button */}
-            <TouchableOpacity
+            <PressableScale
               onPress={handleSend}
               disabled={!canSend}
               style={[
@@ -1367,17 +1396,31 @@ export default function PaymentsScreen() {
                 }
               ]}
             >
-              {isSending ? (
-                <ActivityIndicator size="small" color={canSend ? colors.background : colors.textSecondary} />
-              ) : (
-                <>
-                  <Ionicons name="send" size={18} color={canSend ? colors.background : colors.textSecondary} />
-                  <Text style={[styles.sendButtonText, { color: canSend ? colors.background : colors.textSecondary }]}>
-                    {t('send_payment')}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
+              <View style={styles.sendButtonContents}>
+                {isSending ? (
+                  <Animated.View
+                    key="sending"
+                    entering={FadeIn.duration(durations.instant)}
+                    exiting={FadeOut.duration(durations.instant)}
+                    style={styles.sendButtonInner}
+                  >
+                    <ActivityIndicator size="small" color={canSend ? colors.background : colors.textSecondary} />
+                  </Animated.View>
+                ) : (
+                  <Animated.View
+                    key="idle"
+                    entering={FadeIn.duration(durations.instant)}
+                    exiting={FadeOut.duration(durations.instant)}
+                    style={styles.sendButtonInner}
+                  >
+                    <Ionicons name="send" size={18} color={canSend ? colors.background : colors.textSecondary} />
+                    <Text style={[styles.sendButtonText, { color: canSend ? colors.background : colors.textSecondary }]}>
+                      {t('send_payment')}
+                    </Text>
+                  </Animated.View>
+                )}
+              </View>
+            </PressableScale>
 
             {sendResult && <ResultBanner result={sendResult} onDismiss={() => setSendResult(null)} colors={colors} />}
 
@@ -1432,6 +1475,16 @@ export default function PaymentsScreen() {
           hintText={t('scan_identity_key_hint')}
         />
       </Modal>
+
+      {/* ── First-payment celebration overlay ───────────────────────── */}
+      {celebratingFirstPayment && (
+        <View style={styles.celebrationOverlay} pointerEvents="none">
+          <Celebration onDone={() => {
+            setCelebratingFirstPayment(false)
+            setSendResult({ type: 'success', message: celebrationMessage })
+          }} />
+        </View>
+      )}
     </View>
   )
 }
@@ -1696,13 +1749,24 @@ const styles = StyleSheet.create({
 
   // Send button
   sendButton: {
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.md,
+    marginBottom: spacing.xxxl,
+    overflow: 'hidden'
+  },
+  sendButtonContents: {
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  sendButtonInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
     gap: spacing.sm,
-    marginBottom: spacing.xxxl
+    paddingHorizontal: spacing.lg
   },
   sendButtonText: {
     ...typography.subhead,
@@ -1897,6 +1961,14 @@ const styles = StyleSheet.create({
   },
   outgoingDismissText: {
     ...typography.subhead
+  },
+
+  // First-payment celebration overlay
+  celebrationOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100
   },
 
   // Recipient input row (text field + QR scan button)

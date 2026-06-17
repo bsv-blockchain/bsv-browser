@@ -1,8 +1,9 @@
 import React from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { hitTargets } from '@/context/theme/tokens'
+import PressableScale from '@/components/ui/PressableScale'
 
 interface IconButtonProps {
   name: keyof typeof Ionicons.glyphMap
@@ -33,13 +34,13 @@ export const IconButton: React.FC<IconButtonProps> = ({
   const iconColor = color ?? colors.accent
 
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       onLongPress={onLongPress}
       disabled={disabled}
-      style={({ pressed }) => [
+      scaleTo={0.92}
+      style={[
         styles.container,
-        pressed && styles.pressed,
         disabled && styles.disabled
       ]}
       accessibilityLabel={accessibilityLabel}
@@ -54,7 +55,7 @@ export const IconButton: React.FC<IconButtonProps> = ({
           </Text>
         </View>
       )}
-    </Pressable>
+    </PressableScale>
   )
 }
 
@@ -64,9 +65,6 @@ const styles = StyleSheet.create({
     height: hitTargets.minimum,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  pressed: {
-    opacity: 0.5,
   },
   disabled: {
     opacity: 0.3,

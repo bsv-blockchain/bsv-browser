@@ -2,14 +2,14 @@
 import { createRef } from 'react'
 import { makeAutoObservable, runInAction } from 'mobx'
 import { WebView } from 'react-native-webview'
-import { LayoutAnimation } from 'react-native'
+import { LayoutAnimation, Platform } from 'react-native'
 import { Tab } from '@/shared/types/browser'
 import { kNEW_TAB_URL } from '@/shared/constants'
 import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import { deleteThumbnail } from '@/utils/thumbnailService'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
-import { maxTabsForTier } from '@/utils/deviceTier'
+import { maxTabsForTier, warmPoolSizeForTier } from '@/utils/deviceTier'
 import { devLog } from '@/utils/logging'
 import { perf } from '@/utils/perf'
 const STORAGE_KEYS = {
@@ -30,12 +30,9 @@ const STORAGE_KEYS = {
 // accumulation while letting flagship devices keep more tabs warm.
 export const MAX_TABS = maxTabsForTier()
 
-// Number of tab WebViews kept mounted ("warm") at once. Switching among warm
-// tabs is instant — their WebViews stay alive with page state intact, so no
-// source reload / network round-trip. Tabs outside this set are unmounted to
-// bound memory (each live WebView holds a full page). Capped at MAX_TABS so
-// low-RAM (SE-class) devices never warm more tabs than they're allowed to open.
-export const WARM_POOL_SIZE = Math.min(4, MAX_TABS)
+// Tier-aware warm pool — see warmPoolSizeForTier(). Low-tier iOS keeps one
+// mounted WebView; flagship iOS keeps three so recent tab switches are instant.
+export const WARM_POOL_SIZE = warmPoolSizeForTier()
 
 export class TabStore {
   tabs: Tab[] = [] // Always initialize as an array
@@ -72,6 +69,12 @@ export class TabStore {
   // both callbacks are treated as jumps and neither one spuriously appends a new
   // history entry (which would make back/forward look like a page refresh).
   private pendingHistoryJumps: Map<number, number> = new Map()
+  // Signature of the last nav-state event we actually processed, per tab. WK
+  // fires onNavigationStateChange (+ onLoadEnd) many times for a single
+  // navigation — often 5-7 identical loading=false events. Deduping them here
+  // kills the redundant store writes + log flood that competed with page JS on
+  // the one JS thread. Bypassed while a programmatic jump is pending.
+  private lastNavSig: Map<number, string> = new Map()
   constructor() {
     devLog('TabStore constructor called')
     makeAutoObservable(this)
@@ -96,10 +99,11 @@ export class TabStore {
 
   createTab(url?: string | null): Tab {
     // Ensure url is never null or undefined
-    const safeUrl = url && isValidUrl(url) ? url : kNEW_TAB_URL
+    const safeUrl = url && isValidUrl(url) ? normalizeUrlForHistory(url) : kNEW_TAB_URL
     return {
       id: this.nextId++,
       url: safeUrl,
+      sourceUrl: safeUrl,
       title: 'New Tab',
       webviewRef: createRef<WebView>(),
       canGoBack: false,
@@ -288,7 +292,14 @@ export class TabStore {
         const newUrl = patch.url
         if (!newUrl || newUrl === null || newUrl === undefined || !isValidUrl(newUrl)) {
           patch.url = kNEW_TAB_URL
+        } else {
+          patch.url = normalizeUrlForHistory(newUrl)
         }
+        // updateTab is only ever called for explicit navigation (address bar,
+        // homepage, deep link) — never from passive nav-state events, which write
+        // tab.url directly. So an updateTab URL change is a real load request:
+        // sync sourceUrl too, which is what drives the WebView source.
+        patch.sourceUrl = patch.url
       }
 
       const newUrl = patch.url
@@ -545,6 +556,7 @@ export class TabStore {
     delete this.tabNavigationHistories[id]
     delete this.tabHistoryIndexes[id]
     this.lastFocusedAt.delete(id)
+    this.lastNavSig.delete(id)
     this.tabs.splice(tabIndex, 1)
 
     if (this.tabs.length === 0) {
@@ -579,6 +591,16 @@ export class TabStore {
     // Normalize the URL to strip transient challenge parameters (e.g. Cloudflare __cf_chl_tk)
     // that would otherwise cause redirect loops to be treated as distinct navigations.
     const currentUrl = normalizeUrlForHistory(rawUrl)
+
+    // Idempotency guard: skip WK's redundant repeat events. A pending programmatic
+    // jump must still flow through (the countdown at 2 expects both the
+    // onNavigationStateChange and onLoadEnd events), and any change in loading /
+    // url / title is a real update. Everything else is a duplicate — return before
+    // the history scan, store writes, and nav-state log run again for nothing.
+    const navSig = `${navState.loading}|${currentUrl}|${navState.title ?? ''}|${navState.canGoBack}|${navState.canGoForward}`
+    const jumpPending = (this.pendingHistoryJumps.get(tabId) ?? 0) > 0
+    if (!jumpPending && this.lastNavSig.get(tabId) === navSig) return
+    this.lastNavSig.set(tabId, navSig)
 
     if (!navState.loading && currentUrl && isValidUrl(currentUrl)) {
       // Countdown-based jump detection: each programmatic navigation sets the count to 2
@@ -753,6 +775,9 @@ export class TabStore {
       const parsed = tabsJson ? JSON.parse(tabsJson) : []
       const withRefs = parsed.map((t: any) => ({
         ...t,
+        // Migrate tabs persisted before the url/sourceUrl split: load them at the
+        // last live URL so a restored tab opens where it left off.
+        sourceUrl: t.sourceUrl ?? t.url ?? kNEW_TAB_URL,
         webviewRef: createRef<WebView>()
       }))
 

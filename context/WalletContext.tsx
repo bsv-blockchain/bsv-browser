@@ -35,8 +35,7 @@ const DEFAULT_SETTINGS: WalletSettings = {
     ]
   }
 }
-import { toast } from 'react-toastify'
-import 'react-toastify/dist/ReactToastify.css'
+import { showToast } from '@/components/ui/Toast'
 import type { AppChain } from './config'
 import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR } from './config'
 import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_COOLDOWN_MS, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
@@ -45,6 +44,7 @@ import { UserContext } from './UserContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { usePermissionQueue } from '@/hooks/usePermissionQueue'
 import { createServices } from '@/services/walletServiceConfig'
+import { configureNewHeaderPolling } from '@/utils/walletMonitor'
 import {
   createArcadeBroadcastService,
   createTaalBroadcastService,
@@ -469,7 +469,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       const { requestID, originator, reason, renewal, spending } = args
       if (!requestID || !spending) return
 
-      // Auto-approve small transactions if within threshold and cooldown
+      // Auto-approve small transactions if within threshold and cooldown.
+      // Read the persisted threshold fresh on every request so a change made
+      // in wallet-config takes effect immediately (the mount-time ref read
+      // alone left the old value live until app restart — felt like
+      // auto-approve was "stuck on").
+      try {
+        const stored = await AsyncStorage.getItem(AUTO_APPROVE_STORAGE_KEY)
+        if (stored !== null) autoApproveThresholdRef.current = Number(stored) || 0
+      } catch {}
       const threshold = autoApproveThresholdRef.current
       const now = Date.now()
       const sinceLastMs = now - lastAutoApproveTime
@@ -773,6 +781,18 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           const monitor = new Monitor(monitorOptions)
           monitor.addDefaultTasks()
 
+          const newHeaderTask = monitor._tasks.find((t: any) => t.name === 'NewHeader') as any
+          if (newHeaderTask) {
+            configureNewHeaderPolling(newHeaderTask, {
+              onFailure: (error, retryAt) => {
+                const message = error instanceof Error ? error.message : String(error)
+                console.warn(
+                  `[TaskNewHeader] Chaintracks request failed; retrying after ${new Date(retryAt).toISOString()}: ${message}`
+                )
+              }
+            })
+          }
+
           // Patch TaskArcadeSSE: treat REJECTED as retryable, not permanent failure.
           // Arcade returns REJECTED with 503 "no available server" for transient infra
           // errors — the default handler marks these as permanently invalid.
@@ -870,7 +890,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         return permissionsManager
       } catch (error: any) {
         console.error('Error building wallet:', error)
-        toast.error('Failed to build wallet: ' + error.message)
+        showToast('Failed to build wallet: ' + error.message, { type: 'error' })
         logWithTimestamp(F, 'Error building wallet', error.message)
         return null
       }

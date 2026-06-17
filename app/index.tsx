@@ -17,12 +17,22 @@ import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import { GestureDetector } from 'react-native-gesture-handler'
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated'
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withDelay,
+  withSequence,
+  runOnJS,
+  Easing,
+  SharedValue
+} from 'react-native-reanimated'
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
 import { router } from 'expo-router'
 
+import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useWalletManagers } from '@/context/WalletContext'
 import { WalletInterface } from '@bsv/sdk'
@@ -67,6 +77,8 @@ import { SheetRouter } from '@/components/browser/SheetRouter'
 import { FindInPageBar } from '@/components/browser/FindInPageBar'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { spacing, radii, typography } from '@/context/theme/tokens'
+import { durations } from '@/context/theme/motion'
+import LoadProgressBar from '@/components/browser/LoadProgressBar'
 
 import { useHistory } from '@/hooks/useHistory'
 import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
@@ -111,46 +123,6 @@ function getInjectableJSMessage(message: any = {}) {
   `
 }
 
-/**
- * Builds a small injection script that exposes the current browser chrome
- * safe area insets (including address-bar reservations) to the web page via
- * CSS custom properties, a global object, and a CustomEvent.
- *
- *   padding-bottom: calc(
- *     env(safe-area-inset-bottom) +
- *     var(--browser-safe-area-inset-bottom, 0px)
- *   );
- *
- * The bottom value is driven by `bottomReservedHeight` (coordinated name with
- * the measurement agent responsible for precise on-layout / keyboard /
- * orientation measurements). Re-dispatch of the event and updates to
- * window.__browserSafeAreaInsets.bottom occur on every call (initial load,
- * bar reposition, measurement change, orientation, keyboard).
- *
- * The generated script is resilient (inner try/catch) and idempotent
- * (repeated sets / dispatches are harmless).
- */
-function buildBrowserSafeAreaScript(bottomReservedHeight: number, topReservedHeight: number) {
-  return `
-    (function(){
-      try {
-        var root = document.documentElement;
-        root.style.setProperty('--browser-safe-area-inset-bottom', '${bottomReservedHeight}px');
-        root.style.setProperty('--browser-safe-area-inset-top', '${topReservedHeight}px');
-        root.style.setProperty('--browser-address-bar-height', '${ADDRESS_BAR_HEIGHT}px');
-
-        // Expose current values for JS access (precise measured bottomReservedHeight)
-        window.__browserSafeAreaInsets = { bottom: ${bottomReservedHeight}, top: ${topReservedHeight} };
-
-        // Notify any listeners (pages can addEventListener('browser-safe-area-change', ...))
-        window.dispatchEvent(new CustomEvent('browser-safe-area-change', {
-          detail: window.__browserSafeAreaInsets
-        }));
-      } catch (e) {}
-    })();
-  `
-}
-
 /* -------------------------------------------------------------------------- */
 /*                               USER AGENTS                                  */
 /* -------------------------------------------------------------------------- */
@@ -183,6 +155,9 @@ interface WebViewHostProps {
   // intact) but visually behind the active tab and non-interactive. Only the
   // active host drives the switch-loading overlay and address-bar UI.
   isActive: boolean
+  // True when this tab's WebView is in the warm pool — activation skips the
+  // 200ms crossfade so recently-used tab switches feel instant.
+  isWarm: boolean
   webviewRef: React.RefObject<any>
   containerRef?: React.RefObject<View | null>
   uri: string
@@ -190,8 +165,6 @@ interface WebViewHostProps {
   isFullscreen: boolean
   onExitFullscreen: () => void
   topInset: number
-  bottomReservedHeight: number
-  addressBarIsAtTop: boolean
   isDark: boolean
   acceptLanguage: string
   injectedJavaScript: string
@@ -200,16 +173,17 @@ interface WebViewHostProps {
   onNavStateChange: (tabId: number, navState: WebViewNavigation) => void
   paymentHandlerRef: React.MutableRefObject<any>
   paymentInFlightUrl: React.MutableRefObject<string | null>
-  webviewContentInset: any
   webviewScrollIndicatorInsets: any
   webviewContainerStyle: any
   webviewStyle: any
+  loadProgress: SharedValue<number>
 }
 
 const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
   const {
     tabId,
     isActive,
+    isWarm,
     webviewRef,
     containerRef,
     uri,
@@ -217,8 +191,6 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     isFullscreen,
     onExitFullscreen,
     topInset,
-    bottomReservedHeight,
-    addressBarIsAtTop,
     acceptLanguage,
     injectedJavaScript,
     injectedJSBefore,
@@ -226,13 +198,13 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     onNavStateChange,
     paymentHandlerRef,
     paymentInFlightUrl,
-    webviewContentInset,
     webviewScrollIndicatorInsets,
     webviewContainerStyle,
-    webviewStyle
+    webviewStyle,
+    loadProgress
   } = props
 
-  const getTab = () => tabStore.tabs.find(t => t.id === tabId)
+  const getTab = useCallback(() => tabStore.tabs.find(t => t.id === tabId), [tabId])
 
   // Stable per-tab wrappers so the app-level handlers know which tab fired the
   // event (the warm pool mounts several WebViews; only the active one's events
@@ -243,25 +215,67 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     (navState: WebViewNavigation) => onNavStateChange(tabId, navState),
     [onNavStateChange, tabId]
   )
+  const lastProcessRecoveryAt = useRef(0)
+  const recoverTerminatedProcess = useCallback(
+    (reason: string) => {
+      const tab = getTab()
+      console.warn(`[WebView] ${reason}; tab=${tabId} active=${isActive} url=${tab?.url ?? uri}`)
+      if (tab) tabStore.updateTab(tabId, { isLoading: false })
+      if (!isActive) return
+
+      tabStore.clearSwitchLoading()
+      loadProgress.value = 0
+
+      // Avoid a reload loop if WebKit repeatedly kills the same heavy page.
+      const now = Date.now()
+      if (now - lastProcessRecoveryAt.current < 5000) return
+      lastProcessRecoveryAt.current = now
+
+      setTimeout(() => {
+        if (tabStore.activeTabId !== tabId) return
+        const activeUrl = tabStore.activeTab?.url
+        if (activeUrl?.startsWith('http')) tabStore.raiseLoadingForUrl(activeUrl)
+        webviewRef.current?.reload()
+      }, 100)
+    },
+    [getTab, isActive, loadProgress, tabId, uri, webviewRef]
+  )
+
+  const activeOpacity = useSharedValue(isActive ? 1 : 0)
+  useEffect(() => {
+    // Warm tabs already have a painted page — snap visible instantly so tab
+    // switches stay under the 100ms interaction budget. Cold tabs (fresh mount)
+    // fade in over the outgoing page to avoid a flash of empty chrome.
+    if (isActive) {
+      activeOpacity.value = isWarm ? 1 : withTiming(1, { duration: 100 })
+    } else {
+      activeOpacity.value = withDelay(isWarm ? 0 : 100, withTiming(0, { duration: 0 }))
+    }
+  }, [isActive, isWarm, activeOpacity])
+  const fadeStyle = useAnimatedStyle(() => ({ opacity: activeOpacity.value }))
 
   return (
-    <View
+    <Animated.View
       ref={containerRef}
       collapsable={false}
       // Inactive warm tabs stay mounted (page alive) but hidden behind the
-      // active one and non-interactive. opacity:0 — rather than display:'none'
-      // or unmount — keeps the native WebView painted so re-activation is an
-      // instant composite swap with zero reload/reflow.
+      // active one and non-interactive. Incoming tab fades in (200ms) over the
+      // still-painted outgoing tab; outgoing snaps to opacity 0 only after the
+      // fade completes — asymmetric to avoid background bleed from composite
+      // coverage dipping mid-crossfade. pointerEvents and zIndex switch
+      // instantly for interaction correctness.
       pointerEvents={isActive ? 'auto' : 'none'}
-      style={{
-        position: 'absolute',
-        top: isFullscreen ? 0 : topInset,
-        left: 0,
-        right: 0,
-        bottom: Platform.OS === 'android' && !addressBarIsAtTop && !isFullscreen ? bottomReservedHeight : 0,
-        opacity: isActive ? 1 : 0,
-        zIndex: isActive ? 1 : 0
-      }}
+      style={[
+        {
+          position: 'absolute',
+          top: isFullscreen ? 0 : topInset,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: isActive ? 1 : 0
+        },
+        fadeStyle
+      ]}
     >
       {isFullscreen && (
         <TouchableOpacity
@@ -294,6 +308,10 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
               : MOBILE_UA_ANDROID
         }
         sharedCookiesEnabled={true}
+        // The default static WKProcessPool keeps old site processes alive even
+        // after their tab's WebView unmounts. A per-WebView pool lets iOS release
+        // those processes when external-link navigation replaces the active tab.
+        useSharedProcessPool={Platform.OS !== 'ios'}
         originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
         onMessage={onMessageForTab}
         injectedJavaScript={injectedJavaScript}
@@ -404,6 +422,12 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             )
           }
         }}
+        onContentProcessDidTerminate={() => recoverTerminatedProcess('iOS WebContent process terminated')}
+        onRenderProcessGone={(event: any) =>
+          recoverTerminatedProcess(
+            event.nativeEvent?.didCrash ? 'Android WebView renderer crashed' : 'Android WebView renderer exited'
+          )
+        }
         onHttpError={(e: any) => {
           const tab = getTab()
           if (e.nativeEvent?.url?.includes('favicon.ico') && tab?.url === kNEW_TAB_URL) return
@@ -450,37 +474,39 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             )
           }
         }}
+        onLoadProgress={({ nativeEvent }: any) => {
+          if (!isActive) return
+          const next = nativeEvent.progress * 0.9
+          if (next > loadProgress.value) loadProgress.value = withTiming(next, { duration: durations.quick })
+        }}
         onLoadEnd={(event: any) => {
           // Only the active tab's first paint should clear the switch overlay —
           // a warm background tab finishing a late load must not dismiss it.
           if (isActive) tabStore.clearSwitchLoading()
+          if (isActive && loadProgress.value > 0) {
+            loadProgress.value = withSequence(
+              withTiming(1, { duration: durations.instant }),
+              withDelay(300, withTiming(0, { duration: 0 }))
+            )
+          }
           if (paymentInFlightUrl.current) return
           tabStore.handleNavigationStateChange(tabId, {
             ...(event.nativeEvent ?? event),
             loading: false
           })
-          const tab = getTab()
-          if (tab && tab.url !== kNEW_TAB_URL && webviewRef.current) {
-            const bottom = bottomReservedHeight
-            const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
-            try {
-              webviewRef.current.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
-            } catch (e) {
-              // transient webview unavailability is ok
-            }
-          }
         }}
         javaScriptEnabled
         domStorageEnabled
         allowsBackForwardNavigationGestures
+        pullToRefreshEnabled
+        allowsLinkPreview
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
-        contentInset={webviewContentInset}
         scrollIndicatorInsets={webviewScrollIndicatorInsets}
         containerStyle={webviewContainerStyle}
         style={webviewStyle}
       />
-    </View>
+    </Animated.View>
   )
 })
 
@@ -581,6 +607,60 @@ const ChromeAddressBar = observer(function ChromeAddressBar(props: ChromeAddress
 /* -------------------------------------------------------------------------- */
 /*                                  BROWSER                                   */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * Isolated manifest/PWA-redirect watcher. It reads the active tab's churny
+ * `isLoading` (plus id/url) so the SUBSCRIPTION lives here, not in Browser — a
+ * streaming page that toggles isLoading on every nav-state tick would otherwise
+ * re-render the entire Browser tree (and starve the JS thread when the menu
+ * popover is opening). Renders nothing.
+ */
+const ManifestWatcher = observer(function ManifestWatcher({
+  onRedirect
+}: {
+  onRedirect: (startUrl: string) => void
+}) {
+  const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
+  const activeTab = tabStore.activeTab
+  const tabId = activeTab?.id
+  const tabUrl = activeTab?.url
+  const isLoading = activeTab?.isLoading
+
+  useEffect(() => {
+    if (tabId === undefined || !tabUrl) return
+    let isCancelled = false
+
+    const handleManifest = async () => {
+      const currentUrl = tabUrl
+      if (currentUrl === kNEW_TAB_URL || !currentUrl.startsWith('http') || isLoading) return
+      if (isCancelled) return
+      try {
+        const manifestData = await fetchManifest(currentUrl)
+        if (isCancelled) return
+        if (manifestData && shouldRedirectToStartUrl(manifestData, currentUrl)) {
+          onRedirect(getStartUrl(manifestData, currentUrl))
+        }
+      } catch {}
+    }
+
+    const timeoutId = setTimeout(() => {
+      if (!isLoading && tabUrl !== kNEW_TAB_URL && tabUrl.startsWith('http')) {
+        // Defer manifest probing until chrome interactions settle — the fetch
+        // + JSON parse on the JS thread was competing with tab-switch taps.
+        InteractionManager.runAfterInteractions(() => {
+          if (!isCancelled) handleManifest()
+        })
+      }
+    }, 1000)
+
+    return () => {
+      isCancelled = true
+      clearTimeout(timeoutId)
+    }
+  }, [tabId, isLoading, tabUrl, fetchManifest, getStartUrl, shouldRedirectToStartUrl, onRedirect])
+
+  return null
+})
 
 const Browser = observer(function Browser() {
   useRenderCount('Browser') // dev-only: logs a re-render storm; zero-cost in prod
@@ -780,6 +860,9 @@ const Browser = observer(function Browser() {
 
   const [showTabsView, setShowTabsView] = useState(false)
 
+  // Page-load progress bar: 0 = idle/hidden, 0..0.9 = loading, 1 = done (fades out).
+  const loadProgress = useSharedValue(0)
+
   // Menu popover visibility — driven by a shared value so the open/close
   // animation runs entirely on the UI thread (and stays smooth even while the
   // JS thread is blocked, e.g. parsing large BEEF payloads). React state
@@ -876,7 +959,6 @@ const Browser = observer(function Browser() {
   const [findInPageTotal, setFindInPageTotal] = useState(0)
   const [findInPageCapped, setFindInPageCapped] = useState(false)
 
-  const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const [isFullscreen, setIsFullscreen] = useState(false)
   // Stable identity so passing it to the memoized WebViewHost doesn't break memo.
   const onExitFullscreen = useCallback(() => setIsFullscreen(false), [])
@@ -954,43 +1036,14 @@ const Browser = observer(function Browser() {
     expandRef.current = expandAddressBar
   }, [expandAddressBar])
 
-  /**
-   * Approach A: When the address bar is positioned at the bottom, inset the
-   * WebView content area from the bottom so that fixed/sticky elements on
-   * websites (nav bars, banners, etc.) do not get visually overlapped by
-   * the address bar. The WebView viewport shrinks instead of the bar being
-   * a floating overlay on top of full-height content.
-   */
-  // Tunable visual compensation (in pixels) for any slight "overhang" of the frosted glass
-  // (blur radius, border, shadow, or perceived height of the pill). Start at 0.
-  // Increase if the red block on the WebKit demo still sits a pixel or two below the bar.
-  const BOTTOM_CHROME_VISUAL_EXTRA = 0
-
-  /**
-   * The authoritative height (from device bottom) that must be reserved for the address bar
-   * when it is positioned at the bottom.
-   *
-   * We use the *exact same math* the animation hook already uses to place the bar.
-   * This guarantees the red safe-area visualization on
-   * https://webkit.org/demos/safe-area-insets/safe-areas.html will have its bottom edge
-   * sit flush against the top edge of the frosted address bar.
-   */
+  // Geometry used by native chrome overlays and scroll indicators. The WebView
+  // itself remains full-height; users can collapse the address bar when it
+  // covers page controls.
   const bottomReservedHeight =
-    !addressBarIsAtTop && !isFullscreen
-      ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT + BOTTOM_CHROME_VISUAL_EXTRA
-      : 0
+    !addressBarIsAtTop && !isFullscreen ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT : 0
 
-  // Memoize WebView prop objects so identical values don't churn new refs
-  // each Browser re-render. Without this, every state change (menuPopoverOpen
-  // toggle, suggestions list, gesture-driven address bar position state, etc.)
-  // produces a new contentInset/scrollIndicatorInsets reference. RN-WebView
-  // forwards inline object props to the bridge on each diff, triggering
-  // WKWebView contentInset updates and a full UIScrollView re-layout. On
-  // heavy pages that cascade was stalling the JS bridge for several seconds.
-  const webviewContentInset = useMemo(
-    () => ({ top: 0, left: 0, bottom: bottomReservedHeight, right: 0 }),
-    [bottomReservedHeight]
-  )
+  // Keep scroll bars visible around the floating chrome without changing the
+  // webpage viewport or injecting layout styles into the document.
   const webviewScrollIndicatorInsets = useMemo(
     () => ({
       top: addressBarIsAtTop ? ADDRESS_BAR_HEIGHT : 0,
@@ -1011,32 +1064,6 @@ const Browser = observer(function Browser() {
       if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
     }
   }, [])
-
-  /* ------------------ Push browser safe-area CSS vars to web content -------- */
-  // Track last-injected values so we skip redundant injections on re-renders
-  // that don't actually change the safe-area numbers (e.g. menu popover open,
-  // suggestion list updates). Re-injection on stale state used to fire on
-  // every Browser re-render that touched any dep, even when bottom/top hadn't
-  // moved — contributing to the WKWebView main-thread stalls.
-  const lastInjectedInsets = useRef<{ bottom: number; top: number; tabId: number | null } | null>(null)
-  useEffect(() => {
-    const webview = activeTab?.webviewRef?.current
-    if (!webview || activeTab?.url === kNEW_TAB_URL) return
-
-    const bottom = bottomReservedHeight
-    const top = addressBarIsAtTop && !isFullscreen ? ADDRESS_BAR_HEIGHT : 0
-    const tabId = activeTab?.id ?? null
-
-    const prev = lastInjectedInsets.current
-    if (prev && prev.bottom === bottom && prev.top === top && prev.tabId === tabId) return
-    lastInjectedInsets.current = { bottom, top, tabId }
-
-    try {
-      webview.injectJavaScript(buildBrowserSafeAreaScript(bottom, top))
-    } catch {
-      // WebView may be transiently unavailable (unmount, etc.); safe to ignore
-    }
-  }, [addressBarIsAtTop, isFullscreen, bottomReservedHeight, activeTab?.id, activeTab?.url])
 
   /* -------------------------------- permissions ----------------------------- */
   const domainForUrl = useCallback((u: string): string => {
@@ -1081,6 +1108,11 @@ const Browser = observer(function Browser() {
   // The tab ID of a tab opened via the new tab button that can be "cancelled" (closed to go back)
   const cancelableNewTabId = useRef<number | null>(null)
 
+  // Reset progress bar on tab switch so stale progress from the old tab never bleeds into the new one.
+  useEffect(() => {
+    loadProgress.value = 0
+  }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Navigate to homepage whenever a blank tab becomes active
   useEffect(() => {
     if (!activeTab || activeTab.url !== kNEW_TAB_URL) return
@@ -1119,6 +1151,7 @@ const Browser = observer(function Browser() {
       const tabId = activeTab.id
       const timer = setTimeout(() => {
         if (tabStore.activeTab?.id === tabId && tabStore.activeTab?.url === kNEW_TAB_URL) {
+          setAddressFocused(true)
           addressInputRef.current?.focus()
         }
       }, 100)
@@ -1314,10 +1347,11 @@ const Browser = observer(function Browser() {
     }
     tabStore.updateTab(currentTab.id, { isLoading: false })
     tabStore.clearSwitchLoading()
+    loadProgress.value = 0
     if (currentTab.url !== kNEW_TAB_URL && currentTab.url.startsWith('http')) {
       cancelledLoadTabIds.current.add(currentTab.id)
     }
-  }, [])
+  }, [loadProgress])
 
   const navReloadOrStop = useCallback(() => {
     const currentTab = tabStore.activeTab
@@ -1377,6 +1411,14 @@ const Browser = observer(function Browser() {
     setAddressSuggestions([])
     tabStore.closeTab(tabId)
   }, [])
+
+  const handleNewTab = useCallback(() => {
+    focusAddressBarOnNewTab.current = true
+    tabStore.newTab()
+    cancelableNewTabId.current = tabStore.activeTabId
+    setShowTabsView(false)
+    setMenuPopoverOpen(false)
+  }, [setMenuPopoverOpen])
 
   const onSuggestionSelect = useCallback(
     (url: string) => {
@@ -1615,8 +1657,15 @@ const Browser = observer(function Browser() {
   /* -------------------------------------------------------------------------- */
 
   const injectedJavaScript = useMemo(
-    () => buildInjectedJavaScript(getAcceptLanguageHeader(), Platform.OS === 'android'),
-    [getAcceptLanguageHeader]
+    () =>
+      buildInjectedJavaScript(
+        getAcceptLanguageHeader(),
+        Platform.OS === 'android',
+        __DEV__,
+        !isWeb2Mode,
+        shouldForwardWebViewLogs()
+      ),
+    [getAcceptLanguageHeader, isWeb2Mode]
   )
 
   // Standalone blob download intercept — plain JS string injected before content loads.
@@ -1683,14 +1732,13 @@ const Browser = observer(function Browser() {
     () =>
       nativeSpoofSetup +
       '\n' +
-      buildCWIProviderScript() +
-      '\n' +
+      (isWeb2Mode ? '' : buildCWIProviderScript() + '\n') +
       mediaSourcePolyfill +
       '\n' +
       downloadInterceptScript +
       '\n' +
       getPermissionScript(permissionsDeniedForCurrentDomain, pendingPermission),
-    [downloadInterceptScript, permissionsDeniedForCurrentDomain, pendingPermission]
+    [downloadInterceptScript, isWeb2Mode, permissionsDeniedForCurrentDomain, pendingPermission]
   )
 
   const routeWebViewMessage = useMemo(
@@ -1975,38 +2023,13 @@ const Browser = observer(function Browser() {
   /* -------------------------------------------------------------------------- */
   /*                              MANIFEST HANDLING                             */
   /* -------------------------------------------------------------------------- */
-  useEffect(() => {
-    if (!activeTab) return
-    let isCancelled = false
-
-    const handleManifest = async () => {
-      if (activeTab.url === kNEW_TAB_URL || !activeTab.url.startsWith('http') || activeTab.isLoading) return
-      if (isCancelled) return
-      try {
-        const manifestData = await fetchManifest(activeTab.url)
-        if (isCancelled) return
-        if (manifestData) {
-          const url = new URL(activeTab.url)
-          if (shouldRedirectToStartUrl(manifestData, activeTab.url) && url.pathname === '/') {
-            const startUrl = getStartUrl(manifestData, activeTab.url)
-            updateActiveTab({ url: startUrl })
-            setAddressText(startUrl)
-          }
-        }
-      } catch {}
-    }
-
-    const timeoutId = setTimeout(() => {
-      if (activeTab && !activeTab.isLoading && activeTab.url !== kNEW_TAB_URL && activeTab.url.startsWith('http')) {
-        handleManifest()
-      }
-    }, 1000)
-
-    return () => {
-      isCancelled = true
-      clearTimeout(timeoutId)
-    }
-  }, [activeTab, fetchManifest, getStartUrl, shouldRedirectToStartUrl, updateActiveTab])
+  // The reactive isLoading/url subscription lives in <ManifestWatcher/> (rendered
+  // below) so Browser doesn't re-render on every nav-state tick. This is just the
+  // redirect sink it calls back into.
+  const handleManifestRedirect = useCallback((startUrl: string) => {
+    updateActiveTab({ url: startUrl })
+    setAddressText(startUrl)
+  }, [updateActiveTab])
 
   /* -------------------------------------------------------------------------- */
   /*                              FULLSCREEN HANDLER                            */
@@ -2060,17 +2083,24 @@ const Browser = observer(function Browser() {
       key={tab.id}
       tabId={tab.id}
       isActive={active}
+      isWarm={tabStore.isWarm(tab.id)}
       webviewRef={tab.webviewRef}
       // Only the active host feeds the thumbnail-capture ref — a shared ref
       // across mounted hosts would clobber and capture the wrong tab.
       containerRef={active ? webviewContainerRef : undefined}
-      uri={typeof tab.url === 'string' && tab.url.length > 0 ? tab.url : 'about:blank'}
+      uri={(() => {
+        // Drive the WebView source from sourceUrl (the last explicitly-commanded
+        // URL), NOT the live tab.url. This is what stops passive nav-state
+        // updates — SPA fragment/route changes WK reports as the base URL — from
+        // reloading the WebView and navigating the page away. Fall back to url
+        // for any tab persisted before the split.
+        const src = tab.sourceUrl ?? tab.url
+        return typeof src === 'string' && src.length > 0 ? src : 'about:blank'
+      })()}
       isDesktopMode={tab.isDesktopMode ?? false}
       isFullscreen={active && isFullscreen}
       onExitFullscreen={onExitFullscreen}
       topInset={insets.top}
-      bottomReservedHeight={bottomReservedHeight}
-      addressBarIsAtTop={addressBarIsAtTop}
       isDark={isDark}
       acceptLanguage={getAcceptLanguageHeader()}
       injectedJavaScript={injectedJavaScript}
@@ -2079,10 +2109,10 @@ const Browser = observer(function Browser() {
       onNavStateChange={handleNavStateChange}
       paymentHandlerRef={paymentHandlerRef}
       paymentInFlightUrl={paymentInFlightUrl}
-      webviewContentInset={webviewContentInset}
       webviewScrollIndicatorInsets={webviewScrollIndicatorInsets}
       webviewContainerStyle={webviewContainerStyle}
       webviewStyle={webviewStyle}
+      loadProgress={loadProgress}
     />
   )
 
@@ -2140,6 +2170,7 @@ const Browser = observer(function Browser() {
   return (
     <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
+      <ManifestWatcher onRedirect={handleManifestRedirect} />
 
       {/* ---- Main content: WebView lives between the safe-area bars ----
           Deliberately OUTSIDE the KeyboardAvoidingView below. When the KAV
@@ -2160,15 +2191,13 @@ const Browser = observer(function Browser() {
         keyboardVerticalOffset={0}
       >
         <View style={styles.chromeLayer} pointerEvents="box-none">
-          {/* Touch blocker shield (Approach A hybrid):
+          {/* Touch blocker shield:
             - WebView frame is kept full-height so page backgrounds, heroes, and
               full-bleed visuals can paint under the frosted-glass address bar.
             - When the address bar is at the bottom, this transparent overlay
               captures touches in the bottom (safeBottom + 48px) region, preventing
               web content's fixed/sticky tappable elements from being hit "under"
               the bar while still allowing the visual background to show through.
-            - On iOS, contentInset further helps the web layout engine place
-              fixed elements above the bar naturally.
             - zIndex sits above WebView (0) but below chromeWrapper (20). */}
           {/* Touch blocker area — full height when bar is expanded, tiny right-corner area when collapsed */}
           {!addressBarCollapsed && bottomReservedHeight > 0 && (
@@ -2294,6 +2323,7 @@ const Browser = observer(function Browser() {
                     onClearText={onClearAddressText}
                     onCancelNewTabFn={onCancelNewTabFn}
                   />
+                  <LoadProgressBar progress={loadProgress} />
                 </Animated.View>
               </GestureDetector>
 
@@ -2359,15 +2389,11 @@ const Browser = observer(function Browser() {
                 onFindInPage={() => setFindInPageVisible(true)}
                 onBookmarks={() => sheet.push('browser-menu')}
                 onTabs={async () => {
+                  haptics.tap()
                   await captureActiveThumbnail()
                   setShowTabsView(true)
                 }}
-                onNewTab={() => {
-                  focusAddressBarOnNewTab.current = true
-                  tabStore.newTab()
-                  cancelableNewTabId.current = tabStore.activeTabId
-                  setShowTabsView(false)
-                }}
+                onNewTab={handleNewTab}
                 onSettings={() => sheet.push('settings')}
                 onEnableWeb3={() => router.push('/auth/mnemonic')}
                 onConnections={() => router.push('/connections')}
@@ -2423,7 +2449,11 @@ const Browser = observer(function Browser() {
 
           {/* ---- Tabs Overview ---- */}
           {!isFullscreen && showTabsView && (
-            <TabsOverview onDismiss={() => setShowTabsView(false)} setAddressFocused={setAddressFocused} />
+            <TabsOverview
+              onDismiss={() => setShowTabsView(false)}
+              setAddressFocused={setAddressFocused}
+              onNewTab={handleNewTab}
+            />
           )}
 
           {/* ---- Unified Sheet System ---- */}

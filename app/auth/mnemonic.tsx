@@ -2,9 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   View,
   Text,
-  TouchableOpacity,
   ScrollView,
-  Alert,
   TextInput,
   ActivityIndicator,
   StyleSheet,
@@ -26,6 +24,10 @@ import * as Print from 'expo-print'
 import { Paths, File as ExpoFile } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { showAlert } from '@/components/ui/AlertCard'
+import { showToast } from '@/components/ui/Toast'
+import Celebration from '@/components/ui/Celebration'
+import PressableScale from '@/components/ui/PressableScale'
 
 type MnemonicMode = 'choose' | 'generate' | 'import'
 
@@ -44,6 +46,7 @@ export default function MnemonicScreen() {
   const [copied, setCopied] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
   const [identityKey, setIdentityKey] = useState('')
+  const [celebrating, setCelebrating] = useState(false)
 
   // Fetch identity key (needed for print recovery shares)
   useEffect(() => {
@@ -64,21 +67,23 @@ export default function MnemonicScreen() {
       console.log('[Mnemonic] Building wallet eagerly after mnemonic generation')
       const stored = await storeMnemonic(wallet.mnemonic)
       if (!stored) {
-        Alert.alert(
-          'Biometric Access Required',
-          'Biometric access is needed to protect your wallet keys. Please try again.',
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => setMode('choose') },
-            { text: 'Try Again', onPress: () => handleGenerateNew() }
-          ]
-        )
+        const choice = await showAlert({
+          title: 'Biometric Access Required',
+          message: 'Biometric access is needed to protect your wallet keys. Please try again.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', key: 'cancel' },
+            { text: 'Try Again', key: 'retry' },
+          ],
+        })
+        if (choice === 'cancel') setMode('choose')
+        else handleGenerateNew()
         return
       }
       await buildWalletFromMnemonic(wallet.mnemonic)
       console.log('[Mnemonic] Wallet built successfully during generate flow')
     } catch (error: any) {
       console.error('Error generating mnemonic:', error)
-      Alert.alert('Error', 'Failed to generate mnemonic. Please try again.')
+      showToast('Failed to generate mnemonic. Please try again.', { type: 'error' })
     }
   }
 
@@ -107,6 +112,7 @@ export default function MnemonicScreen() {
   // Copy mnemonic to clipboard
   const handleCopyMnemonic = async () => {
     await Clipboard.setStringAsync(mnemonic)
+    showToast('Copied', { type: 'success' })
     setCopied(true)
     setTimeout(() => {
       setCopied(false)
@@ -135,10 +141,7 @@ export default function MnemonicScreen() {
   // Wallet was already built in handleGenerateNew, so just navigate.
   const handleContinueWithGenerated = () => {
     if (!hasAcknowledged) return
-    // dismissAll() returns to the existing root /index (Browser). Do NOT push('/')
-    // after — that mounts a SECOND Browser on top, leaking a duplicate that
-    // re-renders forever (2x JS work on every nav/SSE tick).
-    router.dismissAll()
+    setCelebrating(true)
   }
 
   // Validate and continue with imported mnemonic or hex private key
@@ -152,21 +155,22 @@ export default function MnemonicScreen() {
         const wif = PrivateKey.fromHex(trimmed).toWif()
         const stored = await setRecoveredKey(wif)
         if (!stored) {
-          Alert.alert(
-            'Biometric Access Required',
-            'Biometric access is needed to protect your wallet keys. Please try again.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Try Again', onPress: () => handleContinueWithImported() }
-            ]
-          )
+          const choice = await showAlert({
+            title: 'Biometric Access Required',
+            message: 'Biometric access is needed to protect your wallet keys. Please try again.',
+            buttons: [
+              { text: 'Cancel', style: 'cancel', key: 'cancel' },
+              { text: 'Try Again', key: 'retry' },
+            ],
+          })
+          if (choice === 'retry') await handleContinueWithImported()
           return
         }
         await buildWalletFromRecoveredKey(wif)
-        router.dismissAll()
+        setCelebrating(true)
       } catch (error: any) {
         console.error('[Mnemonic] Error importing hex key:', error)
-        Alert.alert('Error', `Invalid private key: ${error.message}`)
+        showToast(`Invalid private key: ${error.message}`, { type: 'error' })
       } finally {
         setLoading(false)
       }
@@ -174,10 +178,10 @@ export default function MnemonicScreen() {
     }
 
     if (!validateMnemonic(trimmed)) {
-      Alert.alert(
-        'Invalid Input',
-        'Please enter a valid recovery phrase (12–24 words) or a 64-character hex private key.'
-      )
+      await showAlert({
+        title: 'Invalid Input',
+        message: 'Please enter a valid recovery phrase (12–24 words) or a 64-character hex private key.',
+      })
       return
     }
 
@@ -191,25 +195,42 @@ export default function MnemonicScreen() {
       console.log('[Mnemonic] Starting wallet initialization with mnemonic')
       const stored = await storeMnemonic(mnemonicPhrase)
       if (!stored) {
-        Alert.alert(
-          'Biometric Access Required',
-          'Biometric access is needed to protect your wallet keys. Please try again.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Try Again', onPress: () => initializeWallet(mnemonicPhrase) }
-          ]
-        )
+        const choice = await showAlert({
+          title: 'Biometric Access Required',
+          message: 'Biometric access is needed to protect your wallet keys. Please try again.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', key: 'cancel' },
+            { text: 'Try Again', key: 'retry' },
+          ],
+        })
+        if (choice === 'retry') await initializeWallet(mnemonicPhrase)
         return
       }
       await buildWalletFromMnemonic(mnemonicPhrase)
-      console.log('[Mnemonic] Wallet setup complete, navigating to browser')
-      router.dismissAll()
+      setCelebrating(true)
     } catch (error: any) {
       console.error('[Mnemonic] Error setting up wallet:', error)
-      Alert.alert('Error', `Failed to set up wallet: ${error.message}`)
+      showToast(`Failed to set up wallet: ${error.message}`, { type: 'error' })
     } finally {
       setLoading(false)
     }
+  }
+
+  // ─── Celebration overlay (wallet created) ────────────────────────────
+  if (celebrating) {
+    return (
+      <View style={[s.screen, s.celebrationScreen, { backgroundColor: colors.background }]}>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <Celebration
+          onDone={() => {
+            // dismissAll() returns to the existing root /index (Browser). Do NOT push('/')
+            // after — that mounts a SECOND Browser on top, leaking a duplicate that
+            // re-renders forever (2x JS work on every nav/SSE tick).
+            router.dismissAll()
+          }}
+        />
+      </View>
+    )
   }
 
   // ─── Choose mode ──────────────────────────────────────────────────────
@@ -233,10 +254,10 @@ export default function MnemonicScreen() {
 
           {/* Actions */}
           <View style={s.actionArea}>
-            <TouchableOpacity
-              style={[s.primaryButton, { backgroundColor: colors.identityApproval }]}
+            <PressableScale
+              style={[s.primaryButton, { backgroundColor: colors.accent }]}
               onPress={handleGenerateNew}
-              activeOpacity={0.75}
+              haptic="confirm"
             >
               <Ionicons name="add-circle-outline" size={22} color={colors.textOnAccent} style={s.btnIcon} />
               <View style={s.btnTextGroup}>
@@ -245,9 +266,9 @@ export default function MnemonicScreen() {
                   {t('generate_recovery_phrase_caption')}
                 </Text>
               </View>
-            </TouchableOpacity>
+            </PressableScale>
 
-            <TouchableOpacity
+            <PressableScale
               style={[
                 s.secondaryButton,
                 {
@@ -256,14 +277,14 @@ export default function MnemonicScreen() {
                 }
               ]}
               onPress={() => setMode('import')}
-              activeOpacity={0.75}
+              haptic="tap"
             >
               <Ionicons name="download-outline" size={22} color={colors.accent} style={s.btnIcon} />
               <View style={s.btnTextGroup}>
                 <Text style={[s.btnLabel, { color: colors.textPrimary }]}>{t('import_existing_wallet')}</Text>
                 <Text style={[s.btnCaption, { color: colors.textSecondary }]}>{t('paste_recovery_phrase')}</Text>
               </View>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
 
           {/* Legal disclaimer */}
@@ -286,9 +307,9 @@ export default function MnemonicScreen() {
           </Text>
 
           {/* Cancel */}
-          <TouchableOpacity style={s.textButton} onPress={() => router.back()} activeOpacity={0.6}>
+          <PressableScale style={s.textButton} onPress={() => router.back()} haptic="tap">
             <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>{t('cancel')}</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
       </CustomSafeArea>
     )
@@ -302,6 +323,9 @@ export default function MnemonicScreen() {
         <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
           <Text style={[s.largeTitle, { color: colors.textPrimary, textAlign: 'left' }]}>
             {t('save_recovery_phrase_heading')}
+          </Text>
+          <Text style={[s.sectionSubtitle, { color: colors.textSecondary }]}>
+            Write down these words in order and keep them somewhere safe.
           </Text>
 
           {/* Warning banner */}
@@ -326,7 +350,7 @@ export default function MnemonicScreen() {
             </Text>
           </View>
 
-          {/* Mnemonic display */}
+          {/* Mnemonic display — compact selectable block */}
           <View
             style={[
               s.mnemonicDisplay,
@@ -344,19 +368,19 @@ export default function MnemonicScreen() {
           {/* Action buttons */}
           <View style={s.generateActions}>
             <View style={s.inlineButtonRow}>
-              <TouchableOpacity
-                style={[s.inlineButton, { backgroundColor: colors.protocolApproval }]}
+              <PressableScale
+                style={[s.inlineButton, { backgroundColor: colors.accent }]}
                 onPress={handleShareMnemonic}
-                activeOpacity={0.75}
+                haptic="confirm"
               >
                 <Ionicons name="share-outline" size={20} color={colors.textOnAccent} style={s.btnIcon} />
                 <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>{t('save')}</Text>
-              </TouchableOpacity>
+              </PressableScale>
 
-              <TouchableOpacity
+              <PressableScale
                 style={[s.inlineButton, { backgroundColor: colors.fillTertiary }]}
                 onPress={handleCopyMnemonic}
-                activeOpacity={0.75}
+                haptic="tap"
               >
                 <Ionicons
                   name={copied ? 'checkmark' : 'copy-outline'}
@@ -365,26 +389,34 @@ export default function MnemonicScreen() {
                   style={s.btnIcon}
                 />
                 <Text style={[s.btnLabel, { color: colors.accent }]}>{copied ? t('copied') : t('copy')}</Text>
-              </TouchableOpacity>
+              </PressableScale>
             </View>
 
-            <TouchableOpacity
-              style={[s.primaryButton, { backgroundColor: '#5856D6' }]}
+            <PressableScale
+              style={[s.primaryButton, { backgroundColor: colors.info }]}
               onPress={handlePrintRecoveryShares}
               disabled={isPrinting}
-              activeOpacity={0.75}
+              haptic="confirm"
             >
               {isPrinting ? (
-                <ActivityIndicator color="#FFFFFF" style={s.btnIcon} />
+                <ActivityIndicator color={colors.textOnAccent} style={s.btnIcon} />
               ) : (
-                <Ionicons name="print-outline" size={20} color="#FFFFFF" style={s.btnIcon} />
+                <Ionicons name="print-outline" size={20} color={colors.textOnAccent} style={s.btnIcon} />
               )}
-              <Text style={[s.btnLabel, { color: '#FFFFFF' }]}>{t('print_recovery_shares')}</Text>
-            </TouchableOpacity>
+              <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>{t('print_recovery_shares')}</Text>
+            </PressableScale>
+          </View>
+
+          {/* Biometric protection note */}
+          <View style={[s.biometricNote, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}>
+            <Ionicons name="finger-print" size={32} color={colors.textSecondary} style={s.biometricIcon} />
+            <Text style={[s.biometricText, { color: colors.textSecondary }]}>
+              Your recovery phrase is protected by Face ID / device biometrics.
+            </Text>
           </View>
 
           {/* Acknowledgment */}
-          <TouchableOpacity
+          <PressableScale
             style={[
               s.acknowledgment,
               {
@@ -397,7 +429,7 @@ export default function MnemonicScreen() {
               }
             ]}
             onPress={() => setHasAcknowledged(!hasAcknowledged)}
-            activeOpacity={0.7}
+            haptic="tap"
           >
             <Ionicons
               name={hasAcknowledged ? 'checkmark-circle' : 'ellipse-outline'}
@@ -406,20 +438,20 @@ export default function MnemonicScreen() {
               style={{ marginRight: spacing.md }}
             />
             <Text style={[s.acknowledgmentText, { color: colors.textPrimary }]}>{t('acknowledgment_text')}</Text>
-          </TouchableOpacity>
+          </PressableScale>
 
           {/* Continue */}
-          <TouchableOpacity
+          <PressableScale
             style={[
               s.primaryButton,
               {
-                backgroundColor: hasAcknowledged ? colors.identityApproval : colors.fillSecondary,
+                backgroundColor: hasAcknowledged ? colors.accent : colors.fillSecondary,
                 opacity: loading ? 0.6 : 1
               }
             ]}
             onPress={handleContinueWithGenerated}
             disabled={!hasAcknowledged || loading}
-            activeOpacity={0.75}
+            haptic="confirm"
           >
             {loading ? (
               <ActivityIndicator color={colors.textOnAccent} />
@@ -435,19 +467,19 @@ export default function MnemonicScreen() {
                 {t('continue')}
               </Text>
             )}
-          </TouchableOpacity>
+          </PressableScale>
 
           {/* Back link */}
-          <TouchableOpacity
+          <PressableScale
             style={s.textButton}
             onPress={() => {
               setMode('choose')
               setHasAcknowledged(false)
             }}
-            activeOpacity={0.6}
+            haptic="tap"
           >
             <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>{t('go_back')}</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </ScrollView>
       </CustomSafeArea>
     )
@@ -491,18 +523,18 @@ export default function MnemonicScreen() {
           textAlignVertical="top"
         />
 
-        <TouchableOpacity
+        <PressableScale
           style={[
             s.primaryButton,
             {
-              backgroundColor: importedMnemonic.trim() ? colors.identityApproval : colors.fillSecondary,
+              backgroundColor: importedMnemonic.trim() ? colors.accent : colors.fillSecondary,
               opacity: loading ? 0.6 : 1,
               marginTop: spacing.xxl
             }
           ]}
           onPress={handleContinueWithImported}
           disabled={!importedMnemonic.trim() || loading}
-          activeOpacity={0.75}
+          haptic="confirm"
         >
           {loading ? (
             <ActivityIndicator color={colors.textOnAccent} />
@@ -518,7 +550,7 @@ export default function MnemonicScreen() {
               {t('import_wallet')}
             </Text>
           )}
-        </TouchableOpacity>
+        </PressableScale>
 
         {/* ── Divider ── */}
         <View style={[s.orDivider, { marginTop: spacing.xl }]}>
@@ -528,7 +560,7 @@ export default function MnemonicScreen() {
         </View>
 
         {/* ── Scan Backup Shares ── */}
-        <TouchableOpacity
+        <PressableScale
           style={[
             s.secondaryButton,
             {
@@ -538,18 +570,18 @@ export default function MnemonicScreen() {
             }
           ]}
           onPress={() => router.push('/auth/scan-shares')}
-          activeOpacity={0.75}
+          haptic="tap"
         >
           <Ionicons name="scan-outline" size={22} color={colors.accent} style={s.btnIcon} />
           <View style={s.btnTextGroup}>
             <Text style={[s.btnLabel, { color: colors.textPrimary }]}>{t('scan_backup_shares')}</Text>
             <Text style={[s.btnCaption, { color: colors.textSecondary }]}>{t('scan_backup_shares_caption')}</Text>
           </View>
-        </TouchableOpacity>
+        </PressableScale>
 
-        <TouchableOpacity style={s.textButton} onPress={() => setMode('choose')} activeOpacity={0.6}>
+        <PressableScale style={s.textButton} onPress={() => setMode('choose')} haptic="tap">
           <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>Go Back</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </ScrollView>
     </CustomSafeArea>
   )
@@ -560,6 +592,10 @@ export default function MnemonicScreen() {
 const s = StyleSheet.create({
   screen: {
     flex: 1
+  },
+  celebrationScreen: {
+    alignItems: 'center',
+    justifyContent: 'center'
   },
 
   // Centered layout for the choose screen
@@ -573,7 +609,7 @@ const s = StyleSheet.create({
   // Scrollable layout for generate / import
   scrollContent: {
     paddingHorizontal: spacing.xxl,
-    paddingTop: spacing.xxxl,
+    paddingTop: spacing.xxxl + spacing.xl,
     paddingBottom: 60
   },
 
@@ -591,13 +627,19 @@ const s = StyleSheet.create({
   largeTitle: {
     ...typography.largeTitle,
     marginBottom: spacing.md,
-    textAlign: 'center'
+    textAlign: 'center',
+    marginTop: spacing.xl
   },
   subtitle: {
-    ...typography.callout,
+    ...typography.subhead,
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: spacing.xxxl + spacing.sm
+  },
+  sectionSubtitle: {
+    ...typography.subhead,
+    marginBottom: spacing.xxl,
+    lineHeight: 20
   },
   bodyText: {
     ...typography.body,
@@ -634,6 +676,26 @@ const s = StyleSheet.create({
     textAlign: 'center'
   },
 
+  // ─── Biometric note ────────────────────────────────────────────────
+  biometricNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.md,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
+    gap: spacing.md
+  },
+  biometricIcon: {
+    flexShrink: 0
+  },
+  biometricText: {
+    ...typography.footnote,
+    flex: 1,
+    lineHeight: 18
+  },
+
   // ─── Buttons ────────────────────────────────────────────────────────
   actionArea: {
     width: '100%',
@@ -647,7 +709,7 @@ const s = StyleSheet.create({
     width: '100%',
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.xl,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     minHeight: 50
   },
   secondaryButton: {
@@ -685,7 +747,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     minHeight: 50
   },
   btnIcon: {

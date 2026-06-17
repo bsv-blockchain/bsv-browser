@@ -203,7 +203,7 @@ export function navigationLoadingPage(targetUrl: string): string {
       setTimeout(function () {
         if (cancelled) return;
         var h = document.getElementById('__nav_hint');
-        if (h && !h.textContent) h.textContent = 'Still trying to connect\\u2026 tap the address bar to edit or cancel';
+        if (h && !h.textContent) h.textContent = 'Page is still loading\\u2026 tap the address bar to edit or cancel';
       }, 5000);
     })();
   </script>

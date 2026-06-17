@@ -1,9 +1,12 @@
 import React, { useContext } from 'react'
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'react-native'
+import { View, Text, StyleSheet, Modal, ScrollView } from 'react-native'
 import { WalletContext } from '../../context/WalletContext'
 import { UserContext } from '../../context/UserContext'
 import { useThemeStyles } from '../../context/theme/useThemeStyles'
 import { useTheme } from '../../context/theme/ThemeContext'
+import { spacing, radii } from '../../context/theme/tokens'
+import PressableScale from '../ui/PressableScale'
+import { haptics } from '../../hooks/useHaptics'
 import AmountDisplay from './AmountDisplay'
 
 const SpendingAuthorizationModal = () => {
@@ -77,15 +80,18 @@ const SpendingAuthorizationModal = () => {
 
             {/* Action buttons */}
             <View style={styles.buttonContainer}>
-              <TouchableOpacity style={styles.buttonSecondary} onPress={handleDeny}>
-                <Text style={styles.buttonSecondaryText}>Deny</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.buttonPrimary}
-                onPress={() => handleGrant({ singular: true, amount: authorizationAmount })}
+              <PressableScale
+                style={[styles.buttonDeny, { borderColor: colors.separator }]}
+                onPress={() => { haptics.warning(); handleDeny() }}
               >
-                <Text style={styles.buttonPrimaryText}>Approve</Text>
-              </TouchableOpacity>
+                <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>Deny</Text>
+              </PressableScale>
+              <PressableScale
+                style={[styles.buttonAllow, { backgroundColor: colors.accent }]}
+                onPress={() => { haptics.confirm(); handleGrant({ singular: true, amount: authorizationAmount }) }}
+              >
+                <Text style={[styles.buttonAllowText, { color: colors.textOnAccent }]}>Approve</Text>
+              </PressableScale>
             </View>
           </ScrollView>
         </View>
@@ -165,43 +171,31 @@ const styles = StyleSheet.create({
   },
   buttonContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     marginTop: 10,
-    gap: 40
+    gap: spacing.md
   },
-  buttonPrimaryText: {
-    color: 'black',
-    fontWeight: 'bold'
-  },
-  buttonPrimary: {
+  buttonDeny: {
     flex: 1,
-    backgroundColor: 'white',
-    paddingVertical: 15,
-    paddingHorizontal: 40,
-    borderRadius: 10,
+    minHeight: 44,
+    borderRadius: radii.lg,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
-    color: 'black'
+    justifyContent: 'center'
   },
-  buttonSecondary: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    borderColor: '#5d5d5dff',
-    borderWidth: 1,
-    alignItems: 'center'
-  },
-  buttonSecondaryText: {
-    color: 'white',
-    fontWeight: 'bold'
-  },
-  denyButton: {
-    borderWidth: 1
-  },
-  grantButton: {},
-  buttonText: {
-    textAlign: 'center',
+  buttonDenyText: {
     fontWeight: '600',
-    fontSize: 12
+    fontSize: 17
+  },
+  buttonAllow: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: radii.lg,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  buttonAllowText: {
+    fontWeight: '600',
+    fontSize: 17
   },
   appRow: {
     width: '100%',

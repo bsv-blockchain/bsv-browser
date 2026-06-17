@@ -140,7 +140,16 @@ const Sheet: React.FC<SheetProps> = ({
   /* ------------------------------------------------------------------ */
   return (
     <View style={[StyleSheet.absoluteFill, { zIndex: 50 }]}>
-      {isVisible && <Pressable style={styles.backdrop} onPress={onClose} />}
+      {isVisible && (
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          accessibilityHint="Dismisses this sheet"
+        />
+      )}
       <Animated.View
         style={[
           styles.sheet,

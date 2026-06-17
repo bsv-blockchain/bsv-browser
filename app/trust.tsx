@@ -7,7 +7,6 @@ import {
   TextInput,
   TouchableOpacity,
   Image,
-  Alert,
   Modal,
   ActivityIndicator
 } from 'react-native'
@@ -15,12 +14,13 @@ import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
-
+import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import validateTrust from '@/utils/validateTrust'
+import { showAlert } from '@/components/ui/AlertCard'
 
 // -------------------- Types --------------------
 export type Certifier = {
@@ -117,6 +117,7 @@ export default function TrustScreen() {
   const isSearching = query.trim().length > 0
 
   const onMoveUp = (identityKey: string) => {
+    haptics.tap()
     setTrustedEntities(prev => {
       const idx = prev.findIndex(c => c.identityKey === identityKey)
       if (idx <= 0) return prev
@@ -127,6 +128,7 @@ export default function TrustScreen() {
   }
 
   const onMoveDown = (identityKey: string) => {
+    haptics.tap()
     setTrustedEntities(prev => {
       const idx = prev.findIndex(c => c.identityKey === identityKey)
       if (idx < 0 || idx >= prev.length - 1) return prev
@@ -136,19 +138,17 @@ export default function TrustScreen() {
     })
   }
 
-  const onRemove = (identityKey: string) => {
-    Alert.alert(
-      t('confirm_delete'),
-      t('confirm_delete_body'),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('delete'),
-          style: 'destructive',
-          onPress: () => setTrustedEntities(prev => prev.filter(c => c.identityKey !== identityKey))
-        }
-      ]
-    )
+  const onRemove = async (identityKey: string) => {
+    const choice = await showAlert({
+      title: t('confirm_delete'),
+      message: t('confirm_delete_body'),
+      buttons: [
+        { text: t('cancel'), style: 'cancel', key: 'cancel' },
+        { text: t('delete'), style: 'destructive', key: 'delete' },
+      ],
+    })
+    if (choice !== 'delete') return
+    setTrustedEntities(prev => prev.filter(c => c.identityKey !== identityKey))
   }
 
   return (

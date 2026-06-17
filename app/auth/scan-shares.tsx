@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react'
-import { View, Text, Alert, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
@@ -9,8 +9,10 @@ import { useTranslation } from 'react-i18next'
 import { useWallet } from '@/context/WalletContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { parseShare, validateShareCompatibility, recoverKeyFromShares, ParsedShare } from '@/utils/backupShares'
-import * as Haptics from 'expo-haptics'
+import { showAlert } from '@/components/ui/AlertCard'
+import { haptics } from '@/hooks/useHaptics'
 import QRScanner from '@/components/QRScanner'
+import Celebration from '@/components/ui/Celebration'
 
 export default function ScanSharesScreen() {
   const { t } = useTranslation()
@@ -22,6 +24,7 @@ export default function ScanSharesScreen() {
   const [threshold, setThreshold] = useState<number | null>(null)
   const [recovering, setRecovering] = useState(false)
   const [recovered, setRecovered] = useState(false)
+  const [celebrating, setCelebrating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Prevent re-processing the exact same QR content
@@ -48,14 +51,18 @@ export default function ScanSharesScreen() {
       const compatError = validateShareCompatibility(parsed, scannedShares)
       if (compatError) {
         setError(compatError)
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+        haptics.error()
         return
       }
 
-      // Valid new share — haptic feedback
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-
       const updatedShares = [...scannedShares, parsed]
+      const isComplete = updatedShares.length >= parsed.threshold
+
+      // Haptic for intermediate shares only — Celebration fires haptics.success() on completion
+      if (!isComplete) {
+        haptics.success()
+      }
+
       setScannedShares(updatedShares)
 
       if (!threshold) {
@@ -63,7 +70,7 @@ export default function ScanSharesScreen() {
       }
 
       // Check if we have enough shares to recover
-      if (updatedShares.length >= parsed.threshold) {
+      if (isComplete) {
         handleRecovery(updatedShares.map(s => s.raw))
       } else {
         // Clear last scanned so the next different share can be read
@@ -82,36 +89,33 @@ export default function ScanSharesScreen() {
       // Store the recovered key and build the wallet
       const stored = await setRecoveredKey(wif)
       if (!stored) {
-        Alert.alert(
-          'Biometric Access Required',
-          'Biometric access is needed to protect your wallet keys. Please try again.',
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-              onPress: () => {
-                setScannedShares([])
-                setThreshold(null)
-                lastScannedRef.current = ''
-              }
-            },
-            { text: 'Try Again', onPress: () => handleRecovery(shareStrings) }
-          ]
-        )
+        const choice = await showAlert({
+          title: 'Biometric Access Required',
+          message: 'Biometric access is needed to protect your wallet keys. Please try again.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', key: 'cancel' },
+            { text: 'Try Again', key: 'retry' },
+          ],
+        })
+        if (choice === 'cancel') {
+          setScannedShares([])
+          setThreshold(null)
+          lastScannedRef.current = ''
+        } else {
+          await handleRecovery(shareStrings)
+        }
         return
       }
 
-      setRecovered(true)
       await buildWalletFromRecoveredKey(wif)
-
-      // Navigate to the browser
-      router.dismissAll()
-      router.push('/')
+      setRecovered(true)
+      setCelebrating(true)
     } catch (err: any) {
       console.error('[ScanShares] Recovery failed:', err)
       setError(err.message || t('scan_shares_recovery_failed'))
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      haptics.error()
       // Allow re-scanning
+      setRecovered(false)
       setScannedShares([])
       setThreshold(null)
       lastScannedRef.current = ''
@@ -127,6 +131,20 @@ export default function ScanSharesScreen() {
         <StatusBar style={isDark ? 'light' : 'dark'} />
         <ActivityIndicator size="large" color={colors.accent} />
         <Text style={[styles.recoveringText, { color: colors.textPrimary }]}>{t('scan_shares_recovering')}</Text>
+      </View>
+    )
+  }
+
+  // ── Celebration overlay (backup verified) ─────────────────────────────
+  if (celebrating) {
+    return (
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <Celebration
+          onDone={() => {
+            router.dismissAll()
+          }}
+        />
       </View>
     )
   }

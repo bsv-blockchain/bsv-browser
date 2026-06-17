@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Clipboard from '@react-native-clipboard/clipboard'
-import { toast } from 'react-toastify'
+import { showToast } from '@/components/ui/Toast'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
@@ -121,13 +121,13 @@ export default function TransactionsScreen() {
       if (rawTx) {
         const hex = Array.from(rawTx).map(b => b.toString(16).padStart(2, '0')).join('')
         Clipboard.setString(hex)
-        toast.success(t('tx_copied'))
+        showToast(t('tx_copied'), { type: 'success' })
       } else {
-        toast.error(t('tx_not_available'))
+        showToast(t('tx_not_available'), { type: 'error' })
       }
     } catch (e) {
       console.error('Failed to copy raw tx:', e)
-      toast.error(t('tx_copy_failed'))
+      showToast(t('tx_copy_failed'), { type: 'error' })
     } finally {
       setCopyingTxid(null)
     }
@@ -138,11 +138,11 @@ export default function TransactionsScreen() {
     setAbortingTxid(reference)
     try {
       await managers.permissionsManager.abortAction({ reference }, adminOriginator)
-      toast.success(t('tx_abort_success'))
+      showToast(t('tx_abort_success'), { type: 'success' })
       onRefresh()
     } catch (e) {
       console.error('Failed to abort transaction:', e)
-      toast.error(t('tx_abort_failed'))
+      showToast(t('tx_abort_failed'), { type: 'error' })
     } finally {
       setAbortingTxid(null)
     }
@@ -158,13 +158,13 @@ export default function TransactionsScreen() {
         adminOriginator
       )
       if (count === 0) {
-        toast.info(t('no_transactions'))
+        showToast(t('no_transactions'), { type: 'info' })
       } else {
-        toast.success(t('tx_export_success', { count }))
+        showToast(t('tx_export_success', { count }), { type: 'success' })
       }
     } catch (e) {
       console.error('Failed to export transactions:', e)
-      toast.error(t('tx_export_failed'))
+      showToast(t('tx_export_failed'), { type: 'error' })
     } finally {
       setExporting(false)
     }
@@ -175,10 +175,10 @@ export default function TransactionsScreen() {
     setRefreshingTxid(txid)
     try {
       await refreshProof(txid)
-      toast.success(t('tx_proof_refreshed'))
+      showToast(t('tx_proof_refreshed'), { type: 'success' })
     } catch (e) {
       console.info('Proof refresh:', e instanceof Error ? e.message : e)
-      toast.error(e instanceof Error ? e.message : t('tx_proof_refresh_failed'))
+      showToast(e instanceof Error ? e.message : t('tx_proof_refresh_failed'), { type: 'error' })
     } finally {
       setRefreshingTxid(null)
     }

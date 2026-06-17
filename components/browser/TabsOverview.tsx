@@ -5,7 +5,6 @@ import {
   FlatList,
   InteractionManager,
   Keyboard,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -13,17 +12,19 @@ import {
   TouchableWithoutFeedback,
   View
 } from 'react-native'
+import Reanimated, { FadeInDown, useReducedMotion } from 'react-native-reanimated'
 import { Ionicons } from '@expo/vector-icons'
 import { Swipeable } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image'
-import * as Haptics from 'expo-haptics'
+import { haptics } from '@/hooks/useHaptics'
 import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { BlurChrome } from '@/components/ui/BlurChrome'
 import { IconButton } from '@/components/ui/IconButton'
 import { spacing, radii } from '@/context/theme/tokens'
+import { springs, durations } from '@/context/theme/motion'
 import tabStore from '@/stores/TabStore'
 import type { Tab } from '@/shared/types/browser'
 
@@ -32,20 +33,36 @@ const kNEW_TAB_URL = 'about:blank'
 interface TabsOverviewProps {
   onDismiss: () => void
   setAddressFocused: (focused: boolean) => void
+  onNewTab?: () => void
 }
 
 const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
   onDismiss,
-  setAddressFocused
+  setAddressFocused,
+  onNewTab
 }) => {
   const { colors } = useTheme()
   const { t } = useTranslation()
+  const reducedMotion = useReducedMotion()
   const screen = Dimensions.get('window')
   const ITEM_W = screen.width * 0.42
   const ITEM_H = screen.height * 0.28
+  // Deterministic row pitch lets getItemLayout report exact offsets without
+  // measuring/rendering every row — FlatList knows the full content height up
+  // front, so scrollToEnd lands at the true bottom while virtualization keeps
+  // only the bottom window mounted (memory conscious).
+  const ROW_GUTTER = spacing.sm
+  const ROW_H = ITEM_H + ROW_GUTTER * 2
   const insets = useSafeAreaInsets()
 
-  const renderItem = ({ item }: { item: Tab }) => {
+  // Tabs are stored oldest-first → newest fills the bottom-right of the grid.
+  // Open anchored at the bottom (newest in view); scroll up reaches older tabs.
+  // Stop auto-anchoring once the user drags, so closing/relayout never yanks
+  // their scroll position. Remounts per open (showTabsView toggle) reset this.
+  const listRef = React.useRef<FlatList<Tab>>(null)
+  const userScrolled = React.useRef(false)
+
+  const renderItem = ({ item, index }: { item: Tab; index: number }) => {
     const renderSwipeAction = (
       _progress: Animated.AnimatedInterpolation<number>,
       dragX: Animated.AnimatedInterpolation<number>,
@@ -64,6 +81,9 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
     }
 
     return (
+      <Reanimated.View
+        entering={reducedMotion ? undefined : FadeInDown.duration(durations.quick).delay(Math.min(index * 20, 160)).springify().stiffness(springs.settle.stiffness).damping(springs.settle.damping)}
+      >
       <Swipeable
         renderRightActions={(p, d) => renderSwipeAction(p, d, 'right')}
         renderLeftActions={(p, d) => renderSwipeAction(p, d, 'left')}
@@ -92,6 +112,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
             }
           ]}
           onPress={() => {
+            haptics.tap()
             tabStore.setActiveTab(item.id)
             onDismiss()
           }}
@@ -135,6 +156,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
           </View>
         </Pressable>
       </Swipeable>
+      </Reanimated.View>
     )
   }
 
@@ -145,6 +167,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
       </TouchableWithoutFeedback>
 
       <FlatList
+        ref={listRef}
         data={tabStore.tabs.slice()}
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
@@ -155,7 +178,17 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
         initialNumToRender={6}
         windowSize={10}
         extraData={tabStore.activeTabId}
+        getItemLayout={(_, index) => {
+          const row = Math.floor(index / 2)
+          return { length: ROW_H, offset: ROW_H * row, index }
+        }}
+        onScrollBeginDrag={() => { userScrolled.current = true }}
+        onContentSizeChange={() => {
+          if (!userScrolled.current) listRef.current?.scrollToEnd({ animated: false })
+        }}
         contentContainerStyle={{
+          flexGrow: 1,
+          justifyContent: 'flex-end',
           padding: spacing.md,
           paddingTop: insets.top + spacing.md,
           paddingBottom: 100,
@@ -175,9 +208,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
         <TouchableOpacity
           style={styles.clearAllButton}
           onPress={() => {
-            if (Platform.OS === 'ios') {
-              try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium) } catch {}
-            }
+            haptics.confirm()
             onDismiss()
             setAddressFocused(false)
             Keyboard.dismiss()
@@ -188,6 +219,18 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
           <Ionicons name="trash-outline" size={20} color={colors.accent} />
           <Text style={[styles.clearAllText, { color: colors.accent }]}>{t('clear_all_tabs')}</Text>
         </TouchableOpacity>
+        {onNewTab && (
+          <IconButton
+            name="add"
+            onPress={() => {
+              haptics.confirm()
+              onNewTab()
+            }}
+            size={24}
+            color={colors.accent}
+            accessibilityLabel="New tab"
+          />
+        )}
         <IconButton
           name="close"
           onPress={onDismiss}
@@ -208,7 +251,10 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   tabPreview: {
-    margin: '4%',
+    // marginVertical is numeric (spacing.sm) so it matches ROW_H exactly for
+    // getItemLayout; horizontal stays percentage to center the 2-col grid.
+    marginVertical: spacing.sm,
+    marginHorizontal: '4%',
     borderRadius: radii.md,
     overflow: 'hidden',
   },

@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react'
+import { useCallback, useState, useRef } from 'react'
 
-interface WebAppManifest {
+export interface WebAppManifest {
   name?: string
   short_name?: string
   start_url?: string
@@ -8,15 +8,45 @@ interface WebAppManifest {
   display?: string
   background_color?: string
   theme_color?: string
-  icons?: Array<{
+  icons?: {
     src: string
     sizes: string
     type: string
-  }>
+  }[]
   babbage?: {
     protocolPermissions?: {
       [key: string]: string
     }
+  }
+}
+
+export function resolveManifestStartUrl(manifest: WebAppManifest | null, currentUrl: string): string {
+  if (!manifest?.start_url || manifest.start_url === '.') {
+    return currentUrl
+  }
+
+  try {
+    const current = new URL(currentUrl)
+    return new URL(manifest.start_url, `${current.origin}/`).toString()
+  } catch {
+    return currentUrl
+  }
+}
+
+export function shouldRedirectToManifestStartUrl(manifest: WebAppManifest | null, currentUrl: string): boolean {
+  if (!manifest?.start_url || manifest.start_url === '.') {
+    return false
+  }
+
+  try {
+    const current = new URL(currentUrl)
+    // Only redirect a bare root entry to the PWA start_url. A hash route or query
+    // (e.g. teragun.com/#leaderboard) means the user deep-linked into the app —
+    // redirecting to start_url would strip their fragment and yank them away.
+    if (current.pathname !== '/' || current.hash || current.search) return false
+    return resolveManifestStartUrl(manifest, currentUrl) !== current.toString()
+  } catch {
+    return false
   }
 }
 
@@ -28,51 +58,7 @@ export const useWebAppManifest = () => {
   const manifestCache = useRef<Map<string, WebAppManifest | null>>(new Map())
   const fetchPromises = useRef<Map<string, Promise<WebAppManifest | null>>>(new Map())
 
-  const fetchManifest = async (websiteUrl: string): Promise<WebAppManifest | null> => {
-    try {
-      const url = new URL(websiteUrl)
-      const baseUrl = `${url.protocol}//${url.host}`
-
-      // Check cache first
-      if (manifestCache.current.has(baseUrl)) {
-        const cached = manifestCache.current.get(baseUrl)
-        if (cached !== undefined) {
-          setManifest(cached)
-          return cached
-        }
-      }
-
-      // Check if already fetching
-      if (fetchPromises.current.has(baseUrl)) {
-        return await fetchPromises.current.get(baseUrl)!
-      }
-
-      setLoading(true)
-
-      const fetchPromise = performManifestFetch(baseUrl)
-      fetchPromises.current.set(baseUrl, fetchPromise)
-
-      try {
-        const result = await fetchPromise
-
-        // Cache the result
-        manifestCache.current.set(baseUrl, result)
-        setManifest(result)
-
-        return result
-      } finally {
-        // Clean up
-        fetchPromises.current.delete(baseUrl)
-        setLoading(false)
-      }
-    } catch (error) {
-      console.error('Error fetching manifest:', error)
-      setManifest(null)
-      return null
-    }
-  }
-
-  const performManifestFetch = async (baseUrl: string): Promise<WebAppManifest | null> => {
+  const performManifestFetch = useCallback(async (baseUrl: string): Promise<WebAppManifest | null> => {
     // Try manifest.json first
     const manifestUrl = `${baseUrl}/manifest.json`
 
@@ -115,11 +101,11 @@ export const useWebAppManifest = () => {
 
         if (manifestLinkMatch) {
           const manifestPath = manifestLinkMatch[1]
-          const manifestUrl = manifestPath.startsWith('http')
+          const linkedManifestUrl = manifestPath.startsWith('http')
             ? manifestPath
             : `${baseUrl}${manifestPath.startsWith('/') ? '' : '/'}${manifestPath}`
 
-          const response = await fetch(manifestUrl, {
+          const response = await fetch(linkedManifestUrl, {
             headers: {
               Accept: 'application/json, application/manifest+json'
             }
@@ -136,44 +122,57 @@ export const useWebAppManifest = () => {
     }
 
     return null
-  }
+  }, [])
 
-  const getStartUrl = (manifest: WebAppManifest | null, currentUrl: string): string => {
-    if (!manifest?.start_url) {
-      return currentUrl
-    }
+  const fetchManifest = useCallback(
+    async (websiteUrl: string): Promise<WebAppManifest | null> => {
+      try {
+        const url = new URL(websiteUrl)
+        const baseUrl = `${url.protocol}//${url.host}`
 
-    const url = new URL(currentUrl)
-    const baseUrl = `${url.protocol}//${url.host}`
+        // Check cache first
+        if (manifestCache.current.has(baseUrl)) {
+          const cached = manifestCache.current.get(baseUrl)
+          if (cached !== undefined) {
+            setManifest(cached)
+            return cached
+          }
+        }
 
-    // Handle different start_url formats
-    if (manifest.start_url.startsWith('/')) {
-      return `${baseUrl}${manifest.start_url}`
-    } else if (manifest.start_url.startsWith('http')) {
-      return manifest.start_url
-    } else if (manifest.start_url === '.') {
-      return currentUrl
-    } else {
-      return `${baseUrl}/${manifest.start_url}`
-    }
-  }
+        // Check if already fetching
+        if (fetchPromises.current.has(baseUrl)) {
+          return await fetchPromises.current.get(baseUrl)!
+        }
 
-  const shouldRedirectToStartUrl = (manifest: WebAppManifest | null, currentUrl: string): boolean => {
-    if (!manifest?.start_url) {
-      return false
-    }
+        setLoading(true)
 
-    // Don't redirect if start_url is "."
-    if (manifest.start_url === '.') {
-      return false
-    }
+        const fetchPromise = performManifestFetch(baseUrl)
+        fetchPromises.current.set(baseUrl, fetchPromise)
 
-    const url = new URL(currentUrl)
-    const pathname = url.pathname
+        try {
+          const result = await fetchPromise
 
-    // Redirect if on root path and start_url is different
-    return pathname === '/' && manifest.start_url !== '/' && manifest.start_url !== '.'
-  }
+          // Cache the result
+          manifestCache.current.set(baseUrl, result)
+          setManifest(result)
+
+          return result
+        } finally {
+          // Clean up
+          fetchPromises.current.delete(baseUrl)
+          setLoading(false)
+        }
+      } catch (error) {
+        console.error('Error fetching manifest:', error)
+        setManifest(null)
+        return null
+      }
+    },
+    [performManifestFetch]
+  )
+
+  const getStartUrl = useCallback(resolveManifestStartUrl, [])
+  const shouldRedirectToStartUrl = useCallback(shouldRedirectToManifestStartUrl, [])
 
   const getBabbagePermissions = (manifest: WebAppManifest | null): { [key: string]: string } | null => {
     return manifest?.babbage?.protocolPermissions || null
