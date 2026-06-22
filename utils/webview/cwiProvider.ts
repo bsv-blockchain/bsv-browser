@@ -28,7 +28,6 @@ export function buildCWIProviderScript(): string {
   function invoke(call, args) {
     return new Promise(function(resolve, reject) {
       var id = generateId();
-      var timeoutId = null;
 
       var listener = function(e) {
         var data;
@@ -36,7 +35,6 @@ export function buildCWIProviderScript(): string {
         if (data.type !== 'CWI' || data.id !== id || data.isInvocation === true) return;
 
         window.removeEventListener('message', listener);
-        if (timeoutId !== null) clearTimeout(timeoutId);
 
         if (data.status === 'error') {
           var err = new Error(data.description || 'Wallet error');
@@ -49,18 +47,12 @@ export function buildCWIProviderScript(): string {
 
       window.addEventListener('message', listener);
 
-      timeoutId = setTimeout(function() {
-        window.removeEventListener('message', listener);
-        reject(new Error('Wallet request timed out'));
-      }, 60000);
-
       try {
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'CWI', isInvocation: true, id: id, call: call, args: args
         }));
       } catch(err) {
         window.removeEventListener('message', listener);
-        if (timeoutId !== null) clearTimeout(timeoutId);
         reject(new Error('Failed to communicate with wallet'));
       }
     });
