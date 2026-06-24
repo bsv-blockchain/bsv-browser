@@ -60,7 +60,7 @@ import { StorageExpoSQLite } from '@/storage'
 import * as SQLite from 'expo-sqlite'
 import { getRegisteredDbs, registerDb, selectLatestDb } from '@/utils/walletDbRegistry'
 import { createBtmsModule } from '@bsv/btms-permission-module'
-import { AppState, AppStateStatus } from 'react-native'
+import { AppState, AppStateStatus, InteractionManager } from 'react-native'
 import RNEventSource from 'react-native-sse'
 import NetInfo from '@react-native-community/netinfo'
 
@@ -876,10 +876,20 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
             }
           }
 
-          // startTasks runs in background — don't await (it never resolves until stopTasks)
-          monitor.startTasks().catch(e => console.error('[WalletContext] Monitor error:', e))
+          // Assign the ref synchronously so foreground-resume can reach the monitor
+          // immediately, but DEFER startTasks() until the current interaction/frame
+          // settles. startTasks opens the ARC SSE connection + header polling + proof
+          // crawls — kicking that off in the same frame as the heavy synchronous wallet
+          // build and the first WebView mount piles network + JS work onto the most
+          // fragile moment of cold start. Deferring it costs nothing (background sync is
+          // not needed for first paint or CWI page interaction) and eases launch
+          // contention that contributes to watchdog/OOM kills on real devices.
           monitorRef.current = monitor
-          logWithTimestamp(F, 'Monitor started with ARC SSE support')
+          InteractionManager.runAfterInteractions(() => {
+            // startTasks runs in background — don't await (it never resolves until stopTasks)
+            monitor.startTasks().catch(e => console.error('[WalletContext] Monitor error:', e))
+          })
+          logWithTimestamp(F, 'Monitor scheduled (ARC SSE) after interactions')
         } catch (error: any) {
           console.warn('[WalletContext] Failed to start monitor:', error.message)
         }

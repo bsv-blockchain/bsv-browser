@@ -47,7 +47,7 @@ import {
   safeBottomInset,
   ADDRESS_BAR_HEIGHT
 } from '@/shared/constants'
-import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
+import { buildLocationHrefScript, isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
 import { useTranslation } from 'react-i18next'
@@ -216,6 +216,11 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     [onNavStateChange, tabId]
   )
   const lastProcessRecoveryAt = useRef(0)
+  // Bounded crash-recovery: count consecutive renderer terminations so a page that
+  // reliably kills its WebContent process can't drive an infinite reload loop —
+  // which itself spikes memory/CPU and can OOM-kill the whole app on SE-class
+  // hardware. Per-tab (useRef discarded on unmount); reset after a healthy gap.
+  const processRecoveryCount = useRef(0)
   const recoverTerminatedProcess = useCallback(
     (reason: string) => {
       const tab = getTab()
@@ -228,8 +233,27 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
 
       // Avoid a reload loop if WebKit repeatedly kills the same heavy page.
       const now = Date.now()
-      if (now - lastProcessRecoveryAt.current < 5000) return
+      const sinceLast = now - lastProcessRecoveryAt.current
+      if (sinceLast < 5000) return
+      // A long quiet gap means the previous reload ran healthily — treat the next
+      // termination as a fresh incident, not part of the same loop.
+      if (sinceLast > 60000) processRecoveryCount.current = 0
       lastProcessRecoveryAt.current = now
+      processRecoveryCount.current += 1
+
+      // Bound the retries: after 3 terminations in a row, stop reloading and show an
+      // error page. An unbounded reload loop on a page that keeps killing its
+      // renderer is itself a memory/CPU spike that can OOM-kill the whole app.
+      if (processRecoveryCount.current > 3) {
+        console.warn(
+          `[WebView] renderer terminated ${processRecoveryCount.current}x; stopping reload loop for tab=${tabId}`
+        )
+        const crashPage = getErrorPage('crash')
+        webviewRef.current?.injectJavaScript(
+          `document.open();document.write(\`${escapeForTemplateLiteral(crashPage)}\`);document.close();true;`
+        )
+        return
+      }
 
       setTimeout(() => {
         if (tabStore.activeTabId !== tabId) return
@@ -1362,7 +1386,7 @@ const Browser = observer(function Browser() {
       // Retry the cancelled target rather than reloading the stale document.
       cancelledLoadTabIds.current.delete(currentTab.id)
       injectNavigationSplash(currentTab.url)
-      currentTab.webviewRef?.current?.injectJavaScript(`window.location.href = ${JSON.stringify(currentTab.url)};true;`)
+      currentTab.webviewRef?.current?.injectJavaScript(buildLocationHrefScript(currentTab.url))
     } else {
       currentTab.webviewRef?.current?.reload()
     }

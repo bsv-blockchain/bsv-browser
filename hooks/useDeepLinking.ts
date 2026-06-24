@@ -27,9 +27,13 @@ export function useDeepLinking() {
       // Wait for tabStore to initialize before attempting to handle deep link
       if (!tabStore.isInitialized) {
         console.log('[Deep Link] Waiting for tabStore to initialize...')
-        // Wait up to 5 seconds for initialization
+        // Wait up to 15 seconds for initialization. On a slow cold start (large
+        // persisted tab/history JSON contending with the wallet build on the one
+        // JS thread) init can exceed a few seconds; the old 5s cap silently DROPPED
+        // the tapped link — the exact default-browser launch this app exists for.
+        // The poll yields the thread each tick, so waiting longer is harmless.
         let attempts = 0
-        while (!tabStore.isInitialized && attempts < 50) {
+        while (!tabStore.isInitialized && attempts < 150) {
           await new Promise(resolve => setTimeout(resolve, 100))
           attempts++
         }

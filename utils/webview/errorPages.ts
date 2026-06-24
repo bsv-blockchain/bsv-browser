@@ -56,7 +56,16 @@ export const errorPages = {
   '402': errorPage('402', '#e67e22', 'Payment Required', 'Content protected, please refresh to pay.'),
   '403': errorPage('403', '#e74c3c', 'Access Forbidden', "You don't have permission to view this page."),
   '404': errorPage('404', 'var(--sub)', 'Page Not Found', 'The requested page could not be found.'),
-  '500': errorPage('500', '#e74c3c', 'Server Error', 'Something went wrong on the server.')
+  '500': errorPage('500', '#e74c3c', 'Server Error', 'Something went wrong on the server.'),
+  // Shown by WebViewHost's bounded crash-recovery after a tab's renderer process
+  // has terminated repeatedly — stops an unbounded reload loop that could itself
+  // OOM-kill the app on low-RAM devices.
+  crash: errorPage(
+    ':(',
+    '#e67e22',
+    'Page Stopped Responding',
+    'This page used too much memory and was reloaded several times. Reload to try again, or close the tab.'
+  )
 } as const
 
 export interface NativeErrorInfo {

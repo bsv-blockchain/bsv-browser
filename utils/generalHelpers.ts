@@ -47,3 +47,31 @@ export function normalizeUrlForHistory(url: string): string {
     return url
   }
 }
+
+// Code points that are legal inside a JSON string but break a JS string literal
+// (or crash older WebKit when injected): LINE SEPARATOR and PARAGRAPH SEPARATOR.
+// Built from numeric code points so no raw separator byte exists in this source.
+const LINE_SEP = 0x2028
+const PARA_SEP = 0x2029
+const JS_STRING_UNSAFE = new RegExp('[' + String.fromCharCode(LINE_SEP, PARA_SEP) + ']', 'g')
+
+/**
+ * Build a safe `window.location.href = …;` script for WebView.injectJavaScript().
+ *
+ * Interpolating a URL straight into a template literal (`href = "${url}"`) breaks
+ * the instant the URL contains a double-quote, backslash, newline, or one of the
+ * separators above — the injected source becomes a syntax error. On iOS a syntax
+ * error in injectJavaScript kills the WebContent process
+ * (onContentProcessDidTerminate), which reads to the user as an app crash. This is
+ * the exact failure mode for arbitrary deep-linked URLs (the default-browser case).
+ *
+ * JSON.stringify yields a valid JS string literal for every input except those two
+ * separators, which we escape explicitly.
+ *
+ * The new-tab sentinel (about:blank) maps through unchanged — it has no real URL.
+ */
+export function buildLocationHrefScript(url: string): string {
+  const target = url === kNEW_TAB_URL ? 'about:blank' : url
+  const literal = JSON.stringify(target).replace(JS_STRING_UNSAFE, ch => '\\u' + ch.charCodeAt(0).toString(16))
+  return `window.location.href = ${literal};true;`
+}

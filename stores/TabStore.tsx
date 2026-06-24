@@ -5,7 +5,7 @@ import { WebView } from 'react-native-webview'
 import { LayoutAnimation, Platform } from 'react-native'
 import { Tab } from '@/shared/types/browser'
 import { kNEW_TAB_URL } from '@/shared/constants'
-import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
+import { buildLocationHrefScript, isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import { deleteThumbnail } from '@/utils/thumbnailService'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
@@ -175,11 +175,12 @@ export class TabStore {
   get activeTab(): Tab | null {
     const tab = this.tabs.find(t => t.id === this.activeTabId)
 
-    // If no tab found but we have tabs, fix the activeTabId to point to the first tab
+    // If activeTabId is momentarily stale (e.g. mid close-all, before the new
+    // active tab is committed), fall back to the first tab WITHOUT mutating state.
+    // Writing activeTabId here is a side effect inside a MobX getter and races the
+    // splice/reset loops; the close/switch paths already keep activeTabId correct,
+    // so a read-only fallback is the safe choice.
     if (!tab && this.tabs.length > 0) {
-      runInAction(() => {
-        this.activeTabId = this.tabs[0].id
-      })
       return this.tabs[0]
     }
 
@@ -383,12 +384,9 @@ export class TabStore {
 
       this.pendingHistoryJumps.set(tabId, 2)
       try {
-        if (url === kNEW_TAB_URL) {
-          // Navigate to new tab page
-          tab.webviewRef.current.injectJavaScript(`window.location.href = "about:blank";`)
-        } else {
-          tab.webviewRef.current.injectJavaScript(`window.location.href = "${url}";`)
-        }
+        // Escaped injection — a raw URL with a quote/backslash/newline/U+2028 would
+        // be a JS syntax error and kill the iOS WebContent process (looks like a crash).
+        tab.webviewRef.current.injectJavaScript(buildLocationHrefScript(url))
         devLog(`🔙 [TAB_STORE] Successfully navigated to: ${url}`)
       } catch (error) {
         console.error(`🔙 [TAB_STORE] Error navigating to ${url}:`, error)
@@ -459,7 +457,7 @@ export class TabStore {
 
       this.pendingHistoryJumps.set(tabId, 2)
       try {
-        tab.webviewRef.current?.injectJavaScript(`window.location.href = "${url}";`)
+        tab.webviewRef.current?.injectJavaScript(buildLocationHrefScript(url))
       } catch (error) {
         console.error(`🔜 [TAB_STORE] Error navigating forward to ${url}:`, error)
       }
@@ -520,11 +518,7 @@ export class TabStore {
 
     this.pendingHistoryJumps.set(tabId, 2)
     try {
-      if (url === kNEW_TAB_URL) {
-        tab.webviewRef.current.injectJavaScript(`window.location.href = "about:blank";`)
-      } else {
-        tab.webviewRef.current.injectJavaScript(`window.location.href = "${url}";`)
-      }
+      tab.webviewRef.current.injectJavaScript(buildLocationHrefScript(url))
     } catch (error) {
       console.error(`🎯 [TAB_STORE] Error navigating to history index ${index}:`, error)
     }
@@ -694,10 +688,47 @@ export class TabStore {
 
   async clearAllTabs() {
     devLog('clearAllTabs() called')
+    // Atomic close-all: tear down every WebView/thumbnail/history map inline, reset
+    // state, then create ONE fresh tab. We deliberately do NOT loop closeTab(): that
+    // fires LayoutAnimation.configureNext per tab (+ a recursive newTab when length
+    // hits 0) and a per-tab setActiveTab that raises switchLoading with an 8s timer —
+    // N+2 CoreAnimation commits plus stacked timers in one JS frame, a real-device
+    // instability/termination risk. A single configureNext animates the whole
+    // transition once.
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+
+    // Cancel any in-flight tab-switch overlay + its 8s watchdog so a stale timer
+    // can't fire against the fresh tab after close-all.
+    this.clearSwitchLoading()
+
+    for (const tab of this.tabs) {
+      if (tab.webviewRef?.current) {
+        try {
+          tab.webviewRef.current.stopLoading()
+          tab.webviewRef.current.clearCache?.(true)
+          tab.webviewRef.current.clearHistory?.()
+        } catch {}
+      }
+      deleteThumbnail(tab.id)
+    }
+
+    this.tabs = []
+    this.tabNavigationHistories = {}
+    this.tabHistoryIndexes = {}
+    this.lastFocusedAt.clear()
+    this.lastNavSig.clear()
+    this.pendingHistoryJumps.clear()
     this.nextId = 1
-    const tabIds = this.tabs.map(t => t.id)
-    tabIds.forEach(id => this.closeTab(id))
+
+    // Create the single replacement tab directly (no LayoutAnimation here — the
+    // configureNext above already covers this commit).
+    const fresh = this.createTab(kNEW_TAB_URL)
+    this.tabs.push(fresh)
+    this.activeTabId = fresh.id
+    this.lastFocusedAt.set(fresh.id, Date.now())
+    this.tabNavigationHistories[fresh.id] = [{ url: kNEW_TAB_URL, title: 'New Tab' }]
+    this.tabHistoryIndexes[fresh.id] = 0
+
     this.saveTabs()
   }
 
