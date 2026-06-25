@@ -32,12 +32,12 @@
     "test": "jest"
   },
   "dependencies": {
-    "@bsv/btms": "^1.0.2",
-    "@bsv/btms-permission-module": "^1.0.2",
-    "@bsv/message-box-client": "^2.1.2",
-    "@bsv/sdk": "^2.1.4",
-    "@bsv/wallet-relay": "^0.1.1",
-    "@bsv/wallet-toolbox-mobile": "^2.1.28",
+    "@bsv/btms": "^1.1.0",
+    "@bsv/btms-permission-module": "^1.1.0",
+    "@bsv/message-box-client": "^2.2.0",
+    "@bsv/sdk": "^2.1.6",
+    "@bsv/wallet-relay": "^0.2.0",
+    "@bsv/wallet-toolbox-mobile": "^2.3.2",
     "@callstack/liquid-glass": "^0.7.1",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",
@@ -137,7 +137,9 @@
     "minimatch": "^10.2.2",
     "postcss": "^8.5.10",
     "uuid": "^11.1.1",
-    "js-yaml": "^4.2.0"
+    "js-yaml": "^4.2.0",
+    "react-native": "0.83.6",
+    "@react-native/virtualized-lists": "0.83.6"
   },
   "private": true,
   "expo": {

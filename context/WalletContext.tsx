@@ -37,7 +37,7 @@ const DEFAULT_SETTINGS: WalletSettings = {
 }
 import { showToast } from '@/components/ui/Toast'
 import type { AppChain } from './config'
-import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR } from './config'
+import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR, toWalletChain } from './config'
 import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_COOLDOWN_MS, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { UserContext } from './UserContext'
@@ -62,6 +62,16 @@ import { getRegisteredDbs, registerDb, selectLatestDb } from '@/utils/walletDbRe
 import { createBtmsModule } from '@bsv/btms-permission-module'
 import { AppState, AppStateStatus, InteractionManager } from 'react-native'
 import RNEventSource from 'react-native-sse'
+
+// The toolbox's ArcSSEClient constructs the EventSource with `{ debug: true }`,
+// which makes react-native-sse `console.debug()` on EVERY readystate change of a
+// long-lived SSE connection — a continuous flood over the Metro bridge that
+// starves the JS thread and janks every interaction. Force debug off.
+class QuietEventSource extends (RNEventSource as any) {
+  constructor(url: any, options: any = {}) {
+    super(url, { ...options, debug: false })
+  }
+}
 import NetInfo from '@react-native-community/netinfo'
 
 
@@ -576,9 +586,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         logWithTimestamp(F, 'Building wallet')
         const newManagers = {} as any
         const chain = selectedNetwork
+        // Toolbox chain id ('teratest' -> 'ttn'). App keeps 'teratest' for AsyncStorage keys / env / UI.
+        const walletChain = toWalletChain(selectedNetwork)
         const keyDeriver = new KeyDeriver(new PrivateKey(primaryKey))
         const storageManager = new WalletStorageManager(keyDeriver.identityKey)
-        const signer = new WalletSigner(chain, keyDeriver, storageManager)
+        const signer = new WalletSigner(walletChain, keyDeriver, storageManager)
 
         const bsvExchangeRate = await getExchangeRate()
         const callbackToken = keyDeriver.identityKey.substring(0, 32)
@@ -608,7 +620,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         if (chain === 'main') {
           services.postBeefServices.add(createGorillaPoolBroadcastService('https://arc.gorillapool.io'))
         }
-        services.postBeefServices.add(createWocBroadcastService(chain, serviceOptions.whatsOnChainApiKey))
+        services.postBeefServices.add(createWocBroadcastService(walletChain, serviceOptions.whatsOnChainApiKey))
         if (bitailsService) {
           services.postBeefServices.add({ name: 'Bitails', service: bitailsService.postBeef.bind(bitailsService) })
         }
@@ -619,7 +631,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           ? 'https://api.whatsonchain.com/v1/bsv/main'
           : chain === 'test'
             ? 'https://api.whatsonchain.com/v1/bsv/test'
-            : 'https://woc-ttn.bsvb.tech/v1/bsv/test'
+            : 'https://api.woc-ttn.bsvblockchain.tech/v1/bsv/test'
         const wocApiKey = serviceOptions.whatsOnChainApiKey
         const chaintracksClient = serviceOptions.chaintracks as any
         const getMerklePathSvc = (services as any).getMerklePathServices
@@ -701,7 +713,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           console.log(`[WalletContext] Selected DB: ${selectedDb} (from ${knownDbs.length} registered)`)
 
           phoneStorage = new StorageExpoSQLite({
-            ...StorageProvider.createStorageBaseOptions(chain),
+            ...StorageProvider.createStorageBaseOptions(walletChain),
             feeModel: { model: 'sat/kb', value: 100 },
             identityKey,
             databaseName: selectedDb
@@ -767,9 +779,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         // Start background monitor for transaction status updates (sending → unproven → completed)
         try {
-          const monitorOptions = Monitor.createDefaultWalletMonitorOptions(chain, storageManager, services)
+          const monitorOptions = Monitor.createDefaultWalletMonitorOptions(walletChain, storageManager, services)
           monitorOptions.callbackToken = callbackToken
-          monitorOptions.EventSourceClass = RNEventSource
+          monitorOptions.EventSourceClass = QuietEventSource
           monitorOptions.onTransactionStatusChanged = async (_txid: string, _newStatus: string) => {
             setTxStatusVersion(v => v + 1)
           }
@@ -1193,7 +1205,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     if (!storage) throw new Error('Storage not available')
 
     const wocBase = selectedNetwork === 'teratest'
-      ? 'https://woc-ttn.bsvb.tech'
+      ? 'https://api.woc-ttn.bsvblockchain.tech'
       : 'https://api.whatsonchain.com'
     const chain = selectedNetwork === 'main' ? 'main' : 'test'
 
@@ -1258,7 +1270,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         ? 'https://api.whatsonchain.com/v1/bsv/main'
         : selectedNetwork === 'test'
           ? 'https://api.whatsonchain.com/v1/bsv/test'
-          : 'https://api.whatsonchain.com/v1/bsv/main'
+          : 'https://api.woc-ttn.bsvblockchain.tech/v1/bsv/test'
 
     // Rate limit: max 3 requests/sec (WoC limit ~1 per 0.34s)
     const WOC_INTERVAL = 340

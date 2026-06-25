@@ -143,7 +143,7 @@ export default function LegacyPaymentsScreen() {
   const wocConfig = {
     main: { apiBase: 'https://api.whatsonchain.com', segment: 'main', network: 'mainnet' as const },
     test: { apiBase: 'https://api.whatsonchain.com', segment: 'test', network: 'testnet' as const },
-    teratest: { apiBase: 'https://api.woc-ttn.bsvb.tech', segment: 'test', network: 'testnet' as const }
+    teratest: { apiBase: 'https://api.woc-ttn.bsvblockchain.tech', segment: 'test', network: 'testnet' as const }
   }[selectedNetwork]
   const network = wocConfig.network
 

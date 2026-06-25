@@ -261,15 +261,22 @@ export function useAddressBarAnimation(
   const animatedAddressBarStyle = useAnimatedStyle(() => {
     const keyboardOffset = addressBarAtTop.value ? 0 : -keyboardHeight.value
     const collapse = addressBarCollapseProgress.value
-    // Binary visibility: fully visible until we've morphed most of the way,
-    // then snap invisible for the final stretch. Always emits 0 or 1.
-    const barOpacity = collapse >= 0.55 ? 0 : 1
+    // NO opacity key — the wrapper stays FULLY OPAQUE for the entire collapse.
+    // Why: the bar unmounts at the end of the collapse animation. If it were at
+    // opacity 0 (even via a binary step) when it unmounts, its LiquidGlass pills
+    // return a DISABLED UIVisualEffectView to Fabric's recycler pool; after a few
+    // hide/unhide cycles a later expand reuses one of those pooled disabled views
+    // and the pill renders transparent (the cumulative "sticks after N cycles"
+    // bug). Hiding via transform only (scale → ~0 + translate) never touches the
+    // effect layer, so pills always unmount enabled and the pool stays clean.
     return {
-      opacity: barOpacity,
       transform: [
         { translateY: addressBarTranslateY.value + keyboardOffset },
-        { translateX: collapse * 40 },
-        { scale: 1 - collapse * 0.4 }
+        // Small rightward nudge; the bulk of the rightward bias comes from
+        // transformOrigin:'right center' on chromeWrapper so the bar tucks into
+        // the ... menu button as it shrinks.
+        { translateX: collapse * 20 },
+        { scale: 1 - collapse * 0.95 }
       ]
     }
   })

@@ -1,4 +1,5 @@
 import type { AppChain } from '@/context/config'
+import { toWalletChain } from '@/context/config'
 import {
   ChaintracksServiceClient,
   Services
@@ -19,8 +20,9 @@ export function createServiceOptions(
   arcUrlOverride?: string,
   arcApiKeyOverride?: string
 ): WalletServicesOptions {
+  const walletChain = toWalletChain(network)
   const base = {
-    chain: network,
+    chain: walletChain,
     bsvExchangeRate,
     fiatExchangeRates: {
       timestamp: new Date(),
@@ -42,7 +44,7 @@ export function createServiceOptions(
       whatsOnChainApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
       taalApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
       chaintracks: new ChaintracksServiceClient(
-        network,
+        walletChain,
         process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://arcade-v2-us-1.bsvblockchain.tech/chaintracks/v1'
       )
     }
@@ -61,7 +63,7 @@ export function createServiceOptions(
       whatsOnChainApiKey: process.env?.EXPO_PUBLIC_TEST_WOC_API_KEY ?? '',
       taalApiKey: process.env?.EXPO_PUBLIC_TEST_TAAL_API_KEY ?? '',
       chaintracks: new ChaintracksServiceClient(
-        network,
+        walletChain,
         process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ?? 'https://arcade-v2-testnet-us-1.bsvblockchain.tech/chaintracks/v1'
       )
     }
@@ -80,7 +82,7 @@ export function createServiceOptions(
     whatsOnChainApiKey: process.env?.EXPO_PUBLIC_TERATEST_WOC_API_KEY ?? '',
     taalApiKey: process.env?.EXPO_PUBLIC_TERATEST_WOC_API_KEY ?? '',
     chaintracks: new ChaintracksServiceClient(
-      network,
+      walletChain,
       process.env?.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL ?? 'https://arcade-v2-ttn-us-1.bsvblockchain.tech/chaintracks/v1'
     )
   }

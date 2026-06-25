@@ -8,6 +8,7 @@
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from './StorageExpoSQLite'
 import type { AppChain } from '@/context/config'
+import { toWalletChain } from '@/context/config'
 
 export interface LocalStorageConfig {
   network: AppChain
@@ -23,7 +24,7 @@ export async function initializeLocalStorage(config: LocalStorageConfig): Promis
 
   // Create storage instance
   const storage = new StorageExpoSQLite({
-    ...StorageProvider.createStorageBaseOptions(network)
+    ...StorageProvider.createStorageBaseOptions(toWalletChain(network))
   })
 
   // Initialize database

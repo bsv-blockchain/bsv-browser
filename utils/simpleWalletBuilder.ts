@@ -14,6 +14,7 @@ import {
 } from '@bsv/wallet-toolbox-mobile'
 import { KeyDeriver, PrivateKey, WalletInterface } from '@bsv/sdk'
 import type { AppChain } from '@/context/config'
+import { toWalletChain } from '@/context/config'
 
 export interface SimpleWalletBuilderConfig {
   chain: AppChain
@@ -30,6 +31,7 @@ export async function buildSimpleWallet(
   config: SimpleWalletBuilderConfig
 ): Promise<WalletInterface> {
   const { chain, useLocalStorage = true } = config
+  const walletChain = toWalletChain(chain)
 
   // Create key deriver from primary key
   const keyDeriver = new KeyDeriver(new PrivateKey(primaryKey))
@@ -38,10 +40,10 @@ export async function buildSimpleWallet(
   const storageManager = new WalletStorageManager(keyDeriver.identityKey)
 
   // Create wallet signer
-  const signer = new WalletSigner(chain, keyDeriver, storageManager)
+  const signer = new WalletSigner(walletChain, keyDeriver, storageManager)
 
   // Create services
-  const services = new Services(chain)
+  const services = new Services(walletChain)
 
   // Create wallet
   const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)

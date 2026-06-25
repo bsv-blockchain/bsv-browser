@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { perf } from '@/utils/perf'
+import { isLoggingEnabled } from '@/utils/logging'
 
 /**
  * Counts renders of a component and records each as a `render:<name>` perf span
@@ -15,7 +16,9 @@ export function useRenderCount(name: string): number {
   count.current += 1
   if (__DEV__) {
     perf.measure(`render:${name}`, 0)
-    console.log(`[render] ${name} #${count.current}`)
+    // Gated by the master logging switch so the dev menu can silence this
+    // per-render flood while reproducing a slow interaction.
+    if (isLoggingEnabled()) console.log(`[render] ${name} #${count.current}`)
   }
   return count.current
 }

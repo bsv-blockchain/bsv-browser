@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite'
 import type { SQLiteDatabase } from 'expo-sqlite'
 import { createTables } from './schema/createTables'
+import { devLog } from '../utils/logging'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import type { StorageProviderOptions } from '@bsv/wallet-toolbox-mobile'
 import type {
@@ -1280,7 +1281,7 @@ export class StorageExpoSQLite extends StorageProvider {
       partial: { userId, basketId, spendable: true as any },
       txStatus: txStatus as any
     })
-    console.log(
+    devLog(
       `[StorageExpoSQLite] allocateChangeInput: userId=${userId} basketId=${basketId} target=${targetSatoshis} found ${outputs.length} spendable outputs, satoshis: [${outputs.map(o => o.satoshis).join(',')}]`
     )
     let output: TableOutput | undefined
@@ -1342,10 +1343,10 @@ export class StorageExpoSQLite extends StorageProvider {
 
   // Override internalizeAction for debugging
   async internalizeAction(auth: AuthId, args: any): Promise<any> {
-    console.log('[StorageExpoSQLite] internalizeAction called, userId:', auth.userId)
+    devLog('[StorageExpoSQLite] internalizeAction called, userId:', auth.userId)
     try {
       const result = await super.internalizeAction(auth, args)
-      console.log(
+      devLog(
         '[StorageExpoSQLite] internalizeAction result:',
         JSON.stringify({
           accepted: result.accepted,

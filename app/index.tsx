@@ -30,7 +30,7 @@ import Animated, {
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
-import { router } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 
 import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -919,6 +919,7 @@ const Browser = observer(function Browser() {
     },
     [menuPopoverProgress]
   )
+
   // Binary visibility (NOT a fractional fade). The popover card is a
   // LiquidGlassView (UIVisualEffectView on iOS) and animating an ancestor's
   // opacity to fractional values triggers Apple's well-known stuck-effect
@@ -1010,6 +1011,31 @@ const Browser = observer(function Browser() {
     setGlassRevision(r => r + 1)
   }, [])
 
+  // When the Browser screen regains focus after returning from a pushed route
+  // (transactions, payments, wallet-config, …):
+  //  1. Close any lingering menu sheet / popover so the wallet menu's Settings
+  //     sheet doesn't sit open over the page on back. Opening an in-screen sheet
+  //     does NOT blur Browser, so normal sheet use is unaffected — this only
+  //     fires on return from a full-screen route. `sheet` is read through a ref
+  //     so this callback stays stable (depending on `sheet` directly would
+  //     re-run on every sheet open and instantly close it).
+  //  2. Remount the chrome LiquidGlass pills via glassRevision. The native-stack
+  //     route transition detaches/reattaches the screen's views, which can leave
+  //     a UIVisualEffectView (address-bar / back-button pills) stuck transparent
+  //     with nothing to cure it — a fresh key tears it down and recreates it.
+  //     Skipped on the first focus (initial mount) to avoid a startup remount.
+  const sheetRef = useRef(sheet)
+  sheetRef.current = sheet
+  const hasFocusedOnceRef = useRef(false)
+  useFocusEffect(
+    useCallback(() => {
+      sheetRef.current.close()
+      setMenuPopoverOpen(false)
+      if (hasFocusedOnceRef.current) bumpGlassRevision()
+      hasFocusedOnceRef.current = true
+    }, [setMenuPopoverOpen, bumpGlassRevision])
+  )
+
   const collapseAddressBar = useCallback(() => {
     // Remember pre-collapse position so expand can spring the bar back to the
     // same edge. The useAddressBarAnimation hook keeps addressBarAtTop.value
@@ -1017,10 +1043,18 @@ const Browser = observer(function Browser() {
     // restores the correct translateY — this ref is just for any JS-side
     // consumers that need to know.
     positionBeforeCollapse.current = addressBarIsAtTop ? 'top' : 'bottom'
-    // Bump revision so the collapsed dot's GlassPill mounts FRESH, and so
-    // the AddressBar (still mounted during exit-animation) is torn down at
-    // end-of-anim with a known fresh native-view tree on the next expand.
-    bumpGlassRevision()
+    // DO NOT bump glassRevision here. Bumping on collapse remounts the
+    // AddressBar's LiquidGlass pills FRESH at the very moment the wrapper is
+    // animating its opacity to 0 — a newly-mounted UIVisualEffectView that sees
+    // an opacity change before its effect finishes initializing sticks
+    // transparent (same "init disabled" mechanism as the menu popover), and that
+    // stuck native view then returns to Fabric's recycler pool and poisons the
+    // next expand's remount (the reported "pill transparent after hide/unhide",
+    // alternating between the URL and back-button pills). The collapse bump also
+    // did nothing useful: the collapsed dot/kebab GlassPill is NOT keyed by
+    // glassRevision, so this only ever remounted the exiting bar. Let the
+    // already-initialized pills animate out untouched; the expand bump below
+    // remounts fresh pills at a stable opacity 1.
     // Flip JS state immediately (dot mounts at progress=0 and fades in via the
     // shared collapse-progress), and keep the bar wrapper mounted briefly via
     // barExitAnimating so its UI-thread fade/scale finishes on screen.
@@ -1030,7 +1064,7 @@ const Browser = observer(function Browser() {
     // withTiming(progress, 1) on the UI thread.
     setBarExitAnimating(true)
     setAddressBarCollapsed(true)
-  }, [addressBarIsAtTop, bumpGlassRevision])
+  }, [addressBarIsAtTop])
 
   const expandAddressBar = useCallback(() => {
     // CRITICAL order: zero out the shared values FIRST so that when React
@@ -1041,15 +1075,25 @@ const Browser = observer(function Browser() {
     // LiquidGlassView pill descendant in Apple's stuck UIVisualEffectView
     // state (pills appear transparent / lost their blur background).
     resetGestureState()
-    // Bump revision so the AddressBar mounts with a fresh key and its
-    // LiquidGlass pills are brand-new native views — never inheriting a stuck
-    // UIVisualEffectView state from the previous expand cycle.
-    bumpGlassRevision()
-    setAddressBarCollapsed(false)
-    // Just in case the exit-end callback didn't fire (e.g. cancelled animation),
-    // make sure the bar's exit-mount flag is cleared so we don't have a ghost
-    // wrapper layered behind the freshly re-mounted real bar.
-    setBarExitAnimating(false)
+    // DEFER the remount by one frame. resetGestureState() writes
+    // addressBarCollapseProgress.value = 0 from the JS thread, but that write is
+    // applied on the UI thread ASYNCHRONOUSLY. If we mount the fresh AddressBar
+    // synchronously here, its LiquidGlass pills can paint their FIRST frame while
+    // the UI thread still holds the stale collapsed progress (=1 → opacity 0),
+    // mounting the new UIVisualEffectView at opacity 0 and sticking it
+    // transparent before its effect initializes. Waiting one frame guarantees
+    // the =0 write has propagated, so the pills mount at a stable opacity 1.
+    requestAnimationFrame(() => {
+      // Bump revision so the AddressBar mounts with a fresh key and its
+      // LiquidGlass pills are brand-new native views — never inheriting a stuck
+      // UIVisualEffectView state from the previous expand cycle.
+      bumpGlassRevision()
+      setAddressBarCollapsed(false)
+      // Just in case the exit-end callback didn't fire (e.g. cancelled
+      // animation), clear the bar's exit-mount flag so we don't have a ghost
+      // wrapper layered behind the freshly re-mounted real bar.
+      setBarExitAnimating(false)
+    })
   }, [resetGestureState, bumpGlassRevision])
 
   // Keep the ref up to date so runOnJS always calls the latest version (avoids stale closures)
@@ -2553,6 +2597,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    zIndex: 20
+    zIndex: 20,
+    // Collapse shrinks toward the right edge (where the ... menu button sits) so
+    // the bar visibly tucks into the kebab — signalling that tapping ... brings
+    // it back. Paired with scale/translate in animatedAddressBarStyle.
+    transformOrigin: 'right center'
   }
 })

@@ -72,7 +72,7 @@ function createArcBroadcastService(
               'Content-Type': 'application/octet-stream',
               ...headers
             },
-            body: ef,
+            body: ef as unknown as BodyInit,
             signal: controller.signal
           })
         } finally {
@@ -133,7 +133,9 @@ export function createWocBroadcastService(chain: string, apiKey?: string) {
       ? 'https://api.whatsonchain.com/v1/bsv/main'
       : chain === 'test'
         ? 'https://api.whatsonchain.com/v1/bsv/test'
-        : 'https://api.whatsonchain.com/v1/bsv/main'
+        : chain === 'ttn'
+          ? 'https://api.woc-ttn.bsvblockchain.tech/v1/bsv/test'
+          : 'https://api.whatsonchain.com/v1/bsv/main'
   const name = 'WhatsOnChain'
 
   return {

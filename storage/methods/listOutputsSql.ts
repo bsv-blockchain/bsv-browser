@@ -7,6 +7,7 @@ import type { ListOutputsResult, Validation } from '@bsv/sdk'
 import type { AuthId } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
 import type { StorageExpoSQLite } from '../StorageExpoSQLite'
 import { getListOutputsSpecOp } from '@bsv/wallet-toolbox-mobile/out/src/storage/methods/ListOutputsSpecOp'
+import { devLog } from '../../utils/logging'
 
 export async function listOutputsSql(
   storage: StorageExpoSQLite,
@@ -32,7 +33,7 @@ export async function listOutputsSql(
   let basketId: number | undefined
   if (basket) {
     const baskets = await storage.findOutputBaskets({ partial: { userId, name: basket } })
-    console.log(`[listOutputsSql] basket="${basket}" found ${baskets.length} matches${baskets.length > 0 ? ` (id=${baskets[0].basketId})` : ''}`)
+    devLog(`[listOutputsSql] basket="${basket}" found ${baskets.length} matches${baskets.length > 0 ? ` (id=${baskets[0].basketId})` : ''}`)
     if (baskets.length !== 1) return r
     basketId = baskets[0].basketId
   }
@@ -103,9 +104,9 @@ export async function listOutputsSql(
        WHERE o.userId = ? AND o.basketId = ?`,
       [userId, basketId]
     )
-    console.log(`[listOutputsSql] DEBUG basket=${basketId} raw outputs:`, JSON.stringify(raw))
+    devLog(`[listOutputsSql] DEBUG basket=${basketId} raw outputs:`, JSON.stringify(raw))
   }
-  console.log(`[listOutputsSql] basket="${basket}" specOp=${specOp?.name || 'none'} found ${outputs.length} outputs, satoshis: [${outputs.slice(0, 5).map(o => o.satoshis).join(',')}]`)
+  devLog(`[listOutputsSql] basket="${basket}" specOp=${specOp?.name || 'none'} found ${outputs.length} outputs, satoshis: [${outputs.slice(0, 5).map(o => o.satoshis).join(',')}]`)
 
   // Count total
   if (outputs.length === limit) {

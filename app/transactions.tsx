@@ -106,11 +106,15 @@ export default function TransactionsScreen() {
 
   const handleExplorerLink = useCallback((txid: string) => {
     const baseUrl = selectedNetwork === 'main' ? 'https://whatsonchain.com'
-      : selectedNetwork === 'teratest' ? 'https://woc-ttn.bsvb.tech'
+      : selectedNetwork === 'teratest' ? 'https://woc-ttn.bsvblockchain.tech'
       : 'https://test.whatsonchain.com'
     const url = `${baseUrl}/tx/${txid}`
     tabStore.updateTab(tabStore.activeTabId, { url })
-    router.push('/')
+    // Return to the existing Browser screen — never push('/'), which stacks a
+    // SECOND index/Browser on top of the live one (native-stack keeps both
+    // mounted → two concurrent Browser instances doubling all render work).
+    if (router.canGoBack()) router.back()
+    else router.replace('/')
   }, [selectedNetwork])
 
   const handleCopyRawTx = useCallback(async (txid: string) => {
