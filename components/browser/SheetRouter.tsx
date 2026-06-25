@@ -20,7 +20,6 @@ type Props = {
   domainForUrl: (u: string) => string
   homepageUrl: string
   updateActiveTab: (patch: Partial<Tab>) => void
-  setAddressText: (v: string) => void
   history: HistoryEntry[]
   clearHistory: () => Promise<void>
   removeHistoryItem: (url: string) => Promise<void>
@@ -34,7 +33,6 @@ export function SheetRouter({
   domainForUrl,
   homepageUrl,
   updateActiveTab,
-  setAddressText,
   history,
   clearHistory,
   removeHistoryItem,

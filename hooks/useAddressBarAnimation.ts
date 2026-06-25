@@ -4,6 +4,7 @@ import { Gesture } from 'react-native-gesture-handler'
 import { useSharedValue, useAnimatedStyle, withSpring, withTiming, useAnimatedReaction, runOnJS, cancelAnimation, Easing } from 'react-native-reanimated'
 import type { EdgeInsets } from 'react-native-safe-area-context'
 import { safeBottomInset, ADDRESS_BAR_HEIGHT } from '@/shared/constants'
+import uiStore from '@/stores/uiStore'
 
 export function useAddressBarAnimation(
   insets: EdgeInsets,
@@ -34,7 +35,15 @@ export function useAddressBarAnimation(
   // AddressBar position animation — start at bottom (translateY = travelDistance)
   const addressBarAtTop = useSharedValue(false)
   // React-state mirror of addressBarAtTop for prop-driven components (e.g. MenuPopover)
-  const [addressBarIsAtTop, setAddressBarIsAtTop] = useState(false)
+  const [addressBarIsAtTop, setAddressBarIsAtTopState] = useState(false)
+  // Single source of truth: mirror the JS boolean into uiStore too so Browser
+  // can read it as an observer (WebView bottom inset + SwitchLoadingOverlay)
+  // without taking it as a prop. Wherever the hook flips top<->bottom it goes
+  // through here, keeping local state and the store in lockstep.
+  const setAddressBarIsAtTop = (v: boolean) => {
+    setAddressBarIsAtTopState(v)
+    uiStore.setAddressBarAtTop(v)
+  }
 
   const computeTravelDistance = (top: number, bottom: number) => {
     const screenHeight = Dimensions.get('window').height

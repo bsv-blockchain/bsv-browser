@@ -1,11 +1,8 @@
-import React, { useCallback, useDeferredValue, useEffect, useRef, useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import {
   Keyboard,
   Platform,
-  Share,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
   KeyboardAvoidingView,
@@ -16,40 +13,34 @@ import {
 import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
-import { GestureDetector } from 'react-native-gesture-handler'
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   withDelay,
   withSequence,
-  runOnJS,
-  Easing,
   SharedValue
 } from 'react-native-reanimated'
-import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
 import { router, useFocusEffect } from 'expo-router'
 
-import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useWalletManagers } from '@/context/WalletContext'
 import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
-import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'
+import type { Tab } from '@/shared/types/browser'
 import {
   DEFAULT_HOMEPAGE_URL,
   kNEW_TAB_URL,
-  SEARCH_ENGINES,
-  DEFAULT_SEARCH_ENGINE_ID,
   safeBottomInset,
   ADDRESS_BAR_HEIGHT
 } from '@/shared/constants'
-import { buildLocationHrefScript, isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
+import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
+import uiStore from '@/stores/uiStore'
 import { useTranslation } from 'react-i18next'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 
@@ -67,21 +58,12 @@ import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
 import { getErrorPage, getNativeErrorInfo, paymentLoadingPage, navigationLoadingPage, escapeForTemplateLiteral, escapeForJsSingleQuote } from '@/utils/webview/errorPages'
 
-import { AddressBar } from '@/components/browser/AddressBar'
-import { GlassPill, useGlassColors } from '@/components/browser/GlassPill'
-import { MenuPopover } from '@/components/browser/MenuPopover'
-import { HistoryPopover } from '@/components/browser/HistoryPopover'
+import { AddressBar, AddressBarHandle } from '@/components/browser/AddressBar'
 import { TabsOverview } from '@/components/browser/TabsOverview'
-import { SuggestionsDropdown } from '@/components/browser/SuggestionsDropdown'
 import { SheetRouter } from '@/components/browser/SheetRouter'
-import { FindInPageBar } from '@/components/browser/FindInPageBar'
-import { BlurChrome } from '@/components/ui/BlurChrome'
-import { spacing, radii, typography } from '@/context/theme/tokens'
 import { durations } from '@/context/theme/motion'
-import LoadProgressBar from '@/components/browser/LoadProgressBar'
 
 import { useHistory } from '@/hooks/useHistory'
-import { useAddressBarAnimation } from '@/hooks/useAddressBarAnimation'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useMemoryHygiene } from '@/hooks/useMemoryHygiene'
 import { perf } from '@/utils/perf'
@@ -89,24 +71,6 @@ import { shouldForwardWebViewLogs } from '@/utils/logging'
 import { useRenderCount } from '@/hooks/useRenderCount'
 import { PerfProfiler } from '@/components/PerfProfiler'
 import { mark } from '@/utils/perfMarks'
-
-/* -------------------------------------------------------------------------- */
-/*                       ISOLATED BOOKMARK-AWARE MENU                         */
-/* -------------------------------------------------------------------------- */
-/**
- * Wraps MenuPopover in a tiny observer that reads `bookmarkStore.bookmarks`
- * for the active URL only. Without this wrapper the root `Browser` observer
- * has to read `bookmarkStore.bookmarks.some(...)` directly in its render,
- * which causes every bookmark mutation to re-render the entire WebView +
- * chrome tree. Confining the read here keeps bookmark churn local.
- */
-type ObservedMenuPopoverProps = Omit<React.ComponentProps<typeof MenuPopover>, 'isBookmarked'> & {
-  activeTabUrl: string | null
-}
-const ObservedMenuPopover = observer(({ activeTabUrl, ...rest }: ObservedMenuPopoverProps) => {
-  const isBookmarked = !!activeTabUrl && bookmarkStore.bookmarks.some(b => b.url === activeTabUrl)
-  return <MenuPopover {...rest} isBookmarked={isBookmarked} />
-})
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
@@ -177,6 +141,10 @@ interface WebViewHostProps {
   webviewContainerStyle: any
   webviewStyle: any
   loadProgress: SharedValue<number>
+  // Fired once the ACTIVE tab's first load finishes, so the shell can defer
+  // mounting the other warm-pool WebViews until the active page has painted
+  // (avoids N concurrent cold-start loads contending for network/CPU).
+  onActivePainted?: () => void
 }
 
 const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
@@ -201,7 +169,8 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     webviewScrollIndicatorInsets,
     webviewContainerStyle,
     webviewStyle,
-    loadProgress
+    loadProgress,
+    onActivePainted
   } = props
 
   const getTab = useCallback(() => tabStore.tabs.find(t => t.id === tabId), [tabId])
@@ -506,7 +475,11 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         onLoadEnd={(event: any) => {
           // Only the active tab's first paint should clear the switch overlay —
           // a warm background tab finishing a late load must not dismiss it.
-          if (isActive) tabStore.clearSwitchLoading()
+          if (isActive) {
+            tabStore.clearSwitchLoading()
+            // Active page painted — let the shell mount the deferred warm hosts.
+            onActivePainted?.()
+          }
           if (isActive && loadProgress.value > 0) {
             loadProgress.value = withSequence(
               withTiming(1, { duration: durations.instant }),
@@ -514,10 +487,18 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             )
           }
           if (paymentInFlightUrl.current) return
-          tabStore.handleNavigationStateChange(tabId, {
-            ...(event.nativeEvent ?? event),
-            loading: false
-          })
+          // Only the ACTIVE tab drives nav-state (url/history/saveTabs). On cold
+          // start the warm pool mounts several background WebViews that each fire
+          // onLoadEnd; running the full handler (history recompute + saveTabs +
+          // log) for every one floods the JS thread while the wallet is building
+          // and the active tab is trying to paint. Background tabs keep their
+          // persisted sourceUrl; their nav-state updates when they become active.
+          if (isActive) {
+            tabStore.handleNavigationStateChange(tabId, {
+              ...(event.nativeEvent ?? event),
+              loading: false
+            })
+          }
         }}
         javaScriptEnabled
         domStorageEnabled
@@ -568,63 +549,6 @@ const SwitchLoadingOverlay = observer(function SwitchLoadingOverlay(props: {
     >
       <ActivityIndicator size="large" />
     </View>
-  )
-})
-
-/**
- * Observer wrapper that owns the high-frequency activeTab reads (isLoading,
- * canGoBack/Forward, url) for the address bar. Because these reads live HERE
- * instead of in the Browser observer, a page load's isLoading/canGoBack churn
- * re-renders only this tiny subtree — NOT the 2000-line Browser tree. Browser
- * keeps reading url/id (per-navigation, low-frequency) for the WebView, but no
- * longer re-renders on every loading-state flip during a page load.
- */
-interface ChromeAddressBarProps {
-  addressText: string
-  addressFocused: boolean
-  historyPopoverOpen: boolean
-  glassRevision: number
-  cancelableNewTabId: React.MutableRefObject<number | null>
-  inputRef: React.RefObject<TextInput | null>
-  onChangeText: (t: string) => void
-  onSubmit: () => void
-  onFocus: () => void
-  onBlur: () => void
-  onBack: () => void
-  onBackLongPress: () => void
-  onForward: () => void
-  onForwardLongPress: () => void
-  onReloadOrStop: () => void
-  onClearText: () => void
-  onCancelNewTabFn: () => void
-}
-
-const ChromeAddressBar = observer(function ChromeAddressBar(props: ChromeAddressBarProps) {
-  const tab = tabStore.activeTab
-  return (
-    <AddressBar
-      key={`address-bar-${props.glassRevision}`}
-      addressText={props.addressText}
-      addressFocused={props.addressFocused}
-      isLoading={tab?.isLoading || false}
-      canGoBack={tab?.canGoBack || false}
-      canGoForward={tab?.canGoForward || false}
-      isNewTab={tab?.url === kNEW_TAB_URL}
-      isHttps={tab?.url?.startsWith('https') || false}
-      historyPopoverOpen={props.historyPopoverOpen}
-      onChangeText={props.onChangeText}
-      onSubmit={props.onSubmit}
-      onFocus={props.onFocus}
-      onBlur={props.onBlur}
-      onBack={props.onBack}
-      onBackLongPress={props.onBackLongPress}
-      onForward={props.onForward}
-      onForwardLongPress={props.onForwardLongPress}
-      onReloadOrStop={props.onReloadOrStop}
-      onClearText={props.onClearText}
-      onCancelNewTab={props.cancelableNewTabId.current === tab?.id ? props.onCancelNewTabFn : undefined}
-      inputRef={props.inputRef}
-    />
   )
 })
 
@@ -690,9 +614,8 @@ const Browser = observer(function Browser() {
   useRenderCount('Browser') // dev-only: logs a re-render storm; zero-cost in prod
   /* --------------------------- theme / basic hooks -------------------------- */
   const { isDark, colors } = useTheme()
-  const gc = useGlassColors()
   const insets = useSafeAreaInsets()
-  const { t, i18n } = useTranslation()
+  const { i18n } = useTranslation()
   const { isWeb2Mode } = useBrowserMode()
   const sheet = useSheet()
 
@@ -762,36 +685,16 @@ const Browser = observer(function Browser() {
 
   /* -------------------------------- bookmarks ------------------------------- */
   const [homepageUrl, setHomepageUrlState] = useState(DEFAULT_HOMEPAGE_URL)
-  const searchEngineTemplate = useRef(SEARCH_ENGINES.find(e => e.id === DEFAULT_SEARCH_ENGINE_ID)!.urlTemplate)
 
   useEffect(() => {
     const load = async () => {
       try {
         const storedHomepage = await getItem('homepageUrl')
         if (storedHomepage) setHomepageUrlState(storedHomepage)
-        const storedEngine = await getItem('searchEngineId')
-        if (storedEngine) {
-          const engine = SEARCH_ENGINES.find(e => e.id === storedEngine)
-          if (engine) searchEngineTemplate.current = engine.urlTemplate
-        }
       } catch {}
     }
     load()
   }, [getItem])
-
-  // Re-read search engine preference when the settings sheet closes
-  useEffect(() => {
-    if (sheet.isOpen) return
-    ;(async () => {
-      try {
-        const storedEngine = await getItem('searchEngineId')
-        if (storedEngine) {
-          const engine = SEARCH_ENGINES.find(e => e.id === storedEngine)
-          if (engine) searchEngineTemplate.current = engine.urlTemplate
-        }
-      } catch {}
-    })()
-  }, [sheet.isOpen, getItem])
 
   const addBookmark = useCallback((title: string, url: string) => {
     if (url && url !== kNEW_TAB_URL && isValidUrl(url) && !url.includes('about:blank')) {
@@ -831,295 +734,61 @@ const Browser = observer(function Browser() {
   })
 
   /* -------------------------- ui / animation state -------------------------- */
-  const addressEditing = useRef(false)
-  const [addressText, setAddressText] = useState(kNEW_TAB_URL)
-  const [addressFocused, setAddressFocused] = useState(false)
-  const [addressSuggestions, setAddressSuggestions] = useState<(HistoryEntry | Bookmark)[]>([])
+  // The entire nav-chrome subsystem (address state, popovers, collapse/glass,
+  // find-in-page, gesture animation) now lives in <AddressBar/>. Browser keeps
+  // only the shell-level flags it still owns and reads the two cross-cutting
+  // booleans (addressFocused, addressBarAtTop) from uiStore as an observer.
 
-  const addressInputRef = useRef<TextInput>(null)
-
-  // Collapse ref + stable callback declared BEFORE the hook so the function
-  // identity is defined at the call site (avoids TDZ → undefined → no-op default).
-  const collapseRef = useRef<() => void>(() => {})
-  const requestCollapseAddressBar = useCallback(() => {
-    collapseRef.current()
-  }, [])
-
-  // Tracks whether the bar's collapse-exit animation is still in flight.
-  // Lets us keep the bar's <Animated.View> mounted (and animating its fade
-  // + scale on the UI thread) AFTER addressBarCollapsed has flipped to true,
-  // so the bar's exit and the dot's entrance overlap visually.
-  const [barExitAnimating, setBarExitAnimating] = useState(false)
-
-  const handleCollapseAnimationEnd = useCallback(() => {
-    setBarExitAnimating(false)
-  }, [])
-
-  // Forward declaration — implementation defined below. The kebab tap (when
-  // bar is collapsed) calls this ref so we don't capture a stale identity.
-  const expandRef = useRef<() => void>(() => {})
-  const requestExpandAddressBar = useCallback(() => {
-    expandRef.current()
-  }, [])
-
-  const {
-    keyboardVisible,
-    addressBarPanGesture,
-    animatedAddressBarStyle,
-    animatedMenuPopoverStyle,
-    animatedKebabStyle,
-    addressBarIsAtTop,
-    resetGestureState
-  } = useAddressBarAnimation(
-    insets,
-    addressFocused,
-    addressEditing,
-    addressInputRef,
-    setAddressFocused,
-    setAddressSuggestions,
-    requestCollapseAddressBar,
-    handleCollapseAnimationEnd,
-    requestExpandAddressBar
-  )
+  // Imperative handle into AddressBar so the new-tab / homepage lifecycle
+  // effects below — which read tabStore + persisted homepageUrl and naturally
+  // live here — can still focus/select the address input (whose ref + editing
+  // flag are owned by AddressBar).
+  const addressBarRef = useRef<AddressBarHandle>(null)
 
   const [showTabsView, setShowTabsView] = useState(false)
 
-  // Page-load progress bar: 0 = idle/hidden, 0..0.9 = loading, 1 = done (fades out).
+  // Page-load progress bar: 0 = idle/hidden, 0..0.9 = loading, 1 = done (fades
+  // out). Webview load events set it (WebViewHost); passed to AddressBar for the
+  // LoadProgressBar render.
   const loadProgress = useSharedValue(0)
-
-  // Menu popover visibility — driven by a shared value so the open/close
-  // animation runs entirely on the UI thread (and stays smooth even while the
-  // JS thread is blocked, e.g. parsing large BEEF payloads). React state
-  // (menuPopoverOpen) controls mount; the close-side unmount only fires AFTER
-  // the close animation completes via runOnJS in the withTiming callback.
-  // The setMenuPopoverOpen(open) API is preserved so callers don't change.
-  const [menuPopoverOpen, _setMenuPopoverMounted] = useState(false)
-  const menuPopoverProgress = useSharedValue(0)
-  const setMenuPopoverOpen = useCallback(
-    (open: boolean) => {
-      if (open) {
-        // Snap progress to 1 INSTANTLY on open — no fade-in. Rationale:
-        // the popover card is a LiquidGlassView (UIVisualEffectView on iOS).
-        // If the wrapper's opacity animates from 0 -> 1 on first mount, the
-        // native effect view initialises in a disabled state and stays stuck
-        // transparent (the "first open is empty" bug). By making the wrapper
-        // opaque on its FIRST paint, the effect view initialises enabled and
-        // renders correctly. Perceptual motion still comes from the existing
-        // translateY in `animatedMenuPopoverStyle`. The close path still
-        // animates 1 -> 0 so the popover can fade out before unmounting.
-        _setMenuPopoverMounted(true)
-        menuPopoverProgress.value = 1
-      } else {
-        menuPopoverProgress.value = withTiming(0, { duration: 160, easing: Easing.in(Easing.cubic) }, finished => {
-          if (finished) {
-            runOnJS(_setMenuPopoverMounted)(false)
-          }
-        })
-      }
-    },
-    [menuPopoverProgress]
-  )
-
-  // Binary visibility (NOT a fractional fade). The popover card is a
-  // LiquidGlassView (UIVisualEffectView on iOS) and animating an ancestor's
-  // opacity to fractional values triggers Apple's well-known stuck-effect
-  // bug — the blur snaps transparent and STAYS broken until the native view
-  // is re-mounted. We snap visible at the midpoint of the timing animation;
-  // the perceptual fade comes from the popover's own enter/exit transform
-  // (translateY in `animatedMenuPopoverStyle`).
-  //
-  // Note: we deliberately do NOT include a transform here, since this style is
-  // composed with `animatedMenuPopoverStyle` (which owns translateY based on the
-  // address-bar position). In React Native style merge, `transform` is replaced
-  // wholesale by later entries — so adding scale here would clobber translateY.
-  const animatedMenuVisibilityStyle = useAnimatedStyle(() => ({
-    opacity: menuPopoverProgress.value >= 0.5 ? 1 : 0
-  }))
-
-  // HistoryPopover visibility — driven by a shared value so open/close runs
-  // entirely on the UI thread (same pattern as MenuPopover above). React state
-  // (historyPopoverDirection) controls mount + which side ('back' | 'forward'
-  // | null); the close-side unmount only fires AFTER the close animation
-  // completes via runOnJS in the withTiming callback.
-  const [historyPopoverDirection, _setHistoryPopoverDirectionMounted] = useState<'back' | 'forward' | null>(null)
-  const historyPopoverProgress = useSharedValue(0)
-  const setHistoryPopoverDirection = useCallback(
-    (next: 'back' | 'forward' | null) => {
-      if (next !== null) {
-        // Snap progress to 1 INSTANTLY on open — no fade-in. Same rationale as
-        // `setMenuPopoverOpen` above: the popover card is a LiquidGlassView
-        // (UIVisualEffectView on iOS), and a 0 -> 1 fade-in on first mount
-        // leaves the native effect stuck transparent. Opening with opacity
-        // already at 1 avoids the bug. Close still animates 1 -> 0 so the
-        // popover can fade out before unmounting.
-        _setHistoryPopoverDirectionMounted(next)
-        historyPopoverProgress.value = 1
-      } else {
-        historyPopoverProgress.value = withTiming(0, { duration: 160, easing: Easing.in(Easing.cubic) }, finished => {
-          if (finished) {
-            runOnJS(_setHistoryPopoverDirectionMounted)(null)
-          }
-        })
-      }
-    },
-    [historyPopoverProgress]
-  )
-  const historyPopoverOpen = historyPopoverDirection !== null
-  // Binary visibility (NOT a fractional fade) — same rationale as
-  // `animatedMenuVisibilityStyle` above. The popover card is a LiquidGlassView
-  // / UIVisualEffectView, and fractional ancestor opacity sticks the effect
-  // view transparent on iOS. Snap at the midpoint of the timing animation;
-  // the perceptual movement comes from the wrapper's translateY in
-  // `animatedMenuPopoverStyle` (composed with this style). Keep transforms
-  // out of this style so the merge doesn't clobber translateY.
-  const animatedHistoryVisibilityStyle = useAnimatedStyle(() => ({
-    opacity: historyPopoverProgress.value >= 0.5 ? 1 : 0
-  }))
-  const desktopModeCooldown = useRef(false)
-
-  /* ------------------------------ find in page ----------------------------- */
-  const [findInPageVisible, setFindInPageVisible] = useState(false)
-  const [findInPageQuery, setFindInPageQuery] = useState('')
-  const [findInPageCurrent, setFindInPageCurrent] = useState(0)
-  const [findInPageTotal, setFindInPageTotal] = useState(0)
-  const [findInPageCapped, setFindInPageCapped] = useState(false)
 
   const [isFullscreen, setIsFullscreen] = useState(false)
   // Stable identity so passing it to the memoized WebViewHost doesn't break memo.
   const onExitFullscreen = useCallback(() => setIsFullscreen(false), [])
 
-  // Address bar collapse state (new gesture: rightward hold+swipe collapses bar into the ... button)
-  const [addressBarCollapsed, setAddressBarCollapsed] = useState(false)
-  // Remember where the bar was before collapsing so we can restore the position on expand
-  const positionBeforeCollapse = useRef<'top' | 'bottom'>('bottom')
-
-  // glassRevision — monotonically incremented on every collapse and every
-  // expand. Used as `key` on the AddressBar subtree and on the collapsed
-  // dot's GlassPill so React fully unmounts and re-mounts the underlying
-  // LiquidGlassView (UIVisualEffectView on iOS) on each cycle.
-  //
-  // Why: @callstack/liquid-glass wraps Apple's UIVisualEffectView, which has
-  // a well-known rendering bug — once its parent goes through a fractional
-  // opacity transition (or ANY interruption while alpha < 1), the effect can
-  // snap to fully transparent and STICK there even after parent opacity
-  // returns to 1. Re-mounting the native view tears down the effect view and
-  // re-creates it, restoring the blur. The user empirically confirmed this:
-  // opening the menu popover (which conditionally re-renders the kebab pill)
-  // unsticks it. We do the same thing automatically on collapse <-> expand.
-  const [glassRevision, setGlassRevision] = useState(0)
-  const bumpGlassRevision = useCallback(() => {
-    setGlassRevision(r => r + 1)
-  }, [])
-
   // When the Browser screen regains focus after returning from a pushed route
-  // (transactions, payments, wallet-config, …):
-  //  1. Close any lingering menu sheet / popover so the wallet menu's Settings
-  //     sheet doesn't sit open over the page on back. Opening an in-screen sheet
-  //     does NOT blur Browser, so normal sheet use is unaffected — this only
-  //     fires on return from a full-screen route. `sheet` is read through a ref
-  //     so this callback stays stable (depending on `sheet` directly would
-  //     re-run on every sheet open and instantly close it).
-  //  2. Remount the chrome LiquidGlass pills via glassRevision. The native-stack
-  //     route transition detaches/reattaches the screen's views, which can leave
-  //     a UIVisualEffectView (address-bar / back-button pills) stuck transparent
-  //     with nothing to cure it — a fresh key tears it down and recreates it.
-  //     Skipped on the first focus (initial mount) to avoid a startup remount.
+  // (transactions, payments, wallet-config, …) close any lingering menu sheet so
+  // the wallet menu's Settings sheet doesn't sit open over the page on back.
+  // Opening an in-screen sheet does NOT blur Browser, so normal sheet use is
+  // unaffected — this only fires on return from a full-screen route. `sheet` is
+  // read through a ref so this callback stays stable (depending on `sheet`
+  // directly would re-run on every sheet open and instantly close it).
+  // (The menu-popover close + glass remount on focus live in AddressBar.)
   const sheetRef = useRef(sheet)
   sheetRef.current = sheet
-  const hasFocusedOnceRef = useRef(false)
   useFocusEffect(
     useCallback(() => {
       sheetRef.current.close()
-      setMenuPopoverOpen(false)
-      if (hasFocusedOnceRef.current) bumpGlassRevision()
-      hasFocusedOnceRef.current = true
-    }, [setMenuPopoverOpen, bumpGlassRevision])
+    }, [])
   )
-
-  const collapseAddressBar = useCallback(() => {
-    // Remember pre-collapse position so expand can spring the bar back to the
-    // same edge. The useAddressBarAnimation hook keeps addressBarAtTop.value
-    // unchanged through the collapse so resetGestureState() on expand already
-    // restores the correct translateY — this ref is just for any JS-side
-    // consumers that need to know.
-    positionBeforeCollapse.current = addressBarIsAtTop ? 'top' : 'bottom'
-    // DO NOT bump glassRevision here. Bumping on collapse remounts the
-    // AddressBar's LiquidGlass pills FRESH at the very moment the wrapper is
-    // animating its opacity to 0 — a newly-mounted UIVisualEffectView that sees
-    // an opacity change before its effect finishes initializing sticks
-    // transparent (same "init disabled" mechanism as the menu popover), and that
-    // stuck native view then returns to Fabric's recycler pool and poisons the
-    // next expand's remount (the reported "pill transparent after hide/unhide",
-    // alternating between the URL and back-button pills). The collapse bump also
-    // did nothing useful: the collapsed dot/kebab GlassPill is NOT keyed by
-    // glassRevision, so this only ever remounted the exiting bar. Let the
-    // already-initialized pills animate out untouched; the expand bump below
-    // remounts fresh pills at a stable opacity 1.
-    // Flip JS state immediately (dot mounts at progress=0 and fades in via the
-    // shared collapse-progress), and keep the bar wrapper mounted briefly via
-    // barExitAnimating so its UI-thread fade/scale finishes on screen.
-    //
-    // Do NOT call resetGestureState() here — that would zero
-    // addressBarCollapseProgress mid-animation, fighting the in-flight
-    // withTiming(progress, 1) on the UI thread.
-    setBarExitAnimating(true)
-    setAddressBarCollapsed(true)
-  }, [addressBarIsAtTop])
-
-  const expandAddressBar = useCallback(() => {
-    // CRITICAL order: zero out the shared values FIRST so that when React
-    // commits the state changes below and the bar wrapper / AddressBar mount,
-    // the animatedAddressBarStyle reads collapse=0 and emits opacity=1. If we
-    // don't reset first, a stale collapse=1 from the just-finished collapse
-    // animation causes the wrapper to mount at opacity=0, which traps every
-    // LiquidGlassView pill descendant in Apple's stuck UIVisualEffectView
-    // state (pills appear transparent / lost their blur background).
-    resetGestureState()
-    // DEFER the remount by one frame. resetGestureState() writes
-    // addressBarCollapseProgress.value = 0 from the JS thread, but that write is
-    // applied on the UI thread ASYNCHRONOUSLY. If we mount the fresh AddressBar
-    // synchronously here, its LiquidGlass pills can paint their FIRST frame while
-    // the UI thread still holds the stale collapsed progress (=1 → opacity 0),
-    // mounting the new UIVisualEffectView at opacity 0 and sticking it
-    // transparent before its effect initializes. Waiting one frame guarantees
-    // the =0 write has propagated, so the pills mount at a stable opacity 1.
-    requestAnimationFrame(() => {
-      // Bump revision so the AddressBar mounts with a fresh key and its
-      // LiquidGlass pills are brand-new native views — never inheriting a stuck
-      // UIVisualEffectView state from the previous expand cycle.
-      bumpGlassRevision()
-      setAddressBarCollapsed(false)
-      // Just in case the exit-end callback didn't fire (e.g. cancelled
-      // animation), clear the bar's exit-mount flag so we don't have a ghost
-      // wrapper layered behind the freshly re-mounted real bar.
-      setBarExitAnimating(false)
-    })
-  }, [resetGestureState, bumpGlassRevision])
-
-  // Keep the ref up to date so runOnJS always calls the latest version (avoids stale closures)
-  useEffect(() => {
-    collapseRef.current = collapseAddressBar
-  }, [collapseAddressBar])
-  useEffect(() => {
-    expandRef.current = expandAddressBar
-  }, [expandAddressBar])
 
   // Geometry used by native chrome overlays and scroll indicators. The WebView
   // itself remains full-height; users can collapse the address bar when it
-  // covers page controls.
+  // covers page controls. Reads the address-bar position from uiStore (single
+  // source of truth, mirrored by the animation hook).
   const bottomReservedHeight =
-    !addressBarIsAtTop && !isFullscreen ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT : 0
+    !uiStore.addressBarAtTop && !isFullscreen ? safeBottomInset(insets.bottom) + ADDRESS_BAR_HEIGHT : 0
 
   // Keep scroll bars visible around the floating chrome without changing the
   // webpage viewport or injecting layout styles into the document.
   const webviewScrollIndicatorInsets = useMemo(
     () => ({
-      top: addressBarIsAtTop ? ADDRESS_BAR_HEIGHT : 0,
-      bottom: addressBarIsAtTop ? bottomInset : bottomReservedHeight,
+      top: uiStore.addressBarAtTop ? ADDRESS_BAR_HEIGHT : 0,
+      bottom: uiStore.addressBarAtTop ? bottomInset : bottomReservedHeight,
       left: 0,
       right: 0
     }),
-    [addressBarIsAtTop, bottomReservedHeight, bottomInset]
+    [uiStore.addressBarAtTop, bottomReservedHeight, bottomInset]
   )
   const webviewContainerStyle = useMemo(() => ({ backgroundColor: isDark ? '#000' : '#fff' }), [isDark])
   const webviewStyle = useMemo(() => ({ flex: 1 }), [])
@@ -1163,7 +832,7 @@ const Browser = observer(function Browser() {
     if (tabStore.isInitialized && !activeTab) {
       tabStore.newTab()
       Keyboard.dismiss()
-      setAddressFocused(false)
+      uiStore.setAddressFocused(false)
     }
   }, [activeTab])
 
@@ -1175,6 +844,15 @@ const Browser = observer(function Browser() {
 
   // The tab ID of a tab opened via the new tab button that can be "cancelled" (closed to go back)
   const cancelableNewTabId = useRef<number | null>(null)
+
+  // Tabs whose last load was cancelled by the user. A cancelled provisional
+  // navigation never commits, so the WKWebView's own URL still points at the
+  // PREVIOUS document (about:blank on a fresh tab) while tab.url holds the
+  // target the user actually wanted. Native reload() would re-show the stale
+  // document — the refresh button must re-navigate to tab.url instead.
+  // Written/read by AddressBar's cancel/reload handlers; cleared here in
+  // handleNavStateChange (the WebView event source) the moment a new load starts.
+  const cancelledLoadTabIds = useRef<Set<number>>(new Set())
 
   // Reset progress bar on tab switch so stale progress from the old tab never bleeds into the new one.
   useEffect(() => {
@@ -1194,19 +872,15 @@ const Browser = observer(function Browser() {
       const stored = await getItem('homepageUrl')
       const url = stored || DEFAULT_HOMEPAGE_URL
       if (url && url !== kNEW_TAB_URL && url !== 'about:blank') {
+        // Navigating the tab updates tab.url; AddressBar's url-sync reflects it
+        // into the input (no direct setAddressText needed across the boundary).
         tabStore.updateTab(tabStore.activeTabId, { url })
-        setAddressText(url)
         setHomepageUrlState(url)
         if (shouldFocusAddressBar) {
+          // The input ref + editing flag live in AddressBar — go through its
+          // imperative handle to focus and select the homepage URL.
           setTimeout(() => {
-            addressEditing.current = true
-            setAddressFocused(true)
-            addressInputRef.current?.focus()
-            setTimeout(() => {
-              addressInputRef.current?.setNativeProps({
-                selection: { start: 0, end: url.length }
-              })
-            }, 0)
+            addressBarRef.current?.beginEditing(url)
           }, 150)
         }
       }
@@ -1215,32 +889,25 @@ const Browser = observer(function Browser() {
 
   // Auto-focus on new tab (only if still blank — homepage navigation may have kicked in)
   useEffect(() => {
-    if (activeTab && activeTab.url === kNEW_TAB_URL && !addressFocused) {
+    if (activeTab && activeTab.url === kNEW_TAB_URL && !uiStore.addressFocused) {
       const tabId = activeTab.id
       const timer = setTimeout(() => {
         if (tabStore.activeTab?.id === tabId && tabStore.activeTab?.url === kNEW_TAB_URL) {
-          setAddressFocused(true)
-          addressInputRef.current?.focus()
+          addressBarRef.current?.focusInput()
         }
       }, 100)
       return () => clearTimeout(timer)
     }
-  }, [activeTab, activeTab?.id, activeTab?.url, addressFocused])
+  }, [activeTab, activeTab?.id, activeTab?.url, uiStore.addressFocused])
 
-  // Sync address text with tab url
+  // Ensure at least one tab exists; never leave the user on an empty browser.
   useEffect(() => {
     if (tabStore.tabs.length === 0 && tabStore.isInitialized) {
       tabStore.newTab()
-      setAddressFocused(false)
+      uiStore.setAddressFocused(false)
       Keyboard.dismiss()
     }
   }, [])
-
-  useEffect(() => {
-    if (activeTab && !addressEditing.current) {
-      setAddressText(activeTab.url)
-    }
-  }, [activeTab])
 
   /* -------------------------------------------------------------------------- */
   /*                                 UTILITIES                                  */
@@ -1285,434 +952,14 @@ const Browser = observer(function Browser() {
     }
   }, [])
 
-  /* -------------------------------------------------------------------------- */
-  /*                              ADDRESS HANDLING                              */
-  /* -------------------------------------------------------------------------- */
-
-  const onAddressSubmit = useCallback(() => {
-    let entry = addressText.trim()
-    const hasProtocol = /^[a-z]+:\/\//i.test(entry)
-    const isIpAddress = /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/.*)?$/i.test(entry)
-    const isProbablyUrl = hasProtocol || /^(www\.|([A-Za-z0-9\-]+\.)+[A-Za-z]{2,})(\/|$)/i.test(entry) || isIpAddress
-
-    if (entry === '') {
-      entry = kNEW_TAB_URL
-    } else if (!isProbablyUrl) {
-      entry = searchEngineTemplate.current.replace('%s', encodeURIComponent(entry))
-    } else if (!hasProtocol) {
-      entry = isIpAddress ? 'http://' + entry : 'https://' + entry
-    }
-
-    if (!isValidUrl(entry)) entry = kNEW_TAB_URL
-
-    injectNavigationSplash(entry)
-    updateActiveTab({ url: entry })
-    addressEditing.current = false
-    cancelableNewTabId.current = null
-  }, [addressText, updateActiveTab, injectNavigationSplash])
-
-  /* -------------------------------------------------------------------------- */
-  /*                          ADDRESS BAR AUTOCOMPLETE                          */
-  /* -------------------------------------------------------------------------- */
-
-  const fuseRef = useRef(
-    new Fuse<HistoryEntry | Bookmark>([], {
-      keys: ['title', 'url'],
-      threshold: 0.4
-    })
-  )
-  useEffect(() => {
-    fuseRef.current.setCollection([...history, ...bookmarkStore.bookmarks])
-  }, [history])
-
-  // Keep input updates synchronous (so typing feels instant) but compute Fuse
-  // results from a deferred value. React 19 schedules the suggestion update at
-  // a lower priority, so a long Fuse pass on a big history list can never block
-  // the TextInput keystroke render.
-  const deferredAddressText = useDeferredValue(addressText)
-  useEffect(() => {
-    const txt = deferredAddressText.trim()
-    if (txt.length === 0) {
-      setAddressSuggestions([])
-      return
-    }
-    const results = fuseRef.current
-      .search(txt)
-      .slice(0, 10)
-      .map(r => r.item)
-    const uniqueResults = results
-      .filter((item, index, self) => index === self.findIndex(t => t.url === item.url))
-      .slice(0, 5)
-    setAddressSuggestions(uniqueResults)
-  }, [deferredAddressText])
-
-  const onChangeAddressText = useCallback((txt: string) => {
-    setAddressText(txt)
-  }, [])
-
-  /* -------------------------------------------------------------------------- */
-  /*                               TAB NAVIGATION                              */
-  /* -------------------------------------------------------------------------- */
-  const navBack = useCallback(() => {
-    const currentTab = tabStore.activeTab
-    if (currentTab?.canGoBack) tabStore.goBack(currentTab.id)
-  }, [])
-
-  const navBackLongPress = useCallback(() => {
-    const currentTab = tabStore.activeTab
-    if (!currentTab) return
-    const { entries, currentIndex } = tabStore.getNavigationHistory(currentTab.id)
-    // Only open if there's at least one back entry that isn't the new-tab sentinel
-    const hasBack = entries.some((e, i) => i < currentIndex && e.url !== 'about:blank' && !e.url.includes('new-tab'))
-    if (hasBack) setHistoryPopoverDirection('back')
-  }, [])
-
-  const navForward = useCallback(() => {
-    const currentTab = tabStore.activeTab
-    if (currentTab?.canGoForward) tabStore.goForward(currentTab.id)
-  }, [])
-
-  const navForwardLongPress = useCallback(() => {
-    const currentTab = tabStore.activeTab
-    if (!currentTab) return
-    const { entries, currentIndex } = tabStore.getNavigationHistory(currentTab.id)
-    const hasForward = entries.some((e, i) => i > currentIndex && e.url !== 'about:blank' && !e.url.includes('new-tab'))
-    if (hasForward) setHistoryPopoverDirection('forward')
-  }, [])
-
-  const onSelectHistoryEntry = useCallback((index: number) => {
-    const currentTab = tabStore.activeTab
-    if (currentTab) tabStore.navigateToHistoryIndex(currentTab.id, index)
-    setHistoryPopoverDirection(null)
-  }, [])
-
-  // Tabs whose last load was cancelled by the user. A cancelled provisional
-  // navigation never commits, so the WKWebView's own URL still points at the
-  // PREVIOUS document (about:blank on a fresh tab) while tab.url holds the
-  // target the user actually wanted. Native reload() would re-show the stale
-  // document — the refresh button must re-navigate to tab.url instead.
-  // Cleared the moment any new load starts for that tab.
-  const cancelledLoadTabIds = useRef<Set<number>>(new Set())
-
-  /**
-   * Cancel the active tab's in-flight load. stopLoading() alone is not enough:
-   * WebKit reports the stopped provisional navigation as NSURLErrorCancelled
-   * (-999), which react-native-webview swallows (no onError, no onLoadEnd), so
-   * the tab's isLoading flag — and the navigation splash's spinner — would
-   * otherwise stay stuck until something else navigates. Clear both ourselves.
-   */
-  const cancelActiveLoad = useCallback(() => {
-    const currentTab = tabStore.activeTab
-    if (!currentTab?.isLoading) return
-    const ref = currentTab.webviewRef?.current
-    try {
-      ref?.stopLoading()
-      // Flip the splash (if that's what's showing) to its cancelled state.
-      // No-op on real pages — __navCancel only exists on the splash document.
-      ref?.injectJavaScript('window.__navCancel && window.__navCancel();true;')
-    } catch {
-      // WebView may be mid-teardown; cancelling is best-effort.
-    }
-    tabStore.updateTab(currentTab.id, { isLoading: false })
-    tabStore.clearSwitchLoading()
-    loadProgress.value = 0
-    if (currentTab.url !== kNEW_TAB_URL && currentTab.url.startsWith('http')) {
-      cancelledLoadTabIds.current.add(currentTab.id)
-    }
-  }, [loadProgress])
-
-  const navReloadOrStop = useCallback(() => {
-    const currentTab = tabStore.activeTab
-    if (!currentTab) return
-    if (currentTab.isLoading) {
-      cancelActiveLoad()
-    } else if (cancelledLoadTabIds.current.has(currentTab.id)) {
-      // Retry the cancelled target rather than reloading the stale document.
-      cancelledLoadTabIds.current.delete(currentTab.id)
-      injectNavigationSplash(currentTab.url)
-      currentTab.webviewRef?.current?.injectJavaScript(buildLocationHrefScript(currentTab.url))
-    } else {
-      currentTab.webviewRef?.current?.reload()
-    }
-  }, [cancelActiveLoad, injectNavigationSplash])
-
-  // Stable AddressBar handlers so the memoized AddressBar (LiquidGlass pill)
-  // skips reconciliation on Browser re-renders that don't change its inputs.
-  // activeTab is ref-stable across in-place MobX mutations, so these stay
-  // stable across the page-load nav storm.
-  const onAddressFocus = useCallback(() => {
-    // A USER tap on the bar while a page is loading means they want to change
-    // course (typo'd URL, slow host). Cancel the in-flight request immediately
-    // so the correction isn't queued behind a dying load — and so the WebView
-    // isn't doing network/layout work while they type. Programmatic focuses
-    // (the new-tab homepage flow) set addressEditing BEFORE calling .focus(),
-    // so this guard keeps them from cancelling their own homepage load.
-    if (!addressEditing.current) cancelActiveLoad()
-    setMenuPopoverOpen(false)
-    setHistoryPopoverDirection(null)
-    addressEditing.current = true
-    setAddressFocused(true)
-    if (activeTab?.url === kNEW_TAB_URL) setAddressText('')
-    setTimeout(() => {
-      const textToSelect = activeTab?.url === kNEW_TAB_URL ? '' : addressText
-      addressInputRef.current?.setNativeProps({
-        selection: { start: 0, end: textToSelect.length }
-      })
-    }, 0)
-  }, [activeTab, addressText, cancelActiveLoad, setMenuPopoverOpen, setHistoryPopoverDirection])
-
-  const onAddressBlur = useCallback(() => {
-    addressEditing.current = false
-    setAddressFocused(false)
-    setAddressSuggestions([])
-    setAddressText(activeTab?.url || kNEW_TAB_URL)
-  }, [activeTab])
-
-  const onClearAddressText = useCallback(() => setAddressText(''), [])
-
-  const onCancelNewTabFn = useCallback(() => {
-    const tabId = cancelableNewTabId.current!
-    cancelableNewTabId.current = null
-    Keyboard.dismiss()
-    addressEditing.current = false
-    setAddressFocused(false)
-    setAddressSuggestions([])
-    tabStore.closeTab(tabId)
-  }, [])
-
   const handleNewTab = useCallback(() => {
     focusAddressBarOnNewTab.current = true
     tabStore.newTab()
     cancelableNewTabId.current = tabStore.activeTabId
     setShowTabsView(false)
-    setMenuPopoverOpen(false)
-  }, [setMenuPopoverOpen])
-
-  const onSuggestionSelect = useCallback(
-    (url: string) => {
-      addressInputRef.current?.blur()
-      Keyboard.dismiss()
-      setAddressFocused(false)
-      setAddressSuggestions([])
-      setAddressText(url)
-      injectNavigationSplash(url)
-      updateActiveTab({ url })
-      addressEditing.current = false
-      cancelableNewTabId.current = null
-    },
-    [injectNavigationSplash, updateActiveTab]
-  )
-
-  const shareCurrent = useCallback(async () => {
-    const currentTab = tabStore.activeTab
-    if (!currentTab) return
-    try {
-      await Share.share({ message: currentTab.url })
-    } catch {}
+    // The menu popover (if the new tab was opened from it) closes itself inside
+    // AddressBar via its dismiss wrapper, so no cross-boundary close is needed.
   }, [])
-
-  /* -------------------------------------------------------------------------- */
-  /*                              FIND IN PAGE                                  */
-  /* -------------------------------------------------------------------------- */
-
-  /**
-   * Find-in-page uses the CSS Custom Highlight API when available (iOS 17.2+,
-   * Android WebView 105+). This paints highlights at the rendering layer
-   * without modifying the DOM — zero layout shifts, zero style conflicts.
-   *
-   * The state stored on window:
-   *   __bsvFindRanges : Range[]   – every match range
-   *   __bsvFindIdx    : number    – index of the active match
-   */
-
-  /** Clear all find highlights (CSS Highlight API). */
-  const CLEAR_FIND_JS = `
-    if(typeof CSS!=='undefined'&&CSS.highlights){
-      CSS.highlights.delete('__bsv_find');
-      CSS.highlights.delete('__bsv_find_active');
-    }
-    window.__bsvFindRanges=null;
-    window.__bsvFindIdx=0;
-    if(window.__bsvFindSheet){
-      var idx=document.adoptedStyleSheets.indexOf(window.__bsvFindSheet);
-      if(idx>=0){var a=Array.from(document.adoptedStyleSheets);a.splice(idx,1);document.adoptedStyleSheets=a;}
-      window.__bsvFindSheet=null;
-    }`
-
-  const findInPageScript = useCallback(
-    (query: string) => {
-      if (!activeTab?.webviewRef?.current) return
-      if (!query) {
-        activeTab.webviewRef.current.injectJavaScript(`(function(){
-          ${CLEAR_FIND_JS}
-          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-            type:'FIND_IN_PAGE_RESULT',current:0,total:0
-          }));
-        })();true;`)
-        return
-      }
-      const escaped = escapeForJsSingleQuote(query)
-      activeTab.webviewRef.current.injectJavaScript(`(function(){
-        try{
-          ${CLEAR_FIND_JS}
-
-          // Check for CSS Custom Highlight API support
-          var hasHighlightAPI=typeof CSS!=='undefined'&&typeof CSS.highlights!=='undefined'&&typeof Highlight!=='undefined';
-          if(!hasHighlightAPI){
-            window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-              type:'FIND_IN_PAGE_RESULT',current:0,total:0,error:'no_highlight_api'
-            }));
-            return;
-          }
-
-          // Inject styles via adoptedStyleSheets (bypasses CSP)
-          if(!window.__bsvFindSheet){
-            var sheet=new CSSStyleSheet();
-            sheet.replaceSync('::highlight(__bsv_find){background-color:rgba(255,210,0,0.4);}::highlight(__bsv_find_active){background-color:rgba(255,150,0,0.6);}');
-            window.__bsvFindSheet=sheet;
-            document.adoptedStyleSheets=[].concat(Array.from(document.adoptedStyleSheets),[sheet]);
-          }
-
-          var MAX_MATCHES=1000;
-          var query='${escaped}'.toLowerCase();
-          if(!query){
-            window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-              type:'FIND_IN_PAGE_RESULT',current:0,total:0
-            }));
-            return;
-          }
-          var qLen=query.length;
-
-          // Walk text nodes and collect Range objects — no DOM modification
-          var ranges=[];
-          var capped=false;
-          var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{
-            acceptNode:function(n){
-              var tag=n.parentElement&&n.parentElement.tagName;
-              if(tag==='SCRIPT'||tag==='STYLE'||tag==='NOSCRIPT')return NodeFilter.FILTER_REJECT;
-              return NodeFilter.FILTER_ACCEPT;
-            }
-          },false);
-          while(walker.nextNode()){
-            var node=walker.currentNode;
-            var text=(node.textContent||'').toLowerCase();
-            var pos=0;
-            while((pos=text.indexOf(query,pos))!==-1){
-              var r=new Range();
-              r.setStart(node,pos);
-              r.setEnd(node,pos+qLen);
-              ranges.push(r);
-              pos+=qLen;
-              if(ranges.length>=MAX_MATCHES){capped=true;break;}
-            }
-            if(capped)break;
-          }
-
-          window.__bsvFindRanges=ranges;
-          window.__bsvFindIdx=0;
-
-          if(ranges.length>0){
-            CSS.highlights.set('__bsv_find',new Highlight(...ranges));
-            CSS.highlights.set('__bsv_find_active',new Highlight(ranges[0]));
-            // Scroll to first match using Selection (no DOM modification)
-            var sel=window.getSelection();
-            sel.removeAllRanges();
-            var scrollRange=ranges[0].cloneRange();
-            scrollRange.collapse(true);
-            sel.addRange(scrollRange);
-            var active=document.activeElement;
-            if(active&&active.blur)active.blur();
-            sel.removeAllRanges();
-          }
-
-          var total=capped?MAX_MATCHES:ranges.length;
-          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-            type:'FIND_IN_PAGE_RESULT',
-            current:ranges.length>0?1:0,
-            total:total,
-            capped:capped
-          }));
-        }catch(e){
-          window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-            type:'FIND_IN_PAGE_RESULT',current:0,total:0,error:e.message
-          }));
-        }
-      })();true;`)
-    },
-    [activeTab]
-  )
-
-  const findInPageNavigate = useCallback(
-    (direction: 'next' | 'prev') => {
-      if (!activeTab?.webviewRef?.current) return
-      activeTab.webviewRef.current.injectJavaScript(`(function(){
-        var ranges=window.__bsvFindRanges;
-        if(!ranges||ranges.length===0||typeof CSS==='undefined'||!CSS.highlights)return;
-        var idx=window.__bsvFindIdx||0;
-        idx=${direction === 'next' ? '(idx+1)%ranges.length' : '(idx-1+ranges.length)%ranges.length'};
-        window.__bsvFindIdx=idx;
-        CSS.highlights.set('__bsv_find_active',new Highlight(ranges[idx]));
-        // Scroll into view using Selection API (no DOM modification)
-        try{
-          var sel=window.getSelection();
-          sel.removeAllRanges();
-          var scrollRange=ranges[idx].cloneRange();
-          scrollRange.collapse(true);
-          sel.addRange(scrollRange);
-          var el=document.createElement('span');
-          scrollRange.insertNode(el);
-          el.scrollIntoView({block:'center'});
-          el.parentNode.removeChild(el);
-          sel.removeAllRanges();
-        }catch(e){}
-        window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({
-          type:'FIND_IN_PAGE_RESULT',current:idx+1,total:ranges.length
-        }));
-      })();true;`)
-    },
-    [activeTab]
-  )
-
-  const closeFindInPageRef = useRef<() => void>(() => {})
-
-  const closeFindInPage = useCallback(() => {
-    setFindInPageVisible(false)
-    setFindInPageQuery('')
-    setFindInPageCurrent(0)
-    setFindInPageTotal(0)
-    setFindInPageCapped(false)
-    if (activeTab?.webviewRef?.current) {
-      activeTab.webviewRef.current.injectJavaScript(`(function(){
-        ${CLEAR_FIND_JS}
-      })();true;`)
-    }
-  }, [activeTab])
-
-  closeFindInPageRef.current = closeFindInPage
-
-  const findInPageVisibleRef = useRef(false)
-  findInPageVisibleRef.current = findInPageVisible
-
-  /** Debounce timer for find-in-page queries */
-  const findDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const onFindInPageQueryChange = useCallback(
-    (text: string) => {
-      setFindInPageQuery(text)
-      if (findDebounceRef.current) clearTimeout(findDebounceRef.current)
-      findDebounceRef.current = setTimeout(() => {
-        findInPageScript(text)
-      }, 250)
-    },
-    [findInPageScript]
-  )
-
-  // Close find-in-page when the active tab changes
-  useEffect(() => {
-    if (findInPageVisibleRef.current) {
-      closeFindInPageRef.current()
-    }
-  }, [activeTab?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* -------------------------------------------------------------------------- */
   /*                           WEBVIEW MESSAGE HANDLER                          */
@@ -1865,9 +1112,9 @@ const Browser = observer(function Browser() {
       perf.measure(`webview.message:${msg?.type}`, 0)
 
       if (msg.type === 'FIND_IN_PAGE_RESULT') {
-        setFindInPageCurrent(msg.current ?? 0)
-        setFindInPageTotal(msg.total ?? 0)
-        setFindInPageCapped(!!msg.capped)
+        // Find-in-page state lives in AddressBar; forward the result through its
+        // imperative handle (the WebView message bridge stays in the shell).
+        addressBarRef.current?.onFindInPageResult(msg.current ?? 0, msg.total ?? 0, !!msg.capped)
         return
       }
 
@@ -2062,9 +1309,9 @@ const Browser = observer(function Browser() {
       }
 
       tabStore.handleNavigationStateChange(activeTab.id, navState)
-      // Show the clean URL (without transient challenge tokens) in the address bar
+      // tabStore writes the clean URL onto tab.url; AddressBar's url-sync effect
+      // (which guards on its own editing flag) reflects it into the input.
       const cleanUrl = normalizeUrlForHistory(navState.url)
-      if (!addressEditing.current) setAddressText(cleanUrl)
 
       // Debounce history push so that rapid onNavigationStateChange events
       // (which often carry stale titles from the *previous* page) settle before
@@ -2089,8 +1336,8 @@ const Browser = observer(function Browser() {
   // below) so Browser doesn't re-render on every nav-state tick. This is just the
   // redirect sink it calls back into.
   const handleManifestRedirect = useCallback((startUrl: string) => {
+    // updateActiveTab writes tab.url; AddressBar's url-sync reflects it.
     updateActiveTab({ url: startUrl })
-    setAddressText(startUrl)
   }, [updateActiveTab])
 
   /* -------------------------------------------------------------------------- */
@@ -2118,13 +1365,27 @@ const Browser = observer(function Browser() {
   /*                                  RENDER                                    */
   /* -------------------------------------------------------------------------- */
 
-  const showAddressBar = Platform.OS === 'android' ? !keyboardVisible || addressFocused : true
-
   const [ready, setReady] = useState(false)
   useEffect(() => {
     const handle = InteractionManager.runAfterInteractions(() => setReady(true))
     return () => handle.cancel?.()
   }, [])
+
+  // Cold-start warm-pool stagger: mount only the ACTIVE tab's WebView first and
+  // defer the other warm hosts until the active page has painted (markActivePainted,
+  // fired from the active host's onLoadEnd) — so N WebViews don't load over the
+  // network concurrently and starve the active tab's first paint (the 8s
+  // tab.switch.toPaint watchdog). Once flipped it stays true, so warm-switching
+  // remains instant. Fallback timer flips it even if the active page never fires
+  // onLoadEnd (slow/stuck), so background tabs still warm.
+  const [backgroundWarmReady, setBackgroundWarmReady] = useState(false)
+  const markActivePainted = useCallback(() => setBackgroundWarmReady(true), [])
+  useEffect(() => {
+    if (isWeb2Mode || !walletBuilding) {
+      const t = setTimeout(() => setBackgroundWarmReady(true), 5000)
+      return () => clearTimeout(t)
+    }
+  }, [isWeb2Mode, walletBuilding])
 
   if (!tabStore.isInitialized || !ready) {
     return (
@@ -2175,6 +1436,7 @@ const Browser = observer(function Browser() {
       webviewContainerStyle={webviewContainerStyle}
       webviewStyle={webviewStyle}
       loadProgress={loadProgress}
+      onActivePainted={active ? markActivePainted : undefined}
     />
   )
 
@@ -2200,9 +1462,18 @@ const Browser = observer(function Browser() {
           .filter((t): t is Tab => !!t && t.url !== kNEW_TAB_URL && t.url.startsWith('http'))
       : []
 
+    // Stagger cold-start mounting: until the active page has painted, render
+    // ONLY the active warm host so it doesn't compete with 1-2 background loads.
+    // After backgroundWarmReady flips, render the full warm pool (and keep it
+    // mounted) so subsequent tab switches stay instant.
+    const activeId = activeTab?.id
+    const hostsToRender = backgroundWarmReady
+      ? warmWebTabs
+      : warmWebTabs.filter(tab => tab.id === activeId)
+
     return (
       <>
-        {warmWebTabs.map(tab => renderHost(tab, tab.id === activeTab?.id))}
+        {hostsToRender.map(tab => renderHost(tab, tab.id === activeId))}
         {/* Homepage cover: when the active tab is a new tab, paint over the warm
             background WebViews so they're invisible but stay mounted. */}
         {isNewTab && (
@@ -2221,7 +1492,7 @@ const Browser = observer(function Browser() {
         <SwitchLoadingOverlay
           topInset={insets.top}
           bottomReservedHeight={bottomReservedHeight}
-          addressBarIsAtTop={addressBarIsAtTop}
+          addressBarIsAtTop={uiStore.addressBarAtTop}
           isFullscreen={isFullscreen}
           backgroundColor={colors.background}
         />
@@ -2248,272 +1519,39 @@ const Browser = observer(function Browser() {
       <KeyboardAvoidingView
         style={StyleSheet.absoluteFill}
         pointerEvents="box-none"
-        enabled={Platform.OS === 'ios' && addressFocused}
+        enabled={Platform.OS === 'ios' && uiStore.addressFocused}
         behavior="padding"
         keyboardVerticalOffset={0}
       >
         <View style={styles.chromeLayer} pointerEvents="box-none">
-          {/* Touch blocker shield:
-            - WebView frame is kept full-height so page backgrounds, heroes, and
-              full-bleed visuals can paint under the frosted-glass address bar.
-            - When the address bar is at the bottom, this transparent overlay
-              captures touches in the bottom (safeBottom + 48px) region, preventing
-              web content's fixed/sticky tappable elements from being hit "under"
-              the bar while still allowing the visual background to show through.
-            - zIndex sits above WebView (0) but below chromeWrapper (20). */}
-          {/* Touch blocker area — full height when bar is expanded, tiny right-corner area when collapsed */}
-          {!addressBarCollapsed && bottomReservedHeight > 0 && (
-            <View
-              pointerEvents="auto"
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: bottomReservedHeight,
-                backgroundColor: 'transparent',
-                zIndex: 15
-              }}
-            />
-          )}
-
-          {/* Small right-side blocker when collapsed (only protects taps under the ... button) */}
-          {addressBarCollapsed && (
-            <View
-              pointerEvents="auto"
-              style={{
-                position: 'absolute',
-                right: spacing.md - 4,
-                bottom: 0,
-                width: 52,
-                height: safeBottomInset(insets.bottom) + 52,
-                backgroundColor: 'transparent',
-                zIndex: 15
-              }}
-            />
-          )}
-
-          {/* Always-mounted kebab (...) pill.
-            Lives OUTSIDE the collapsing address-bar wrapper so it stays
-            visible during right-swipe collapse. Its translateY follows the
-            bar's vertical position (top vs bottom) + keyboard offset via
-            `animatedKebabStyle`, but the style emits NO opacity, NO scale,
-            NO translateX — only translateY. This is required so the
-            LiquidGlassView (UIVisualEffectView on iOS) never sees a
-            fractional-opacity ancestor (Apple's stuck-effect bug).
-            The kebab's tap action is always "open the menu popover". */}
-          {!isFullscreen && showAddressBar && !addressFocused && (
-            <Animated.View
-              style={[
-                {
-                  position: 'absolute',
-                  right: spacing.md,
-                  top: insets.top + spacing.xs,
-                  zIndex: 30,
-                  width: 44,
-                  height: 44
-                },
-                animatedKebabStyle
-              ]}
-              pointerEvents="box-none"
-            >
-              {!menuPopoverOpen && (
-                <GlassPill style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      // Collapsed bar: first tap re-expands the address bar.
-                      // Expanded bar: tap opens the menu popover.
-                      if (addressBarCollapsed) {
-                        requestExpandAddressBar()
-                        return
-                      }
-                      setHistoryPopoverDirection(null)
-                      setMenuPopoverOpen(true)
-                    }}
-                    style={{
-                      width: 44,
-                      height: 44,
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                    activeOpacity={0.6}
-                  >
-                    <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
-                  </TouchableOpacity>
-                </GlassPill>
-              )}
-            </Animated.View>
-          )}
-
-          {/* Address bar re-expand is now a single tap on the kebab (...) pill.
-            The previous full-width left-swipe hit area was removed because it
-            captured touches across the entire top strip, blocking taps that
-            should land on the web page beneath. */}
-
-          {/* ---- Floating Address Bar + Popover (absolutely positioned) ----
-            Stays mounted while the collapse exit animation plays (gated by
-            barExitAnimating) so the bar's UI-thread fade + scale completes
-            on screen before the wrapper unmounts. The GestureDetector is
-            still wrapped here, but during exit-animating the bar is fading
-            to opacity 0 so taps don't land on it visually. */}
-          {!isFullscreen && showAddressBar && (!addressBarCollapsed || barExitAnimating) && (
-            <>
-              <GestureDetector gesture={addressBarPanGesture}>
-                <Animated.View
-                  key={`chrome-wrapper-${glassRevision}`}
-                  style={[styles.chromeWrapper, { top: insets.top }, animatedAddressBarStyle]}
-                  // Block taps during the collapse-exit animation so the fading
-                  // bar can't receive ghost touches before it unmounts.
-                  pointerEvents={addressBarCollapsed ? 'none' : 'box-none'}
-                >
-                  <ChromeAddressBar
-                    addressText={addressText}
-                    addressFocused={addressFocused}
-                    historyPopoverOpen={historyPopoverOpen}
-                    glassRevision={glassRevision}
-                    cancelableNewTabId={cancelableNewTabId}
-                    inputRef={addressInputRef}
-                    onChangeText={onChangeAddressText}
-                    onSubmit={onAddressSubmit}
-                    onFocus={onAddressFocus}
-                    onBlur={onAddressBlur}
-                    onBack={navBack}
-                    onBackLongPress={navBackLongPress}
-                    onForward={navForward}
-                    onForwardLongPress={navForwardLongPress}
-                    onReloadOrStop={navReloadOrStop}
-                    onClearText={onClearAddressText}
-                    onCancelNewTabFn={onCancelNewTabFn}
-                  />
-                  <LoadProgressBar progress={loadProgress} />
-                </Animated.View>
-              </GestureDetector>
-
-              {/* ---- Suggestions ---- */}
-              {addressFocused && (
-                <SuggestionsDropdown
-                  suggestions={addressSuggestions}
-                  colors={colors}
-                  bottomOffset={bottomInset}
-                  onSelect={onSuggestionSelect}
-                />
-              )}
-            </>
-          )}
-
-          {/* ---- Find in Page Bar ---- */}
-          {findInPageVisible && !isFullscreen && (
-            <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 30 }}>
-              <FindInPageBar
-                query={findInPageQuery}
-                currentMatch={findInPageCurrent}
-                totalMatches={findInPageTotal}
-                capped={findInPageCapped}
-                onChangeQuery={onFindInPageQueryChange}
-                onNext={() => findInPageNavigate('next')}
-                onPrevious={() => findInPageNavigate('prev')}
-                onClose={closeFindInPage}
-              />
-            </View>
-          )}
-
-          {/* ---- Menu Popover (full-screen layer so backdrop covers everything) ----
-            Stays mounted while the close animation plays (the JS unmount only
-            fires after the UI-thread fade-out completes via runOnJS callback). */}
-          {menuPopoverOpen && (
-            <Animated.View
-              style={[
-                { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-                animatedMenuPopoverStyle,
-                animatedMenuVisibilityStyle
-              ]}
-            >
-              <ObservedMenuPopover
-                activeTabUrl={activeTab?.url ?? null}
-                isNewTab={isNewTab}
-                canShare={!isNewTab}
-                addressBarAtTop={addressBarIsAtTop}
-                topOffset={8}
-                bottomOffset={bottomInset + 4}
-                isDesktopMode={activeTab?.isDesktopMode ?? false}
-                onDismiss={() => setMenuPopoverOpen(false)}
-                onShare={shareCurrent}
-                onAddBookmark={() => {
-                  if (activeTab && activeTab.url !== kNEW_TAB_URL && isValidUrl(activeTab.url)) {
-                    addBookmark(activeTab.title || t('untitled'), activeTab.url)
-                  }
-                }}
-                onRemoveBookmark={() => {
-                  if (activeTab) {
-                    bookmarkStore.removeBookmark(activeTab.url)
-                  }
-                }}
-                onFindInPage={() => setFindInPageVisible(true)}
-                onBookmarks={() => sheet.push('browser-menu')}
-                onTabs={async () => {
-                  haptics.tap()
-                  await captureActiveThumbnail()
-                  setShowTabsView(true)
-                }}
-                onNewTab={handleNewTab}
-                onSettings={() => sheet.push('settings')}
-                onEnableWeb3={() => router.push('/auth/mnemonic')}
-                onConnections={() => router.push('/connections')}
-                onToggleDesktopMode={() => {
-                  if (!activeTab || desktopModeCooldown.current) return
-                  desktopModeCooldown.current = true
-                  setMenuPopoverOpen(false)
-                  tabStore.toggleDesktopMode(activeTab.id)
-                  // The native layer sets customUserAgent but does not reload automatically,
-                  // so we must trigger a reload explicitly after the state update propagates.
-                  if (activeTab.url !== kNEW_TAB_URL) {
-                    setTimeout(() => {
-                      activeTab.webviewRef.current?.reload()
-                    }, 50)
-                  }
-                  setTimeout(() => {
-                    desktopModeCooldown.current = false
-                  }, 1500)
-                }}
-              />
-            </Animated.View>
-          )}
-
-          {/* ---- History Popover (full-screen layer, anchored left) ----
-            Stays mounted while the close animation plays (the JS unmount only
-            fires after the UI-thread fade-out completes via runOnJS callback,
-            same pattern as MenuPopover). */}
-          {historyPopoverOpen &&
-            activeTab &&
-            (() => {
-              const { entries, currentIndex } = tabStore.getNavigationHistory(activeTab.id)
-              return (
-                <Animated.View
-                  style={[
-                    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-                    animatedMenuPopoverStyle,
-                    animatedHistoryVisibilityStyle
-                  ]}
-                >
-                  <HistoryPopover
-                    entries={entries}
-                    currentIndex={currentIndex}
-                    direction={historyPopoverDirection!}
-                    addressBarAtTop={addressBarIsAtTop}
-                    topOffset={8}
-                    bottomOffset={bottomInset + 4}
-                    onDismiss={() => setHistoryPopoverDirection(null)}
-                    onSelectEntry={onSelectHistoryEntry}
-                  />
-                </Animated.View>
-              )
-            })()}
+          {/* ---- Nav-chrome subsystem (address bar, popovers, find-in-page,
+            collapse/glass) — extracted so keystrokes / page-load churn re-render
+            only this component, not the 2000-line shell. */}
+          <AddressBar
+            ref={addressBarRef}
+            loadProgress={loadProgress}
+            isFullscreen={isFullscreen}
+            updateActiveTab={updateActiveTab}
+            injectNavigationSplash={injectNavigationSplash}
+            cancelableNewTabId={cancelableNewTabId}
+            cancelledLoadTabIds={cancelledLoadTabIds}
+            onShowTabs={async () => {
+              await captureActiveThumbnail()
+              setShowTabsView(true)
+            }}
+            onNewTab={handleNewTab}
+            onEnableWeb3={() => router.push('/auth/mnemonic')}
+            onConnections={() => router.push('/connections')}
+            onOpenSheet={route => sheet.push(route)}
+            history={history}
+            addBookmark={addBookmark}
+          />
 
           {/* ---- Tabs Overview ---- */}
           {!isFullscreen && showTabsView && (
             <TabsOverview
               onDismiss={() => setShowTabsView(false)}
-              setAddressFocused={setAddressFocused}
+              setAddressFocused={uiStore.setAddressFocused}
               onNewTab={handleNewTab}
             />
           )}
@@ -2525,7 +1563,6 @@ const Browser = observer(function Browser() {
             domainForUrl={domainForUrl}
             homepageUrl={homepageUrl}
             updateActiveTab={updateActiveTab}
-            setAddressText={setAddressText}
             history={history}
             clearHistory={clearHistory}
             removeHistoryItem={removeHistoryItem}
