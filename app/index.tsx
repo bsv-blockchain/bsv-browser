@@ -300,7 +300,14 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
               ? MOBILE_UA_IOS
               : MOBILE_UA_ANDROID
         }
-        sharedCookiesEnabled={true}
+        // sharedCookiesEnabled syncs the native NSHTTPCookieStorage into the
+        // WKWebView cookie store on the iOS MAIN THREAD on every navigation —
+        // on cookie/redirect-heavy pages this froze the whole app for 10s+
+        // (Safari loaded the same URL in 200ms). Disabled: the WebView uses its
+        // own persistent WKWebsiteDataStore (cookies + logins still persist and
+        // are shared across tabs), we just don't bridge cookies to/from native
+        // RN networking — which a browser doesn't need.
+        sharedCookiesEnabled={false}
         // The default static WKProcessPool keeps old site processes alive even
         // after their tab's WebView unmounts. A per-WebView pool lets iOS release
         // those processes when external-link navigation replaces the active tab.

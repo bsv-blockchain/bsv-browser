@@ -20,8 +20,8 @@ export function getDeviceTier(): DeviceTier {
   if (cachedTier) return cachedTier
 
   // Device.totalMemory is bytes on iOS+Android. expo-device returns null on
-  // simulators/emulators occasionally; treat null as "mid" so dev work isn't
-  // accidentally degraded.
+  // simulators/emulators occasionally; treat null as "mid" (warm pool default 2)
+  // so dev work isn't degraded.
   const memBytes = Device.totalMemory
   if (typeof memBytes === 'number' && memBytes > 0) {
     const gb = memBytes / 1024 / 1024 / 1024

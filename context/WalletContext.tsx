@@ -318,6 +318,28 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const autoApproveThresholdRef = useRef<number>(DEFAULT_AUTO_APPROVE_THRESHOLD)
   const managersRef = useRef<ManagerState>({})
   useEffect(() => { managersRef.current = managers }, [managers])
+
+  // [perf] JS-thread-stall watchdog — started at provider MOUNT (not in the
+  // monitor setup) so it also covers the cold-start window BEFORE the wallet
+  // builds. Logs whenever the JS event loop is blocked >120ms. NOTE: a native/UI
+  // thread freeze or an interactive auth wait (Face ID) leaves the JS thread
+  // idle, so the watchdog stays silent — that absence is itself a signal.
+  useEffect(() => {
+    if (!__DEV__) return
+    const g = globalThis as any
+    if (g.__jsStallWatchdog) return
+    g.__jsStallWatchdog = true
+    const TICK = 200
+    let last = performance.now()
+    const tick = () => {
+      const now = performance.now()
+      const lag = now - last - TICK
+      if (lag > 120) console.warn(`[perf] JS thread stalled ${lag.toFixed(0)}ms`)
+      last = now
+      g.__jsStallWatchdogTimer = setTimeout(tick, TICK)
+    }
+    g.__jsStallWatchdogTimer = setTimeout(tick, TICK)
+  }, [])
   useEffect(() => {
     AsyncStorage.getItem(AUTO_APPROVE_STORAGE_KEY).then(v => {
       if (v !== null) autoApproveThresholdRef.current = Number(v) || 0
@@ -888,6 +910,32 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
             }
           }
 
+          // ── Perf instrumentation (dev) — find which Monitor task hangs the UI ──
+          // The Monitor runs all due tasks back-to-back on the JS thread every
+          // ~5s with no yielding between them (Monitor.runOnce), so one task doing
+          // heavy SYNCHRONOUS work freezes the UI. Wrap every task's runTask to
+          // log wall-clock duration, and run a JS-thread-stall watchdog that fires
+          // whenever the event loop is blocked >120ms. Cross-reference: a task
+          // whose duration ~matches a stall is the synchronous-CPU culprit; a long
+          // duration with NO matching stall is just slow network (non-blocking).
+          if (__DEV__) {
+            for (const task of monitor._tasks as any[]) {
+              const taskName = task.name
+              const origRun = task.runTask.bind(task)
+              task.runTask = async () => {
+                const start = performance.now()
+                try {
+                  return await origRun()
+                } finally {
+                  const ms = performance.now() - start
+                  if (ms > 50) console.warn(`[perf] monitor task ${taskName}: ${ms.toFixed(0)}ms (wall-clock)`)
+                }
+              }
+            }
+            // (JS-thread-stall watchdog now started at provider mount above so it
+            // also covers the pre-wallet-build cold-start window.)
+          }
+
           // Assign the ref synchronously so foreground-resume can reach the monitor
           // immediately, but DEFER startTasks() until the current interaction/frame
           // settles. startTasks opens the ARC SSE connection + header polling + proof
@@ -960,14 +1008,21 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
       try {
         // Use provided mnemonic directly (e.g. from mnemonic screen) or read from secure storage
+        // [perf breadcrumbs] attribute the cold-start pre-build gap: getMnemonic
+        // can block on Face ID / Keychain (interactive, not a JS hang), while
+        // recoverMnemonicWallet runs pure-JS PBKDF2 + BIP32 EC math (JS-thread).
+        const __tMnemonicStart = performance.now()
         const mnemonic = providedMnemonic || (await getMnemonic())
+        if (__DEV__) console.warn(`[perf] getMnemonic (auth/keychain): ${(performance.now() - __tMnemonicStart).toFixed(0)}ms`)
         if (!mnemonic) {
           walletBuildingRef.current = false
           setWalletBuilding(false)
           return
         }
 
+        const __tRecoverStart = performance.now()
         const { rootKey, primaryKey } = recoverMnemonicWallet(mnemonic)
+        if (__DEV__) console.warn(`[perf] recoverMnemonicWallet (PBKDF2+BIP32): ${(performance.now() - __tRecoverStart).toFixed(0)}ms`)
 
         // For noWAB, we don't need a PrivilegedKeyManager from WAB
         // We can create a simple one that always returns the primary key
