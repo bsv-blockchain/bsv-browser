@@ -328,7 +328,10 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         injectedJavaScriptBeforeContentLoaded={isWeb2Mode ? undefined : injectedJSBefore}
         // Default ["phoneNumber"] makes WebKit scan + auto-link phone numbers on
         // every page parse — pure cost, no benefit for a general-purpose browser.
-        dataDetectorTypes="none"
+        // iOS/WebKit-only feature: on New-Arch Android the RNCWebView codegen prop
+        // parser aborts (SIGABRT: castValue assertion value.isObject()) on this
+        // value, so only pass it on iOS.
+        dataDetectorTypes={Platform.OS === 'ios' ? 'none' : undefined}
         onNavigationStateChange={onNavForTab}
         allowsFullscreenVideo={true}
         mediaPlaybackRequiresUserAction={false}
