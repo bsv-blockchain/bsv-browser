@@ -136,6 +136,12 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
             ) : item.thumbnailUri ? (
               <Image
                 source={{ uri: item.thumbnailUri }}
+                // The thumbnail file path is constant per tab ("<id>.jpg"), so a
+                // recaptured snapshot overwrites it under the same URI. expo-image
+                // caches by URI and would keep showing the first bitmap — disable
+                // caching and key the view on the version so each capture reloads.
+                cachePolicy="none"
+                recyclingKey={`${item.id}:${item.thumbnailVersion ?? 0}`}
                 style={{ flex: 1 }}
                 contentFit="cover"
                 transition={200}

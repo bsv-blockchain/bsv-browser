@@ -18,6 +18,13 @@ export type Tab = {
   isLoading: boolean
   isDesktopMode: boolean
   thumbnailUri?: string
+  // Host the current thumbnail represents. Recapture is skipped while a tab stays
+  // on the same host and triggered when it changes (see the host-change effect).
+  thumbnailHost?: string
+  // Bumped on every capture. Appended to the thumbnail URI at render so expo-image
+  // (which caches by URI) reloads the new bitmap — the file path is constant per
+  // tab, so without this an overwritten thumbnail keeps showing the stale image.
+  thumbnailVersion?: number
 }
 export type HistoryEntry = { title: string; url: string; timestamp: number }
 export type Bookmark = { title: string; url: string; added: number }

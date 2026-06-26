@@ -1,5 +1,15 @@
 import { kNEW_TAB_URL } from '@/shared/constants'
 
+/** Hostname of a URL, or '' for the new-tab sentinel / unparseable input. */
+export function hostOf(url: string): string {
+  if (!url || url === kNEW_TAB_URL) return ''
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ''
+  }
+}
+
 // Helper function to validate URL
 export function isValidUrl(url: string): boolean {
   if (!url) return false

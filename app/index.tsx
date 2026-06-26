@@ -37,7 +37,7 @@ import {
   safeBottomInset,
   ADDRESS_BAR_HEIGHT
 } from '@/shared/constants'
-import { isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
+import { hostOf, isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
 import uiStore from '@/stores/uiStore'
@@ -131,6 +131,12 @@ interface WebViewHostProps {
   topInset: number
   isDark: boolean
   acceptLanguage: string
+  // Web2 mode turns on native Apple Pay (enableApplePay) which is mutually
+  // exclusive with WKWebView script injection — RNCWebViewImpl.resetupScripts
+  // skips injectedJavaScript/before-content/history when Apple Pay is on, and
+  // evaluateJS is blocked. We have no wallet bridge in web2, so we drop the
+  // injected scripts there and gain Apple Pay; web3 keeps the bridge, no Apple Pay.
+  isWeb2Mode: boolean
   injectedJavaScript: string
   injectedJSBefore: string
   onMessage: (tabId: number, event: any) => void
@@ -160,6 +166,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
     onExitFullscreen,
     topInset,
     acceptLanguage,
+    isWeb2Mode,
     injectedJavaScript,
     injectedJSBefore,
     onMessage,
@@ -314,8 +321,14 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         useSharedProcessPool={Platform.OS !== 'ios'}
         originWhitelist={['https://*', 'http://*', 'blob:*', 'data:*', 'about:*']}
         onMessage={onMessageForTab}
-        injectedJavaScript={injectedJavaScript}
-        injectedJavaScriptBeforeContentLoaded={injectedJSBefore}
+        // Apple Pay (web2) is incompatible with WKWebView script injection, so
+        // skip the injected scripts there. In web3 the wallet bridge needs them.
+        enableApplePay={isWeb2Mode}
+        injectedJavaScript={isWeb2Mode ? undefined : injectedJavaScript}
+        injectedJavaScriptBeforeContentLoaded={isWeb2Mode ? undefined : injectedJSBefore}
+        // Default ["phoneNumber"] makes WebKit scan + auto-link phone numbers on
+        // every page parse — pure cost, no benefit for a general-purpose browser.
+        dataDetectorTypes="none"
         onNavigationStateChange={onNavForTab}
         allowsFullscreenVideo={true}
         mediaPlaybackRequiresUserAction={false}
@@ -405,6 +418,14 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
             }
           }
           return true
+        }}
+        // Without this, RNCWebView falls back to loadRequest on the SAME WebView
+        // for target="_blank"/window.open — clobbering the current page. Open a
+        // new tab instead (the native side cancels the in-place nav, preserving
+        // this tab). Active-only so a backgrounded warm tab can't spawn tabs.
+        onOpenWindow={(event: any) => {
+          const targetUrl = event?.nativeEvent?.targetUrl
+          if (isActive && targetUrl) tabStore.newTab(targetUrl)
         }}
         androidLayerType="hardware"
         androidHardwareAccelerationDisabled={false}
@@ -719,9 +740,37 @@ const Browser = observer(function Browser() {
     // only consumed when the tabs grid is opened or on backgrounding, so a few
     // hundred ms of latency is invisible to the user.
     await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
+    // Snapshot the live url BEFORE the await chain so we tag the thumbnail with
+    // the host that was actually on screen, not wherever the tab navigated to
+    // mid-capture.
+    const capturedHost = hostOf(activeTab.url)
     const uri = await captureThumbnail(webviewContainerRef, activeTab.id)
-    if (uri) tabStore.updateTab(activeTab.id, { thumbnailUri: uri })
+    if (uri) tabStore.setThumbnail(activeTab.id, uri, capturedHost)
   }, [activeTab])
+
+  // Recapture policy: only the ACTIVE tab can be snapshotted (its container holds
+  // the capture ref). While a tab stays on one host the existing thumbnail is
+  // fine; when the host changes the old snapshot is wrong, so dump it and grab a
+  // fresh one after the new page settles. Same-host in-page navigation (SPA
+  // routes, fragments) is intentionally ignored — no churn.
+  useEffect(() => {
+    if (!activeTab || activeTab.url === kNEW_TAB_URL) return
+    const host = hostOf(activeTab.url)
+    if (!host || host === activeTab.thumbnailHost) return
+    // Host changed → drop the stale snapshot, then recapture once the page paints.
+    tabStore.dumpThumbnail(activeTab.id)
+    if (thumbnailCaptureTimer.current) clearTimeout(thumbnailCaptureTimer.current)
+    thumbnailCaptureTimer.current = setTimeout(() => {
+      thumbnailCaptureTimer.current = null
+      captureActiveThumbnail()
+    }, 1200)
+    return () => {
+      if (thumbnailCaptureTimer.current) {
+        clearTimeout(thumbnailCaptureTimer.current)
+        thumbnailCaptureTimer.current = null
+      }
+    }
+  }, [activeTab, activeTab?.url, activeTab?.thumbnailHost, captureActiveThumbnail])
 
   // iOS memory hygiene: on backgrounding capture the current tab thumbnail so the
   // user sees an up-to-date snapshot on return, and on memoryWarning purge inactive
@@ -1433,6 +1482,7 @@ const Browser = observer(function Browser() {
       topInset={insets.top}
       isDark={isDark}
       acceptLanguage={getAcceptLanguageHeader()}
+      isWeb2Mode={isWeb2Mode}
       injectedJavaScript={injectedJavaScript}
       injectedJSBefore={injectedJSBefore}
       onMessage={handleMessage}

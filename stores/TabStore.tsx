@@ -336,6 +336,34 @@ export class TabStore {
     }
   }
 
+  /**
+   * Record a freshly-captured thumbnail. Bumps thumbnailVersion so the render
+   * URI changes and expo-image reloads the new bitmap (the on-disk path is
+   * constant per tab). `host` is stored so we only recapture on host changes.
+   */
+  setThumbnail(id: number, uri: string, host: string) {
+    const tab = this.tabs.find(t => t.id === id)
+    if (!tab) return
+    tab.thumbnailUri = uri
+    tab.thumbnailHost = host
+    tab.thumbnailVersion = (tab.thumbnailVersion ?? 0) + 1
+    this.saveTabs()
+  }
+
+  /**
+   * Drop a tab's thumbnail (file + reference) so the grid falls back to the
+   * placeholder until a fresh capture lands. Called when the tab's host changes
+   * — the old snapshot no longer represents the page. thumbnailHost is left as-is
+   * so the host-change effect doesn't re-fire before the recapture completes.
+   */
+  dumpThumbnail(id: number) {
+    const tab = this.tabs.find(t => t.id === id)
+    if (!tab || !tab.thumbnailUri) return
+    deleteThumbnail(id)
+    tab.thumbnailUri = undefined
+    this.saveTabs()
+  }
+
   goBack(tabId: number) {
     const tab = this.tabs.find(t => t.id === tabId)
     const history = this.tabNavigationHistories[tabId] || []
