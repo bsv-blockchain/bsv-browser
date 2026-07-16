@@ -327,6 +327,7 @@ const resources = {
       // Biometric prompts
       biometric_store_wallet: 'Securely Store Your Wallet',
       biometric_load_wallet: 'Securely Load Your Wallet',
+      clipboard_will_clear: 'Copied — clipboard clears in 60s',
 
       // Connections screen
       connections: 'Connections',

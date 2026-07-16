@@ -1,19 +1,10 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef } from 'react'
+import React, { createContext, useCallback, useContext, useMemo } from 'react'
 import * as SecureStore from 'expo-secure-store'
-import * as LocalAuthentication from 'expo-local-authentication'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import i18n from '@/context/i18n/translations'
 
 export interface LocalStorageContextType {
-  /* non-secure */
-  setSnap: (snap: number[]) => Promise<void>
-  getSnap: () => Promise<number[] | null>
-  deleteSnap: () => Promise<void>
-
   /* secure */
-  setPassword: (password: string) => Promise<boolean>
-  getPassword: () => Promise<string | null>
-  deletePassword: () => Promise<void>
   setMnemonic: (mnemonic: string) => Promise<boolean>
   getMnemonic: () => Promise<string | null>
   deleteMnemonic: () => Promise<void>
@@ -27,22 +18,43 @@ export interface LocalStorageContextType {
   deleteItem: (item: string) => Promise<void>
 }
 
-const SNAP_KEY = 'snap'
-const PASSWORD_KEY = 'password'
 const MNEMONIC_KEY = 'mnemonic'
 const RECOVERED_KEY = 'recoveredKey'
-const HAS_WALLET_KEYS = 'hasWalletKeys'
+// Fast-path hint (plaintext AsyncStorage): "a wallet secret was stored". Lets us
+// avoid a pointless biometric prompt when there is genuinely no wallet, and lets
+// callers tell "no wallet" apart from "wallet exists but its key is unreadable".
+export const HAS_WALLET_KEYS = 'hasWalletKeys'
+
+// Dedicated keychain service for the auth-bound secrets. This MUST stay
+// separate from the app's non-authenticated SecureStore usage (e.g. the
+// WalletConnect sequence counters): expo-secure-store cannot mix authenticated
+// and unauthenticated items under the same keychainService.
+const SECURE_KEYCHAIN_SERVICE = 'bsv-wallet-secure'
+
+// Auth is enforced by the OS and bound to the keychain item via
+// requireAuthentication — Face ID / Touch ID / device credential fires on every
+// read, not a JS-side check a debugger or direct getItemAsync could skip. The
+// library is patched (patches/expo-secure-store) so the item uses biometryAny /
+// setInvalidatedByBiometricEnrollment(false) and survives biometric enrollment
+// changes instead of being wiped.
+const SECURE_WRITE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainService: SECURE_KEYCHAIN_SERVICE,
+  requireAuthentication: true,
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+}
+
+const secureReadOptions = (): SecureStore.SecureStoreOptions => ({
+  keychainService: SECURE_KEYCHAIN_SERVICE,
+  requireAuthentication: true,
+  authenticationPrompt: i18n.t('biometric_load_wallet')
+})
+
+const SECURE_DELETE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainService: SECURE_KEYCHAIN_SERVICE
+}
 
 export const LocalStorageContext = createContext<LocalStorageContextType>({
-  /* non-secure */
-  setSnap: async () => {},
-  getSnap: async () => null,
-  deleteSnap: async () => {},
-
   /* secure */
-  setPassword: async () => false,
-  getPassword: async () => null,
-  deletePassword: async () => {},
   setMnemonic: async () => false,
   getMnemonic: async () => null,
   deleteMnemonic: async () => {},
@@ -50,6 +62,7 @@ export const LocalStorageContext = createContext<LocalStorageContextType>({
   getRecoveredKey: async () => null,
   deleteRecoveredKey: async () => {},
 
+  /* general */
   getItem: AsyncStorage.getItem,
   setItem: AsyncStorage.setItem,
   deleteItem: AsyncStorage.removeItem
@@ -58,201 +71,71 @@ export const LocalStorageContext = createContext<LocalStorageContextType>({
 export const useLocalStorage = () => useContext(LocalStorageContext)
 
 export default function LocalStorageProvider({ children }: { children: React.ReactNode }) {
-  /* --------------------------------- SECURE -------------------------------- */
-
-  // keep "am I already biometrically unlocked?" in memory for this session
-  const authenticatedRef = useRef(false)
-  const authInProgress = useRef<Promise<boolean> | null>(null)
-
-  const ensureAuth = useCallback(async (promptMessage: string): Promise<boolean> => {
-    // If we already asked this frame, reuse the same promise so we don't show
-    // the Face ID modal twice in parallel.
-    if (authInProgress.current) return authInProgress.current
-
-    const doAuth = async () => {
-      // Use ref so the check is always up-to-date, even before React re-renders.
-      if (authenticatedRef.current) return true
-
-      const { success } = await LocalAuthentication.authenticateAsync({
-        promptMessage,
-        cancelLabel: 'Cancel',
-        disableDeviceFallback: false
-      })
-
-      authenticatedRef.current = success
-      authInProgress.current = null // reset latch
-      return success
-    }
-
-    authInProgress.current = doAuth()
-    return authInProgress.current
-  }, [])
-
-  /* ------------------------------- non-secure ------------------------------ */
-
-  const setSnap = useCallback(async (snap: number[]): Promise<void> => {
-    try {
-      const snapAsJSON = typeof snap === 'string' ? snap : JSON.stringify(snap)
-      await AsyncStorage.setItem(SNAP_KEY, snapAsJSON)
-    } catch (err) {
-      console.warn('[setSnap]', err)
-    }
-  }, [])
-
-  const getSnap = useCallback(async (): Promise<number[] | null> => {
-    try {
-      const raw = await AsyncStorage.getItem(SNAP_KEY)
-      return raw ? (JSON.parse(raw) as number[]) : null
-    } catch (err) {
-      console.warn('[getSnap]', err)
-      return null
-    }
-  }, [])
-
-  const deleteSnap = useCallback(async (): Promise<void> => {
-    try {
-      await AsyncStorage.removeItem(SNAP_KEY)
-    } catch (err) {
-      console.warn('[deleteSnap]', err)
-    }
-  }, [])
-
   /* -------------------------------- secure --------------------------------- */
 
-  const setMnemonic = useCallback(
-    async (mnemonic: string): Promise<boolean> => {
-      try {
-        if (!(await ensureAuth(i18n.t('biometric_store_wallet')))) return false
-        await SecureStore.setItemAsync(MNEMONIC_KEY, mnemonic, {
-          keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
-        })
-        await AsyncStorage.setItem(HAS_WALLET_KEYS, 'true')
-        return true
-      } catch (err) {
-        console.warn('[setMnemonic]', err)
-        return false
-      }
-    },
-    [ensureAuth]
-  )
+  const setMnemonic = useCallback(async (mnemonic: string): Promise<boolean> => {
+    try {
+      await SecureStore.setItemAsync(MNEMONIC_KEY, mnemonic, SECURE_WRITE_OPTIONS)
+      await AsyncStorage.setItem(HAS_WALLET_KEYS, 'true')
+      return true
+    } catch (err) {
+      console.warn('[setMnemonic]', err)
+      return false
+    }
+  }, [])
 
   const getMnemonic = useCallback(async (): Promise<string | null> => {
-    try {
-      const hasKeys = await AsyncStorage.getItem(HAS_WALLET_KEYS)
-      if (!hasKeys) return null
-      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return null
-      return await SecureStore.getItemAsync(MNEMONIC_KEY)
-    } catch (err) {
-      console.warn('[getMnemonic]', err)
-      return null
-    }
-  }, [ensureAuth])
+    // Fast path: never trigger a biometric prompt when there is genuinely no
+    // wallet. Absence/invalidation resolves to null; an auth cancel rejects and
+    // is allowed to propagate so callers can keep the wallet locked and retry
+    // rather than mistaking a cancel for "no wallet".
+    const hasKeys = await AsyncStorage.getItem(HAS_WALLET_KEYS)
+    if (!hasKeys) return null
+    return await SecureStore.getItemAsync(MNEMONIC_KEY, secureReadOptions())
+  }, [])
 
   const deleteMnemonic = useCallback(async (): Promise<void> => {
     try {
-      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return
-      await SecureStore.deleteItemAsync(MNEMONIC_KEY)
+      await SecureStore.deleteItemAsync(MNEMONIC_KEY, SECURE_DELETE_OPTIONS)
       await AsyncStorage.removeItem(HAS_WALLET_KEYS)
     } catch (err) {
       console.warn('[deleteMnemonic]', err)
     }
-  }, [ensureAuth])
-
-  /* -------------------------------- secure --------------------------------- */
-
-  const setPassword = useCallback(
-    async (password: string): Promise<boolean> => {
-      try {
-        if (!(await ensureAuth(i18n.t('biometric_store_wallet')))) return false
-        await SecureStore.setItemAsync(PASSWORD_KEY, password, {
-          keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
-        })
-        await AsyncStorage.setItem(HAS_WALLET_KEYS, 'true')
-        return true
-      } catch (err) {
-        console.warn('[setPassword]', err)
-        return false
-      }
-    },
-    [ensureAuth]
-  )
-
-  const getPassword = useCallback(async (): Promise<string | null> => {
-    try {
-      const hasKeys = await AsyncStorage.getItem(HAS_WALLET_KEYS)
-      if (!hasKeys) return null
-      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return null
-      return await SecureStore.getItemAsync(PASSWORD_KEY)
-    } catch (err) {
-      console.warn('[getPassword]', err)
-      return null
-    }
-  }, [ensureAuth])
-
-  const deletePassword = useCallback(async (): Promise<void> => {
-    try {
-      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return
-      await SecureStore.deleteItemAsync(PASSWORD_KEY)
-      await AsyncStorage.removeItem(HAS_WALLET_KEYS)
-    } catch (err) {
-      console.warn('[deletePassword]', err)
-    }
-  }, [ensureAuth])
+  }, [])
 
   /* ----------------------------- recovered key ------------------------------ */
 
-  const setRecoveredKey = useCallback(
-    async (wif: string): Promise<boolean> => {
-      try {
-        if (!(await ensureAuth(i18n.t('biometric_store_wallet')))) return false
-        await SecureStore.setItemAsync(RECOVERED_KEY, wif, {
-          keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
-        })
-        await AsyncStorage.setItem(HAS_WALLET_KEYS, 'true')
-        return true
-      } catch (err) {
-        console.warn('[setRecoveredKey]', err)
-        return false
-      }
-    },
-    [ensureAuth]
-  )
+  const setRecoveredKey = useCallback(async (wif: string): Promise<boolean> => {
+    try {
+      await SecureStore.setItemAsync(RECOVERED_KEY, wif, SECURE_WRITE_OPTIONS)
+      await AsyncStorage.setItem(HAS_WALLET_KEYS, 'true')
+      return true
+    } catch (err) {
+      console.warn('[setRecoveredKey]', err)
+      return false
+    }
+  }, [])
 
   const getRecoveredKey = useCallback(async (): Promise<string | null> => {
-    try {
-      const hasKeys = await AsyncStorage.getItem(HAS_WALLET_KEYS)
-      if (!hasKeys) return null
-      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return null
-      return await SecureStore.getItemAsync(RECOVERED_KEY)
-    } catch (err) {
-      console.warn('[getRecoveredKey]', err)
-      return null
-    }
-  }, [ensureAuth])
+    const hasKeys = await AsyncStorage.getItem(HAS_WALLET_KEYS)
+    if (!hasKeys) return null
+    return await SecureStore.getItemAsync(RECOVERED_KEY, secureReadOptions())
+  }, [])
 
   const deleteRecoveredKey = useCallback(async (): Promise<void> => {
     try {
-      if (!(await ensureAuth(i18n.t('biometric_load_wallet')))) return
-      await SecureStore.deleteItemAsync(RECOVERED_KEY)
+      await SecureStore.deleteItemAsync(RECOVERED_KEY, SECURE_DELETE_OPTIONS)
       await AsyncStorage.removeItem(HAS_WALLET_KEYS)
     } catch (err) {
       console.warn('[deleteRecoveredKey]', err)
     }
-  }, [ensureAuth])
+  }, [])
 
   /* -------------------------------- output --------------------------------- */
 
   const value: LocalStorageContextType = useMemo(
     () => ({
-      /* non-secure */
-      setSnap,
-      getSnap,
-      deleteSnap,
-
       /* secure */
-      setPassword,
-      getPassword,
-      deletePassword,
       setMnemonic,
       getMnemonic,
       deleteMnemonic,
@@ -265,20 +148,7 @@ export default function LocalStorageProvider({ children }: { children: React.Rea
       setItem: AsyncStorage.setItem,
       deleteItem: AsyncStorage.removeItem
     }),
-    [
-      setSnap,
-      getSnap,
-      deleteSnap,
-      setPassword,
-      getPassword,
-      deletePassword,
-      setMnemonic,
-      getMnemonic,
-      deleteMnemonic,
-      setRecoveredKey,
-      getRecoveredKey,
-      deleteRecoveredKey
-    ]
+    [setMnemonic, getMnemonic, deleteMnemonic, setRecoveredKey, getRecoveredKey, deleteRecoveredKey]
   )
 
   return <LocalStorageContext.Provider value={value}>{children}</LocalStorageContext.Provider>
