@@ -154,7 +154,7 @@ bsv-browser/
 
 ## Architecture
 
-The app boots through `index.js`, which installs `react-native-quick-crypto` as a global `crypto` polyfill before any BSV SDK code runs. Expo Router then takes over.
+The app boots through `index.js`, which first installs `react-native-quick-crypto` as a global `crypto` polyfill, then installs the fast ECDSA backend (`installFastEcdsa`) before any BSV SDK code runs. Expo Router then takes over.
 
 The root layout (`app/_layout.tsx`) nests context providers in this order:
 
@@ -184,7 +184,7 @@ GestureHandlerRootView
 
 **Web2/Web3 dual mode** -- the app starts in Web2 mode (a plain browser). Creating or importing a wallet automatically switches to Web3 mode, enabling the CWI provider, payments, and identity features. Users can toggle modes manually.
 
-**Metro** is configured with crypto polyfills (`react-native-quick-crypto`, `stream-browserify`, `buffer`) and special COOP/COEP headers for SharedArrayBuffer support (required by `expo-sqlite` on web).
+**Metro** is configured with crypto polyfills (`react-native-quick-crypto`, `stream-browserify`, `buffer`), routes `node:crypto` to quick-crypto, and rewrites `@bsv/sdk` ECDSA relative imports to `utils/crypto/fastECDSA.ts` (with `@bsv/sdk-original-ecdsa` as the pure-JS escape hatch). Special COOP/COEP headers support SharedArrayBuffer (required by `expo-sqlite` on web).
 
 ## Environment Variables
 

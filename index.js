@@ -47,5 +47,17 @@ if (global.crypto && typeof global.crypto.getRandomValues === 'function') {
   console.warn('[Crypto Setup] Warning: global.crypto not properly initialized after install()')
 }
 
+// Install accelerated ECDSA backend (noble, or native when available) before SDK use.
+// Metro rewrites @bsv/sdk ECDSA imports to utils/crypto/fastECDSA.ts.
+import { installFastEcdsa } from './utils/crypto/installFastEcdsa'
+try {
+  const { backend } = installFastEcdsa()
+  if (__DEV__) {
+    console.log(`[Crypto Setup] Fast ECDSA backend: ${backend}`)
+  }
+} catch (e) {
+  console.warn('[Crypto Setup] Fast ECDSA install failed; using pure-JS SDK ECDSA', e)
+}
+
 // Then start the normal Expo app
 import 'expo-router/entry'

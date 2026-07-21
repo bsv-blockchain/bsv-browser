@@ -1,5 +1,6 @@
 const { getDefaultConfig } = require('expo/metro-config')
 const path = require('path')
+const { shouldAliasBsvEcdsa } = require('./metro-shims/ecdsaResolve')
 
 const config = getDefaultConfig(__dirname)
 
@@ -13,6 +14,11 @@ config.resolver.extraNodeModules = {
 
 const emptyShim = path.resolve(__dirname, 'metro-shims/empty.js')
 const quickCryptoMain = require.resolve('react-native-quick-crypto')
+const fastEcdsa = path.resolve(__dirname, 'utils/crypto/fastECDSA.ts')
+const originalEcdsa = path.resolve(
+  __dirname,
+  'node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js'
+)
 
 const upstream = config.resolver.resolveRequest
 config.resolver.resolveRequest = (context, moduleName, platform) => {
@@ -22,6 +28,14 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   }
   if (moduleName === 'node:buffer' || moduleName === 'node:process') {
     return { type: 'sourceFile', filePath: emptyShim }
+  }
+  // Escape hatch: pure-JS @bsv/sdk ECDSA (used by fastECDSA for customK / fallback).
+  if (moduleName === '@bsv/sdk-original-ecdsa') {
+    return { type: 'sourceFile', filePath: originalEcdsa }
+  }
+  // Rewrite @bsv/sdk relative ECDSA imports to the accelerated drop-in.
+  if (shouldAliasBsvEcdsa(moduleName, context.originModulePath)) {
+    return { type: 'sourceFile', filePath: fastEcdsa }
   }
   if (typeof upstream === 'function') return upstream(context, moduleName, platform)
   return context.resolveRequest(context, moduleName, platform)
