@@ -195,6 +195,18 @@ Re-fetch: \`node modules/native-secp256k1/scripts/fetch-prebuilts.mjs --force\`
 }
 
 main().catch(err => {
-  console.error('[native-secp256k1] fetch-prebuilts failed:', err)
-  process.exit(1)
+  // Soft-fail: offline / network errors must not break `npm install`.
+  // Native ECDSA needs vendor prebuilts; without them the app uses noble fallback.
+  console.warn(
+    '[native-secp256k1] WARNING: fetch-prebuilts failed — continuing without vendor prebuilts.'
+  )
+  console.warn(
+    '[native-secp256k1] Offline install is OK; ECDSA will use @noble/secp256k1 until prebuilts are present and the native app is rebuilt.'
+  )
+  console.warn('[native-secp256k1] Re-run when online: npm run fetch-native-secp')
+  console.warn(
+    '[native-secp256k1]',
+    err && typeof err === 'object' && 'message' in err ? err.message : err
+  )
+  process.exit(0)
 })

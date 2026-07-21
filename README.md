@@ -90,6 +90,8 @@ Once a wallet is active the app switches to **Web3 mode** and BSV-enabled web ap
 | `npm run fix`          | Run `format` then `lint:fix`                            |
 | `npm run clean`        | Delete generated caches and build artifacts             |
 | `npm run version`      | Bump version in package.json + app.json, commit and tag |
+| `npm run fetch-native-secp` | Download UltrafastSecp256k1 prebuilts for native ECDSA  |
+| `npm test`             | Run Jest suite                                          |
 
 ### Device / Store Builds
 
@@ -176,6 +178,64 @@ GestureHandlerRootView
 
 **Wallet storage** is backed by `expo-sqlite` with a schema defined in `storage/schema/createTables.ts`. See `storage/README.md` for detailed documentation.
 
+### Crypto stack (hashes + ECDSA)
+
+Wallet and CWI paths need both general crypto (SHA, AES, HMAC, random) and secp256k1 ECDSA. The app accelerates both the same way: **early install in `index.js` + Metro resolution**, never monkey-patching frozen ESM exports.
+
+| Layer | What it speeds up | Mechanism |
+| ----- | ----------------- | --------- |
+| **quick-crypto** | SHA-256/512, AES-GCM, HMAC, `getRandomValues` | `react-native-quick-crypto` `install()` in `index.js`; Metro maps `crypto` / `node:crypto` → quick-crypto |
+| **fast ECDSA** | secp256k1 `sign` / `verify` (hot path for `PrivateKey.sign`, `createAction` / micropayments) | Metro rewrites `@bsv/sdk` relative `ECDSA` imports to `utils/crypto/fastECDSA.ts`; `installFastEcdsa()` selects backend at boot |
+| **native-secp256k1** | Same ECDSA ops, native C ABI | Local Expo module (`modules/native-secp256k1`) over UltrafastSecp256k1 / ufsecp **sync** methods |
+| **noble fallback** | Same ECDSA ops in pure JS | Audited `@noble/secp256k1` when native is missing (web, Jest, pre-rebuild dev clients) |
+
+**Boot sequence** (`index.js`):
+
+1. `react-native-quick-crypto` `install()` — native hashes/AES/HMAC + global `crypto`
+2. `installFastEcdsa()` — prefer **native** ufsecp if the Expo module is linked and `isAvailable()`, else **noble**
+3. In `__DEV__`, logs: `Fast ECDSA backend: native` or `Fast ECDSA backend: noble`
+4. Expo Router entry
+
+**Metro** (`metro.config.js`):
+
+- Polyfills: `react-native-quick-crypto`, `stream-browserify`, `buffer`
+- Routes `node:crypto` → quick-crypto so SDK hash/AES paths stay native
+- Rewrites `@bsv/sdk` `./ECDSA` (and `.js`) imports to `utils/crypto/fastECDSA.ts`
+- Escape hatch alias `@bsv/sdk-original-ecdsa` → stock pure-JS ECDSA (used by `fastECDSA` for `customK` signing and verify fallback)
+- COOP/COEP headers support SharedArrayBuffer (`expo-sqlite` on web)
+
+**Semantics preserved:**
+
+- `sign` / `verify` stay **synchronous** (required by `@bsv/sdk` `PrivateKey.sign`)
+- Low-S signatures on the fast path; `customK` still uses original pure-JS ECDSA
+- Oversized message hashes are rejected like the original SDK
+- Public-key derivation is not Metro-aliased separately; ECDSA sign/verify is the measured hot path. Backends also expose `pubkeyCreate` for internal use.
+
+**Native rebuild (required for `backend: native`):**
+
+Prebuilt ufsecp libraries are **not** committed. After clone or when vendor is missing:
+
+```bash
+# Fetch UltrafastSecp256k1 prebuilts into modules/native-secp256k1/vendor/
+npm run fetch-native-secp
+
+# Regenerate native projects and rebuild the dev client
+npx expo prebuild
+# iOS
+npx expo run:ios --device
+# Android
+npx expo run:android --device
+```
+
+`postinstall` also runs the fetch script; offline installs **warn** and continue (noble fallback). Without a native rebuild after adding this module, the app still works with `Fast ECDSA backend: noble`.
+
+**Node micro-benchmark** (no RN; noble vs pure-JS only):
+
+```bash
+node scripts/perf/ecdsa-bench.mjs
+# optional: node scripts/perf/ecdsa-bench.mjs --n=500
+```
+
 **CWI Provider** (`utils/webview/cwiProvider.ts`) exposes `window.CWI` to web apps inside the browser. This implements the BRC-100 wallet interface, including `createAction`, `signAction`, `listActions`, `getPublicKey`, `encrypt`/`decrypt`, `createSignature`/`verifySignature`, `acquireCertificate`/`listCertificates`, and identity discovery methods. All operations go through a permission system with user-facing approval modals.
 
 **WebView communication** happens via injected polyfills (`utils/webview/`) that bridge web-app wallet requests to the native wallet layer through a message router. Custom user-agent spoofing and media polyfills ensure compatibility with sites that use bot detection or advanced media APIs.
@@ -183,8 +243,6 @@ GestureHandlerRootView
 **Background monitoring** -- a `Monitor` instance subscribes to ARC SSE (Server-Sent Events) for real-time transaction status updates. Missed events are fetched when the app returns from the background.
 
 **Web2/Web3 dual mode** -- the app starts in Web2 mode (a plain browser). Creating or importing a wallet automatically switches to Web3 mode, enabling the CWI provider, payments, and identity features. Users can toggle modes manually.
-
-**Metro** is configured with crypto polyfills (`react-native-quick-crypto`, `stream-browserify`, `buffer`), routes `node:crypto` to quick-crypto, and rewrites `@bsv/sdk` ECDSA relative imports to `utils/crypto/fastECDSA.ts` (with `@bsv/sdk-original-ecdsa` as the pure-JS escape hatch). Special COOP/COEP headers support SharedArrayBuffer (required by `expo-sqlite` on web).
 
 ## Environment Variables
 
@@ -321,6 +379,7 @@ The `--clean` flag regenerates the native projects from scratch, ensuring all na
 | Wallet storage       | `expo-sqlite`                                                                                              |
 | Secure key storage   | `expo-secure-store`                                                                                        |
 | Crypto polyfill      | `react-native-quick-crypto`                                                                                |
+| Fast ECDSA (native)  | `native-secp256k1` (local Expo module + ufsecp prebuilts via `npm run fetch-native-secp`)                  |
 
 **When is a rebuild needed?**
 
