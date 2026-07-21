@@ -1,0 +1,37 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.nativesecp256k1'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.nativesecp256k1"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+    externalNativeBuild {
+      cmake {
+        cppFlags "-std=c++20 -frtti -fexceptions -fvisibility=hidden"
+        arguments "-DANDROID_STL=c++_shared"
+      }
+    }
+    ndk {
+      abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+    }
+  }
+  externalNativeBuild {
+    cmake {
+      path "src/main/cpp/CMakeLists.txt"
+    }
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+
+dependencies {
+  implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
+}

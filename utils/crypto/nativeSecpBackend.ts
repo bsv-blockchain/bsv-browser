@@ -8,10 +8,11 @@ type NativeSecpModule = {
 }
 
 function tryRequireNative(): NativeSecpModule | null {
+  // Prefer package name (file:modules/native-secp256k1); keep relative fallback.
   const candidates = ['native-secp256k1', '../../modules/native-secp256k1']
   for (const id of candidates) {
     try {
-      // Native module is optional until Task 4; soft-fail when missing.
+      // Native module is optional; soft-fail when missing or unlinked.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const mod = require(id) as NativeSecpModule | { default?: NativeSecpModule }
       if (mod && typeof mod === 'object') {

@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["NativeSecp256k1Module"]
+  },
+  "android": {
+    "modules": ["expo.modules.nativesecp256k1.NativeSecp256k1Module"]
+  }
+}

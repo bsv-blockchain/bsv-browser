@@ -28,10 +28,12 @@
     "prebuild": "expo prebuild --clean",
     "prebuild:ios": "expo prebuild --platform ios --clean",
     "prebuild:android": "expo prebuild --platform android --clean",
-    "postinstall": "patch-package && node -e \"const fs=require('fs'),p=require('path'),t=p.join('node_modules','expo','node_modules','@expo','cli','node_modules'),s=p.join('node_modules','@expo','cli','node_modules','glob');fs.mkdirSync(t,{recursive:true});try{fs.symlinkSync(p.resolve(s),p.join(t,'glob'))}catch(e){if(e.code!=='EEXIST')throw e}\"",
+    "postinstall": "patch-package && node -e \"const fs=require('fs'),p=require('path'),t=p.join('node_modules','expo','node_modules','@expo','cli','node_modules'),s=p.join('node_modules','@expo','cli','node_modules','glob');fs.mkdirSync(t,{recursive:true});try{fs.symlinkSync(p.resolve(s),p.join(t,'glob'))}catch(e){if(e.code!=='EEXIST')throw e}\" && node modules/native-secp256k1/scripts/fetch-prebuilts.mjs",
+    "fetch-native-secp": "node modules/native-secp256k1/scripts/fetch-prebuilts.mjs",
     "test": "jest"
   },
   "dependencies": {
+    "native-secp256k1": "file:modules/native-secp256k1",
     "@bsv/btms": "^1.1.0",
     "@bsv/btms-permission-module": "^1.1.0",
     "@bsv/message-box-client": "^2.2.0",
@@ -163,7 +165,8 @@
     "moduleNameMapper": {
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
       "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js",
-      "^@bsv/sdk-original-ecdsa$": "<rootDir>/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js"
+      "^@bsv/sdk-original-ecdsa$": "<rootDir>/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js",
+      "^native-secp256k1$": "<rootDir>/__tests__/__mocks__/native-secp256k1.js"
     },
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble)/)",
