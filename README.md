@@ -54,13 +54,15 @@ A mobile browser that brings identity, micropayments, and BSV-powered websites t
 git clone https://github.com/bsv-blockchain/bsv-browser.git
 cd bsv-browser
 
-# 2. Install dependencies
+# 2. Install dependencies (also downloads native ECDSA prebuilts when online)
 npm install
 
 # 3. (Optional) Create a .env.local for API keys -- see "Environment Variables" below
 #    The app works without one; defaults are defined in context/config.tsx
 
-# 4. Start the dev server
+# 4. Build a native dev client, then start Metro
+#    See "Building for Devices" for the full from-clone binary rebuild steps.
+npm run ios-dev-build        # or: npm run android-dev-build
 npm start                    # opens Expo dev-client menu
 ```
 
@@ -74,6 +76,11 @@ Once a wallet is active the app switches to **Web3 mode** and BSV-enabled web ap
 
 > **Note:** The app uses a **development build** (Expo dev-client), not Expo Go.
 > You must create a dev build first -- see [Building for Devices](#building-for-devices).
+>
+> Native ECDSA prebuilts under `modules/native-secp256k1/vendor/` are **not** in git.
+> `npm install` fetches them via `postinstall` when the network is available. Offline installs
+> still work; signing falls back to `@noble/secp256k1` until prebuilts are present and the
+> native app is rebuilt.
 
 ## Available Scripts
 
@@ -90,7 +97,7 @@ Once a wallet is active the app switches to **Web3 mode** and BSV-enabled web ap
 | `npm run fix`          | Run `format` then `lint:fix`                            |
 | `npm run clean`        | Delete generated caches and build artifacts             |
 | `npm run version`      | Bump version in package.json + app.json, commit and tag |
-| `npm run fetch-native-secp` | Download UltrafastSecp256k1 prebuilts for native ECDSA  |
+| `npm run fetch-native-secp` | Download UltrafastSecp256k1 prebuilts into `vendor/` (required for native ECDSA builds; also runs on postinstall) |
 | `npm test`             | Run Jest suite                                          |
 
 ### Device / Store Builds
@@ -213,21 +220,17 @@ Wallet and CWI paths need both general crypto (SHA, AES, HMAC, random) and secp2
 
 **Native rebuild (required for `backend: native`):**
 
-Prebuilt ufsecp libraries are **not** committed. After clone or when vendor is missing:
+Prebuilt UltrafastSecp256k1 / ufsecp libraries are **not** committed. From a clean clone, see
+[Native Rebuild Requirements](#native-rebuild-requirements) for the full from-repo binary rebuild
+flow. Short version:
 
 ```bash
-# Fetch UltrafastSecp256k1 prebuilts into modules/native-secp256k1/vendor/
-npm run fetch-native-secp
-
-# Regenerate native projects and rebuild the dev client
-npx expo prebuild
-# iOS
-npx expo run:ios --device
-# Android
-npx expo run:android --device
+npm install                          # postinstall fetches vendor/ when online
+npm run fetch-native-secp            # or re-run if vendor/ is missing / offline install
+# then rebuild the native app (EAS local or expo run) so NativeSecp256k1 is linked
 ```
 
-`postinstall` also runs the fetch script; offline installs **warn** and continue (noble fallback). Without a native rebuild after adding this module, the app still works with `Fast ECDSA backend: noble`.
+Without prebuilts + a native rebuild, the app still works with `Fast ECDSA backend: noble`.
 
 **Node micro-benchmark** (no RN; noble vs pure-JS only):
 
@@ -322,46 +325,115 @@ refactor tab store to use async initialization
 
 The app uses **EAS Build** to create native binaries locally. You need the EAS CLI installed (`npm i -g eas-cli`).
 
+### From a clean clone (recommended path)
+
+```bash
+git clone https://github.com/bsv-blockchain/bsv-browser.git
+cd bsv-browser
+npm install                      # installs JS deps + downloads UltrafastSecp256k1 into vendor/
+
+# Confirm native ECDSA prebuilts are present (gitignored)
+ls modules/native-secp256k1/vendor/ios/UltrafastSecp256k1.xcframework/Info.plist
+ls modules/native-secp256k1/vendor/android/arm64-v8a/lib/libfastsecp256k1.a
+
+# If the listing failed (offline install, partial download), fetch explicitly:
+npm run fetch-native-secp        # add -- --force to re-download
+
+# Local EAS dev-client builds (bundles the native module + prebuilts)
+npm run ios-dev-build            # macOS + Xcode
+# or
+npm run android-dev-build
+```
+
+EAS local builds run CocoaPods / Gradle as part of the build. On iOS, `pod install` stages
+shared C++ and the Ultrafast xcframework into `modules/native-secp256k1/ios/` (CocoaPods cannot
+load sources outside the pod directory). Those staged files are gitignored; do not commit them.
+
 ### iOS (macOS only)
 
 ```bash
-# Create a development build
+npm run fetch-native-secp        # ensure vendor/ exists before archiving
 npm run ios-dev-build
 
 # The build produces a .tar.gz archive. Double-click it to extract the .app,
 # then drag the .app onto the iOS Simulator window to install it.
 
-# Start the dev server and connect
-npm run ios
+npm run ios                      # start Metro and connect the dev client
+```
+
+**Alternative (no EAS):** regenerate native projects and build with Xcode tooling:
+
+```bash
+npm run fetch-native-secp
+npx expo prebuild --platform ios --clean
+cd ios && pod install && cd ..   # stages NativeSecp256k1 ios/ copies from vendor/ + common/
+npx expo run:ios --device
 ```
 
 ### Android
 
 ```bash
-# Create a development build
+npm run fetch-native-secp
 npm run android-dev-build
 
 # The APK will be output locally -- install it via adb
 adb install build-*.apk
 
-# Start the dev server and connect
 npm run android
 ```
+
+**Alternative (no EAS):**
+
+```bash
+npm run fetch-native-secp
+npx expo prebuild --platform android --clean
+npx expo run:android --device
+```
+
+Gradle links `modules/native-secp256k1/common/ufsecp_bridge.cpp` against
+`vendor/android/<abi>/lib/libfastsecp256k1.a` via the module’s CMakeLists.
 
 ### Production builds
 
 ```bash
+npm run fetch-native-secp        # CI / clean machines must have vendor/ before archive
 npm run ios-build-for-app-store
 npm run android-build-for-play-store
 ```
 
 ## Native Rebuild Requirements
 
-Some features use native libraries that require a full native rebuild (not just a Metro restart). After adding or updating these dependencies, run:
+Some features use native libraries that require a full native rebuild (not just a Metro restart).
+
+### Fast ECDSA prebuilts (from-repo binary rebuild)
+
+| Step | Command / artifact | Notes |
+| ---- | ------------------ | ----- |
+| 1. Fetch prebuilts | `npm run fetch-native-secp` | Also run by `postinstall`. Source: [UltrafastSecp256k1 v4.5.0](https://github.com/shrec/UltrafastSecp256k1/releases/tag/v4.5.0) |
+| 2. Vendor layout | `modules/native-secp256k1/vendor/` | **Gitignored.** Contains `ios/*.xcframework`, `android/<abi>/lib/*.a`, and C++/C headers under `include/` |
+| 3. Shared C++ bridge | `modules/native-secp256k1/common/ufsecp_bridge.{h,cpp}` | Source of truth for both platforms (committed) |
+| 4. iOS stage (automatic) | `pod install` via `NativeSecp256k1.podspec` | Copies `common/*` + `vendor/ios/UltrafastSecp256k1.xcframework` into `modules/native-secp256k1/ios/` (gitignored). Framework targets cannot use Swift bridging headers; ObjC is exposed via the module umbrella. |
+| 5. Android link | CMake in the Expo module | Compiles `common/ufsecp_bridge.cpp` + JNI against the ABI static lib |
+| 6. Rebuild app | EAS (`npm run ios-dev-build` / `android-dev-build`) or `npx expo run:*` | Required for `Fast ECDSA backend: native` in `__DEV__` logs |
+
+Re-download prebuilts after clearing `vendor/` or when bumping the Ultrafast version in
+`modules/native-secp256k1/scripts/fetch-prebuilts.mjs`:
 
 ```bash
+npm run fetch-native-secp -- --force
+```
+
+Detailed module docs: [`modules/native-secp256k1/README.md`](modules/native-secp256k1/README.md).
+
+### After native dependency changes
+
+```bash
+# Ensure ECDSA prebuilts exist first
+npm run fetch-native-secp
+
 # iOS
 npx expo prebuild --platform ios --clean
+cd ios && pod install && cd ..
 npx expo run:ios --device
 
 # Android
@@ -379,21 +451,32 @@ The `--clean` flag regenerates the native projects from scratch, ensuring all na
 | Wallet storage       | `expo-sqlite`                                                                                              |
 | Secure key storage   | `expo-secure-store`                                                                                        |
 | Crypto polyfill      | `react-native-quick-crypto`                                                                                |
-| Fast ECDSA (native)  | `native-secp256k1` (local Expo module + ufsecp prebuilts via `npm run fetch-native-secp`)                  |
+| Fast ECDSA (native)  | `native-secp256k1` (local Expo module + UltrafastSecp256k1 prebuilts via `npm run fetch-native-secp`)      |
 
 **When is a rebuild needed?**
 
 - After `npm install` adds a package with native code
 - After modifying files in `patches/` (applied via `patch-package` postinstall)
 - After changing `app.json` plugin configurations (e.g. BLE permissions, Expo plugins)
+- After changing `modules/native-secp256k1/` native sources or re-fetching prebuilts
+- After a clone or clean when you want `backend: native` instead of noble
 
 **When is a rebuild NOT needed?**
 
 - Changes to JS/TS source files only -- Metro hot-reload is sufficient
 - Changes to translations, styles, or React component logic
 
-See [`docs/LOCAL_PAYMENTS.md`](docs/LOCAL_PAYMENTS.md) for detailed documentation on the BLE local payments architecture.
+**Troubleshooting native ECDSA**
 
+| Symptom | Likely cause | Fix |
+| ------- | ------------ | --- |
+| `Fast ECDSA backend: noble` on a fresh device build | Prebuilts missing or module not linked | `npm run fetch-native-secp`, then full native rebuild |
+| `Using bridging headers with framework targets is unsupported` | Old podspec with `SWIFT_OBJC_BRIDGING_HEADER` | Use current podspec (modular public ObjC header only); `cd ios && pod install` |
+| `redefinition of module 'UltrafastSecp256k1'` | Stale staged xcframework still has `module.modulemap` | Re-run `pod install` (podspec strips module maps when staging) |
+| Undefined symbols `native_secp_*` or `secp256k1::` | Vendor not staged into the iOS pod / not linked | Ensure `vendor/` exists, re-run `pod install` (copies xcframework + bridge into `ios/`), rebuild |
+| Offline `npm install` warning about prebuilts | Network unavailable during postinstall | Re-run `npm run fetch-native-secp` when online, then rebuild |
+
+See [`docs/LOCAL_PAYMENTS.md`](docs/LOCAL_PAYMENTS.md) for detailed documentation on the BLE local payments architecture.
 ## Publishing Your Own Version
 
 If you want to fork this project and release your own version on the Apple App Store and Google Play Store, you need to create your own Expo project, generate signing credentials, and replace the identifiers in the config files.

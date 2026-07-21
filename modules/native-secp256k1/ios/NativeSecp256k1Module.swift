@@ -18,12 +18,14 @@ public class NativeSecp256k1Module: Module {
       true
     }
 
+    // ObjC NSError** methods import as throwing when exposed via the module
+    // umbrella (framework targets cannot use a Swift bridging header).
     Function("ecdsaSign") { (msg32: Data, priv32: Data) throws -> Data in
-      var error: NSError?
-      guard let result = NativeSecp256k1Bridge.ecdsaSignMsg32(msg32, priv32: priv32, error: &error) else {
-        throw NativeSecpError(error?.localizedDescription ?? "ecdsaSign failed")
+      do {
+        return try NativeSecp256k1Bridge.ecdsaSignMsg32(msg32, priv32: priv32)
+      } catch {
+        throw NativeSecpError(error.localizedDescription)
       }
-      return result
     }
 
     Function("ecdsaVerify") { (msg32: Data, sig64: Data, pub33: Data) -> Bool in
@@ -31,11 +33,11 @@ public class NativeSecp256k1Module: Module {
     }
 
     Function("pubkeyCreate") { (priv32: Data) throws -> Data in
-      var error: NSError?
-      guard let result = NativeSecp256k1Bridge.pubkeyCreatePriv32(priv32, error: &error) else {
-        throw NativeSecpError(error?.localizedDescription ?? "pubkeyCreate failed")
+      do {
+        return try NativeSecp256k1Bridge.pubkeyCreatePriv32(priv32)
+      } catch {
+        throw NativeSecpError(error.localizedDescription)
       }
-      return result
     }
   }
 }

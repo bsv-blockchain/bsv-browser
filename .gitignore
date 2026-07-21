@@ -52,3 +52,9 @@ credentials.json
 # UltrafastSecp256k1 mobile prebuilts (fetched by scripts/fetch-prebuilts.mjs)
 modules/native-secp256k1/vendor/**
 !modules/native-secp256k1/vendor/README.md
+
+# Staged into ios/ by NativeSecp256k1.podspec (sources: common/ + vendor/)
+modules/native-secp256k1/ios/ufsecp_bridge.h
+modules/native-secp256k1/ios/ufsecp_bridge.cpp
+modules/native-secp256k1/ios/UltrafastSecp256k1.xcframework/
+/credentials

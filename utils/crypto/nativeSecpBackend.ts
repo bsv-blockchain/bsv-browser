@@ -7,23 +7,30 @@ type NativeSecpModule = {
   pubkeyCreate?: (priv32: Uint8Array) => Uint8Array
 }
 
+function resolveModule(mod: NativeSecpModule | { default?: NativeSecpModule }): NativeSecpModule | null {
+  if (!mod || typeof mod !== 'object') return null
+  if ('default' in mod && mod.default) return mod.default
+  return mod as NativeSecpModule
+}
+
 function tryRequireNative(): NativeSecpModule | null {
-  // Prefer package name (file:modules/native-secp256k1); keep relative fallback.
-  const candidates = ['native-secp256k1', '../../modules/native-secp256k1']
-  for (const id of candidates) {
-    try {
-      // Native module is optional; soft-fail when missing or unlinked.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const mod = require(id) as NativeSecpModule | { default?: NativeSecpModule }
-      if (mod && typeof mod === 'object') {
-        const resolved = 'default' in mod && mod.default ? mod.default : (mod as NativeSecpModule)
-        return resolved
-      }
-    } catch {
-      // try next candidate
-    }
+  // Metro requires string-literal require() arguments (no require(id)).
+  // Package is wired as file:modules/native-secp256k1 in package.json.
+  // Soft-fail when the package is missing (Jest maps it; web may not link native).
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return resolveModule(require('native-secp256k1') as NativeSecpModule | { default?: NativeSecpModule })
+  } catch {
+    // fall through to relative path (source checkout without node_modules link)
   }
-  return null
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return resolveModule(
+      require('../../modules/native-secp256k1') as NativeSecpModule | { default?: NativeSecpModule }
+    )
+  } catch {
+    return null
+  }
 }
 
 /**
