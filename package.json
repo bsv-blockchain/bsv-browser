@@ -137,7 +137,7 @@
     "minimatch": "^10.2.2",
     "postcss": "^8.5.10",
     "uuid": "^11.1.1",
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^4.3.0",
     "react-native": "0.83.6",
     "@react-native/virtualized-lists": "0.83.6"
   },
