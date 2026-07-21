@@ -102,7 +102,7 @@ export function verify(msg: BigNumber, sig: Signature, key: Point): boolean {
   }
 
   if (key.x == null || key.y == null) {
-    throw new Error('Invalid public key: missing coordinates.')
+    return false
   }
 
   ensureInstalled()
