@@ -162,7 +162,8 @@
     ],
     "moduleNameMapper": {
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
-      "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js"
+      "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js",
+      "^@bsv/sdk-original-ecdsa$": "<rootDir>/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js"
     },
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble)/)",
