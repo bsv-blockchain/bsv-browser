@@ -45,7 +45,7 @@ export function getSecpBackend(): SecpBackend {
  * already call the ECDSA module, so the alias covers them. Public-key-only helpers are
  * not Metro-aliased; backends still expose `pubkeyCreate` for internal use.
  */
-export function installFastEcdsa(): { backend: string } {
+export function installFastEcdsa(): { backend: SecpBackend['name'] } {
   const existing = readInstalled()
   if (existing) {
     return { backend: existing.name }
