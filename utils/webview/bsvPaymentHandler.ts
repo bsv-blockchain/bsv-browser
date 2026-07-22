@@ -2,6 +2,7 @@ import { PublicKey, Utils, Random } from '@bsv/sdk'
 import type { WalletInterface, WalletProtocol } from '@bsv/sdk'
 import { getErrorPage } from './errorPages'
 import { handleUrlDownload } from './downloadHandler'
+import { mark, measureAsync } from '@/utils/perfMarks'
 
 const BRC29_PROTOCOL_ID: WalletProtocol = [2, '3241645161d8']
 const HEADER_PREFIX = 'x-bsv-'
@@ -150,6 +151,7 @@ export class BsvPaymentHandler {
     }
 
     const satoshisRequired = Number.parseInt(satsHeader)
+    const endTotal = mark('402.total')
 
     try {
       const serverIdentityKey = serverHeader
@@ -159,17 +161,33 @@ export class BsvPaymentHandler {
       const derivationSuffix = btoa(timestamp)
       const originator = new URL(url).origin
 
-      const { publicKey: derivedPubKey } = await this.wallet.getPublicKey({
-        protocolID: BRC29_PROTOCOL_ID,
-        keyID: `${derivationPrefix} ${derivationSuffix}`,
-        counterparty: serverIdentityKey
-      }, originator)
+      // Derived (BRC-29) key and sender identity key are independent — derive
+      // them concurrently instead of serially. Each getPublicKey is an async
+      // KeyDeriver + (native) EC op; running them in parallel removes one full
+      // key-derivation round-trip from the pay hot path.
+      const [derivedRes, identityRes] = await Promise.all([
+        measureAsync('402.derive', () =>
+          this.wallet.getPublicKey({
+            protocolID: BRC29_PROTOCOL_ID,
+            keyID: `${derivationPrefix} ${derivationSuffix}`,
+            counterparty: serverIdentityKey
+          }, originator)),
+        measureAsync('402.identity', () =>
+          this.wallet.getPublicKey({ identityKey: true }, originator))
+      ])
+      const derivedPubKey = derivedRes.publicKey
+      const senderIdentityKey = identityRes.publicKey
 
       const pkh = PublicKey.fromString(derivedPubKey).toHash('hex') as string
 
-      const { publicKey: senderIdentityKey } = await this.wallet.getPublicKey({ identityKey: true }, originator)
-
-      let actionResult = await this.wallet.createAction({
+      // acceptDelayedBroadcast defaults to true in @bsv/sdk. That parks the
+      // signed tx as ProvenTxReq status `unsent` until TaskSendWaiting ages it
+      // (~7s) and the monitor posts it — so the merchant often cannot
+      // internalize until SSE/network status arrives. 402 micropayments need
+      // the tx on the network before we retry the paid GET, so force undelayed
+      // broadcast: createAction/signAction posts immediately and only returns
+      // after a successful broadcaster response (Arcade RECEIVED is enough).
+      let actionResult = await measureAsync('402.createAction', () => this.wallet.createAction({
         description: `Paid Content: ${new URL(url).pathname}`,
         outputs: [{
           satoshis: satoshisRequired,
@@ -184,9 +202,10 @@ export class BsvPaymentHandler {
         }],
         labels: ['402-payment'],
         options: {
-          randomizeOutputs: false
+          randomizeOutputs: false,
+          acceptDelayedBroadcast: false
         }
-      }, originator)
+      }, originator))
 
       // createAction may return an unsigned `signableTransaction` instead of a
       // final `tx` when signing is deferred. This is a documented, reachable
@@ -200,10 +219,11 @@ export class BsvPaymentHandler {
       // inputs and broadcasts. Without this, the payment tx stays created-but-
       // unsigned and the 402 page hangs forever on "Payment Required".
       if (!actionResult.tx && actionResult.signableTransaction) {
-        const signed = await this.wallet.signAction({
-          reference: actionResult.signableTransaction.reference,
-          spends: {}
-        }, originator)
+        const signed = await measureAsync('402.signAction', () => this.wallet.signAction({
+          reference: actionResult.signableTransaction!.reference,
+          spends: {},
+          options: { acceptDelayedBroadcast: false }
+        }, originator))
         actionResult = { ...actionResult, ...signed }
       }
 
@@ -222,12 +242,12 @@ export class BsvPaymentHandler {
         [`${HEADER_PREFIX}vout`]: vout
       }
 
-      const response = await fetch(url, {
+      const response = await measureAsync('402.paidGet', () => fetch(url, {
         headers: {
           ...paymentHeaders,
           Accept: 'text/html'
         } as HeadersInit
-      })
+      }))
 
       if (response.ok) {
         // If the paid endpoint redirected us cross-origin (typical of paid
@@ -279,6 +299,8 @@ export class BsvPaymentHandler {
       return getErrorPage(402)
     } catch {
       return getErrorPage(402)
+    } finally {
+      endTotal()
     }
   }
 

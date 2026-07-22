@@ -474,6 +474,7 @@ The `--clean` flag regenerates the native projects from scratch, ensuring all na
 | `Using bridging headers with framework targets is unsupported` | Old podspec with `SWIFT_OBJC_BRIDGING_HEADER` | Use current podspec (modular public ObjC header only); `cd ios && pod install` |
 | `redefinition of module 'UltrafastSecp256k1'` | Stale staged xcframework still has `module.modulemap` | Re-run `pod install` (podspec strips module maps when staging) |
 | Undefined symbols `native_secp_*` or `secp256k1::` | Vendor not staged into the iOS pod / not linked | Ensure `vendor/` exists, re-run `pod install` (copies xcframework + bridge into `ios/`), rebuild |
+| `ld: library 'fastsecp256k1' not found` (often on `x86_64` simulator) | Prebuilts are arm64-only; generic simulator builds still try x86_64 | Podspec excludes `x86_64` for `iphonesimulator`. Re-run `pod install` and rebuild. Intel Mac simulators are not supported for native ECDSA. |
 | Offline `npm install` warning about prebuilts | Network unavailable during postinstall | Re-run `npm run fetch-native-secp` when online, then rebuild |
 
 See [`docs/LOCAL_PAYMENTS.md`](docs/LOCAL_PAYMENTS.md) for detailed documentation on the BLE local payments architecture.

@@ -58,6 +58,12 @@ Pod::Spec.new do |s|
   # No SWIFT_OBJC_BRIDGING_HEADER: ios.useFrameworks builds this as a framework
   # target, and Xcode rejects bridging headers on frameworks. Swift sees
   # NativeSecp256k1Bridge via DEFINES_MODULE + public_header_files (umbrella).
+  #
+  # UltrafastSecp256k1 prebuilts ship arm64 only (device + arm64-simulator).
+  # EAS/Xcode generic-simulator destinations still try x86_64 when
+  # ONLY_ACTIVE_ARCH=NO; CocoaPods then cannot select a slice, leaves
+  # libfastsecp256k1.a uncopied, and the app link fails with
+  # `ld: library 'fastsecp256k1' not found`. Exclude x86_64 for simulator.
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'SWIFT_COMPILATION_MODE' => 'wholemodule',
@@ -70,10 +76,12 @@ Pod::Spec.new do |s|
       '"$(PODS_TARGET_SRCROOT)/../vendor/include"'
     ].join(' '),
     'OTHER_CPLUSPLUSFLAGS' => '-std=c++20',
-    'OTHER_LDFLAGS' => '-lc++'
+    'OTHER_LDFLAGS' => '-lc++',
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'x86_64'
   }
 
   s.user_target_xcconfig = {
-    'OTHER_LDFLAGS' => '-lc++'
+    'OTHER_LDFLAGS' => '-lc++',
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'x86_64'
   }
 end

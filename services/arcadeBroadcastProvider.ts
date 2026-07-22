@@ -5,13 +5,27 @@ import type {
 } from '@bsv/wallet-toolbox-mobile/out/src/sdk'
 
 /**
+ * ARC intermediate statuses that still mean "accepted for relay".
+ * Arcade often replies immediately with RECEIVED (HTTP 202); SEEN_* / MINED
+ * typically arrive later via SSE. The toolbox's built-in ARC provider treats any
+ * non-double-spend 2xx as success — match that so we do not fail over to WoC
+ * after Arcade already accepted the tx.
+ */
+const ARC_DOUBLE_SPEND_STATUSES = new Set([
+  'DOUBLE_SPEND_ATTEMPTED',
+  'SEEN_IN_ORPHAN_MEMPOOL'
+])
+
+/**
  * Shared response handling for ARC-compatible services (Arcade, Taal, GorillaPool).
  * Maps txStatus to the correct PostTxResultForTxid fields.
+ *
+ * Exported for unit tests.
  */
-function handleArcResponse(
+export function handleArcResponse(
   serviceName: string,
-  response: Response,
-  data: any,
+  response: { ok: boolean; status: number },
+  data: { txid?: string; txStatus?: string },
   txids: string[]
 ): PostTxResultForTxid {
   const txResult: PostTxResultForTxid = {
@@ -24,15 +38,12 @@ function handleArcResponse(
       httpStatus: response.status
     }]
   }
-  if (data.txStatus === 'DOUBLE_SPEND_ATTEMPTED') {
+  if (data.txStatus && ARC_DOUBLE_SPEND_STATUSES.has(data.txStatus)) {
     txResult.doubleSpend = true
-  } else if (
-    response.ok &&
-    (data.txStatus === 'SEEN_ON_NETWORK' ||
-      data.txStatus === 'SEEN_MULTIPLE_NODES' ||
-      data.txStatus === 'MINED' ||
-      !data.txStatus)
-  ) {
+  } else if (response.ok && data.txStatus !== 'REJECTED') {
+    // RECEIVED / STORED / SENT_TO_NETWORK / ACCEPTED_BY_NETWORK / SEEN_* / MINED
+    // all mean the broadcaster accepted the tx. Page-load 402 must not wait for
+    // SSE SEEN_ON_NETWORK before treating the post as successful.
     txResult.status = 'success'
   } else if (data.txStatus === 'REJECTED' || !response.ok) {
     txResult.serviceError = true

@@ -143,6 +143,12 @@ This project sets `ios.useFrameworks: static` (static frameworks). Important con
 
 4. **Verified build path:** after `npm run fetch-native-secp` + `pod install`, a Release  
    `iphoneos` archive of the app target should link `NativeSecp256k1` and `-lfastsecp256k1`.
+
+5. **Simulator arch:** prebuilts are **arm64-only** (`ios-arm64` + `ios-arm64-simulator`).  
+   The podspec sets `EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64` on both the pod  
+   and the app so EAS/Xcode generic-simulator builds do not fail with  
+   `ld: library 'fastsecp256k1' not found` when linking x86_64.
+
 ## How Android packaging works
 
 `android/src/main/cpp/CMakeLists.txt` points at:
