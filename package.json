@@ -15,6 +15,7 @@
     "ios-dev-build": "eas build --profile development --platform ios --local --verbose-logs --build-logger-level trace",
     "ios-dev-physical": "eas build --profile dev-physical --platform ios --local --verbose-logs --build-logger-level trace",
     "ios": "expo start --dev-client --ios",
+    "ios-run": "RCT_USE_PREBUILT_RNCORE=0 npx expo run:ios",
     "ios-build-for-app-store": "eas build --profile production --platform ios --local --verbose-logs --build-logger-level trace",
     "web": "expo start --web",
     "lint": "expo lint",
