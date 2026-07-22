@@ -1,0 +1,18 @@
+{
+  "cxxNamespace": ["enginenative"],
+  "ios": {
+    "iosModuleName": "EngineNative"
+  },
+  "android": {
+    "androidNamespace": ["enginenative"],
+    "androidCxxLibName": "EngineNative"
+  },
+  "autolinking": {
+    "EngineNative": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridEngineNative"
+      }
+    }
+  }
+}

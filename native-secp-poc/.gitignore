@@ -1,0 +1,3 @@
+target/
+sdk-2.1.6/
+packages/SecpNativeFFI/SecpNative.xcframework/

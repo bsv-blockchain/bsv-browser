@@ -1,0 +1,19 @@
+{
+  "name": "react-native-secp-native",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nitro module exposing the secp-native Rust crate (rust-secp256k1) to JS for BSV Browser. Bytes-only seam: ArrayBuffer in/out.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src",
+    "ios",
+    "nitrogen/generated",
+    "nitro.json",
+    "SecpNative.podspec"
+  ],
+  "peerDependencies": {
+    "react-native": "*",
+    "react-native-nitro-modules": "*"
+  }
+}

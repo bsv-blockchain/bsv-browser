@@ -1,0 +1,18 @@
+{
+  "cxxNamespace": ["secpnative"],
+  "ios": {
+    "iosModuleName": "SecpNative"
+  },
+  "android": {
+    "androidNamespace": ["secpnative"],
+    "androidCxxLibName": "SecpNative"
+  },
+  "autolinking": {
+    "SecpNative": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridSecpNative"
+      }
+    }
+  }
+}
