@@ -19,7 +19,7 @@ import { useWallet } from '@/context/WalletContext'
 import { PrivateKey } from '@bsv/sdk'
 import { generateMnemonicWallet, validateMnemonic, recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
-import * as Clipboard from 'expo-clipboard'
+import { copySecretToClipboard } from '@/utils/secureClipboard'
 import * as Print from 'expo-print'
 import { Paths, File as ExpoFile } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
@@ -111,8 +111,8 @@ export default function MnemonicScreen() {
 
   // Copy mnemonic to clipboard
   const handleCopyMnemonic = async () => {
-    await Clipboard.setStringAsync(mnemonic)
-    showToast('Copied', { type: 'success' })
+    await copySecretToClipboard(mnemonic)
+    showToast(t('clipboard_will_clear'), { type: 'success' })
     setCopied(true)
     setTimeout(() => {
       setCopied(false)

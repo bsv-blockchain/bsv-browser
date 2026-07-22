@@ -25,7 +25,7 @@ import { ListRow } from '@/components/ui/ListRow'
 import { showAlert } from '@/components/ui/AlertCard'
 import { showToast } from '@/components/ui/Toast'
 import { router } from 'expo-router'
-import Clipboard from '@react-native-clipboard/clipboard'
+import { copySecretToClipboard } from '@/utils/secureClipboard'
 import { exportAllWalletDatabases } from '@/utils/exportDatabases'
 import { importWalletDatabase } from '@/utils/importDatabases'
 import { PrivateKey } from '@bsv/sdk'
@@ -113,12 +113,13 @@ export default function WalletConfigScreen() {
       // Copy mnemonic if available, otherwise fall back to primary key hex
       const mnemonic = await getMnemonic()
       if (mnemonic) {
-        Clipboard.setString(mnemonic)
+        await copySecretToClipboard(mnemonic)
       } else {
         const wif = await getRecoveredKey()
         if (!wif) return
-        Clipboard.setString(PrivateKey.fromWif(wif).toHex())
+        await copySecretToClipboard(PrivateKey.fromWif(wif).toHex())
       }
+      showToast(t('clipboard_will_clear'), { type: 'success' })
       setCopiedMnemonic(true)
       setTimeout(() => setCopiedMnemonic(false), 2000)
     } catch (error) {

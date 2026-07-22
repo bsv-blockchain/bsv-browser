@@ -41,7 +41,7 @@ import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR, toWalletChain } f
 import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_COOLDOWN_MS, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { UserContext } from './UserContext'
-import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { useLocalStorage, HAS_WALLET_KEYS } from '@/context/LocalStorageProvider'
 import { usePermissionQueue } from '@/hooks/usePermissionQueue'
 import { createServices } from '@/services/walletServiceConfig'
 import { configureNewHeaderPolling } from '@/utils/walletMonitor'
@@ -350,8 +350,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   }, [])
 
   const {
-    getSnap,
-    deleteSnap,
     getItem,
     setItem,
     setMnemonic,
@@ -560,6 +558,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [configStatus, setConfigStatus] = useState<ConfigStatus>('initial')
   // Used to trigger a re-render after snapshot load completes.
   const [snapshotLoaded, setSnapshotLoaded] = useState<boolean>(false)
+  // Set when a wallet secret was stored but is no longer readable from the
+  // keychain (e.g. invalidated). Drives a redirect to the re-import flow so the
+  // user can restore from their recovery phrase instead of getting stuck.
+  const [walletNeedsRecovery, setWalletNeedsRecovery] = useState<boolean>(false)
 
   const finalizeConfig = useCallback((wabConfig: WABConfig): boolean => {
     const { method, network, storageUrl } = wabConfig
@@ -977,18 +979,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     ]
   )
 
-  // Watch for wallet authentication state
-  useEffect(() => {
-    ;(async () => {
-      const snap = await getSnap()
-      if (managers?.walletManager?.authenticated && snap) {
-        setSnapshotLoaded(true)
-      } else if (!snap && snapshotLoaded) {
-        setSnapshotLoaded(false)
-      }
-    })()
-  }, [managers?.walletManager?.authenticated, snapshotLoaded, getSnap])
-
   // TODO: Re-add WAB (WalletAuthenticationManager) support in future version
 
   const buildWalletFromMnemonic = useCallback(
@@ -1015,6 +1005,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const mnemonic = providedMnemonic || (await getMnemonic())
         if (__DEV__) console.warn(`[perf] getMnemonic (auth/keychain): ${(performance.now() - __tMnemonicStart).toFixed(0)}ms`)
         if (!mnemonic) {
+          // No mnemonic available. Whether this means "no wallet" or "wallet
+          // exists but its key is currently unreadable" is decided by the
+          // auto-build effect once the recovered-key fallback is also exhausted.
           walletBuildingRef.current = false
           setWalletBuilding(false)
           return
@@ -1029,9 +1022,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const privilegedKeyManager = new PrivilegedKeyManager(async () => rootKey)
 
         // Create SimpleWalletManager and provide keys for authentication
-        const snap = await getSnap()
-
-        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
+        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet)
 
         // Provide the primary key and privileged key manager to authenticate the wallet
         await swm.providePrimaryKey(primaryKey)
@@ -1043,10 +1034,17 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           walletManager: swm
         }))
         setWalletBuilt(true)
+        setWalletNeedsRecovery(false)
         walletBuildingRef.current = false
         setWalletBuilding(false)
 
-        await setMnemonic(mnemonic)
+        // Only re-persist when a NEW mnemonic was supplied (create/import). On a
+        // cold-start build the mnemonic was just read from the keychain, so
+        // writing it back would fire a second biometric prompt on iOS (an
+        // update, unlike a create, prompts).
+        if (providedMnemonic) {
+          await setMnemonic(mnemonic)
+        }
         logWithTimestamp(F, 'Mnemonic wallet build completed')
       } catch (error: any) {
         walletBuildingRef.current = false
@@ -1054,7 +1052,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         console.error('[WalletContext] Error building mnemonic wallet:', error)
       }
     },
-    [walletBuilt, configStatus, getMnemonic, getSnap, setMnemonic, buildWallet]
+    [walletBuilt, configStatus, getMnemonic, setMnemonic, buildWallet]
   )
 
   // Build wallet from a recovered PrivateKey (WIF) obtained via backup share scanning
@@ -1074,8 +1072,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         // Use the recovered primary key as both the signing key and the privileged key
         const privilegedKeyManager = new PrivilegedKeyManager(async () => recoveredKey)
 
-        const snap = await getSnap()
-        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
+        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet)
 
         await swm.providePrimaryKey(primaryKey)
 
@@ -1086,6 +1083,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           walletManager: swm
         }))
         setWalletBuilt(true)
+        setWalletNeedsRecovery(false)
         walletBuildingRef.current = false
         setWalletBuilding(false)
 
@@ -1097,7 +1095,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         console.error('[WalletContext] Error building wallet from recovered key:', error)
       }
     },
-    [walletBuilt, configStatus, getSnap, setRecoveredKey, buildWallet]
+    [walletBuilt, configStatus, setRecoveredKey, buildWallet]
   )
 
   // Tear down the current wallet and re-trigger auto-build.
@@ -1130,6 +1128,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     walletBuildingRef.current = false
     setWalletBuilding(false)
     setSnapshotLoaded(false)
+    setWalletNeedsRecovery(false)
 
     // Re-finalize with current config — triggers auto-build effect
     const config = { wabUrl: 'noWAB', method: 'mnemonic', network: selectedNetwork, storageUrl: 'local' }
@@ -1167,6 +1166,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       walletBuildingRef.current = false
       setWalletBuilding(false)
       setSnapshotLoaded(false)
+      setWalletNeedsRecovery(false)
 
       // Persist new config
       const newConfig = { wabUrl: 'noWAB', method: 'mnemonic', network, storageUrl: 'local' }
@@ -1201,12 +1201,25 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         if (recoveredWif) {
           await buildWalletFromRecoveredKey(recoveredWif)
         } else {
-          // No mnemonic and no recovered key — genuinely no wallet to build
+          // Neither key source produced a value. If a wallet secret was
+          // previously stored (flag set) but is now unreadable — e.g. keychain
+          // invalidated — the user must re-import their phrase rather than land
+          // in a silently broken state. Otherwise there is genuinely no wallet.
+          const hadWallet = (await getItem(HAS_WALLET_KEYS)) === 'true'
+          if (hadWallet) setWalletNeedsRecovery(true)
           setWalletBuilding(false)
         }
       }
     })()
-  }, [configStatus, walletBuilt, buildWalletFromMnemonic, buildWalletFromRecoveredKey, getRecoveredKey])
+  }, [configStatus, walletBuilt, buildWalletFromMnemonic, buildWalletFromRecoveredKey, getRecoveredKey, getItem])
+
+  // A stored wallet is no longer readable (e.g. keychain invalidated) — send the
+  // user to the recovery-phrase re-import flow rather than leaving them stuck.
+  useEffect(() => {
+    if (walletNeedsRecovery) {
+      router.replace('/auth/mnemonic')
+    }
+  }, [walletNeedsRecovery])
 
   // Settings are AsyncStorage-only — no on-chain sync needed
 
@@ -1241,20 +1254,19 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   const logout = useCallback(() => {
     logWithTimestamp(F, 'Logout')
-    deleteSnap().then(async () => {
-      setManagers({})
-      setConfigStatus('initial')
-      setSnapshotLoaded(false)
-      setWalletBuilt(false)
-      walletBuildingRef.current = false
-      setWalletBuilding(false)
-      deleteMnemonic()
-      deleteRecoveredKey()
+    setManagers({})
+    setConfigStatus('initial')
+    setSnapshotLoaded(false)
+    setWalletBuilt(false)
+    setWalletNeedsRecovery(false)
+    walletBuildingRef.current = false
+    setWalletBuilding(false)
+    deleteMnemonic()
+    deleteRecoveredKey()
 
-      router.dismissAll()
-      router.push('/')
-    })
-  }, [deleteSnap, deleteMnemonic, deleteRecoveredKey])
+    router.dismissAll()
+    router.push('/')
+  }, [deleteMnemonic, deleteRecoveredKey])
 
   const refreshProof = useCallback(async (txid: string): Promise<void> => {
     if (!storage) throw new Error('Storage not available')

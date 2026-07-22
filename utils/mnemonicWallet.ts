@@ -90,9 +90,9 @@ export function validateMnemonic(mnemonic: string): boolean {
  * @param strength Entropy bits: 128 (12 words), 160 (15 words), 192 (18 words), 224 (21 words), 256 (24 words)
  */
 export function generateRandomMnemonic(strength: 128 | 160 | 192 | 224 | 256 = 128): string {
-  // For now, @bsv/sdk Mnemonic.fromRandom() generates 128 bits (12 words)
-  // If you need different strengths, you may need to generate entropy manually
-  const mnemonic = Mnemonic.fromRandom()
+  // Mnemonic.fromRandom(bits) honors the requested entropy (128 → 12 words,
+  // 256 → 24 words, etc.).
+  const mnemonic = Mnemonic.fromRandom(strength)
   return mnemonic.toString()
 }
 
@@ -156,25 +156,4 @@ export function parseMnemonic(mnemonic: string): MnemonicValidationResult {
  */
 export function formatMnemonicForDisplay(mnemonic: string): string[] {
   return mnemonic.trim().split(/\s+/)
-}
-
-/**
- * Helper to securely store mnemonic (should be encrypted in production)
- * Returns base64 encoded mnemonic
- */
-export function encodeMnemonicForStorage(mnemonic: string): string {
-  // In production, this should encrypt the mnemonic
-  // For now, just base64 encode
-  return btoa(mnemonic)
-}
-
-/**
- * Helper to retrieve stored mnemonic
- */
-export function decodeMnemonicFromStorage(encoded: string): string {
-  try {
-    return atob(encoded)
-  } catch {
-    throw new Error('Failed to decode stored mnemonic')
-  }
 }

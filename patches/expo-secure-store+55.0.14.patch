@@ -1,0 +1,33 @@
+diff --git a/node_modules/expo-secure-store/android/src/main/java/expo/modules/securestore/encryptors/AESEncryptor.kt b/node_modules/expo-secure-store/android/src/main/java/expo/modules/securestore/encryptors/AESEncryptor.kt
+index 3a12dc9..912649f 100644
+--- a/node_modules/expo-secure-store/android/src/main/java/expo/modules/securestore/encryptors/AESEncryptor.kt
++++ b/node_modules/expo-secure-store/android/src/main/java/expo/modules/securestore/encryptors/AESEncryptor.kt
+@@ -61,6 +61,15 @@ class AESEncryptor : KeyBasedEncryptor<KeyStore.SecretKeyEntry> {
+       .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+       .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+       .setUserAuthenticationRequired(options.requireAuthentication)
++      // Keep the key usable after the user adds/changes a biometric instead of
++      // wiping it (the Android default). The stored secret is a convenience
++      // cache over the user's recovery phrase; enrolling a fingerprint must not
++      // destroy wallet access. Requires API 24+ (Expo minSdk is 24).
++      .apply {
++        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
++          setInvalidatedByBiometricEnrollment(false)
++        }
++      }
+       .build()
+ 
+     val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, keyStore.provider)
+diff --git a/node_modules/expo-secure-store/ios/SecureStoreModule.swift b/node_modules/expo-secure-store/ios/SecureStoreModule.swift
+index 584df21..d90eca2 100644
+--- a/node_modules/expo-secure-store/ios/SecureStoreModule.swift
++++ b/node_modules/expo-secure-store/ios/SecureStoreModule.swift
+@@ -102,7 +102,7 @@ public final class SecureStoreModule: Module {
+       }
+ 
+       var error: Unmanaged<CFError>? = nil
+-      guard let accessOptions = SecAccessControlCreateWithFlags(kCFAllocatorDefault, accessibility, .biometryCurrentSet, &error) else {
++      guard let accessOptions = SecAccessControlCreateWithFlags(kCFAllocatorDefault, accessibility, .biometryAny, &error) else {
+         let errorCode = error.map { CFErrorGetCode($0.takeRetainedValue()) }
+         throw SecAccessControlError(errorCode)
+       }
