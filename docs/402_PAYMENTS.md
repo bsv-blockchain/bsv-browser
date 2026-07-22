@@ -33,7 +33,7 @@ Since WebView native navigations don't expose response headers, the payment hand
 
 1. **Read payment parameters** — extract `x-bsv-sats` (amount) and `x-bsv-server` (server identity key) from headers, or probe the URL if headers were unavailable.
 2. **Derive a payment key** — call `wallet.getPublicKey()` with BRC-29 protocol ID `[2, '3241645161d8']`, a random `derivationPrefix` and `derivationSuffix`, and the server's identity key as counterparty.
-3. **Build the transaction** — call `wallet.createAction()` with a P2PKH output locked to the derived key's hash. The `customInstructions` field carries the derivation parameters so the server can derive the matching private key.
+3. **Build and broadcast the transaction** — call `wallet.createAction()` with a P2PKH output locked to the derived key's hash and `acceptDelayedBroadcast: false`. The `customInstructions` field carries the derivation parameters so the server can derive the matching private key. Undelayed mode posts to Arcade (or failover broadcasters) before the call returns; Arcade's immediate `RECEIVED` / `202` is treated as broadcast success (later SSE `SEEN_ON_NETWORK` is not required for the paid retry).
 4. **Retry the request** — re-fetch the original URL with five payment headers:
 
 ```
