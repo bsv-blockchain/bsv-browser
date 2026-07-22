@@ -513,16 +513,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       const threshold = autoApproveThresholdRef.current
       const now = Date.now()
       const sinceLastMs = now - lastAutoApproveTime
-      console.log(
-        `[spend-auth] requestID=${requestID} sats=${spending.satoshis} threshold=${threshold} ` +
-          `sinceLastMs=${sinceLastMs} cooldownMs=${AUTO_APPROVE_COOLDOWN_MS} ` +
-          `eligible=${threshold > 0 && spending.satoshis <= threshold} cooldownOk=${sinceLastMs >= AUTO_APPROVE_COOLDOWN_MS} ` +
-          `managerBound=${!!managersRef.current.permissionsManager}`
-      )
+      // Logging gated behind __DEV__: an unconditional console.log here flushes
+      // over the JS↔native bridge on every spend request — i.e. on the payment
+      // hot path — and shows up as jank under any burst of micropayments.
       if (threshold > 0 && spending.satoshis <= threshold) {
         if (sinceLastMs >= AUTO_APPROVE_COOLDOWN_MS) {
           lastAutoApproveTime = now
-          console.log(`[spend-auth] AUTO-APPROVING requestID=${requestID}`)
+          if (__DEV__) console.log(`[spend-auth] AUTO-APPROVING requestID=${requestID} sats=${spending.satoshis}`)
           managersRef.current.permissionsManager?.grantPermission({
             requestID,
             ephemeral: true,
@@ -530,9 +527,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           })
           return
         }
-        console.log(`[spend-auth] cooldown blocked → manual modal requestID=${requestID}`)
-      } else {
-        console.log(`[spend-auth] not eligible → manual modal requestID=${requestID}`)
+        if (__DEV__) console.log(`[spend-auth] cooldown blocked → manual modal requestID=${requestID}`)
+      } else if (__DEV__) {
+        console.log(`[spend-auth] not eligible → manual modal requestID=${requestID} sats=${spending.satoshis} threshold=${threshold}`)
       }
 
       spendingQueue.enqueue({

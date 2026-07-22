@@ -76,6 +76,17 @@ import { mark } from '@/utils/perfMarks'
 /*                                   CONSTS                                   */
 /* -------------------------------------------------------------------------- */
 
+// BRC-100 methods that must NOT pay the InteractionManager yield tax on the
+// CWI hot path. L0 = fixed in-memory answers; L1 = pure crypto (no storage,
+// no permission mutation). These are what dApps storm on page load.
+const CWI_NO_YIELD = new Set<string>([
+  // L0 — free
+  'getVersion', 'getNetwork', 'isAuthenticated', 'waitForAuthentication',
+  // L1 — crypto
+  'getPublicKey', 'createHmac', 'verifyHmac', 'createSignature', 'verifySignature',
+  'encrypt', 'decrypt'
+])
+
 function getInjectableJSMessage(message: any = {}) {
   const messageString = JSON.stringify(message)
   return `
@@ -1268,7 +1279,16 @@ const Browser = observer(function Browser() {
       // chrome animations on iPhone SE. InteractionManager.runAfterInteractions
       // resolves immediately when the JS thread is idle, so auto-approved micros
       // pay no extra cost.
-      await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
+      //
+      // Tiered scheduling: L0 (fixed in-memory answers) and L1 (crypto) methods
+      // skip the yield entirely. dApps fire storms of getPublicKey / getNetwork /
+      // isAuthenticated on page load; making each wait a frame for
+      // runAfterInteractions adds latency for no benefit — they touch no storage
+      // and don't contend with chrome the way an L3 createAction does. Only
+      // L2 (reads) and L3 (mutations) keep the yield.
+      if (!CWI_NO_YIELD.has(msg.call)) {
+        await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
+      }
 
       const perfEnd = mark(`cwi.${msg.call}`)
       try {

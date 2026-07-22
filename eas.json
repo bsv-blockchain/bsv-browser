@@ -10,11 +10,17 @@
       "distribution": "internal",
       "ios": {
         "simulator": true
+      },
+      "env": {
+        "RCT_USE_PREBUILT_RNCORE": "0"
       }
     },
     "dev-physical": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "RCT_USE_PREBUILT_RNCORE": "0"
+      }
     },
     "preview-apk": {
       "distribution": "internal",

@@ -82,6 +82,7 @@ Once a wallet is active the app switches to **Web3 mode** and BSV-enabled web ap
 | `npm start`            | Start the Expo dev server (`expo start --dev-client`)   |
 | `npm run android`      | Start on a connected Android device / emulator          |
 | `npm run ios`          | Start on a connected iOS device / simulator             |
+| `npm run ios-run`      | Build (RN from source) + launch the iOS dev-client on the simulator |
 | `npm run web`          | Start the web version                                   |
 | `npm run lint`         | Run ESLint                                              |
 | `npm run lint:fix`     | Run ESLint with auto-fix                                |
@@ -267,7 +268,7 @@ The app uses **EAS Build** to create native binaries locally. You need the EAS C
 ### iOS (macOS only)
 
 ```bash
-# Create a development build
+# Create a development build (EAS local — simulator dev-client)
 npm run ios-dev-build
 
 # The build produces a .tar.gz archive. Double-click it to extract the .app,
@@ -276,6 +277,29 @@ npm run ios-dev-build
 # Start the dev server and connect
 npm run ios
 ```
+
+For a faster local iterate-on-native loop (compiles, installs, and launches on
+a booted simulator in one step, without the EAS packaging), use:
+
+```bash
+npm run ios-run
+```
+
+> **Why `RCT_USE_PREBUILT_RNCORE=0`?** This repo defaults to Expo's **prebuilt
+> React-Core** (`ios/Podfile`) for faster release builds. The prebuilt
+> framework omits the RN dev-support symbols that **`expo-dev-client`** /
+> `expo-dev-menu` link against (packager connection, Hermes inspector), so a
+> dev-client build against the prebuilt core **fails to link**. Dev-client
+> builds must therefore build React Native **from source**:
+> - `npm run ios-run` sets `RCT_USE_PREBUILT_RNCORE=0` for you.
+> - `npm run ios-dev-build` / `ios-dev-physical` inherit it from the matching
+>   EAS profile in `eas.json` (`env.RCT_USE_PREBUILT_RNCORE = "0"`).
+> - Production builds keep the prebuilt core (they don't ship the dev menu), so
+>   release build times are unaffected.
+>
+> If you run `npx expo run:ios` or `pod install` directly, export
+> `RCT_USE_PREBUILT_RNCORE=0` first, or the dev-client link will fail with
+> `Undefined symbols … RCTPackagerConnection / inspector_modern`.
 
 ### Android
 
