@@ -1,0 +1,63 @@
+# secp-native — PoC Rust staticlib backing a future Nitro module that gives @bsv/sdk
+# native ECDSA sign/verify + BRC-42 derivation on iOS (BSV Browser app).
+#
+# Crate shape copied from the PROVEN a prior proven UniFFI staticlib crate pattern:
+#   • standalone single-crate [workspace] — building this never touches any other
+#     workspace's Cargo.lock (bsv-browser has no Rust workspace; the isolation rule
+#     is kept anyway so this PoC composes into any future repo layout unchanged),
+#   • UniFFI 0.28 proc-macro mode (uniffi::setup_scaffolding!() + a `uniffi-bindgen`
+#     bin for --library-mode Swift binding generation),
+#   • bytes-only FFI seam: ONLY Vec<u8>/bool/String cross the boundary — no
+#     secp256k1 crate type (SecretKey/PublicKey/Signature) is ever exposed.
+[package]
+name = "secp-native"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Bytes-only UniFFI wrapper over rust-secp256k1 (bitcoin-core libsecp256k1 C bindings): ECDSA sign/verify (RFC 6979, low-S, DER), pubkey create, tweak-add, ECDH shared point, BRC-42 deriveChild."
+
+# Standalone single-crate workspace (the beef-ios-ffi concurrency rule).
+[workspace]
+
+[lib]
+# staticlib → linked into SecpNative.xcframework (--library xcframework flow);
+# cdylib → `uniffi-bindgen --library` reads proc-macro metadata off the host dylib;
+# lib → in-host tests + bench bin.
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+# rust-secp256k1 = bindings to bitcoin-core's libsecp256k1 C library (vendored, built by
+# cc at compile time — no system dep). sign_ecdsa uses RFC 6979 nonces natively (verified
+# in the crate source, see RESULTS.md) and always emits low-S signatures.
+secp256k1 = { version = "0.31", features = ["rand", "recovery", "global-context"] }
+
+# For the BRC-42 deriveChild composite: sha256hmac(sharedPointCompressed, invoiceNumberUtf8).
+# NOT used for signing nonces — libsecp256k1 does RFC 6979 itself.
+hmac = "0.12"
+sha2 = "0.10"
+
+# Match beef-ios-ffi / dkls-ffi EXACTLY (UniFFI 0.28 proc-macro mode, `cli` for bindgen).
+uniffi = { version = "0.28", features = ["cli"] }
+
+thiserror = "2"
+
+[dev-dependencies]
+# Conformance test reads fixtures/vectors.json (vectors generated from the real @bsv/sdk).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+
+# Host-side UniFFI bindgen (generates the Swift bindings from the built lib).
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+# Host bench: 1000-iter timed loops for sign / verify / deriveChild composite.
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
+
+# Device/sim release builds: small + fast, matches the xcframework script's `--release`.
+[profile.release]
+lto = true
+codegen-units = 1

@@ -1,0 +1,220 @@
+diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js b/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js
+index 272dc4e..ae44965 100644
+--- a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js
++++ b/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js
+@@ -28,20 +28,85 @@ async function completeSignedTransaction(prior, spends, wallet) {
+     /// //////////////////
+     // Insert SABPPP unlock templates for wallet signed inputs
+     /// //////////////////
+-    for (const pdi of prior.pdi) {
+-        const sabppp = new ScriptTemplateBRC29_1.ScriptTemplateBRC29({
+-            derivationPrefix: pdi.derivationPrefix,
+-            derivationSuffix: pdi.derivationSuffix,
+-            keyDeriver: wallet.keyDeriver
+-        });
+-        const keys = wallet.getClientChangeKeyPair();
+-        const lockerPrivKey = keys.privateKey;
+-        const unlockerPubKey = pdi.unlockerPubKey || keys.publicKey;
+-        const sourceSatoshis = pdi.sourceSatoshis;
+-        const lockingScript = (0, utilityHelpers_1.asBsvSdkScript)(pdi.lockingScript);
+-        const unlockTemplate = sabppp.unlock(lockerPrivKey, unlockerPubKey, sourceSatoshis, lockingScript);
+-        const input = prior.tx.inputs[pdi.vin];
+-        input.unlockingScriptTemplate = unlockTemplate;
++    // BSV Browser patch (native-crypto M3, issue #9): batch the per-input BRC-42
++    // child-key derivations into ONE async native crossing per counterparty
++    // (batchBrc42DeriveChild — an off-JS-thread Nitro method; the ECDH shared
++    // secret is computed once per counterparty instead of once per input).
++    // Taken ONLY when the native module is present AND wallet.keyDeriver is the
++    // plain callback-free KeyDeriver whose rootKey matches the client change key
++    // — exactly the case where ScriptTemplateBRC29.getKeyDeriver would reuse
++    // wallet.keyDeriver. Derived keys are byte-identical to derivePrivateKey
++    // (bsv-fuzz batch_derive class + vectors, 0 mismatches); the resulting
++    // P2PKH unlock template construction is the same call ScriptTemplateBRC29
++    // makes. Any failure falls back to the original per-input loop below.
++    let nativeBatchedPdi = false;
++    if (prior.pdi.length > 0) {
++        try {
++            const nat = globalThis.__bsvSecpNative;
++            const kd = wallet.keyDeriver;
++            const keys = wallet.getClientChangeKeyPair();
++            let rootPriv = keys.privateKey;
++            if (typeof rootPriv === 'string') {
++                rootPriv = sdk_1.PrivateKey.fromHex(rootPriv);
++            }
++            if (nat != null && typeof nat.batchBrc42DeriveChild === 'function' &&
++                kd != null && kd.cacheSharedSecret === undefined && kd.retrieveCachedSharedSecret === undefined &&
++                typeof kd.computeInvoiceNumber === 'function' && typeof kd.normalizeCounterparty === 'function' &&
++                kd.rootKey != null && typeof kd.rootKey.toHex === 'function' &&
++                kd.rootKey.toHex() === rootPriv.toHex()) {
++                // Group inputs by counterparty pubkey; invoice numbers vary per input.
++                const groups = new Map();
++                for (const pdi of prior.pdi) {
++                    const unlockerPubKey = pdi.unlockerPubKey || keys.publicKey;
++                    const keyID = `${pdi.derivationPrefix ?? ''} ${pdi.derivationSuffix ?? ''}`;
++                    const invoiceNumber = kd.computeInvoiceNumber(ScriptTemplateBRC29_1.brc29ProtocolID, keyID);
++                    const cp = kd.normalizeCounterparty(unlockerPubKey);
++                    const cpHex = cp.encode(true, 'hex');
++                    if (!groups.has(cpHex)) {
++                        groups.set(cpHex, { cp, pdis: [], invoices: [] });
++                    }
++                    const g = groups.get(cpHex);
++                    g.pdis.push(pdi);
++                    g.invoices.push(invoiceNumber);
++                }
++                const root32 = Uint8Array.from(kd.rootKey.toArray('be', 32)).buffer;
++                const p2pkh = new sdk_1.P2PKH();
++                for (const g of groups.values()) {
++                    const cp33 = Uint8Array.from(g.cp.encode(true)).buffer;
++                    const childCat = new Uint8Array(await nat.batchBrc42DeriveChild(root32, cp33, g.invoices));
++                    if (childCat.length !== g.pdis.length * 32) {
++                        throw new Error('batchBrc42DeriveChild length mismatch');
++                    }
++                    for (let j = 0; j < g.pdis.length; j++) {
++                        const pdi = g.pdis[j];
++                        const derived = new sdk_1.PrivateKey(Array.from(childCat.subarray(j * 32, (j + 1) * 32)));
++                        const unlockTemplate = p2pkh.unlock(derived, 'all', false, pdi.sourceSatoshis, (0, utilityHelpers_1.asBsvSdkScript)(pdi.lockingScript));
++                        prior.tx.inputs[pdi.vin].unlockingScriptTemplate = unlockTemplate;
++                    }
++                }
++                nativeBatchedPdi = true;
++            }
++        }
++        catch (e) {
++            nativeBatchedPdi = false;
++        }
++    }
++    if (!nativeBatchedPdi) {
++        for (const pdi of prior.pdi) {
++            const sabppp = new ScriptTemplateBRC29_1.ScriptTemplateBRC29({
++                derivationPrefix: pdi.derivationPrefix,
++                derivationSuffix: pdi.derivationSuffix,
++                keyDeriver: wallet.keyDeriver
++            });
++            const keys = wallet.getClientChangeKeyPair();
++            const lockerPrivKey = keys.privateKey;
++            const unlockerPubKey = pdi.unlockerPubKey || keys.publicKey;
++            const sourceSatoshis = pdi.sourceSatoshis;
++            const lockingScript = (0, utilityHelpers_1.asBsvSdkScript)(pdi.lockingScript);
++            const unlockTemplate = sabppp.unlock(lockerPrivKey, unlockerPubKey, sourceSatoshis, lockingScript);
++            const input = prior.tx.inputs[pdi.vin];
++            input.unlockingScriptTemplate = unlockTemplate;
++        }
+     }
+     /// //////////////////
+     // Sign wallet signed inputs making transaction fully valid.
+@@ -100,5 +165,114 @@ function verifyUnlockScripts(txid, beef) {
+             throw new WERR_errors_1.WERR_INVALID_PARAMETER(`inputs[${i}].unlockScript`, `valid. ${e.message}`);
+         }
+     }
++    // BSV Browser patch (native-crypto M5.6, issue #24): SHADOW-MODE Tier-3
++    // engine verify. The JS `Spend` loop above stayed AUTHORITATIVE (reaching
++    // here means every input verified valid). Now re-verify the whole tx through
++    // the native engine's ONE `batchVerifyP2pkhInputs` crossing ALONGSIDE the JS
++    // result and log any divergence LOUDLY — but never change the verdict this
++    // rung (shadow = observe; a later rung flips authority once shadow is clean).
++    // P2PKH-eligible only; any ineligible input skips the shadow (identical
++    // philosophy to the M5.5 sign routing).
++    engineShadowVerify(txid, tx);
++}
++/**
++ * Shadow-mode native verify (issue #24). Fire-and-(mostly)-forget: kicks the
++ * engine's async `batchVerifyP2pkhInputs` and compares its per-input verdict
++ * bitmap to the JS `Spend` result (which, at this call site, is all-valid).
++ * Divergences → `console.error` with tx/input detail + a global counter the
++ * proof harness reads. The returned/attached promise is stashed on
++ * `globalThis.__bsvEngineShadow.pending` so tests can await the comparison.
++ */
++function engineShadowVerify(txid, tx) {
++    const shadow = (globalThis.__bsvEngineShadow ??= {
++        verifyChecks: 0, verifyEligible: 0, verifySkipped: 0,
++        verifyDivergences: 0, verifyAgreeInputs: 0, pending: Promise.resolve(),
++        lastDivergence: null
++    });
++    shadow.verifyChecks++;
++    try {
++        const eng = globalThis.__bsvEngineNative;
++        if (eng == null || typeof eng.batchVerifyP2pkhInputs !== 'function') {
++            shadow.verifySkipped++;
++            return; // no engine (web/jest/Expo Go) — nothing to shadow
++        }
++        const SIGHASH_FORKID = 0x40;
++        const SIGHASH_CHRONICLE = 0x20;
++        const n = tx.inputs.length;
++        if (n === 0) { shadow.verifySkipped++; return; }
++        // Build the signed-tx bytes + 37B prevout meta; bail (skip) on the FIRST
++        // ineligible input — the engine only handles canonical P2PKH FORKID.
++        const metaBytes = new Uint8Array(n * 37);
++        const mv = new DataView(metaBytes.buffer);
++        for (let i = 0; i < n; i++) {
++            const input = tx.inputs[i];
++            const sourceOutput = input.sourceTransaction?.outputs?.[input.sourceOutputIndex];
++            if (sourceOutput == null) { shadow.verifySkipped++; return; }
++            const lock = sourceOutput.lockingScript.toBinary();
++            // 25-byte P2PKH lock shape.
++            if (lock.length !== 25 || lock[0] !== 0x76 || lock[1] !== 0xa9 ||
++                lock[2] !== 0x14 || lock[23] !== 0x88 || lock[24] !== 0xac) {
++                shadow.verifySkipped++; return;
++            }
++            const unlock = input.unlockingScript?.toBinary();
++            // canonical two-push shape: push(sig‖scope) push(pubkey33).
++            if (unlock == null || unlock.length < 2) { shadow.verifySkipped++; return; }
++            const l1 = unlock[0];
++            if (l1 < 2 || l1 >= 0x4c || unlock.length !== 1 + l1 + 1 + 33 ||
++                unlock[1 + l1] !== 33) {
++                shadow.verifySkipped++; return;
++            }
++            const scopeByte = unlock[l1]; // last byte of the sig element
++            if ((scopeByte & SIGHASH_FORKID) === 0 || (scopeByte & SIGHASH_CHRONICLE) !== 0) {
++                shadow.verifySkipped++; return;
++            }
++            const sats = sourceOutput.satoshis ?? 0;
++            if (!Number.isInteger(sats) || sats < 0 || sats > Number.MAX_SAFE_INTEGER) {
++                shadow.verifySkipped++; return;
++            }
++            mv.setUint32(i * 37, i, true);
++            mv.setUint32(i * 37 + 4, sats >>> 0, true);
++            mv.setUint32(i * 37 + 8, Math.floor(sats / 0x100000000), true);
++            metaBytes.set(lock, i * 37 + 12);
++        }
++        shadow.verifyEligible++;
++        const signedBuf = Uint8Array.from(tx.toBinary()).buffer;
++        const metaBuf = metaBytes.buffer;
++        shadow.pending = (async () => {
++            try {
++                const bitmap = new Uint8Array(await eng.batchVerifyP2pkhInputs(signedBuf, metaBuf));
++                // JS verdict at this call site = all-valid. Any 0 (or wrong
++                // length) is a divergence.
++                let diverged = false;
++                if (bitmap.length !== n) {
++                    diverged = true;
++                }
++                else {
++                    for (let i = 0; i < n; i++) {
++                        if (bitmap[i] === 1) { shadow.verifyAgreeInputs++; }
++                        else {
++                            diverged = true;
++                            console.error(`[EngineShadow] VERIFY DIVERGENCE txid=${txid} input=${i}: engine=INVALID, JS=VALID`);
++                        }
++                    }
++                }
++                if (diverged) {
++                    shadow.verifyDivergences++;
++                    shadow.lastDivergence = { txid, bitmap: Array.from(bitmap), n };
++                }
++            }
++            catch (e) {
++                // Engine Err on an ELIGIBLE, JS-valid tx is itself a divergence
++                // (JS said valid; engine could not confirm) — log loudly.
++                shadow.verifyDivergences++;
++                shadow.lastDivergence = { txid, error: String(e), n };
++                console.error(`[EngineShadow] VERIFY DIVERGENCE txid=${txid}: engine rejected an eligible JS-valid tx: ${String(e)}`);
++            }
++        })();
++    }
++    catch (e) {
++        // Shadow must NEVER affect the authoritative path.
++        shadow.verifySkipped++;
++    }
+ }
+ //# sourceMappingURL=completeSignedTransaction.js.map
+\ No newline at end of file

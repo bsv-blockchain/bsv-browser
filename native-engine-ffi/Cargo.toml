@@ -1,0 +1,101 @@
+# native-engine-ffi — M5.1 Tier-3 engine FFI crate (docs/TIER3-ENGINE-DESIGN.md §2).
+# The SHIPPABLE promotion of the M5.3-PASSED spike `native-engine-poc` (200k
+# differential cases vs the app's patched @bsv/sdk@2.1.6, 0 mismatches — its
+# batch_sign_p2pkh_inputs / compute_sighash_signing_order behavior and framing
+# are FROZEN, byte-parity-proven logic): UniFFI 0.28 proc-macro layer, bytes-only
+# seam, staticlib → EngineNative.xcframework → Nitro module
+# packages/react-native-engine-native.
+#
+# RATIFIED DECISION (issue #19 comment, owner-discussed 2026-07-21): the ECDSA
+# sign core routes through the PROVEN libsecp256k1 path — `secp256k1 =0.31.1`,
+# the exact dep/approach of native-secp-poc (byte-exact vs @bsv/sdk@2.1.6 over
+# 155,148+ fuzz cases, 3.7× faster than k256: 21µs vs 77µs/op) — NOT k256.
+# k256 remains ONLY inside bsv-rs internals for non-signing math (curve types
+# the sighash/tx modules carry); no k256 code signs anything here, and the
+# k256-vs-libsecp DER equality for every digest < n is pinned by
+# tests/sign_core_crosscheck.rs (4,096 pairs, edge scalars included).
+#
+# K256-BOUNDARY-CONTRACT (copied from a prior proven UniFFI staticlib crate,
+# the #34 contract, verbatim where it applies):
+#   the dkls FFI tree is k256 0.14-rc.7 — the #34 K256-BOUNDARY-CONTRACT keeps
+#   `dkls-ios-ffi` / `dkls-ffi` / `dkls-do` STRICTLY bsv-rs-free so the two k256
+#   majors never collide in one crate's closure. This crate links bsv-rs but
+#   exposes ONLY bytes-in → bytes-out functions: NO k256 type (no
+#   Scalar/PublicKey/Signature) ever crosses the FFI, so the #34 seam stays
+#   bytes-only EVEN THOUGH this crate links bsv-rs. It is a sibling of the dkls
+#   FFI, never reachable from the dkls wasm/FFI crate closure.
+# Dual pin guards (design doc §2, guards 2+3):
+#   (1) scripts/build-engine-xcframework.sh greps this crate's committed
+#       Cargo.lock — FAIL if k256 outside 0.13.x or any dkls crate appears;
+#   (2) tests/pin_guard.rs runs `cargo tree -e normal` — exactly one
+#       `k256 v0.13.*`, exactly one `secp256k1 v0.31.1`, zero
+#       `dkls|sl-mpc-mate|multi-party`, else hard-fail.
+# bsv-rs is consumed from crates.io, exactly pinned (`=0.3.18`); the source
+# commit that version was published from is recorded in BSV-RS-PIN.md.
+
+[package]
+name = "native-engine-ffi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Bytes-only UniFFI wrapper promoting the M5.3-proven Tier-3 engine spike: batch P2PKH sighash (midstates once per scope-class, via bsv-rs) + ECDSA sign (libsecp256k1, the M1-M4-proven core) for the BSV Browser iOS app."
+
+# Standalone single-crate workspace (the beef-ios-ffi / native-secp-poc
+# isolation rule): building this never touches any other workspace's lock.
+[workspace]
+
+[lib]
+# Library target name `engine_native` (SWIFT_MODULE EngineNative / FFI module
+# engine_nativeFFI) — mirrors secp-native → SecpNative exactly, so every proven
+# delta in the build script (extern-C guards, nested modulemap, bindgen CWD)
+# carries over 1:1. The package keeps the design doc's crate name.
+name = "engine_native"
+# staticlib → linked into EngineNative.xcframework (--library xcframework flow);
+# cdylib → `uniffi-bindgen --library` reads proc-macro metadata off the host dylib;
+# lib → in-host tests + the rust-harness engine_corpus drift gate.
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+# The engine. `transaction` (⊃ script ⊃ primitives) per the design doc crate
+# plan — the M5.1 seam needs only the sighash module, but the M5.C BEEF legs
+# (beef_verify_structure / beef_to_ef) land in THIS crate and need
+# bsv-rs::transaction, so the feature is pinned now (one lock, no churn later).
+bsv-rs = { version = "=0.3.18", default-features = false, features = ["transaction"] }
+
+# THE SIGN CORE (ratified #19 decision): bitcoin-core libsecp256k1 C bindings,
+# same pin + features as native-secp-poc. RFC 6979 nonces + always-low-S DER,
+# byte-exact vs @bsv/sdk@2.1.6 (M1–M4) AND vs bsv-rs k256 for digest < n
+# (tests/sign_core_crosscheck.rs).
+secp256k1 = { version = "=0.31.1", features = ["global-context"] }
+
+# Match beef-ios-ffi / secp-native EXACTLY (UniFFI 0.28 proc-macro mode, `cli`
+# for --library bindgen).
+uniffi = { version = "0.28", features = ["cli"] }
+
+thiserror = "2"
+# Privkey scalar hygiene at the seam (design doc §3: "Privkey scalars zeroized
+# after use") — the real crate's upgrade over the spike's volatile-write Drop.
+zeroize = "1"
+
+[dev-dependencies]
+# THE FROZEN ORACLE: the M5.3-PASSED spike itself. tests/spike_parity.rs proves
+# the promotion changed nothing — framed output + error byte/variant equality
+# over a deterministic adversarial corpus. Never in the lib graph.
+native-engine-poc = { path = "../native-engine-poc" }
+hex = "0.4"
+serde_json = "1"
+# M5.2 (issue #20): the engine-level ts-stack conformance replay
+# (tests/conformance_engine.rs) reads the parsed tx struct for the
+# serialization parse-census. Same path+features as the [dependencies] entry,
+# so cargo unifies to ONE bsv-rs in the lock (no k256-pin impact).
+bsv-rs = { version = "=0.3.18", default-features = false, features = ["transaction"] }
+
+# Host-side UniFFI bindgen (generates the Swift bindings from the built lib).
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+# Device/sim release builds: small + fast, matches the xcframework script's `--release`.
+[profile.release]
+lto = true
+codegen-units = 1

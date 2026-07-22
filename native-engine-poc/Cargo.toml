@@ -1,0 +1,57 @@
+# native-engine-poc — M5.3 KILL-TEST spike crate (host-only; NO iOS, NO Nitro, NO
+# xcframework). Validates the Tier-3 engine design (docs/TIER3-ENGINE-DESIGN.md)
+# BEFORE any packaging investment: batch_sign_p2pkh_inputs over a framed tx
+# skeleton with sighash midstates computed ONCE per scope-class, differentially
+# fuzzed byte-exact against the app's patched @bsv/sdk@2.1.6 (bsv-fuzz classes
+# p2pkh_sign_flow + sighash_preimage).
+#
+# Crate shape follows native-secp-poc: standalone single-crate [workspace]
+# (building this never touches any other workspace's lock), bytes-only API
+# surface (Vec<u8>/u32/u64/String), Result<_, EngineError>. UniFFI is
+# deliberately ABSENT here — that is M5.1's job (native-engine-ffi). This crate
+# exists to answer one question cheaply: are the engine's signed-tx bytes
+# EXACTLY the SDK's?
+#
+# K256-BOUNDARY-CONTRACT (design doc §2, dual-pin guard): this crate links
+# bsv-rs (k256 0.13.x) and — in dev-dependencies ONLY — rust-secp256k1 0.31
+# (the proven native-secp-poc sign core) as a second, independent RFC-6979
+# oracle for the sign-core cross-check test. No dkls crate may ever appear in
+# the lock; `cargo tree -e normal` must show exactly one `k256 v0.13.*`
+# (dev-deps are not part of the shipped staticlib). See tests/pin_guard.rs.
+
+[package]
+name = "native-engine-poc"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Host-only kill-test spike for the BSV Browser Tier-3 native engine: batch P2PKH sighash+sign over bsv-rs, midstates once per tx, bytes-only."
+
+# Standalone single-crate workspace (the beef-ios-ffi / native-secp-poc isolation rule).
+[workspace]
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+# The engine. primitives feature carries the whole sighash module
+# (primitives/bsv/sighash.rs), TransactionSignature, PrivateKey — everything the
+# sign path needs. (The real native-engine-ffi crate will use features =
+# ["transaction"] for the M5.C BEEF legs; the spike doesn't need it.)
+bsv-rs = { version = "=0.3.18", default-features = false, features = ["primitives"] }
+thiserror = "2"
+
+[dev-dependencies]
+# Independent RFC-6979 sign core (bitcoin-core libsecp256k1 — the byte-exactness
+# of THIS pin vs @bsv/sdk@2.1.6 is already proven over 155,148 fuzz cases in
+# native-secp-poc). Used only by tests/sign_core_crosscheck.rs to prove
+# bsv-rs::PrivateKey::sign (k256) emits identical DER. Never in the lib graph.
+secp256k1 = { version = "=0.31.1", features = ["global-context"] }
+hex = "0.4"
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
