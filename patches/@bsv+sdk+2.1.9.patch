@@ -626,7 +626,7 @@ index 171fc4d..667914d 100644
              let Qprime;
              try {
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js b/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js
-index 5d4ac89..10ce938 100644
+index fc37cf4..6ae6cb1 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js
 @@ -61,7 +61,19 @@ class P2PKH {
@@ -649,37 +649,8 @@ index 5d4ac89..10ce938 100644
              sign: async (tx, inputIndex) => {
                  const signatureScope = (0, SignatureUtils_js_1.computeSignatureScope)(signOutputs, anyoneCanPay);
                  const resolved = (0, SignatureUtils_js_1.resolveSourceDetails)(tx, inputIndex, sourceSatoshis, lockingScript);
-diff --git a/node_modules/@bsv/sdk/dist/cjs/src/script/templates/SignatureUtils.js b/node_modules/@bsv/sdk/dist/cjs/src/script/templates/SignatureUtils.js
-index 0e77154..6bd331e 100644
---- a/node_modules/@bsv/sdk/dist/cjs/src/script/templates/SignatureUtils.js
-+++ b/node_modules/@bsv/sdk/dist/cjs/src/script/templates/SignatureUtils.js
-@@ -58,7 +58,12 @@ function resolveSourceDetails(tx, inputIndex, providedSourceSatoshis, providedLo
-  * Formats the transaction preimage for signing.
-  */
- function formatPreimage(params) {
--    const { tx, inputIndex, signatureScope, sourceTXID, sourceSatoshis, lockingScript, otherInputs, inputSequence } = params;
-+    // BSV Browser patch (native-crypto M5.5): forward the optional shared
-+    // SignatureHashCache so Transaction.sign's fallback loop can compute
-+    // hashPrevouts/hashSequence/hashOutputs once per scope-class per tx
-+    // (formatBip143 already supports it; callers without `cache` are
-+    // byte-for-byte unchanged).
-+    const { tx, inputIndex, signatureScope, sourceTXID, sourceSatoshis, lockingScript, otherInputs, inputSequence, cache } = params;
-     const input = tx.inputs[inputIndex];
-     return TransactionSignature_js_1.default.format({
-         sourceTXID,
-@@ -71,7 +76,8 @@ function formatPreimage(params) {
-         inputSequence: inputSequence ?? (0, utils_js_1.verifyNotNull)(input.sequence, 'input.sequence must have value'),
-         subscript: lockingScript,
-         lockTime: tx.lockTime,
--        scope: signatureScope
-+        scope: signatureScope,
-+        cache
-     });
- }
- //# sourceMappingURL=SignatureUtils.js.map
-\ No newline at end of file
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js b/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js
-index 4be365f..1f99a7a 100644
+index d3e7c68..a8ac1ba 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js
 @@ -15,6 +15,9 @@ const Beef_js_1 = require("./Beef.js");
@@ -692,10 +663,10 @@ index 4be365f..1f99a7a 100644
  /** Post-Chronicle height used when an input's source UTXO mined-height is unobtainable. */
  const POST_CHRONICLE_HEIGHT_FALLBACK = 943816;
  /**
-@@ -511,6 +514,427 @@ class Transaction {
-                 }
+@@ -642,6 +645,427 @@ class Transaction {
              }
          }
+         this.materializeSourceTXIDs();
 +        // ── Tier-1: ENGINE route (BSV Browser patch, M5.5 issue #23) ─────────
 +        // Sign the whole P2PKH path through ONE async crossing into the Tier-3
 +        // native engine (globalThis.__bsvEngineNative.batchSignP2pkhInputs —
@@ -1024,8 +995,8 @@ index 4be365f..1f99a7a 100644
 +                        const preimage = (0, SignatureUtils_js_1.formatPreimage)({
 +                            tx: this, inputIndex: i, signatureScope,
 +                            sourceTXID: resolved.sourceTXID, sourceSatoshis: resolved.sourceSatoshis,
-+                            lockingScript: resolved.lockingScript, otherInputs: resolved.otherInputs,
-+                            cache
++                            lockingScript: resolved.lockingScript,
++                            allInputs: resolved.allInputs
 +                        });
 +                        const h1 = (0, Hash_js_1.sha256)(preimage);
 +                        if (hasBatchNative) {
@@ -1117,9 +1088,9 @@ index 4be365f..1f99a7a 100644
 +                catch (e) { /* fall through to the original per-template path (tier 3) */ }
 +            }
 +        }
-         const unlockingScripts = await Promise.all(this.inputs.map(async (x, i) => {
-             if (typeof this.inputs[i].unlockingScriptTemplate === 'object') {
-                 return await this.inputs[i]?.unlockingScriptTemplate?.sign(this, i);
+         const previousCache = this.activeSignatureHashCache;
+         this.activeSignatureHashCache = { hashOutputsSingle: new Map() };
+         let unlockingScripts;
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js
 index db011b6..3fbbd60 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js
@@ -1728,7 +1699,7 @@ index f56f7a5..18a548f 100644
              let Qprime;
              try {
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js b/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js
-index 9f4f417..090bbb9 100644
+index b21dda5..b386547 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js
 @@ -56,7 +56,19 @@ export default class P2PKH {
@@ -1751,37 +1722,8 @@ index 9f4f417..090bbb9 100644
              sign: async (tx, inputIndex) => {
                  const signatureScope = computeSignatureScope(signOutputs, anyoneCanPay);
                  const resolved = resolveSourceDetails(tx, inputIndex, sourceSatoshis, lockingScript);
-diff --git a/node_modules/@bsv/sdk/dist/esm/src/script/templates/SignatureUtils.js b/node_modules/@bsv/sdk/dist/esm/src/script/templates/SignatureUtils.js
-index 34ef53c..c5ed4a8 100644
---- a/node_modules/@bsv/sdk/dist/esm/src/script/templates/SignatureUtils.js
-+++ b/node_modules/@bsv/sdk/dist/esm/src/script/templates/SignatureUtils.js
-@@ -50,7 +50,12 @@ export function resolveSourceDetails(tx, inputIndex, providedSourceSatoshis, pro
-  * Formats the transaction preimage for signing.
-  */
- export function formatPreimage(params) {
--    const { tx, inputIndex, signatureScope, sourceTXID, sourceSatoshis, lockingScript, otherInputs, inputSequence } = params;
-+    // BSV Browser patch (native-crypto M5.5): forward the optional shared
-+    // SignatureHashCache so Transaction.sign's fallback loop can compute
-+    // hashPrevouts/hashSequence/hashOutputs once per scope-class per tx
-+    // (formatBip143 already supports it; callers without `cache` are
-+    // byte-for-byte unchanged).
-+    const { tx, inputIndex, signatureScope, sourceTXID, sourceSatoshis, lockingScript, otherInputs, inputSequence, cache } = params;
-     const input = tx.inputs[inputIndex];
-     return TransactionSignature.format({
-         sourceTXID,
-@@ -63,7 +68,8 @@ export function formatPreimage(params) {
-         inputSequence: inputSequence ?? verifyNotNull(input.sequence, 'input.sequence must have value'),
-         subscript: lockingScript,
-         lockTime: tx.lockTime,
--        scope: signatureScope
-+        scope: signatureScope,
-+        cache
-     });
- }
- //# sourceMappingURL=SignatureUtils.js.map
-\ No newline at end of file
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js b/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js
-index a1a25f7..6708098 100644
+index 7bf1a4c..a1ea57a 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js
 @@ -1,7 +1,10 @@
@@ -1796,10 +1738,10 @@ index a1a25f7..6708098 100644
  import LivePolicy from './fee-models/LivePolicy.js';
  import Spend from '../script/Spend.js';
  import { defaultBroadcaster } from './broadcasters/DefaultBroadcaster.js';
-@@ -515,6 +518,427 @@ export default class Transaction {
-                 }
+@@ -649,6 +652,427 @@ export default class Transaction {
              }
          }
+         this.materializeSourceTXIDs();
 +        // ── Tier-1: ENGINE route (BSV Browser patch, M5.5 issue #23) ─────────
 +        // Sign the whole P2PKH path through ONE async crossing into the Tier-3
 +        // native engine (globalThis.__bsvEngineNative.batchSignP2pkhInputs —
@@ -2128,8 +2070,8 @@ index a1a25f7..6708098 100644
 +                        const preimage = formatPreimage({
 +                            tx: this, inputIndex: i, signatureScope,
 +                            sourceTXID: resolved.sourceTXID, sourceSatoshis: resolved.sourceSatoshis,
-+                            lockingScript: resolved.lockingScript, otherInputs: resolved.otherInputs,
-+                            cache
++                            lockingScript: resolved.lockingScript,
++                            allInputs: resolved.allInputs
 +                        });
 +                        const h1 = sha256(preimage);
 +                        if (hasBatchNative) {
@@ -2221,6 +2163,6 @@ index a1a25f7..6708098 100644
 +                catch (e) { /* fall through to the original per-template path (tier 3) */ }
 +            }
 +        }
-         const unlockingScripts = await Promise.all(this.inputs.map(async (x, i) => {
-             if (typeof this.inputs[i].unlockingScriptTemplate === 'object') {
-                 return await this.inputs[i]?.unlockingScriptTemplate?.sign(this, i);
+         const previousCache = this.activeSignatureHashCache;
+         this.activeSignatureHashCache = { hashOutputsSingle: new Map() };
+         let unlockingScripts;

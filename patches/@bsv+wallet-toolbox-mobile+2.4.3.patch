@@ -1,5 +1,5 @@
 diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js b/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js
-index 272dc4e..ae44965 100644
+index 4569453..032f38c 100644
 --- a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js
 +++ b/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js
 @@ -28,20 +28,85 @@ async function completeSignedTransaction(prior, spends, wallet) {
@@ -102,7 +102,7 @@ index 272dc4e..ae44965 100644
      }
      /// //////////////////
      // Sign wallet signed inputs making transaction fully valid.
-@@ -100,5 +165,114 @@ function verifyUnlockScripts(txid, beef) {
+@@ -102,5 +167,114 @@ function verifyUnlockScripts(txid, beef) {
              throw new WERR_errors_1.WERR_INVALID_PARAMETER(`inputs[${i}].unlockScript`, `valid. ${e.message}`);
          }
      }
