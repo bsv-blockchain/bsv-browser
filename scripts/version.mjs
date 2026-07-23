@@ -5,7 +5,9 @@
  *
  * Updates:
  *   - package.json  → "version"
- *   - app.json      → "expo.version"  (sets iOS CFBundleShortVersionString and Android versionName)
+ *   - app.json      → "expo.version"
+ *   - ios/BSVBrowser/Info.plist → CFBundleShortVersionString (bare workflow: the
+ *     native project is authoritative once ios/ exists — app.json alone is ignored)
  *
  * Build numbers (iOS buildNumber / Android versionCode) are left untouched —
  * they are auto-incremented by EAS on each production build via "autoIncrement": true in eas.json.
@@ -49,8 +51,12 @@ updateJson(resolve(root, 'app.json'), json => {
   json.expo.version = version
 })
 
+const infoPlist = resolve(root, 'ios', 'BSVBrowser', 'Info.plist')
+execSync(`/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${version}" "${infoPlist}"`, { cwd: root, stdio: 'inherit' })
+console.log('  updated ios/BSVBrowser/Info.plist')
+
 // Commit the version bump
-execSync('git add package.json app.json', { cwd: root, stdio: 'inherit' })
+execSync('git add package.json app.json ios/BSVBrowser/Info.plist', { cwd: root, stdio: 'inherit' })
 execSync(`git commit -m "chore: bump version to ${version}"`, { cwd: root, stdio: 'inherit' })
 
 // Create annotated tag (force-update if it already exists locally)

@@ -653,6 +653,62 @@ public func batchVerifyP2pkhInputs(signedTx: Data, prevoutsMeta: Data)throws  ->
 })
 }
 /**
+ * BEEF → Extended Format (BRC-30) conversion (design doc §M5.C), replacing the
+ * `services/arcadeBroadcastProvider.ts` serialize→reparse→toEF round-trip. The
+ * output is byte-identical to the SDK's `Transaction.fromBEEF(beef, txid).toEF()`
+ * (proven: the M5.9 `beef` fuzz class vs the app's patched @bsv/sdk@2.1.6, plus
+ * the tx-003→tx-004 conformance anchor below).
+ *
+ * `txid`: the subject transaction, in INTERNAL byte order (32 bytes) — JS
+ * converts at the hex boundary, per the seam convention. An EMPTY `txid`
+ * selects the subject the way the SDK's `fromAnyBeef` does:
+ * `atomic_txid ?? last tx`.
+ *
+ * READ-ONLY: this reads the BEEF and emits EF; it never re-emits BEEF.
+ *
+ * `Err(BeefInvalid)` on parse failure, unknown/absent subject txid, a
+ * txid-only subject, or any missing ancestry that leaves an input without the
+ * source output `to_ef` requires. `Err(BadFraming)` if `txid` is a non-empty
+ * wrong length.
+ */
+public func beefToEf(beef: Data, txid: Data)throws  -> Data {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_engine_native_fn_func_beef_to_ef(
+        FfiConverterData.lower(beef),
+        FfiConverterData.lower(txid),$0
+    )
+})
+}
+/**
+ * Structural BEEF verification (design doc §M5.C): parse + `verify_valid`, then
+ * return the per-block-height merkle roots for the caller's JS
+ * `chainTracker.isValidRootForHeight` step. A "BEEF verified" claim is
+ * structural + roots + the JS-checked headers — never structural alone; this
+ * fn delivers only the first two.
+ *
+ * `allow_txid_only = false`: the internalizeAction / EF-conversion contract
+ * requires a fully-hydrated BEEF (no txid-only leaves), the strictest verdict.
+ * The oracle compares against the SDK `Beef.isValid(false)` under the same rule.
+ *
+ * Returns, on a structurally-valid BEEF, roots framed in ASCENDING block height
+ * for determinism (design doc §3 shape):
+ * `[u32 LE count]([u32 LE blockHeight][32B merkleRoot, display order])*`
+ * The merkle root bytes are display order (the `MerklePath::compute_root` hex
+ * string decoded as-is — the same order a block header carries), so JS hands
+ * them straight to the chain tracker without a byte reversal.
+ *
+ * `Err(BeefInvalid)` on any parse failure OR `verify_valid` = false — the
+ * single verdict the SDK's `isValid` boolean maps to. READ-ONLY: no
+ * re-serialization occurs.
+ */
+public func beefVerifyStructure(beef: Data)throws  -> Data {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_engine_native_fn_func_beef_verify_structure(
+        FfiConverterData.lower(beef),$0
+    )
+})
+}
+/**
  * Conformance/debug export (design doc §1): one sighash, **signing order
  * only** (internal byte order, ready for ECDSA). Never routed in prod.
  */
@@ -709,6 +765,12 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_engine_native_checksum_func_batch_verify_p2pkh_inputs() != 3483) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_engine_native_checksum_func_beef_to_ef() != 49880) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_engine_native_checksum_func_beef_verify_structure() != 679) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_engine_native_checksum_func_compute_sighash_signing_order() != 22453) {

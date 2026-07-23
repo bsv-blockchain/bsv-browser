@@ -102,7 +102,7 @@ echo "    tree clean: exactly one $K256_VERSIONS, no dkls-family crates"
 # ---------------------------------------------------------------------------
 BSV_RS_DIR="$CRATE_DIR/../../bsv-rs"
 BSV_RS_HASH="$(git -C "$BSV_RS_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
-BSV_RS_DIRTY="$(git -C "$BSV_RS_DIR" status --porcelain 2>/dev/null | head -1)"
+BSV_RS_DIRTY="$(git -C "$BSV_RS_DIR" status --porcelain 2>/dev/null | head -1 || true)"
 {
   echo "# BSV-RS-PIN — bsv-rs path-dep commit recorded per xcframework build"
   echo

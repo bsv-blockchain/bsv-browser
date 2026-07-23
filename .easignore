@@ -1,0 +1,89 @@
+# EAS archive rules. NOTE: when .easignore exists, eas-cli IGNORES every
+# .gitignore (root + nested) for archiving — this file must therefore carry
+# all of their rules itself. It exists for exactly one deviation:
+#   packages/react-native-engine-native/ios/EngineNative.xcframework
+#   packages/react-native-secp-native/ios/SecpNative.xcframework
+# are gitignored build artifacts that MUST be in the EAS build archive
+# (EngineNative.podspec / SecpNative.podspec vendor them; pod install fails
+# without them). Build + sync them before an EAS build:
+#   (cd native-engine-ffi && scripts/build-engine-xcframework.sh)
+#   (cd native-secp-poc  && scripts/build-secp-xcframework.sh)
+#   packages/react-native-engine-native/scripts/sync-xcframework.sh
+#   packages/react-native-secp-native/scripts/sync-xcframework.sh
+
+# --- from .gitignore (root) ---
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+/.windsurfrules
+
+.env
+
+*.apk
+*.ipa
+android
+
+expo-env.d.ts
+.expo
+*.aab
+/BSVBrowser.app
+build-*.tar.gz
+/@bsvb__bsv-browser.jks
+docs/marketing
+marketing.html
+Dev Builds.zip
+.opencode
+credentials.json
+.superpowers/
+
+# --- from ios/.gitignore (path-prefixed) ---
+ios/build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.xcuserstate
+project.xcworkspace
+.xcode.env.local
+*.jsbundle
+ios/Pods/
+
+# --- Rust build dirs (nested .gitignores) ---
+native-engine-ffi/target/
+native-engine-poc/target/
+native-secp-poc/target/
+native-secp-poc/sdk-2.1.6/
+
+# FFI source-package xcframeworks stay OUT of the archive — the pods consume
+# the pre-synced copies under packages/react-native-*-native/ios/, which are
+# deliberately NOT listed here (the whole point of this file).
+native-engine-ffi/packages/EngineNativeFFI/EngineNative.xcframework/
+native-secp-poc/packages/SecpNativeFFI/SecpNative.xcframework/
