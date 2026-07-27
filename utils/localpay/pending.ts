@@ -33,11 +33,25 @@ function fromWire(s: Serialised): PendingPayment {
   return { ...s, frame: { ...s.frame, transaction: new Uint8Array(s.frame.transaction) } }
 }
 
+// All read-modify-write sequences on the queue share one storage key, so they
+// must not interleave: a concurrent write built from a stale read silently
+// drops entries. Every mutating path runs through this chain.
+let queueLock: Promise<unknown> = Promise.resolve()
+
+function withQueueLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queueLock.then(fn, fn)
+  queueLock = run.catch(() => undefined)
+  return run
+}
+
 async function readAll(storage: KVStorage): Promise<PendingPayment[]> {
+  // A storage failure must NOT be reported as "empty" — callers write back
+  // what they read, so swallowing it here destroys the queue.
+  const raw = await storage.getKeyValue(PENDING_KEY)
+  if (!raw) return []
   try {
-    const raw = await storage.getKeyValue(PENDING_KEY)
-    if (!raw) return []
-    return (JSON.parse(raw) as Serialised[]).map(fromWire)
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? (parsed as Serialised[]).map(fromWire) : []
   } catch {
     return []
   }
@@ -48,14 +62,16 @@ async function writeAll(storage: KVStorage, list: PendingPayment[]): Promise<voi
 }
 
 export async function savePending(storage: KVStorage, frame: PaymentFrame): Promise<PendingPayment> {
-  const entry: PendingPayment = {
-    id: `${Date.now()}_${frame.senderIdentityKey.slice(0, 8)}`,
-    receivedAt: new Date().toISOString(),
-    frame,
-    status: 'pending',
-  }
-  await writeAll(storage, [...(await readAll(storage)), entry])
-  return entry
+  return withQueueLock(async () => {
+    const entry: PendingPayment = {
+      id: `${Date.now()}_${frame.senderIdentityKey.slice(0, 8)}`,
+      receivedAt: new Date().toISOString(),
+      frame,
+      status: 'pending',
+    }
+    await writeAll(storage, [...(await readAll(storage)), entry])
+    return entry
+  })
 }
 
 export async function getPending(storage: KVStorage): Promise<PendingPayment[]> {
@@ -73,11 +89,13 @@ export async function updateStatus(
   status: PendingStatus,
   failureReason?: string
 ): Promise<void> {
-  const all = await readAll(storage)
-  const next = all.map(p =>
-    p.id === id ? { ...p, status, failureReason, lastAttemptAt: new Date().toISOString() } : p
-  )
-  await writeAll(storage, next)
+  return withQueueLock(async () => {
+    const all = await readAll(storage)
+    const next = all.map(p =>
+      p.id === id ? { ...p, status, failureReason, lastAttemptAt: new Date().toISOString() } : p
+    )
+    await writeAll(storage, next)
+  })
 }
 
 interface InternalizingWallet {
@@ -130,9 +148,10 @@ function sessionKey(sessionId: Uint8Array): string {
 }
 
 async function readSpent(storage: KVStorage): Promise<string[]> {
+  // Same as readAll: let storage errors propagate, swallow only parse failures.
+  const raw = await storage.getKeyValue(SPENT_KEY)
+  if (!raw) return []
   try {
-    const raw = await storage.getKeyValue(SPENT_KEY)
-    if (!raw) return []
     const parsed = JSON.parse(raw) as unknown
     return Array.isArray(parsed) ? (parsed as string[]) : []
   } catch {
@@ -141,10 +160,12 @@ async function readSpent(storage: KVStorage): Promise<string[]> {
 }
 
 export async function markSessionSpent(storage: KVStorage, sessionId: Uint8Array): Promise<void> {
-  const key = sessionKey(sessionId)
-  const spent = await readSpent(storage)
-  if (spent.includes(key)) return
-  await storage.setKeyValue(SPENT_KEY, JSON.stringify([...spent, key]))
+  return withQueueLock(async () => {
+    const key = sessionKey(sessionId)
+    const spent = await readSpent(storage)
+    if (spent.includes(key)) return
+    await storage.setKeyValue(SPENT_KEY, JSON.stringify([...spent, key]))
+  })
 }
 
 export async function isSessionSpent(storage: KVStorage, sessionId: Uint8Array): Promise<boolean> {

@@ -85,6 +85,57 @@ describe('localpay pending queue', () => {
     expect(all[0].status).toBe('failed')
     expect(all).toHaveLength(1)
   })
+
+  it('storage failures propagate from getPending', async () => {
+    const s = {
+      getKeyValue: jest.fn().mockRejectedValue(new Error('SQLite locked')),
+      setKeyValue: jest.fn(),
+    }
+    await expect(getPending(s as never)).rejects.toThrow('SQLite locked')
+  })
+
+  it('storage failures propagate from savePending and do not call setKeyValue', async () => {
+    const setKeyValue = jest.fn()
+    const s = {
+      getKeyValue: jest.fn().mockRejectedValue(new Error('SQLite locked')),
+      setKeyValue,
+    }
+    await expect(savePending(s as never, frame())).rejects.toThrow('SQLite locked')
+    expect(setKeyValue).not.toHaveBeenCalled()
+  })
+
+  it('processPending re-invokes internalizeAction for processing entry and completes it', async () => {
+    const s = fakeStorage()
+    const p = await savePending(s, frame())
+    await updateStatus(s, p.id, 'processing')
+    const wallet = { internalizeAction: jest.fn().mockResolvedValue({ accepted: true }) }
+    const results = await processPending(wallet as never, s, 'admin.com')
+    expect(wallet.internalizeAction).toHaveBeenCalledTimes(1)
+    expect(results).toEqual([expect.objectContaining({ success: true })])
+    expect((await getPending(s))[0].status).toBe('completed')
+  })
+
+  it('concurrent saves both persist via serialization', async () => {
+    const s = {
+      map: new Map<string, string>(),
+      getKeyValue: async (k: string) => {
+        // Yield after each get to force interleaving
+        await new Promise(r => setImmediate(r))
+        return s.map.get(k)
+      },
+      setKeyValue: async (k: string, v: string) => {
+        s.map.set(k, v)
+      },
+    }
+    const [p1, p2] = await Promise.all([
+      savePending(s as never, frame()),
+      savePending(s as never, frame()),
+    ])
+    const all = await getPending(s as never)
+    expect(all).toHaveLength(2)
+    expect(all.map(x => x.id)).toContain(p1.id)
+    expect(all.map(x => x.id)).toContain(p2.id)
+  })
 })
 
 describe('spent session guard', () => {
