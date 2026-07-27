@@ -119,11 +119,11 @@ describe('localpay pending queue', () => {
     const s = {
       map: new Map<string, string>(),
       getKeyValue: async (k: string) => {
-        // Yield after each get to force interleaving
         await new Promise(r => setImmediate(r))
         return s.map.get(k)
       },
       setKeyValue: async (k: string, v: string) => {
+        await new Promise(r => setImmediate(r))
         s.map.set(k, v)
       },
     }
@@ -135,6 +135,9 @@ describe('localpay pending queue', () => {
     expect(all).toHaveLength(2)
     expect(all.map(x => x.id)).toContain(p1.id)
     expect(all.map(x => x.id)).toContain(p2.id)
+    // Verify the stored list itself has 2 entries
+    const stored = JSON.parse(s.map.get(PENDING_KEY)!)
+    expect(stored).toHaveLength(2)
   })
 })
 
