@@ -996,6 +996,8 @@ git commit -m "feat(localpay): scaffold LocalPayTransport nitro module"
   - `stopListening(): Promise<void>`
   - `sendFrame(instanceName: string, pskBase64: string, frameBase64: string, timeoutMs: number): Promise<string>` — resolves with the base64 ack frame
 
+**Carried forward from Task 4's review:** `isSupported()` currently reads `if #available(iOS 15.0, *) { return true }` while the podspec pins the deployment target to iOS 15.1. The check can never evaluate false, so it is dead code and the method is effectively `return true`. Replace it with a real capability probe in this task — at minimum confirm `NWParameters` peer-to-peer is usable, rather than asserting support unconditionally.
+
 - [ ] **Step 1: Extend the Nitro spec**
 
 ```ts
