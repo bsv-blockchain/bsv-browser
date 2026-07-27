@@ -42,7 +42,8 @@ function toB64url(b: Uint8Array): string {
   return globalThis.btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function fromB64url(s: string): Uint8Array {
+function fromB64url(s: unknown): Uint8Array {
+  if (typeof s !== 'string') throw new CodecError('expected base64url string')
   const pad = s.replace(/-/g, '+').replace(/_/g, '/')
   const bin = globalThis.atob(pad + '='.repeat((4 - (pad.length % 4)) % 4))
   return Uint8Array.from(bin, c => c.charCodeAt(0))
@@ -67,26 +68,32 @@ export function decodeSession(text: string): Session {
   let parsed: Record<string, unknown>
   try {
     parsed = JSON.parse(new TextDecoder().decode(fromB64url(text.slice('bsvpay1:'.length))))
-  } catch {
+  } catch (e) {
+    if (e instanceof CodecError) throw e
     throw new CodecError('malformed session payload')
   }
-  const { v, c, s, k, i, a, p, x } = parsed as Record<string, never>
+  const { v, c, s, k, i, a, p, x } = parsed as Record<string, unknown>
   if (v !== SESSION_VERSION) throw new CodecError(`unsupported session version ${String(v)}`)
-  if (typeof i !== 'string' || (i as string).length !== 66) throw new CodecError('bad identityKey')
+  if (typeof i !== 'string' || i.length !== 66) throw new CodecError('bad identityKey')
   if (typeof a !== 'number') throw new CodecError('bad amount')
-  const sessionId = fromB64url(s as string)
-  const psk = fromB64url(k as string)
+  if (typeof s !== 'string') throw new CodecError('bad sessionId encoding')
+  if (typeof k !== 'string') throw new CodecError('bad psk encoding')
+  if (typeof p !== 'string') throw new CodecError('bad derivationPrefix encoding')
+  if (typeof x !== 'string') throw new CodecError('bad derivationSuffix encoding')
+  if (c !== undefined && c !== null && typeof c !== 'number') throw new CodecError('bad caps')
+  const sessionId = fromB64url(s)
+  const psk = fromB64url(k)
   if (sessionId.length !== 16) throw new CodecError('bad sessionId length')
   if (psk.length !== 32) throw new CodecError('bad psk length')
   return {
     version: v as number,
-    caps: (c as number) ?? 0,
+    caps: (typeof c === 'number' ? c : 0),
     sessionId,
     psk,
-    identityKey: i as string,
-    amount: a as number,
-    derivationPrefix: p as string,
-    derivationSuffix: x as string,
+    identityKey: i,
+    amount: a,
+    derivationPrefix: p,
+    derivationSuffix: x,
   }
 }
 

@@ -11,6 +11,16 @@ const args = {
   supportsAwdl: true,
 }
 
+// Helper to encode a custom JSON envelope as a QR string
+function encodeCustomQR(payload: Record<string, unknown>): string {
+  const body = JSON.stringify(payload)
+  let s = ''
+  const encoded = new TextEncoder().encode(body)
+  for (const byte of encoded) s += String.fromCharCode(byte)
+  const b64url = globalThis.btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return 'bsvpay1:' + b64url
+}
+
 describe('localpay session', () => {
   it('mints 16-byte sessionId and 32-byte psk', () => {
     const s = mintSession(args)
@@ -53,5 +63,71 @@ describe('localpay session', () => {
   it('derives the same instance name on both sides', () => {
     const s = mintSession(args)
     expect(instanceName(decodeSession(encodeSession(s)).sessionId)).toBe(instanceName(s.sessionId))
+  })
+
+  it('rejects missing sessionId encoding (s)', () => {
+    const qr = encodeCustomQR({
+      v: SESSION_VERSION,
+      c: 0,
+      k: 'AAAA',
+      i: args.identityKey,
+      a: 5000,
+      p: 'cHJlZml4',
+      x: 'c3VmZml4',
+    })
+    expect(() => decodeSession(qr)).toThrow(CodecError)
+  })
+
+  it('rejects missing psk encoding (k)', () => {
+    const qr = encodeCustomQR({
+      v: SESSION_VERSION,
+      c: 0,
+      s: 'AAAA',
+      i: args.identityKey,
+      a: 5000,
+      p: 'cHJlZml4',
+      x: 'c3VmZml4',
+    })
+    expect(() => decodeSession(qr)).toThrow(CodecError)
+  })
+
+  it('rejects missing derivationPrefix encoding (p)', () => {
+    const qr = encodeCustomQR({
+      v: SESSION_VERSION,
+      c: 0,
+      s: 'AAAA',
+      k: 'AAAA',
+      i: args.identityKey,
+      a: 5000,
+      x: 'c3VmZml4',
+    })
+    expect(() => decodeSession(qr)).toThrow(CodecError)
+  })
+
+  it('rejects missing derivationSuffix encoding (x)', () => {
+    const qr = encodeCustomQR({
+      v: SESSION_VERSION,
+      c: 0,
+      s: 'AAAA',
+      k: 'AAAA',
+      i: args.identityKey,
+      a: 5000,
+      p: 'cHJlZml4',
+    })
+    expect(() => decodeSession(qr)).toThrow(CodecError)
+  })
+
+  it('rejects non-numeric caps', () => {
+    const qr = encodeCustomQR({
+      v: SESSION_VERSION,
+      c: 'not-a-number',
+      s: 'AAAA',
+      k: 'AAAA',
+      i: args.identityKey,
+      a: 5000,
+      p: 'cHJlZml4',
+      x: 'c3VmZml4',
+    })
+    expect(() => decodeSession(qr)).toThrow(CodecError)
   })
 })
