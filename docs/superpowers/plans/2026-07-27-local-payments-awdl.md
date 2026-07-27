@@ -882,22 +882,23 @@ Pod::Spec.new do |s|
   s.authors      = 'BSV Browser'
   s.platforms    = { ios: '15.1' }
   s.source       = { git: '.', tag: s.version.to_s }
-  s.source_files = 'ios/**/*.{swift}'
+  s.source_files = ['ios/HybridLocalPayTransport.swift', 'ios/AwdlSession.swift']
   s.frameworks   = 'Network', 'Security'
 
-  autolinking_script = File.join(__dir__, 'nitrogen/generated/ios/LocalPayTransport+autolinking.rb')
-  if File.exist?(autolinking_script)
-    require autolinking_script
-    add_nitrogen_files(s)
-  else
-    Pod::UI.puts "[LocalPayTransport] Skipping Nitro autolinking – #{autolinking_script} not found"
-  end
+  # `load`, not `require`: every Nitro package's autolinking.rb defines a method
+  # named `add_nitrogen_files`, and this repo has three of them. `load` re-executes
+  # the file so the definition in scope is this package's, immediately before the call.
+  load File.join(__dir__, 'nitrogen', 'generated', 'ios', 'LocalPayTransport+autolinking.rb')
+  add_nitrogen_files(s)
 
-  s.dependency 'React-jsi'
-  s.dependency 'React-callinvoker'
-  s.dependency 'NitroModules'
+  # Supplies the New Architecture C++ interop build settings the Swift<->C++ bridge
+  # needs. Listing React-jsi / React-callinvoker / NitroModules by hand instead does
+  # NOT configure interop, and the generated bridge fails to compile.
+  install_modules_dependencies(s)
 end
 ```
+
+**Codegen tool — read this carefully.** The binary is `nitrogen`, a devDependency of this repo (`nitrogen@^0.35.2`, installed 0.35.10, present at `node_modules/.bin/nitrogen`). Do **not** run `npx nitro-codegen`: that name resolves to an unrelated abandoned package at 0.29.4, and generating with it against the 0.35.10 runtime produces a bridge that fails to compile with `'bridge' is not a member type of enum '__ObjC.margelo.nitro.<ns>'`.
 
 - [ ] **Step 3: Write the lazy TS getter**
 
@@ -950,7 +951,7 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
 cd /Users/personal/git/ts/bsv-browser
 npm pkg set dependencies.react-native-localpay-transport="file:./packages/react-native-localpay-transport"
 npm install
-npx nitro-codegen --config packages/react-native-localpay-transport/nitro.json
+npx nitrogen --config packages/react-native-localpay-transport/nitro.json
 ```
 
 Expected: `packages/react-native-localpay-transport/nitrogen/generated/` created, containing `ios/LocalPayTransport+autolinking.rb`.
@@ -1228,7 +1229,7 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
 - [ ] **Step 4: Regenerate Nitro bindings and build**
 
 ```bash
-npx nitro-codegen --config packages/react-native-localpay-transport/nitro.json
+npx nitrogen --config packages/react-native-localpay-transport/nitro.json
 npm run prebuild:ios
 npm run ios-build-for-app-store
 ```
