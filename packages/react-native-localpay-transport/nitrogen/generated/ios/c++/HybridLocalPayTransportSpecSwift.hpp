@@ -14,7 +14,9 @@ namespace LocalPayTransport { class HybridLocalPayTransportSpec_cxx; }
 
 
 
-
+#include <NitroModules/Promise.hpp>
+#include <string>
+#include <functional>
 
 #include "LocalPayTransport-Swift-Cxx-Umbrella.hpp"
 
@@ -68,6 +70,30 @@ namespace margelo::nitro::localpaytransport {
     // Methods
     inline bool isSupported() override {
       auto __result = _swiftPart.isSupported();
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
+    inline std::shared_ptr<Promise<void>> startListening(const std::string& instanceName, const std::string& pskBase64, const std::function<void(const std::string& /* frameBase64 */)>& onFrame, const std::function<void(const std::string& /* message */)>& onError) override {
+      auto __result = _swiftPart.startListening(instanceName, pskBase64, onFrame, onError);
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
+    inline std::shared_ptr<Promise<void>> stopListening() override {
+      auto __result = _swiftPart.stopListening();
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
+    inline std::shared_ptr<Promise<std::string>> sendFrame(const std::string& instanceName, const std::string& pskBase64, const std::string& frameBase64, double timeoutMs) override {
+      auto __result = _swiftPart.sendFrame(instanceName, pskBase64, frameBase64, std::forward<decltype(timeoutMs)>(timeoutMs));
       if (__result.hasError()) [[unlikely]] {
         std::rethrow_exception(__result.error());
       }

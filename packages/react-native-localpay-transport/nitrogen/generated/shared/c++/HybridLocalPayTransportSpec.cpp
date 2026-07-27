@@ -15,6 +15,9 @@ namespace margelo::nitro::localpaytransport {
     // load custom methods/properties
     registerHybrids(this, [](Prototype& prototype) {
       prototype.registerHybridMethod("isSupported", &HybridLocalPayTransportSpec::isSupported);
+      prototype.registerHybridMethod("startListening", &HybridLocalPayTransportSpec::startListening);
+      prototype.registerHybridMethod("stopListening", &HybridLocalPayTransportSpec::stopListening);
+      prototype.registerHybridMethod("sendFrame", &HybridLocalPayTransportSpec::sendFrame);
     });
   }
 

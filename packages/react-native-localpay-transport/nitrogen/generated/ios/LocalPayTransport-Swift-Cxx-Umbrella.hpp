@@ -13,9 +13,12 @@ namespace margelo::nitro::localpaytransport { class HybridLocalPayTransportSpec;
 
 // Include C++ defined types
 #include "HybridLocalPayTransportSpec.hpp"
+#include <NitroModules/Promise.hpp>
 #include <NitroModules/Result.hpp>
 #include <exception>
+#include <functional>
 #include <memory>
+#include <string>
 
 // C++ helpers for Swift
 #include "LocalPayTransport-Swift-Cxx-Bridge.hpp"

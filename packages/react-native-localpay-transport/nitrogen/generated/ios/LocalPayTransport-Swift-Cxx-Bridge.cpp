@@ -14,6 +14,30 @@
 
 namespace margelo::nitro::localpaytransport::bridge::swift {
 
+  // pragma MARK: std::function<void()>
+  Func_void create_Func_void(void* NON_NULL swiftClosureWrapper) noexcept {
+    auto swiftClosure = LocalPayTransport::Func_void::fromUnsafe(swiftClosureWrapper);
+    return [swiftClosure = std::move(swiftClosure)]() mutable -> void {
+      swiftClosure.call();
+    };
+  }
+  
+  // pragma MARK: std::function<void(const std::exception_ptr& /* error */)>
+  Func_void_std__exception_ptr create_Func_void_std__exception_ptr(void* NON_NULL swiftClosureWrapper) noexcept {
+    auto swiftClosure = LocalPayTransport::Func_void_std__exception_ptr::fromUnsafe(swiftClosureWrapper);
+    return [swiftClosure = std::move(swiftClosure)](const std::exception_ptr& error) mutable -> void {
+      swiftClosure.call(error);
+    };
+  }
+  
+  // pragma MARK: std::function<void(const std::string& /* frameBase64 */)>
+  Func_void_std__string create_Func_void_std__string(void* NON_NULL swiftClosureWrapper) noexcept {
+    auto swiftClosure = LocalPayTransport::Func_void_std__string::fromUnsafe(swiftClosureWrapper);
+    return [swiftClosure = std::move(swiftClosure)](const std::string& frameBase64) mutable -> void {
+      swiftClosure.call(frameBase64);
+    };
+  }
+  
   // pragma MARK: std::shared_ptr<HybridLocalPayTransportSpec>
   std::shared_ptr<HybridLocalPayTransportSpec> create_std__shared_ptr_HybridLocalPayTransportSpec_(void* NON_NULL swiftUnsafePointer) noexcept {
     LocalPayTransport::HybridLocalPayTransportSpec_cxx swiftPart = LocalPayTransport::HybridLocalPayTransportSpec_cxx::fromUnsafe(swiftUnsafePointer);

@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.authors      = 'BSV Browser'
   s.platforms    = { ios: '15.1' }
   s.source       = { git: '.', tag: s.version.to_s }
-  s.source_files = ['ios/HybridLocalPayTransport.swift']
+  s.source_files = ['ios/HybridLocalPayTransport.swift', 'ios/AwdlSession.swift']
   s.frameworks   = 'Network', 'Security'
 
   load File.join(__dir__, 'nitrogen', 'generated', 'ios', 'LocalPayTransport+autolinking.rb')
