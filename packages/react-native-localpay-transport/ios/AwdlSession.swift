@@ -31,6 +31,14 @@ enum AwdlSession {
   }
 
   /// 4-byte big-endian length prefix, so a stream yields discrete frames.
+  ///
+  /// `.bigEndian` is applied on both the write side here and the read side in
+  /// `readFrame` below. That is correct, not merely symmetric-looking: on a
+  /// little-endian platform (every current Apple device), `UInt32.bigEndian`
+  /// byte-swaps the value, and applying that same byte swap a second time on
+  /// read undoes it -- i.e. `.bigEndian` is its own inverse there. So
+  /// "encode with `.bigEndian`, decode with `.bigEndian`" round-trips the
+  /// original value, independent of what the host's native endianness is.
   static func lengthPrefixed(_ payload: Data) -> Data {
     var out = Data(count: 4)
     let n = UInt32(payload.count).bigEndian
