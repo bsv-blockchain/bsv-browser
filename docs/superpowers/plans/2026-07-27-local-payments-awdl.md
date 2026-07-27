@@ -1733,6 +1733,7 @@ Requirements that must be met, not paraphrased:
 - On receive, before persisting: `if (await isSessionSpent(storage, session.sessionId)) return` — surface `local_pay_failed` and stop. After a successful `savePending`, call `markSessionSpent(storage, session.sessionId)`. A re-scanned session QR must never double-credit.
 - Local Network denial surfaces as `local_pay_network_denied` with a route to Settings — not a spinner that never resolves.
 - Render the payment QR with `react-native-qrcode-svg` at error-correction level `M`, sized to at least 280pt.
+- Every `decodeSession` and `decodeFrame` call sits inside a `try/catch` that handles **all** errors, not only `CodecError`. A structurally valid envelope carrying malformed base64, or a body that parses to literal `null`, still throws a native error from `atob`/destructuring. A hostile or corrupted QR must surface `local_pay_failed`, never crash the screen.
 
 - [ ] **Step 3: Verify the screen renders in the existing sanity test**
 
