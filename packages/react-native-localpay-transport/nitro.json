@@ -1,0 +1,13 @@
+{
+  "cxxNamespace": ["localpaytransport"],
+  "ios": { "iosModuleName": "LocalPayTransport" },
+  "android": {
+    "androidNamespace": ["localpaytransport"],
+    "androidCxxLibName": "LocalPayTransport"
+  },
+  "autolinking": {
+    "LocalPayTransport": {
+      "ios": { "language": "swift", "implementationClassName": "HybridLocalPayTransport" }
+    }
+  }
+}

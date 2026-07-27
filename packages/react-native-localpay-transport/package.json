@@ -1,0 +1,13 @@
+{
+  "name": "react-native-localpay-transport",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nitro module exposing Network.framework AWDL peer-to-peer TCP with TLS-PSK for BSV Browser local payments. iOS only.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": ["src", "ios", "nitrogen/generated", "nitro.json", "LocalPayTransport.podspec"],
+  "peerDependencies": {
+    "react-native": "*",
+    "react-native-nitro-modules": "*"
+  }
+}

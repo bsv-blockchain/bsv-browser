@@ -101,6 +101,7 @@
     "react-native-engine-native": "file:./packages/react-native-engine-native",
     "react-native-gesture-handler": "~2.30.0",
     "react-native-localize": "^3.4.1",
+    "react-native-localpay-transport": "file:./packages/react-native-localpay-transport",
     "react-native-modal": "^14.0.0-rc.1",
     "react-native-nitro-modules": "^0.35.2",
     "react-native-otp-inputs": "^7.4.0",
