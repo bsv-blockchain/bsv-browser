@@ -91,7 +91,7 @@ export function encodeFrame(f: PaymentFrame): Uint8Array {
     throw new CodecError(`senderIdentityKey must be 66 hex chars, got ${f.senderIdentityKey.length}`)
   }
   const out: number[] = [f.version & 0xff]
-  for (const byte of hexToBytes(f.senderIdentityKey)) out.push(byte)
+  for (const byte of hexToBytes(f.senderIdentityKey.toLowerCase())) out.push(byte)
   putVarint(out, f.amount)
   putVarint(out, f.outputIndex)
   putStr(out, f.derivationPrefix)

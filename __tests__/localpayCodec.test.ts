@@ -18,7 +18,11 @@ describe('localpay codec', () => {
 
   it('round-trips a large transaction', () => {
     const f = { ...sample(), transaction: new Uint8Array(50_000).fill(7) }
-    expect(decodeFrame(encodeFrame(f)).transaction.length).toBe(50_000)
+    const decoded = decodeFrame(encodeFrame(f))
+    expect(decoded.transaction.length).toBe(50_000)
+    expect(decoded.transaction[0]).toBe(7)
+    expect(decoded.transaction[49_999]).toBe(7)
+    expect(Array.from(decoded.transaction).every(b => b === 7)).toBe(true)
   })
 
   it('round-trips amounts above 32 bits', () => {
@@ -44,5 +48,11 @@ describe('localpay codec', () => {
 
   it('rejects a wrong-length identity key', () => {
     expect(() => encodeFrame({ ...sample(), senderIdentityKey: 'abcd' })).toThrow(CodecError)
+  })
+
+  it('normalizes uppercase identity key to lowercase', () => {
+    const f = { ...sample(), senderIdentityKey: '02'.padEnd(66, 'A') }
+    const decoded = decodeFrame(encodeFrame(f))
+    expect(decoded.senderIdentityKey).toBe('02'.padEnd(66, 'a'))
   })
 })
