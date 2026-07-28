@@ -617,7 +617,7 @@ Create `utils/pay/rails/address.ts`:
  * must not be "corrected".
  */
 import { PublicKey, Utils, type WalletProtocol } from '@bsv/sdk'
-import type { AppChain } from '@/types'   // adjust to the path the grep in Step 3 found
+import type { AppChain } from '@/context/config'   // 'main' | 'test' | 'teratest'
 
 export const BRC29_PROTOCOL_ID: WalletProtocol = [2, '3241645161d8']
 
