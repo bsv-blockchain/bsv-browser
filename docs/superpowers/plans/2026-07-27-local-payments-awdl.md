@@ -1882,7 +1882,7 @@ git commit -m "fix(localpay): device-test findings"
 
 ## Deferred, deliberately
 
-- **Offline and chained unconfirmed spends.** Separate spike. When it lands, the QR path needs fountain-coded animated QR (payload grows ~226 B per chained spend) and `buildPaymentFrame`'s `transportKind` becomes load-bearing.
+- **Offline and chained unconfirmed spends.** Separate spike. When it lands, the QR path needs fountain-coded animated QR (payload grows ~226 B per chained spend), and `buildPaymentFrame` would need a per-transport encoding switch again — the `transportKind` parameter it originally carried was removed as dead, since both paths ship AtomicBEEF.
 - **Android as an AWDL peer.** Not possible; would need Wi-Fi Aware, which is entitlement-gated with unproven Android interop.
 - **Payee-initiated request with no fixed amount.** Open question 1 in the spec.
 - **Retention policy for completed pending entries.** Open question 2. The queue grows unbounded until decided.

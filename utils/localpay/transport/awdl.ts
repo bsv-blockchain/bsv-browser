@@ -66,11 +66,19 @@ export const awdlTransport: LocalPaymentTransport = {
           name,
           toBase64(session.psk),
           frameBase64 => {
+            // Decode BEFORE finish(). `finish` latches `settled` and tears the
+            // listener down before it invokes its callback, so a throw from
+            // inside that callback can never be recovered by a second finish() —
+            // the guard returns early and the promise never settles at all,
+            // leaving the payee spinning against a listener that is already gone.
+            // Any version skew, truncation or trailing bytes reaches this path.
+            let frame: PaymentFrame
             try {
-              finish(() => resolve(decodeFrame(fromBase64(frameBase64))))
+              frame = decodeFrame(fromBase64(frameBase64))
             } catch (e) {
-              finish(() => reject(e))
+              return finish(() => reject(e))
             }
+            finish(() => resolve(frame))
           },
           message => finish(() => reject(new Error(message)))
         )

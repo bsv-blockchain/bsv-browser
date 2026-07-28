@@ -110,7 +110,11 @@ Used whenever either device is not iOS.
 
 The payer builds and signs the transaction, then renders the `PaymentFrame` as a second static QR. The payee scans it.
 
-Payload is the signed rawtx plus routing fields — ancestry is *not* transmitted. Every input is confirmed on-chain (offline chaining is out of scope), so the payee fetches ancestors by txid when it internalizes. A 1-in-2-out P2PKH transaction is ~226 bytes; with `senderIdentityKey`, `outputIndex` and the echoed nonces the frame is ~350–450 bytes, comfortably one static QR (v40 byte-mode holds 2,331 B at EC level M).
+Payload is the signed **AtomicBEEF** plus routing fields — the same encoding the AWDL path uses.
+
+> **Amended during implementation.** This section originally specified a bare rawtx on the QR path, with the payee fetching ancestors by txid at internalize time, giving a ~350–450 byte frame. That is not what shipped, and the shipped behaviour is the correct one: a bare rawtx makes the payee's `internalizeAction` depend on network reachability at exactly the moment two devices may have chosen a local hand-off *because* connectivity is poor. Carrying ancestry keeps the receive side offline-capable and keeps one encoding across both transports.
+>
+> The cost is size: AtomicBEEF grows with input count, so a multi-input payment can exceed what a symbol will hold. `MAX_FRAME_QR_CHARS` (2,200 chars, `utils/localpay/codec.ts`) is the ceiling; the payer checks against it before rendering and reports `local_pay_too_large` rather than handing an oversize payload to the encoder, which would otherwise throw out of render. A single-input payment fits comfortably (v40 byte-mode holds 2,331 B at EC level M).
 
 There is no ACK on this path. The payer's QR stays on screen until dismissed; the payee's snackbar is the receipt.
 
@@ -128,7 +132,7 @@ PaymentFrame {
   outputIndex: varint
   derivationPrefix: len-prefixed bytes
   derivationSuffix: len-prefixed bytes
-  transaction: len-prefixed bytes   // AtomicBEEF (AWDL) or rawtx (QR)
+  transaction: len-prefixed bytes   // AtomicBEEF, on both transports
 }
 ```
 

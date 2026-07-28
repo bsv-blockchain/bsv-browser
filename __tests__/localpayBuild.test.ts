@@ -10,37 +10,41 @@ const session = () => mintSession({
   supportsAwdl: true,
 })
 
+// Mirrors WalletPermissionsManager with `signAndProcess: false`: createAction
+// returns a signableTransaction (carrying the reference) rather than a final tx,
+// and buildPaymentFrame finalizes it through signAction.
 function walletStub() {
   return {
     getPublicKey: jest.fn().mockResolvedValue({ publicKey: '03'.padEnd(66, 'f') }),
-    createAction: jest.fn().mockResolvedValue({ tx: [1, 2, 3], txid: 'deadbeef' }),
-    signAction: jest.fn().mockResolvedValue({ tx: [9, 9, 9], txid: 'finalized' }),
+    createAction: jest.fn().mockResolvedValue({ signableTransaction: { reference: 'ref-123' } }),
+    signAction: jest.fn().mockResolvedValue({ tx: [1, 2, 3], txid: 'finalized' }),
+    abortAction: jest.fn().mockResolvedValue({ aborted: true }),
   }
 }
 
 describe('buildPaymentFrame', () => {
   it('echoes the session derivation nonces and amount', async () => {
     const s = session()
-    const f = await buildPaymentFrame(walletStub() as never, s, 'awdl', 'admin.com')
-    expect(f.amount).toBe(777)
-    expect(f.derivationPrefix).toBe(s.derivationPrefix)
-    expect(f.derivationSuffix).toBe(s.derivationSuffix)
+    const { frame } = await buildPaymentFrame(walletStub() as never, s, 'admin.com')
+    expect(frame.amount).toBe(777)
+    expect(frame.derivationPrefix).toBe(s.derivationPrefix)
+    expect(frame.derivationSuffix).toBe(s.derivationSuffix)
   })
 
   it('uses the local identity key as sender', async () => {
-    const f = await buildPaymentFrame(walletStub() as never, session(), 'awdl', 'admin.com')
-    expect(f.senderIdentityKey).toBe('03'.padEnd(66, 'f'))
+    const { frame } = await buildPaymentFrame(walletStub() as never, session(), 'admin.com')
+    expect(frame.senderIdentityKey).toBe('03'.padEnd(66, 'f'))
   })
 
   it('carries the transaction bytes', async () => {
-    const f = await buildPaymentFrame(walletStub() as never, session(), 'awdl', 'admin.com')
-    expect(Array.from(f.transaction)).toEqual([1, 2, 3])
+    const { frame } = await buildPaymentFrame(walletStub() as never, session(), 'admin.com')
+    expect(Array.from(frame.transaction)).toEqual([1, 2, 3])
   })
 
   it('propagates a createAction failure', async () => {
     const w = walletStub()
     w.createAction.mockRejectedValue(new Error('insufficient funds'))
-    await expect(buildPaymentFrame(w as never, session(), 'awdl', 'admin.com'))
+    await expect(buildPaymentFrame(w as never, session(), 'admin.com'))
       .rejects.toThrow('insufficient funds')
   })
 
@@ -52,7 +56,7 @@ describe('buildPaymentFrame', () => {
   it('derives the payee key with the session nonces, protocol, and counterparty', async () => {
     const s = session()
     const w = walletStub()
-    await buildPaymentFrame(w as never, s, 'awdl', 'admin.com')
+    await buildPaymentFrame(w as never, s, 'admin.com')
     const derivationArgs = w.getPublicKey.mock.calls[1][0]
     expect(derivationArgs).toEqual({
       protocolID: PEERPAY_PROTOCOL_ID,
@@ -71,7 +75,7 @@ describe('buildPaymentFrame', () => {
       supportsAwdl: true,
     })
     const w = walletStub()
-    await buildPaymentFrame(w as never, s, 'awdl', 'admin.com')
+    await buildPaymentFrame(w as never, s, 'admin.com')
     const derivationArgs = w.getPublicKey.mock.calls[1][0]
     expect(derivationArgs.keyID).toBe('uniquePrefix123 uniqueSuffix456')
     expect(derivationArgs.counterparty).toBe('02'.padEnd(66, 'b'))
@@ -79,27 +83,51 @@ describe('buildPaymentFrame', () => {
 
   it('creates the action with randomizeOutputs disabled and noSend so the payee broadcasts', async () => {
     const w = walletStub()
-    await buildPaymentFrame(w as never, session(), 'awdl', 'admin.com')
+    await buildPaymentFrame(w as never, session(), 'admin.com')
     const createArgs = w.createAction.mock.calls[0][0]
-    expect(createArgs.options).toEqual({ randomizeOutputs: false, noSend: true })
+    expect(createArgs.options).toEqual({ randomizeOutputs: false, noSend: true, signAndProcess: false })
+  })
+
+  // The reference is the ONLY handle that can release the inputs a `noSend`
+  // action holds. WalletPermissionsManager swallows it unless signAndProcess is
+  // explicitly false, and TaskFailAbandoned never sweeps 'nosend' — so losing it
+  // locks amount + fee in the payer's wallet permanently.
+  it('asks for the deferred result so the abort reference survives', async () => {
+    const w = walletStub()
+    await buildPaymentFrame(w as never, session(), 'admin.com')
+    expect(w.createAction.mock.calls[0][0].options.signAndProcess).toBe(false)
+  })
+
+  it('returns the createAction reference alongside the frame', async () => {
+    const built = await buildPaymentFrame(walletStub() as never, session(), 'admin.com')
+    expect(built.reference).toBe('ref-123')
+  })
+
+  it('returns no reference when a wallet finalizes createAction itself', async () => {
+    const w = walletStub()
+    w.createAction.mockResolvedValue({ tx: [4, 5, 6], txid: 'deadbeef' })
+    const built = await buildPaymentFrame(w as never, session(), 'admin.com')
+    expect(built.reference).toBeUndefined()
+    expect(Array.from(built.frame.transaction)).toEqual([4, 5, 6])
+    expect(w.signAction).not.toHaveBeenCalled()
   })
 
   it('forwards the originator to every wallet call', async () => {
     const w = walletStub()
-    await buildPaymentFrame(w as never, session(), 'awdl', 'admin.com')
+    await buildPaymentFrame(w as never, session(), 'admin.com')
     expect(w.getPublicKey.mock.calls[0][1]).toBe('admin.com')
     expect(w.getPublicKey.mock.calls[1][1]).toBe('admin.com')
     expect(w.createAction.mock.calls[0][1]).toBe('admin.com')
+    expect(w.signAction.mock.calls[0][1]).toBe('admin.com')
   })
 
-  it('finalizes a signableTransaction via signAction when createAction defers signing', async () => {
+  it('finalizes a signableTransaction via signAction with empty spends and noSend', async () => {
     const w = walletStub()
-    w.createAction.mockResolvedValue({ signableTransaction: { reference: 'ref-123' } })
-    const f = await buildPaymentFrame(w as never, session(), 'awdl', 'admin.com')
+    const built = await buildPaymentFrame(w as never, session(), 'admin.com')
     expect(w.signAction).toHaveBeenCalledWith(
-      expect.objectContaining({ reference: 'ref-123' }),
+      { reference: 'ref-123', spends: {}, options: { noSend: true } },
       'admin.com'
     )
-    expect(Array.from(f.transaction)).toEqual([9, 9, 9])
+    expect(Array.from(built.frame.transaction)).toEqual([1, 2, 3])
   })
 })

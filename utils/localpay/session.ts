@@ -75,7 +75,10 @@ export function decodeSession(text: string): Session {
   const { v, c, s, k, i, a, p, x } = parsed as Record<string, unknown>
   if (v !== SESSION_VERSION) throw new CodecError(`unsupported session version ${String(v)}`)
   if (typeof i !== 'string' || i.length !== 66) throw new CodecError('bad identityKey')
-  if (typeof a !== 'number') throw new CodecError('bad amount')
+  // Satoshis: a whole, positive, exactly-representable count. A bare typeof
+  // check admits 0, negatives, NaN and fractions — and a fractional amount
+  // renders as a blank figure directly above a live Send button.
+  if (typeof a !== 'number' || !Number.isSafeInteger(a) || a <= 0) throw new CodecError('bad amount')
   if (typeof s !== 'string') throw new CodecError('bad sessionId encoding')
   if (typeof k !== 'string') throw new CodecError('bad psk encoding')
   if (typeof p !== 'string') throw new CodecError('bad derivationPrefix encoding')

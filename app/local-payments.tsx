@@ -33,6 +33,9 @@
  *   optional, so it degrades to a QR-only request with the pairing QR still up.
  *
  * Money safety (see settleReceived below, which is the only write path):
+ *   0. The frame is bound to the session before anything else: a frame whose
+ *      derivation nonces or amount do not match the live request is refused
+ *      without burning the session, so the real payer can still pay.
  *   1. isSessionSpent() is consulted before anything is written.
  *   2. savePending() completes before markSessionSpent(). Never the reverse:
  *      a crash between the two would burn a one-shot session whose payment was
@@ -45,6 +48,14 @@
  *      nor PendingPayment carries a sessionId, so it cannot be recovered later.
  *   5. Every decode sits in a bare `catch`, which catches non-Error throws from
  *      atob and destructuring too, not just CodecError.
+ *
+ * Money safety, payer side (see abortBuild below):
+ *   The frame is built `noSend`, which holds `amount + fee` in inputs marked
+ *   unspendable. Nothing in storage ever reaps a 'nosend' action, so an
+ *   abandoned build locks those funds permanently. abortBuild() releases them —
+ *   but ONLY on paths where the frame provably never left the device. Once
+ *   delivery is even possible the action must stay intact, because the payee may
+ *   still broadcast it and a freed input can be respent into a conflict.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -204,6 +215,19 @@ export default function LocalPaymentsScreen() {
   /** The encoder rejected the pairing payload. Should be unreachable at ~170 chars. */
   const [sessionQrBroken, setSessionQrBroken] = useState(false)
 
+  /**
+   * A frame arrived that does not belong to this request. Advisory, not fatal:
+   * the session is deliberately left live so the real payer can still pay.
+   */
+  const [sessionMismatch, setSessionMismatch] = useState(false)
+
+  /**
+   * Bumped to restart the AWDL listener. A rejected frame resolves the listener
+   * promise, so without this the fast path would stay dead for the rest of a
+   * session that is still accepting payment.
+   */
+  const [listenerEpoch, setListenerEpoch] = useState(0)
+
   /** Blur must abort the AWDL listener; refocus must bring it back. */
   const [focused, setFocused] = useState(true)
 
@@ -215,6 +239,17 @@ export default function LocalPaymentsScreen() {
   const settlingRef = useRef(false)
   /** Ignores the repeat reads multiScan produces while a scan is being handled. */
   const scanLatchRef = useRef(false)
+
+  /**
+   * Whether this device can be an AWDL peer. Resolved ONCE per mount.
+   *
+   * `localSupportsAwdl()` is not a cheap predicate: each call constructs a
+   * throwaway NWListener in Swift on the JS thread, and can trigger the Local
+   * Network permission alert. It was previously called from render and twice
+   * more per render of the confirm screen. The answer cannot change while the
+   * screen is mounted, so every read goes through this.
+   */
+  const supportsAwdl = useMemo(() => localSupportsAwdl(), [])
 
   const abortAll = useCallback(() => {
     for (const controller of abortsRef.current) {
@@ -267,6 +302,7 @@ export default function LocalPaymentsScreen() {
     setUnsettled(null)
     setNearbyError(null)
     setSessionQrBroken(false)
+    setSessionMismatch(false)
   }, [abortAll])
 
   const goBack = useCallback(() => {
@@ -282,7 +318,42 @@ export default function LocalPaymentsScreen() {
   const settleReceived = useCallback(
     async (frame: PaymentFrame, session: Session) => {
       if (settlingRef.current) return
+
+      // (0) Bind the frame to THIS session, before the one-shot latch and before
+      //     any write. Two distinct holes close here:
+      //
+      //     · frame.amount is display-only — internalizeAction credits whatever
+      //       the output actually holds — so a payer could send 1 satoshi against
+      //       a 100,000 request with amount: 100000 in the frame and the payee's
+      //       screen would read "Received 100,000".
+      //     · onFrameScanned hands ANY decoded frame to the live hostedSession, so
+      //       scanning a stray payment QR would queue a stranger's payment AND burn
+      //       this session. The real payer would then be told already_paid, acked
+      //       ok, and silently discarded.
+      //
+      //     The nonces are the load-bearing check: derivationPrefix/Suffix are the
+      //     per-session values the payee minted and the payer echoed back, so
+      //     matching them is what makes the frame provably intended for this
+      //     request. The amount check rides along to pin the displayed figure.
+      //
+      //     Deliberately NOT terminal, and deliberately does NOT mark the session
+      //     spent: the request stays live so the genuine payer can still complete.
+      if (
+        frame.derivationPrefix !== session.derivationPrefix ||
+        frame.derivationSuffix !== session.derivationSuffix ||
+        frame.amount !== session.amount
+      ) {
+        scanLatchRef.current = false
+        setSessionMismatch(true)
+        // Back to the waiting screen with the pairing QR still up, and restart
+        // the AWDL listener the rejected frame consumed.
+        setPhase('receive_wait')
+        setListenerEpoch(n => n + 1)
+        return
+      }
+
       settlingRef.current = true
+      setSessionMismatch(false)
       setPhase('receive_settling')
 
       if (!storage) {
@@ -321,8 +392,10 @@ export default function LocalPaymentsScreen() {
           await markSessionSpent(storage, session.sessionId)
         } catch (e) {
           // The frame is already queued, so this is not a payment failure and
-          // must not be reported as one. internalizeAction rejecting a repeat of
-          // the same output is the backstop against a replay from here.
+          // must not be reported as one. internalizeAction is idempotent on a
+          // repeat of the same output — the toolbox merges "wallet payment"
+          // internalizations by txid and skips the second credit — so a replay
+          // from here cannot double-credit.
           console.warn('[localpay] markSessionSpent failed:', messageOf(e))
         }
       } catch (e) {
@@ -380,7 +453,7 @@ export default function LocalPaymentsScreen() {
 
   useEffect(() => {
     if (!hostedSession || !focused) return
-    if (!localSupportsAwdl()) return
+    if (!supportsAwdl) return
 
     // The Set identity is stable for the component's lifetime, but capture it so
     // the cleanup never reaches through a ref that may have been reassigned.
@@ -408,7 +481,7 @@ export default function LocalPaymentsScreen() {
       controller.abort()
       registry.delete(controller)
     }
-  }, [hostedSession, focused])
+  }, [hostedSession, focused, supportsAwdl, listenerEpoch])
 
   // ── Receive: mint the request ──
 
@@ -425,6 +498,7 @@ export default function LocalPaymentsScreen() {
     setPhase('receive_minting')
     setNearbyError(null)
     setSessionQrBroken(false)
+    setSessionMismatch(false)
     try {
       const { publicKey: identityKey } = await wallet.getPublicKey({ identityKey: true }, adminOriginator)
       const derivationPrefix = await createNonce(wallet, 'self', adminOriginator)
@@ -436,7 +510,7 @@ export default function LocalPaymentsScreen() {
         derivationSuffix,
         // An Android payee advertises no AWDL capability, so the payer's
         // selectTransport() takes the QR path without a negotiation round trip.
-        supportsAwdl: localSupportsAwdl()
+        supportsAwdl
       })
       setRole('payee')
       setHostedSession(session)
@@ -444,7 +518,7 @@ export default function LocalPaymentsScreen() {
     } catch (e) {
       fail('generic', messageOf(e))
     }
-  }, [requestAmount, wallet, storage, adminOriginator, fail, t])
+  }, [requestAmount, wallet, storage, adminOriginator, supportsAwdl, fail, t])
 
   // ── Receive: scan the payer's frame ──
 
@@ -492,16 +566,51 @@ export default function LocalPaymentsScreen() {
     [fail, t]
   )
 
+  /**
+   * The transport this payment will take. Memoized per scanned session:
+   * selectTransport() reaches through to localSupportsAwdl(), which is a native
+   * call, and the confirm screen reads it twice on every render.
+   *
+   * Declared above executeSend on purpose — a useCallback dependency array is
+   * evaluated at render time, so referencing it from below would hit the TDZ.
+   */
+  const sendKind = useMemo(
+    () => (scannedSession ? selectTransport(scannedSession) : null),
+    [scannedSession]
+  )
+
+  // ── Send: release an abandoned build ──
+  //
+  // buildPaymentFrame creates the action with `noSend: true`, which flips its
+  // inputs to `spendable: false`. The storage sweeper (TaskFailAbandoned) reaps
+  // only 'unprocessed' and 'unsigned' actions — never 'nosend' — so a build that
+  // is abandoned locks `amount + fee` in this wallet permanently and silently.
+  //
+  // Only ever call this where the frame PROVABLY never left the device. Never
+  // after a possible delivery: the payee may still broadcast, and freeing the
+  // inputs here would let this wallet respend them into a conflicting tx.
+  // Fire-and-forget — an abort failure is a stuck UTXO, not a lost payment, and
+  // must not overwrite the real error already on screen.
+
+  const abortBuild = useCallback(
+    (reference: string | undefined) => {
+      if (!reference || !wallet) return
+      void (wallet as unknown as PayingWalletArg)
+        .abortAction({ reference }, adminOriginator)
+        .catch(e => console.warn('[localpay] abortAction failed:', messageOf(e)))
+    },
+    [wallet, adminOriginator]
+  )
+
   // ── Send: build and deliver ──
 
   const executeSend = useCallback(async () => {
     const session = scannedSession
-    if (!session) return
+    if (!session || !sendKind) return
     if (!wallet) {
       fail('generic', t('wallet_not_ready'))
       return
     }
-    const kind = selectTransport(session)
     setPhase('send_working')
 
     const registry = abortsRef.current
@@ -509,30 +618,41 @@ export default function LocalPaymentsScreen() {
     registry.add(controller)
 
     try {
-      let built: PaymentFrame
+      let built: Awaited<ReturnType<typeof buildPaymentFrame>>
       try {
         // The structural `PayingWallet` in build.ts pins `createAction().tx` to
         // `number[]`, while the SDK's `AtomicBEEF` is `Byte[] | Uint8Array`. The
         // manager satisfies the contract at runtime — build.ts wraps the result in
         // `new Uint8Array(...)`, which accepts either — so this is nominal only.
-        built = await buildPaymentFrame(wallet as unknown as PayingWalletArg, session, kind, adminOriginator)
+        built = await buildPaymentFrame(wallet as unknown as PayingWalletArg, session, adminOriginator)
       } catch (e) {
         // Build errors are wallet errors and must keep their own message. A
         // declined spending prompt reads "Permission denied", which the Local
         // Network heuristic would otherwise misread into an Open Settings button
-        // for the wrong permission, discarding the real reason.
+        // for the wrong permission, discarding the real reason. Nothing was
+        // built, so there is nothing to abort.
         if (!controller.signal.aborted) fail('generic', messageOf(e))
         return
       }
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted) {
+        // The user backed out or the screen blurred while "Delivering…" was up.
+        // The frame was never handed to a transport and never rendered.
+        abortBuild(built.reference)
+        return
+      }
 
       // Computed once, before anything can render it. Null means the frame is
       // too large for a symbol — AtomicBEEF grows with input count — and handing
       // it to <QRCode> would throw during render and take the app down.
-      const qr = frameQrOrNull(built)
+      const qr = frameQrOrNull(built.frame)
 
-      if (kind === 'qr') {
+      if (sendKind === 'qr') {
         if (!qr) {
+          // The only transport for this pair is a QR the frame cannot fit in,
+          // so it can never be delivered. Release the inputs — and, having
+          // released them, make sure no earlier frame is left on offer.
+          abortBuild(built.reference)
+          setPaymentQr(null)
           fail('generic', t('local_pay_too_large'))
           return
         }
@@ -542,10 +662,17 @@ export default function LocalPaymentsScreen() {
       }
 
       try {
-        const ack = await awdlTransport.send(session, built, controller.signal)
+        const ack = await awdlTransport.send(session, built.frame, controller.signal)
         if (controller.signal.aborted) return
         if (!ack.ok) {
-          setPaymentQr(qr)
+          // An explicit decline: the peer processed the frame and refused it, so
+          // nothing was accepted and the inputs can be released. Because they
+          // are released, the frame must NOT then be offered as a QR fallback —
+          // handing over a transaction whose inputs this wallet now considers
+          // free invites a double-spend. Clearing paymentQr also drops any stale
+          // QR left by an earlier attempt.
+          abortBuild(built.reference)
+          setPaymentQr(null)
           fail('generic', ack.error ?? t('local_pay_failed'))
           return
         }
@@ -553,9 +680,11 @@ export default function LocalPaymentsScreen() {
         setPhase('done')
       } catch (e) {
         if (controller.signal.aborted) return
-        // The frame is signed but noSend — nothing has left the wallet — so it is
-        // safe to offer it as a QR and let the payment complete over the fallback.
-        // `qr` is null when it would not fit, which correctly hides that offer.
+        // Deliberately NOT aborted. A throw here does not prove non-delivery —
+        // the bytes may have reached the peer before the ack was lost — so the
+        // action must stay intact and spendable-by-the-payee. The frame is
+        // signed but noSend, so offering it as a QR lets the payment still
+        // complete. `qr` is null when it would not fit, hiding that offer.
         setPaymentQr(qr)
         const message = messageOf(e)
         // The heuristic is scoped to the transport call: only here can a message
@@ -565,7 +694,7 @@ export default function LocalPaymentsScreen() {
     } finally {
       registry.delete(controller)
     }
-  }, [scannedSession, wallet, adminOriginator, fail, t])
+  }, [scannedSession, sendKind, wallet, adminOriginator, abortBuild, fail, t])
 
   // ── Receive: retry a settle that never reached storage ──
 
@@ -606,7 +735,7 @@ export default function LocalPaymentsScreen() {
   }, [hostedSession])
 
   /** Listening over AWDL right now. Goes false once the fast path gives up. */
-  const awdlActive = hostedSession !== null && localSupportsAwdl() && nearbyError === null
+  const awdlActive = hostedSession !== null && supportsAwdl && nearbyError === null
   const requestedSats = Math.round(Number(requestAmount))
   const canRequest = Number.isFinite(requestedSats) && requestedSats > 0
   const scannerOpen = phase === 'send_scan' || phase === 'receive_scan'
@@ -748,6 +877,16 @@ export default function LocalPaymentsScreen() {
               </View>
             )}
 
+            {/* A frame arrived that belongs to a different request. Advisory,
+                not a failure: this session was deliberately NOT marked spent,
+                so the pairing QR above is still live for the real payer. */}
+            {sessionMismatch && (
+              <View style={[styles.note, { backgroundColor: colors.error + '15', borderColor: colors.error + '40' }]}>
+                <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
+                <Text style={[styles.noteText, { color: colors.error }]}>{t('local_pay_wrong_session')}</Text>
+              </View>
+            )}
+
             {/* The fast path gave up. The request is still live over QR, so this
                 is an advisory, not a failure — the pairing QR above still works. */}
             {nearbyError && (
@@ -806,12 +945,12 @@ export default function LocalPaymentsScreen() {
 
             <View style={[styles.badge, { backgroundColor: colors.fillTertiary, alignSelf: 'center' }]}>
               <Ionicons
-                name={selectTransport(scannedSession) === 'awdl' ? 'wifi' : 'qr-code-outline'}
+                name={sendKind === 'awdl' ? 'wifi' : 'qr-code-outline'}
                 size={14}
                 color={colors.textSecondary}
               />
               <Text style={[styles.badgeText, { color: colors.textSecondary }]}>
-                {selectTransport(scannedSession) === 'awdl' ? t('local_pay_via_nearby') : t('local_pay_via_qr')}
+                {sendKind === 'awdl' ? t('local_pay_via_nearby') : t('local_pay_via_qr')}
               </Text>
             </View>
 
@@ -842,6 +981,15 @@ export default function LocalPaymentsScreen() {
                 onError={onPaymentQrError}
               />
             </View>
+            {/* Deliberately does NOT abort the build.
+                The QR path has no ack by design, so this screen cannot know
+                whether the payee scanned. "Done" is modelled as the SUCCESS
+                terminal for this path — it goes straight to "Payment sent" —
+                so the overwhelmingly likely reading is "the payee has it".
+                Aborting would free inputs the payee is about to broadcast and
+                let this wallet respend them into a conflicting transaction,
+                turning a stuck UTXO into a failed payment. The abandoned-build
+                lock is the strictly safer of the two failure modes here. */}
             <TouchableOpacity
               style={[styles.bigBtn, { backgroundColor: colors.accent, marginTop: spacing.lg }]}
               onPress={() => {

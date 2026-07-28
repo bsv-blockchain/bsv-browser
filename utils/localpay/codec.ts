@@ -15,7 +15,12 @@ export interface PaymentFrame {
   outputIndex: number
   derivationPrefix: string
   derivationSuffix: string
-  /** AtomicBEEF (AWDL path) or rawtx (QR path) */
+  /**
+   * AtomicBEEF, on both transports. The design originally specified a bare
+   * rawtx on the QR path to shrink the symbol, but ancestry is what lets the
+   * payee internalize offline — and MAX_FRAME_QR_CHARS already rejects frames
+   * too large to render, so one encoding serves both.
+   */
   transaction: Uint8Array
 }
 

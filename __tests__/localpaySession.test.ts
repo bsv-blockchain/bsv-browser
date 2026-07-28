@@ -117,6 +117,31 @@ describe('localpay session', () => {
     expect(() => decodeSession(qr)).toThrow(CodecError)
   })
 
+  // The amount drives both the payer's confirm screen and the payee's
+  // session-binding check, so anything that is not a whole positive satoshi
+  // count must be refused at the door rather than rendered.
+  const amountQr = (a: unknown) => encodeCustomQR({
+    v: SESSION_VERSION,
+    c: 0,
+    s: 'A'.repeat(22), // 16 bytes
+    k: 'A'.repeat(43), // 32 bytes
+    i: args.identityKey,
+    a,
+    p: 'cHJlZml4',
+    x: 'c3VmZml4',
+  })
+
+  it.each([-1, -5000, 0, 0.5, 1234.56, 2 ** 53, 'ten', null])(
+    'rejects a non-positive-integer amount %p',
+    a => {
+      expect(() => decodeSession(amountQr(a))).toThrow(CodecError)
+    }
+  )
+
+  it('accepts a valid positive integer amount', () => {
+    expect(decodeSession(amountQr(5000)).amount).toBe(5000)
+  })
+
   it('rejects non-numeric caps', () => {
     const qr = encodeCustomQR({
       v: SESSION_VERSION,
