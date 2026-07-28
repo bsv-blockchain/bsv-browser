@@ -1,7 +1,8 @@
 # Payments Consolidation — Design
 
 **Date:** 2026-07-28
-**Status:** Proposed
+**Status:** Implemented 2026-07-28 — code complete, device test outstanding.
+Plan: `docs/superpowers/plans/2026-07-28-payments-consolidation.md`
 **Replaces:** `app/payments.tsx`, `app/legacy-payments.tsx`, `app/local-payments.tsx` as three separate destinations
 **Reference:** `~/Downloads/Payment_UX_Language_Conventions.md` (internal UX language guide)
 
@@ -147,8 +148,35 @@ Open question 3 below still stands; the address-history question is now downgrad
 2. ~~Automatic sweep, or manual?~~ **Decided:** automatic, in the background,
    with a success toast and an inbound history entry. See "Legacy receive
    becomes automatic".
-3. Should "Get paid → handle" show a shareable link as well as the QR? The
-   guide notes shareable payment links as common (Cash App, section 2).
-4. Does anything outside the app deep-link to `/legacy-payments`?
-5. New, from the auto-sweep decision: what are the polling bounds — interval,
-   stop condition, how many days back, and behaviour while offline?
+3. ~~Should "Get paid → handle" show a shareable link as well as the QR?~~
+   **Decided: yes.** It shares a `peerpay:<identityKey>` URI through the native
+   share sheet, alongside the QR and a copy action. That form was already parsed
+   by `utils/parsePeerPayURI.ts` and already routed by `app/+native-intent.ts`,
+   so a tapped link lands on `/pay` with the recipient filled in — no protocol
+   work. `peerPayLinkFor` is tested against the app's own validator.
+4. ~~Does anything outside the app deep-link to `/legacy-payments`?~~
+   **Answered: no.** Its only references were the wallet menu and the route
+   registration. `peerpay:` is the sole external entry point and it targeted
+   `/payments`. All three old paths are nonetheless kept as redirect stubs, since
+   a `peerpay:` link from an earlier build still names `/payments`.
+5. ~~What are the polling bounds?~~ **Decided and implemented:** a 30 s
+   interval, and a pass runs only while the wallet is built, the app is
+   foreground and the device is online, never two at once (`shouldSweepNow`).
+   The sweeper polls only addresses the app has actually shown a user — never a
+   blind day look-back — capped at 8, dropped after 24 h with no activity or once
+   dated more than 7 days back (`utils/pay/watchlist.ts`). An address that
+   received money stays watched, so a second payment to it is still caught.
+
+## Regressions accepted, and one fixed on the way
+
+- The identity-key QR left `settings.tsx` for Get paid → handle, as planned.
+- Dropped as informational: the green active-server chip (its job merged into
+  the message-box row), the "No Message Box Set" warning (the panel auto-opens
+  for that state), and the in-session legacy send log (`/transactions` has it).
+- **Fixed, not accepted:** consolidating the screens initially left the
+  message-box panel unreachable — a user who saved a broken host had no route to
+  reset it, because reset and use-no-server both live inside the panel. Both
+  handle cells now carry a row that names the active host and opens it.
+- **Fixed in passing:** `enter_valid_amount` was called by the old payments
+  screen and defined in no locale, so an invalid amount showed the user a raw
+  key. Now defined in all twelve.
