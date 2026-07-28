@@ -94,6 +94,99 @@ export async function acceptWithRetry(
   }
 }
 
+// ── The inbox ──
+//
+// An arriving payment is credited automatically. Accepting was never a decision
+// a user could act on — the money is already theirs, the token is already in
+// their box, and refusing it only leaves it there — so the tap it required was
+// ceremony. What IS a decision is what to do about one the wallet cannot credit,
+// and that is the only case the UI shows.
+
+/** A payment the wallet has failed to credit, and how many times. */
+export interface InboxAttempt {
+  attempts: number
+  error: string
+}
+
+/**
+ * How many times a payment is credited automatically before a human is asked.
+ *
+ * Two, not one: the common failure is transient (offline, a locked database, a
+ * stale token) and a second pass usually clears it. Not unbounded, because a
+ * structurally corrupt payment can never succeed, and retrying it every poll
+ * forever is a wallet write per tick against money that will never arrive.
+ */
+export const MAX_AUTO_ATTEMPTS = 2
+
+/** Whether this payment has stopped being retried and now needs a person. */
+export function needsAttention(state: InboxAttempt | undefined): boolean {
+  return !!state && state.attempts >= MAX_AUTO_ATTEMPTS
+}
+
+/**
+ * Credit everything in the box that is still worth attempting.
+ *
+ * The credit itself is injected, so this function holds only the policy: what to
+ * attempt, what to leave alone, and what to remember. Returns a fresh attempt
+ * map rather than mutating, and that map is rebuilt from the payments actually
+ * present — a message that has left the box takes its state with it, so the map
+ * cannot grow without bound across a long-lived screen.
+ */
+export async function autoAcceptInbox<T extends { messageId: string | number }>(args: {
+  payments: T[]
+  attempts: Record<string, InboxAttempt>
+  accept: (payment: T) => Promise<void>
+  /** Message ids to attempt even though they had given up — a user pressed Retry. */
+  force?: string[]
+}): Promise<{ accepted: number; attempts: Record<string, InboxAttempt> }> {
+  const { payments, attempts, accept } = args
+  const forced = new Set(args.force ?? [])
+  const next: Record<string, InboxAttempt> = {}
+  let accepted = 0
+
+  for (const payment of payments) {
+    const id = String(payment.messageId)
+    const state = attempts[id]
+
+    // Already given up on, and nobody asked again: keep the row and its error
+    // exactly as it is. This is the line that stops the retry loop.
+    if (needsAttention(state) && !forced.has(id)) {
+      next[id] = state
+      continue
+    }
+
+    try {
+      await accept(payment)
+      accepted++
+      // Success clears the history: the payment is credited and acknowledged, so
+      // there is nothing left to show or retry.
+    } catch (e) {
+      next[id] = {
+        attempts: (state?.attempts ?? 0) + 1,
+        error: e instanceof Error && e.message ? e.message : String(e)
+      }
+    }
+  }
+
+  return { accepted, attempts: next }
+}
+
+/**
+ * Give up on a payment: acknowledge it without crediting it.
+ *
+ * This ABANDONS money. The acknowledge removes the message from the box, so the
+ * payment will never be listed again and this wallet can never credit it — the
+ * only recovery is asking the sender to send again. It exists because a
+ * structurally corrupt payment would otherwise sit in the list for good, and it
+ * must never be one tap away.
+ */
+export async function discardIncoming(
+  client: Pick<PeerPayClient, 'acknowledgeMessage'>,
+  payment: { messageId: string }
+): Promise<void> {
+  await client.acknowledgeMessage({ messageIds: [payment.messageId] })
+}
+
 /**
  * Pay a handle. Four steps, in this order, for the reason in the file header:
  *   1 mint + broadcast the token   2 persist it   3 deliver it   4 mark sent

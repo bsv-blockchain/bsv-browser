@@ -7,9 +7,11 @@
  * identity key — the link is the one the app can route itself, via
  * +native-intent, straight back into Pay → handle.
  *
- * Below it: the inbox. Incoming PeerPay payments are not automatic — accepting
- * one internalizes it — so the list, the per-payment note and Accept all are
- * carried over from the old Payments screen unchanged.
+ * Below it: nothing, when all is well. Arriving payments are credited the moment
+ * this screen sees them — accepting was never a decision anyone could act on,
+ * since the money is already theirs and refusing only leaves it in the box. The
+ * list below appears only for payments the wallet could NOT credit, and exists
+ * so those can be retried or, when they are structurally broken, given up on.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -20,7 +22,6 @@ import {
   Share,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View
 } from 'react-native'
@@ -40,7 +41,16 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import { makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
-import { NO_MESSAGE_BOX, acceptWithRetry, internalizeIncoming, peerPayLinkFor } from '@/utils/pay/rails/handle'
+import {
+  NO_MESSAGE_BOX,
+  acceptWithRetry,
+  autoAcceptInbox,
+  discardIncoming,
+  internalizeIncoming,
+  needsAttention,
+  peerPayLinkFor,
+  type InboxAttempt
+} from '@/utils/pay/rails/handle'
 
 /**
  * How often the inbox is re-read while this screen is in front.
@@ -51,148 +61,112 @@ import { NO_MESSAGE_BOX, acceptWithRetry, internalizeIncoming, peerPayLinkFor } 
  */
 const INBOX_POLL_MS = 5000
 
-// ── Incoming Section ─────────────────────────────────────────────────────────
-//
-// IncomingPaymentsSection and PaymentRow are app/payments.tsx:418-526 and
-// :754-858, carried over unchanged apart from one drop: the section's own
-// acceptResult banner (and the onDismissResult it needed), because the cell
-// below renders the banner itself.
+/**
+ * The description every auto-credited payment carries into the wallet's history.
+ *
+ * Fixed, because nobody is present to type one: the old screen let the user add
+ * a note before accepting, and automatic crediting removes that moment. Same
+ * default the old screen used when the note was left blank.
+ */
+const INBOX_DESCRIPTION = 'Identity Payment'
 
-interface IncomingPaymentsSectionProps {
-  readonly isConfigured: boolean
-  readonly loadingPayments: boolean
+/** How long a tapped Discard stays armed before it disarms itself. */
+const DISCARD_ARM_MS = 5000
+
+// ── Needs attention ──────────────────────────────────────────────────────────
+//
+// Replaces the old accept list. An arriving payment is credited automatically
+// (see autoAcceptInbox in the handle rail), so the only rows here are the ones
+// the wallet could NOT credit after MAX_AUTO_ATTEMPTS tries. That makes this a
+// problem queue, not an inbox: every row offers a retry, and a discard for the
+// structurally broken ones that will never succeed.
+//
+// There is deliberately no empty state. When nothing is wrong the section is
+// absent entirely — an inbox that is always visible and always empty trains
+// people to ignore it, and this is the one place that must be noticed.
+
+interface AttentionSectionProps {
   readonly payments: IncomingPayment[]
+  readonly attempts: Record<string, InboxAttempt>
   readonly senderIdentities: Record<string, DisplayableIdentity | null>
-  readonly acceptingId: string | null
-  readonly acceptingAll: boolean
-  readonly editingNoteId: string | null
-  readonly paymentNotes: Record<string, string>
+  readonly busyId: string | null
+  readonly armedDiscardId: string | null
   readonly colors: ReturnType<typeof import('@/context/theme/ThemeContext').useTheme>['colors']
   readonly t: ReturnType<typeof import('react-i18next').useTranslation>['t']
-  readonly onRefresh: () => void
-  readonly onAccept: (p: IncomingPayment) => void
-  readonly onAcceptAll: () => void
-  readonly onEditNote: (id: string) => void
-  readonly onChangeNote: (id: string, text: string) => void
-  readonly onSubmitNote: () => void
+  readonly onRetry: (p: IncomingPayment) => void
+  readonly onDiscard: (p: IncomingPayment) => void
 }
 
-function IncomingPaymentsSection({
-  isConfigured,
-  loadingPayments,
+function AttentionSection({
   payments,
+  attempts,
   senderIdentities,
-  acceptingId,
-  acceptingAll,
-  editingNoteId,
-  paymentNotes,
+  busyId,
+  armedDiscardId,
   colors,
   t,
-  onRefresh,
-  onAccept,
-  onAcceptAll,
-  onEditNote,
-  onChangeNote,
-  onSubmitNote
-}: IncomingPaymentsSectionProps) {
-  if (!isConfigured) return null
+  onRetry,
+  onDiscard
+}: AttentionSectionProps) {
+  if (payments.length === 0) return null
   return (
     <>
-      <View style={styles.incomingSectionHeader}>
-        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t('incoming_payments')}</Text>
-        <View style={styles.headerActions}>
-          {payments.length > 0 && (
-            <TouchableOpacity
-              onPress={onAcceptAll}
-              disabled={acceptingAll || loadingPayments}
-              style={[styles.acceptAllButton, { opacity: acceptingAll || loadingPayments ? 0.5 : 1 }]}
-            >
-              {acceptingAll ? (
-                <ActivityIndicator size="small" color={colors.accent} />
-              ) : (
-                <Text style={[styles.acceptAllButtonText, { color: colors.accent }]}>{t('accept_all')}</Text>
-              )}
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity onPress={onRefresh} disabled={loadingPayments || acceptingAll}>
-            <Ionicons
-              name="refresh"
-              size={22}
-              color={loadingPayments || acceptingAll ? colors.textQuaternary : colors.accent}
+      <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t('pay_inbox_attention')}</Text>
+      <Text style={[styles.attentionHint, { color: colors.textSecondary }]}>{t('pay_inbox_attention_hint')}</Text>
+      <View
+        style={[
+          styles.paymentsList,
+          { backgroundColor: colors.backgroundSecondary, borderColor: colors.warning + '40' }
+        ]}
+      >
+        {payments.map((payment, idx) => {
+          const id = String(payment.messageId)
+          return (
+            <AttentionRow
+              key={id}
+              payment={payment}
+              identity={senderIdentities[payment.sender ?? '']}
+              error={attempts[id]?.error ?? ''}
+              isLast={idx === payments.length - 1}
+              isBusy={busyId === id}
+              isArmed={armedDiscardId === id}
+              onRetry={() => onRetry(payment)}
+              onDiscard={() => onDiscard(payment)}
+              colors={colors}
+              t={t}
             />
-          </TouchableOpacity>
-        </View>
+          )
+        })}
       </View>
-
-      {loadingPayments && payments.length === 0 && (
-        <View style={styles.centeredSmall}>
-          <ActivityIndicator size="small" color={colors.accent} />
-        </View>
-      )}
-      {!loadingPayments && payments.length === 0 && (
-        <View style={styles.centeredSmall}>
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{t('no_pending_payments')}</Text>
-        </View>
-      )}
-      {payments.length > 0 && (
-        <View
-          style={[styles.paymentsList, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator }]}
-        >
-          {payments.map((payment, idx) => {
-            const id = String(payment.messageId)
-            return (
-              <PaymentRow
-                key={id}
-                payment={payment}
-                identity={senderIdentities[payment.sender ?? '']}
-                isLast={idx === payments.length - 1}
-                isAccepting={acceptingId === id}
-                isEditingNote={editingNoteId === id}
-                note={paymentNotes[id] ?? ''}
-                onAccept={() => onAccept(payment)}
-                onEditNote={() => onEditNote(id)}
-                onChangeNote={text => onChangeNote(id, text)}
-                onSubmitNote={onSubmitNote}
-                colors={colors}
-                t={t}
-              />
-            )
-          })}
-        </View>
-      )}
     </>
   )
 }
 
-interface PaymentRowProps {
+interface AttentionRowProps {
   readonly payment: IncomingPayment
   readonly identity: DisplayableIdentity | null | undefined
+  readonly error: string
   readonly isLast: boolean
-  readonly isAccepting: boolean
-  readonly isEditingNote: boolean
-  readonly note: string
-  readonly onAccept: () => void
-  readonly onEditNote: () => void
-  readonly onChangeNote: (text: string) => void
-  readonly onSubmitNote: () => void
+  readonly isBusy: boolean
+  readonly isArmed: boolean
+  readonly onRetry: () => void
+  readonly onDiscard: () => void
   readonly colors: ReturnType<typeof import('@/context/theme/ThemeContext').useTheme>['colors']
   readonly t: ReturnType<typeof import('react-i18next').useTranslation>['t']
 }
 
-function PaymentRow({
+function AttentionRow({
   payment,
   identity,
+  error,
   isLast,
-  isAccepting,
-  isEditingNote,
-  note,
-  onAccept,
-  onEditNote,
-  onChangeNote,
-  onSubmitNote,
+  isBusy,
+  isArmed,
+  onRetry,
+  onDiscard,
   colors,
   t
-}: PaymentRowProps) {
+}: AttentionRowProps) {
   const senderKey = payment.sender ?? ''
   return (
     <View
@@ -201,7 +175,6 @@ function PaymentRow({
         !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
       ]}
     >
-      {/* Avatar */}
       {identity?.avatarURL ? (
         <Image source={{ uri: identity.avatarURL }} style={styles.paymentAvatar} />
       ) : (
@@ -210,7 +183,6 @@ function PaymentRow({
         </View>
       )}
 
-      {/* Center: identity + note */}
       <View style={styles.paymentInfo}>
         <Text style={[styles.paymentSenderName, { color: colors.textPrimary }]} numberOfLines={1}>
           {identity?.name ?? t('unknown')}
@@ -218,53 +190,47 @@ function PaymentRow({
         <Text style={[styles.paymentSender, { color: colors.textSecondary }]} numberOfLines={1}>
           {identity?.abbreviatedKey ?? `${senderKey.slice(0, 16)}…`}
         </Text>
+        {/* The reason, verbatim from the wallet. It is the only thing that tells
+            the user whether a retry has any chance of working. */}
+        {!!error && (
+          <Text style={[styles.attentionError, { color: colors.warning }]} numberOfLines={2}>
+            {error}
+          </Text>
+        )}
 
-        {isEditingNote ? (
-          <TextInput
-            value={note}
-            onChangeText={onChangeNote}
-            placeholder={t('payment_note_placeholder')}
-            placeholderTextColor={colors.textTertiary}
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={onSubmitNote}
-            style={[styles.noteInput, { color: colors.textPrimary, borderBottomColor: colors.accent }]}
-          />
-        ) : (
+        <View style={[styles.attentionActions, { borderTopColor: colors.separator }]}>
           <TouchableOpacity
-            onPress={onEditNote}
-            style={styles.noteTapTarget}
-            hitSlop={{ top: 4, bottom: 4, left: 0, right: 8 }}
+            onPress={onRetry}
+            disabled={isBusy}
+            style={[
+              styles.attentionButton,
+              { borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator }
+            ]}
           >
-            <Ionicons
-              name="pencil"
-              size={11}
-              color={note ? colors.accent : colors.textQuaternary}
-              style={{ marginRight: 4, marginTop: 1 }}
-            />
-            <Text style={[styles.noteText, { color: note ? colors.accent : colors.textQuaternary }]} numberOfLines={1}>
-              {note || t('payment_note_placeholder')}
+            {isBusy ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <Text style={[styles.attentionButtonText, { color: colors.accent }]}>{t('retry')}</Text>
+            )}
+          </TouchableOpacity>
+          {/* Two taps, because this one is irreversible: discarding acknowledges
+              the message, which removes it from the box for good. A single
+              mis-tap next to Retry would throw the payment away. */}
+          <TouchableOpacity onPress={onDiscard} disabled={isBusy} style={styles.attentionButton}>
+            <Text
+              style={[styles.attentionButtonText, { color: isArmed ? colors.error : colors.textSecondary }]}
+              numberOfLines={1}
+            >
+              {isArmed ? t('pay_dismiss_confirm') : t('dismiss')}
             </Text>
           </TouchableOpacity>
-        )}
+        </View>
       </View>
 
-      {/* Right: amount + accept */}
       <View style={styles.paymentActions}>
-        <Text style={[styles.paymentAmount, { color: colors.success }]}>
+        <Text style={[styles.paymentAmount, { color: colors.textSecondary }]}>
           <AmountDisplay>{payment.token.amount}</AmountDisplay>
         </Text>
-        <TouchableOpacity
-          onPress={onAccept}
-          disabled={isAccepting}
-          style={[styles.acceptButton, { backgroundColor: colors.accent }]}
-        >
-          {isAccepting ? (
-            <ActivityIndicator size="small" color={colors.background} />
-          ) : (
-            <Text style={[styles.acceptButtonText, { color: colors.background }]}>{t('accept')}</Text>
-          )}
-        </TouchableOpacity>
       </View>
     </View>
   )
@@ -283,18 +249,43 @@ export default function HandleReceive() {
   const isConfigured = !!messageBoxUrl && messageBoxUrl !== NO_MESSAGE_BOX
 
   const [payments, setPayments] = useState<IncomingPayment[]>([])
-  const [loading, setLoading] = useState(false)
-  const [acceptingId, setAcceptingId] = useState<string | null>(null)
-  const [acceptingAll, setAcceptingAll] = useState(false)
   const [senderIdentities, setSenderIdentities] = useState<Record<string, DisplayableIdentity | null>>({})
-  const [notes, setNotes] = useState<Record<string, string>>({})
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
+  /** Payments the wallet has failed to credit, keyed by message id. */
+  const [attempts, setAttempts] = useState<Record<string, InboxAttempt>>({})
+  /** The row whose retry or discard is running. */
+  const [busyId, setBusyId] = useState<string | null>(null)
+  /**
+   * The row whose Discard has been tapped once and is waiting for a second tap.
+   *
+   * Discarding is irreversible — it acknowledges the message, so the payment
+   * leaves the box for good and can never be credited. It sits next to Retry,
+   * so one tap must not be enough.
+   */
+  const [armedDiscardId, setArmedDiscardId] = useState<string | null>(null)
+  const armTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /** One inbox read at a time — see fetchPayments. */
   const fetchingRef = useRef(false)
-  /** An accept is running; it refreshes the list itself, so the poll stands off. */
+  /** A credit pass is running; it refreshes the list itself, so the poll stands off. */
   const acceptingRef = useRef(false)
+  /** The live attempt map, for the async credit pass that must not close over stale state. */
+  const attemptsRef = useRef<Record<string, InboxAttempt>>({})
+  /** Set below to the credit pass; called by fetchPayments, which is declared first. */
+  const creditRef = useRef<(list: IncomingPayment[], force?: string[]) => Promise<void>>(async () => {})
+  useEffect(() => {
+    attemptsRef.current = attempts
+  }, [attempts])
+
+  // An armed discard must not stay armed across a screen the user walked away
+  // from and came back to.
+  useEffect(
+    () => () => {
+      if (armTimerRef.current) clearTimeout(armTimerRef.current)
+    },
+    []
+  )
   /**
    * Whether this screen is the one on top. Pushing another route leaves this
    * component mounted, so mount alone is not "the user is looking at it".
@@ -351,10 +342,13 @@ export default function HandleReceive() {
       // response winning would resurrect a row that was just internalized.
       if (fetchingRef.current) return
       fetchingRef.current = true
-      if (!options.silent) setLoading(true)
       try {
         const list = await client.listIncomingPayments(messageBoxUrl)
         setPayments(list)
+        // Credit before resolving identities: the money matters and the names are
+        // decorative, so nothing about a payment landing waits on an overlay
+        // lookup that may never return.
+        await creditRef.current(list)
         const idClient = makeIdentityClient(wallet as any, adminOriginator)
         if (idClient) {
           const senders = [...new Set(list.map(p => p.sender).filter(Boolean))] as string[]
@@ -370,7 +364,6 @@ export default function HandleReceive() {
         }
       } finally {
         fetchingRef.current = false
-        if (!options.silent) setLoading(false)
       }
     },
     [peerPayClient, messageBoxUrl, wallet, adminOriginator, t]
@@ -430,65 +423,121 @@ export default function HandleReceive() {
     [peerPayClient, wallet, adminOriginator, t]
   )
 
-  const handleAccept = useCallback(
+  /**
+   * Credit everything creditable, automatically.
+   *
+   * Accepting was never a decision: the money is already the user's and the
+   * token is already in their box, so the tap only delayed it. This runs after
+   * every list read, and again with `force` when a user retries a row that had
+   * given up. autoAcceptInbox holds the policy and its tests; this wires it to
+   * the wallet and the screen.
+   */
+  const creditInbox = useCallback(
+    async (list: IncomingPayment[], force?: string[]) => {
+      const client = peerPayClient
+      if (!client || list.length === 0) return
+      acceptingRef.current = true
+      try {
+        const outcome = await autoAcceptInbox({
+          payments: list,
+          attempts: attemptsRef.current,
+          force,
+          // acceptWithRetry re-lists once on failure, which clears the common
+          // stale-token case before it is ever counted as an attempt.
+          accept: payment => acceptWithRetry(client, messageBoxUrl, payment, INBOX_DESCRIPTION, internalize)
+        })
+        attemptsRef.current = outcome.attempts
+        setAttempts(outcome.attempts)
+        if (outcome.accepted > 0) {
+          showToast(
+            outcome.accepted === 1 ? t('local_pay_added') : t('local_pay_added_multiple', { count: outcome.accepted }),
+            { type: 'success' }
+          )
+        }
+      } finally {
+        acceptingRef.current = false
+      }
+    },
+    [peerPayClient, messageBoxUrl, internalize, t]
+  )
+
+  // The credit pass is invoked from fetchPayments, which is declared above it —
+  // reached through a ref so neither has to depend on the other.
+  useEffect(() => {
+    creditRef.current = creditInbox
+  }, [creditInbox])
+
+  /** Retry one row that had given up. Runs the whole pass, forcing this id. */
+  const handleRetry = useCallback(
+    async (payment: IncomingPayment) => {
+      const id = String(payment.messageId)
+      setArmedDiscardId(null)
+      setBusyId(id)
+      try {
+        await creditInbox(payments, [id])
+      } finally {
+        setBusyId(null)
+      }
+    },
+    [creditInbox, payments]
+  )
+
+  /**
+   * Give up on a row. TWO TAPS, and the second one abandons money.
+   *
+   * The first tap only arms the button and starts a timer, so a mis-tap next to
+   * Retry costs nothing. The second acknowledges the message on the MessageBox,
+   * which removes it from every future listing — this wallet can never credit
+   * that payment again, and the only recovery is asking the sender to resend.
+   */
+  const handleDiscard = useCallback(
     async (payment: IncomingPayment) => {
       const client = peerPayClient
       if (!client) return
       const id = String(payment.messageId)
-      const description = notes[id]?.trim() || 'Identity Payment'
-      setAcceptingId(id)
-      setEditingNoteId(null)
-      acceptingRef.current = true
+
+      if (armedDiscardId !== id) {
+        setArmedDiscardId(id)
+        if (armTimerRef.current) clearTimeout(armTimerRef.current)
+        // Disarms itself, so a button left armed does not become a one-tap
+        // discard for whoever picks the phone up next.
+        armTimerRef.current = setTimeout(() => setArmedDiscardId(null), DISCARD_ARM_MS)
+        return
+      }
+
+      if (armTimerRef.current) clearTimeout(armTimerRef.current)
+      setArmedDiscardId(null)
+      setBusyId(id)
       try {
-        await acceptWithRetry(client, messageBoxUrl, payment, description, internalize)
-        setResult({ type: 'success', message: t('local_pay_added') })
-        await fetchPayments()
+        await discardIncoming(client, payment)
+        // Drop it locally too: it will never be listed again, so waiting for the
+        // next poll would leave a row on screen that no longer exists.
+        setAttempts(prev => {
+          const next = { ...prev }
+          delete next[id]
+          attemptsRef.current = next
+          return next
+        })
+        setPayments(prev => prev.filter(p => String(p.messageId) !== id))
+        setResult({ type: 'success', message: t('pay_dismissed') })
       } catch (e: any) {
         setResult({ type: 'error', message: e?.message || t('unknown_error') })
       } finally {
-        // Released only after the refresh above has resolved, so the next poll
-        // reads a list that already reflects this accept.
-        acceptingRef.current = false
-        setAcceptingId(null)
+        setBusyId(null)
         setTimeout(() => setResult(null), 5000)
       }
     },
-    [peerPayClient, notes, messageBoxUrl, internalize, fetchPayments, t]
+    [peerPayClient, armedDiscardId, t]
   )
 
-  const handleAcceptAll = useCallback(async () => {
-    const client = peerPayClient
-    if (!client || payments.length === 0) return
-    setAcceptingAll(true)
-    setEditingNoteId(null)
-    acceptingRef.current = true
-    let successCount = 0
-    let lastError: string | null = null
-    for (const payment of payments) {
-      const id = String(payment.messageId)
-      const description = notes[id]?.trim() || 'Identity Payment'
-      try {
-        await acceptWithRetry(client, messageBoxUrl, payment, description, internalize)
-        successCount++
-      } catch (e: any) {
-        lastError = e?.message || t('unknown_error')
-      }
-    }
-    if (successCount > 0) {
-      setResult({
-        type: lastError ? 'error' : 'success',
-        message: lastError
-          ? `${t('local_pay_added_multiple', { count: successCount })} (${lastError})`
-          : t('local_pay_added_multiple', { count: successCount })
-      })
-      await fetchPayments()
-    } else if (lastError) {
-      setResult({ type: 'error', message: lastError })
-    }
-    acceptingRef.current = false
-    setAcceptingAll(false)
-    setTimeout(() => setResult(null), 5000)
-  }, [peerPayClient, payments, notes, messageBoxUrl, internalize, fetchPayments, t])
+  /**
+   * The rows worth showing: only payments the wallet has given up on. Everything
+   * else was credited and acknowledged, so it is gone.
+   */
+  const attention = useMemo(
+    () => payments.filter(p => needsAttention(attempts[String(p.messageId)])),
+    [payments, attempts]
+  )
 
   return (
     // Scrolls, because a 240pt QR plus the inbox overflows a small screen and a
@@ -555,25 +604,21 @@ export default function HandleReceive() {
         </TouchableOpacity>
       </View>
 
-      {/* The inbox. Accepting is what internalizes, so this stays explicit. */}
-      <IncomingPaymentsSection
-        isConfigured={isConfigured}
-        loadingPayments={loading}
-        payments={payments}
-        senderIdentities={senderIdentities}
-        acceptingId={acceptingId}
-        acceptingAll={acceptingAll}
-        editingNoteId={editingNoteId}
-        paymentNotes={notes}
-        colors={colors}
-        t={t}
-        onRefresh={fetchPayments}
-        onAccept={handleAccept}
-        onAcceptAll={handleAcceptAll}
-        onEditNote={setEditingNoteId}
-        onChangeNote={(id, text) => setNotes(prev => ({ ...prev, [id]: text }))}
-        onSubmitNote={() => setEditingNoteId(null)}
-      />
+      {/* Only the payments the wallet gave up on. Everything else was credited
+          the moment it was seen, so there is nothing here to accept. */}
+      {isConfigured && (
+        <AttentionSection
+          payments={attention}
+          attempts={attempts}
+          senderIdentities={senderIdentities}
+          busyId={busyId}
+          armedDiscardId={armedDiscardId}
+          colors={colors}
+          t={t}
+          onRetry={handleRetry}
+          onDiscard={handleDiscard}
+        />
+      )}
       {result && <ResultBanner result={result} onDismiss={() => setResult(null)} colors={colors} />}
     </ScrollView>
   )
@@ -583,6 +628,31 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg
+  },
+
+  // Needs attention
+  attentionHint: {
+    ...typography.footnote,
+    marginBottom: spacing.md
+  },
+  attentionError: {
+    ...typography.caption1,
+    marginTop: spacing.xs
+  },
+  attentionActions: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: spacing.sm
+  },
+  attentionButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.sm + 2
+  },
+  attentionButtonText: {
+    ...typography.subhead,
+    fontWeight: '500'
   },
 
   // Your handle
@@ -627,34 +697,6 @@ const styles = StyleSheet.create({
   },
 
   // Incoming payments
-  incomingSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm
-  },
-  acceptAllButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm
-  },
-  acceptAllButtonText: {
-    ...typography.subhead,
-    fontWeight: '600'
-  },
-  centeredSmall: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.xxl
-  },
-  emptyText: {
-    ...typography.body
-  },
   paymentsList: {
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
@@ -695,23 +737,6 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     marginBottom: spacing.xs
   },
-  noteTapTarget: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2
-  },
-  noteText: {
-    ...typography.caption2,
-    flex: 1,
-    fontStyle: 'italic'
-  },
-  noteInput: {
-    ...typography.caption1,
-    marginTop: 4,
-    paddingVertical: 3,
-    borderBottomWidth: 1,
-    paddingHorizontal: 0
-  },
   paymentActions: {
     alignItems: 'flex-end',
     gap: spacing.xs,
@@ -720,16 +745,5 @@ const styles = StyleSheet.create({
   paymentAmount: {
     ...typography.footnote,
     fontWeight: '700'
-  },
-  acceptButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radii.sm,
-    alignItems: 'center',
-    minWidth: 70
-  },
-  acceptButtonText: {
-    ...typography.footnote,
-    fontWeight: '600'
   }
 })
