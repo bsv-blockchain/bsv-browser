@@ -23,7 +23,7 @@ import PressableScale from '@/components/ui/PressableScale'
 import { showToast } from '@/components/ui/Toast'
 import ResultBanner from '@/components/pay/ResultBanner'
 import RecipientField from '@/components/pay/RecipientField'
-import { ConfigPanel, useMessageBoxConfig } from '@/components/pay/MessageBoxConfig'
+import { ConfigPanel, MessageBoxBar, useMessageBoxConfig } from '@/components/pay/MessageBoxConfig'
 import { useIdentitySearch } from '@/components/pay/useIdentitySearch'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
@@ -271,6 +271,17 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
   return (
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {/* Config lives behind the same gear the old screen used, not on the main path. */}
+      <MessageBoxBar
+        url={config.messageBoxUrl}
+        open={config.showConfig}
+        onToggle={() =>
+          // A no-server sentinel keeps the panel pinned open: there is nothing to
+          // collapse back to, and closing it would hide the only way to fix it.
+          config.setShowConfig(v => (config.messageBoxUrl === NO_MESSAGE_BOX ? true : !v))
+        }
+        colors={colors}
+        t={t}
+      />
       {config.showConfig && (
         <ConfigPanel
           urlInput={config.urlInput}

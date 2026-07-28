@@ -32,7 +32,7 @@ import type { DisplayableIdentity } from '@bsv/sdk'
 
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import ResultBanner from '@/components/pay/ResultBanner'
-import { ConfigPanel, useMessageBoxConfig } from '@/components/pay/MessageBoxConfig'
+import { ConfigPanel, MessageBoxBar, useMessageBoxConfig } from '@/components/pay/MessageBoxConfig'
 import { showToast } from '@/components/ui/Toast'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
@@ -404,6 +404,15 @@ export default function HandleReceive() {
     // Scrolls, because a 240pt QR plus the inbox overflows a small screen and a
     // note being edited puts the keyboard over the row that owns it.
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      {/* The way into the message-box settings, and the active host. Without it a
+          user who saved a broken host has no route back to reset or clear it. */}
+      <MessageBoxBar
+        url={config.messageBoxUrl}
+        open={config.showConfig}
+        onToggle={() => config.setShowConfig(v => (config.messageBoxUrl === NO_MESSAGE_BOX ? true : !v))}
+        colors={colors}
+        t={t}
+      />
       {config.showConfig && (
         <ConfigPanel
           urlInput={config.urlInput}
