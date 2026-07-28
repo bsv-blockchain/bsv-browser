@@ -342,7 +342,33 @@ const resources = {
       invalid_qr_code: 'Invalid QR Code',
       wallet_not_ready: 'Wallet not ready',
       please_log_in_first: 'Please log in first',
-      unknown_error: 'Unknown error'
+      unknown_error: 'Unknown error',
+
+      // Local payments
+      local_payments: 'Local Payments',
+      local_payments_subtitle: 'Send or receive BSV payments to a nearby device.',
+      local_pay_request: 'Request Payment',
+      local_pay_send: 'Send Payment',
+      local_pay_amount: 'Amount',
+      local_pay_enter_amount: 'How much would you like to request?',
+      local_pay_show_qr: 'Show this code to the payer',
+      local_pay_scan_qr: 'Scan the payee’s code',
+      local_pay_scan_payer_qr: 'Scan the payer’s code',
+      local_pay_waiting: 'Waiting for the payer…',
+      local_pay_show_payment_qr: 'Show this code to the payee',
+      local_pay_show_qr_instead: 'Show a QR code instead',
+      local_pay_via_nearby: 'Nearby Wi-Fi',
+      local_pay_via_qr: 'QR code',
+      local_pay_preparing: 'Preparing the request…',
+      local_pay_delivering: 'Delivering the payment…',
+      local_pay_saving: 'Saving the payment…',
+      local_pay_sent: 'Payment sent',
+      local_pay_received: 'Payment received',
+      local_pay_added: 'Added to your wallet.',
+      local_pay_queued: 'Saved — it will be added to your wallet automatically.',
+      local_pay_already_paid: 'This request has already been paid.',
+      local_pay_failed: 'Payment failed',
+      local_pay_network_denied: 'Local Network access is off. Enable it in Settings to pay nearby devices.'
     }
   },
   zh: {
@@ -573,7 +599,33 @@ const resources = {
       invalid_qr_code: '无效的二维码',
       wallet_not_ready: '钱包未就绪',
       please_log_in_first: '请先登录',
-      unknown_error: '未知错误'
+      unknown_error: '未知错误',
+
+      // Local payments
+      local_payments: '附近支付',
+      local_payments_subtitle: '与附近的设备收发 BSV 付款。',
+      local_pay_request: '请求付款',
+      local_pay_send: '发送付款',
+      local_pay_amount: '金额',
+      local_pay_enter_amount: '您想请求多少金额？',
+      local_pay_show_qr: '请向付款方出示此二维码',
+      local_pay_scan_qr: '扫描收款方的二维码',
+      local_pay_scan_payer_qr: '扫描付款方的二维码',
+      local_pay_waiting: '正在等待付款方…',
+      local_pay_show_payment_qr: '请向收款方出示此二维码',
+      local_pay_show_qr_instead: '改用二维码',
+      local_pay_via_nearby: '附近 Wi-Fi',
+      local_pay_via_qr: '二维码',
+      local_pay_preparing: '正在准备请求…',
+      local_pay_delivering: '正在发送付款…',
+      local_pay_saving: '正在保存付款…',
+      local_pay_sent: '付款已发送',
+      local_pay_received: '已收到付款',
+      local_pay_added: '已添加到您的钱包。',
+      local_pay_queued: '已保存 — 稍后会自动添加到您的钱包。',
+      local_pay_already_paid: '此请求已经支付过了。',
+      local_pay_failed: '付款失败',
+      local_pay_network_denied: '本地网络访问已关闭。请在“设置”中开启，才能向附近的设备付款。'
     }
   },
   hi: {
@@ -807,7 +859,33 @@ const resources = {
       invalid_qr_code: 'अमान्य QR कोड',
       wallet_not_ready: 'वॉलेट तैयार नहीं',
       please_log_in_first: 'पहले लॉग इन करें',
-      unknown_error: 'अज्ञात त्रुटि'
+      unknown_error: 'अज्ञात त्रुटि',
+
+      // Local payments
+      local_payments: 'नज़दीकी भुगतान',
+      local_payments_subtitle: 'पास मौजूद डिवाइस को BSV भुगतान भेजें या प्राप्त करें।',
+      local_pay_request: 'भुगतान का अनुरोध करें',
+      local_pay_send: 'भुगतान भेजें',
+      local_pay_amount: 'राशि',
+      local_pay_enter_amount: 'आप कितनी राशि का अनुरोध करना चाहते हैं?',
+      local_pay_show_qr: 'यह कोड भुगतानकर्ता को दिखाएं',
+      local_pay_scan_qr: 'प्राप्तकर्ता का कोड स्कैन करें',
+      local_pay_scan_payer_qr: 'भुगतानकर्ता का कोड स्कैन करें',
+      local_pay_waiting: 'भुगतानकर्ता की प्रतीक्षा हो रही है…',
+      local_pay_show_payment_qr: 'यह कोड प्राप्तकर्ता को दिखाएं',
+      local_pay_show_qr_instead: 'इसके बजाय QR कोड दिखाएं',
+      local_pay_via_nearby: 'नज़दीकी Wi-Fi',
+      local_pay_via_qr: 'QR कोड',
+      local_pay_preparing: 'अनुरोध तैयार किया जा रहा है…',
+      local_pay_delivering: 'भुगतान भेजा जा रहा है…',
+      local_pay_saving: 'भुगतान सहेजा जा रहा है…',
+      local_pay_sent: 'भुगतान भेज दिया गया',
+      local_pay_received: 'भुगतान प्राप्त हुआ',
+      local_pay_added: 'आपके वॉलेट में जोड़ दिया गया।',
+      local_pay_queued: 'सहेज लिया गया — यह अपने आप आपके वॉलेट में जुड़ जाएगा।',
+      local_pay_already_paid: 'इस अनुरोध का भुगतान पहले ही हो चुका है।',
+      local_pay_failed: 'भुगतान विफल',
+      local_pay_network_denied: 'लोकल नेटवर्क एक्सेस बंद है। नज़दीकी डिवाइस को भुगतान करने के लिए इसे सेटिंग्स में चालू करें।'
     }
   },
   es: {
@@ -1043,7 +1121,33 @@ const resources = {
       invalid_qr_code: 'Código QR inválido',
       wallet_not_ready: 'Billetera no lista',
       please_log_in_first: 'Por favor, inicia sesión primero',
-      unknown_error: 'Error desconocido'
+      unknown_error: 'Error desconocido',
+
+      // Local payments
+      local_payments: 'Pagos cercanos',
+      local_payments_subtitle: 'Envía o recibe pagos en BSV con un dispositivo cercano.',
+      local_pay_request: 'Solicitar pago',
+      local_pay_send: 'Enviar pago',
+      local_pay_amount: 'Monto',
+      local_pay_enter_amount: '¿Cuánto quieres solicitar?',
+      local_pay_show_qr: 'Muestra este código a quien paga',
+      local_pay_scan_qr: 'Escanea el código de quien cobra',
+      local_pay_scan_payer_qr: 'Escanea el código de quien paga',
+      local_pay_waiting: 'Esperando a quien paga…',
+      local_pay_show_payment_qr: 'Muestra este código a quien cobra',
+      local_pay_show_qr_instead: 'Mostrar un código QR en su lugar',
+      local_pay_via_nearby: 'Wi-Fi cercano',
+      local_pay_via_qr: 'Código QR',
+      local_pay_preparing: 'Preparando la solicitud…',
+      local_pay_delivering: 'Entregando el pago…',
+      local_pay_saving: 'Guardando el pago…',
+      local_pay_sent: 'Pago enviado',
+      local_pay_received: 'Pago recibido',
+      local_pay_added: 'Añadido a tu billetera.',
+      local_pay_queued: 'Guardado: se añadirá a tu billetera automáticamente.',
+      local_pay_already_paid: 'Esta solicitud ya fue pagada.',
+      local_pay_failed: 'El pago falló',
+      local_pay_network_denied: 'El acceso a la red local está desactivado. Actívalo en Configuración para pagar a dispositivos cercanos.'
     }
   },
   fr: {
@@ -1273,7 +1377,33 @@ const resources = {
       invalid_qr_code: 'Code QR invalide',
       wallet_not_ready: 'Portefeuille non prêt',
       please_log_in_first: 'Veuillez d\'abord vous connecter',
-      unknown_error: 'Erreur inconnue'
+      unknown_error: 'Erreur inconnue',
+
+      // Local payments
+      local_payments: 'Paiements à proximité',
+      local_payments_subtitle: 'Envoyez ou recevez des paiements en BSV avec un appareil à proximité.',
+      local_pay_request: 'Demander un paiement',
+      local_pay_send: 'Envoyer un paiement',
+      local_pay_amount: 'Montant',
+      local_pay_enter_amount: 'Quel montant souhaitez-vous demander ?',
+      local_pay_show_qr: 'Montrez ce code au payeur',
+      local_pay_scan_qr: 'Scannez le code du bénéficiaire',
+      local_pay_scan_payer_qr: 'Scannez le code du payeur',
+      local_pay_waiting: 'En attente du payeur…',
+      local_pay_show_payment_qr: 'Montrez ce code au bénéficiaire',
+      local_pay_show_qr_instead: 'Afficher un code QR à la place',
+      local_pay_via_nearby: 'Wi-Fi à proximité',
+      local_pay_via_qr: 'Code QR',
+      local_pay_preparing: 'Préparation de la demande…',
+      local_pay_delivering: 'Envoi du paiement…',
+      local_pay_saving: 'Enregistrement du paiement…',
+      local_pay_sent: 'Paiement envoyé',
+      local_pay_received: 'Paiement reçu',
+      local_pay_added: 'Ajouté à votre portefeuille.',
+      local_pay_queued: 'Enregistré — il sera ajouté automatiquement à votre portefeuille.',
+      local_pay_already_paid: 'Cette demande a déjà été payée.',
+      local_pay_failed: 'Échec du paiement',
+      local_pay_network_denied: 'L’accès au réseau local est désactivé. Activez-le dans Réglages pour payer les appareils à proximité.'
     }
   },
   ar: {
@@ -1499,7 +1629,33 @@ const resources = {
       invalid_qr_code: 'رمز QR غير صالح',
       wallet_not_ready: 'المحفظة غير جاهزة',
       please_log_in_first: 'الرجاء تسجيل الدخول أولاً',
-      unknown_error: 'خطأ غير معروف'
+      unknown_error: 'خطأ غير معروف',
+
+      // Local payments
+      local_payments: 'المدفوعات القريبة',
+      local_payments_subtitle: 'أرسل أو استلم مدفوعات BSV مع جهاز قريب.',
+      local_pay_request: 'طلب دفعة',
+      local_pay_send: 'إرسال دفعة',
+      local_pay_amount: 'المبلغ',
+      local_pay_enter_amount: 'ما المبلغ الذي تريد طلبه؟',
+      local_pay_show_qr: 'اعرض هذا الرمز على الدافع',
+      local_pay_scan_qr: 'امسح رمز المستلم',
+      local_pay_scan_payer_qr: 'امسح رمز الدافع',
+      local_pay_waiting: 'في انتظار الدافع…',
+      local_pay_show_payment_qr: 'اعرض هذا الرمز على المستلم',
+      local_pay_show_qr_instead: 'اعرض رمز QR بدلاً من ذلك',
+      local_pay_via_nearby: 'شبكة Wi-Fi قريبة',
+      local_pay_via_qr: 'رمز QR',
+      local_pay_preparing: 'جارٍ تجهيز الطلب…',
+      local_pay_delivering: 'جارٍ إرسال الدفعة…',
+      local_pay_saving: 'جارٍ حفظ الدفعة…',
+      local_pay_sent: 'تم إرسال الدفعة',
+      local_pay_received: 'تم استلام الدفعة',
+      local_pay_added: 'تمت الإضافة إلى محفظتك.',
+      local_pay_queued: 'تم الحفظ — ستُضاف إلى محفظتك تلقائيًا.',
+      local_pay_already_paid: 'تم دفع هذا الطلب بالفعل.',
+      local_pay_failed: 'فشلت عملية الدفع',
+      local_pay_network_denied: 'الوصول إلى الشبكة المحلية مُعطَّل. فعّله من الإعدادات للدفع إلى الأجهزة القريبة.'
     }
   },
   pt: {
@@ -1729,7 +1885,33 @@ const resources = {
       invalid_qr_code: 'Código QR inválido',
       wallet_not_ready: 'Carteira não pronta',
       please_log_in_first: 'Por favor, faça login primeiro',
-      unknown_error: 'Erro desconhecido'
+      unknown_error: 'Erro desconhecido',
+
+      // Local payments
+      local_payments: 'Pagamentos por perto',
+      local_payments_subtitle: 'Envie ou receba pagamentos em BSV com um dispositivo por perto.',
+      local_pay_request: 'Solicitar pagamento',
+      local_pay_send: 'Enviar pagamento',
+      local_pay_amount: 'Valor',
+      local_pay_enter_amount: 'Quanto você quer solicitar?',
+      local_pay_show_qr: 'Mostre este código a quem vai pagar',
+      local_pay_scan_qr: 'Escaneie o código de quem vai receber',
+      local_pay_scan_payer_qr: 'Escaneie o código de quem vai pagar',
+      local_pay_waiting: 'Aguardando quem vai pagar…',
+      local_pay_show_payment_qr: 'Mostre este código a quem vai receber',
+      local_pay_show_qr_instead: 'Mostrar um código QR',
+      local_pay_via_nearby: 'Wi-Fi por perto',
+      local_pay_via_qr: 'Código QR',
+      local_pay_preparing: 'Preparando a solicitação…',
+      local_pay_delivering: 'Entregando o pagamento…',
+      local_pay_saving: 'Salvando o pagamento…',
+      local_pay_sent: 'Pagamento enviado',
+      local_pay_received: 'Pagamento recebido',
+      local_pay_added: 'Adicionado à sua carteira.',
+      local_pay_queued: 'Salvo — será adicionado à sua carteira automaticamente.',
+      local_pay_already_paid: 'Esta solicitação já foi paga.',
+      local_pay_failed: 'Falha no pagamento',
+      local_pay_network_denied: 'O acesso à rede local está desativado. Ative-o em Ajustes para pagar dispositivos por perto.'
     }
   },
   bn: {
@@ -1957,7 +2139,33 @@ const resources = {
       invalid_qr_code: 'অবৈধ QR কোড',
       wallet_not_ready: 'ওয়ালেট প্রস্তুত নেই',
       please_log_in_first: 'প্রথমে লগইন করুন',
-      unknown_error: 'অজানা ত্রুটি'
+      unknown_error: 'অজানা ত্রুটি',
+
+      // Local payments
+      local_payments: 'কাছাকাছি পেমেন্ট',
+      local_payments_subtitle: 'কাছের কোনো ডিভাইসে BSV পেমেন্ট পাঠান বা গ্রহণ করুন।',
+      local_pay_request: 'পেমেন্টের অনুরোধ করুন',
+      local_pay_send: 'পেমেন্ট পাঠান',
+      local_pay_amount: 'পরিমাণ',
+      local_pay_enter_amount: 'আপনি কত পরিমাণ অনুরোধ করতে চান?',
+      local_pay_show_qr: 'এই কোডটি প্রদানকারীকে দেখান',
+      local_pay_scan_qr: 'গ্রহীতার কোড স্ক্যান করুন',
+      local_pay_scan_payer_qr: 'প্রদানকারীর কোড স্ক্যান করুন',
+      local_pay_waiting: 'প্রদানকারীর জন্য অপেক্ষা করা হচ্ছে…',
+      local_pay_show_payment_qr: 'এই কোডটি গ্রহীতাকে দেখান',
+      local_pay_show_qr_instead: 'বদলে একটি QR কোড দেখান',
+      local_pay_via_nearby: 'কাছাকাছি Wi-Fi',
+      local_pay_via_qr: 'QR কোড',
+      local_pay_preparing: 'অনুরোধ প্রস্তুত করা হচ্ছে…',
+      local_pay_delivering: 'পেমেন্ট পাঠানো হচ্ছে…',
+      local_pay_saving: 'পেমেন্ট সংরক্ষণ করা হচ্ছে…',
+      local_pay_sent: 'পেমেন্ট পাঠানো হয়েছে',
+      local_pay_received: 'পেমেন্ট গ্রহণ করা হয়েছে',
+      local_pay_added: 'আপনার ওয়ালেটে যোগ করা হয়েছে।',
+      local_pay_queued: 'সংরক্ষিত হয়েছে — এটি স্বয়ংক্রিয়ভাবে আপনার ওয়ালেটে যোগ হবে।',
+      local_pay_already_paid: 'এই অনুরোধের পেমেন্ট আগেই হয়ে গেছে।',
+      local_pay_failed: 'পেমেন্ট ব্যর্থ হয়েছে',
+      local_pay_network_denied: 'লোকাল নেটওয়ার্ক অ্যাক্সেস বন্ধ আছে। কাছের ডিভাইসে পেমেন্ট করতে সেটিংসে এটি চালু করুন।'
     }
   },
   ru: {
@@ -2187,7 +2395,33 @@ const resources = {
       invalid_qr_code: 'Неверный QR-код',
       wallet_not_ready: 'Кошелёк не готов',
       please_log_in_first: 'Сначала войдите в систему',
-      unknown_error: 'Неизвестная ошибка'
+      unknown_error: 'Неизвестная ошибка',
+
+      // Local payments
+      local_payments: 'Платежи поблизости',
+      local_payments_subtitle: 'Отправляйте и получайте платежи в BSV с устройством поблизости.',
+      local_pay_request: 'Запросить платёж',
+      local_pay_send: 'Отправить платёж',
+      local_pay_amount: 'Сумма',
+      local_pay_enter_amount: 'Какую сумму вы хотите запросить?',
+      local_pay_show_qr: 'Покажите этот код плательщику',
+      local_pay_scan_qr: 'Отсканируйте код получателя',
+      local_pay_scan_payer_qr: 'Отсканируйте код плательщика',
+      local_pay_waiting: 'Ожидание плательщика…',
+      local_pay_show_payment_qr: 'Покажите этот код получателю',
+      local_pay_show_qr_instead: 'Показать QR-код',
+      local_pay_via_nearby: 'Wi-Fi поблизости',
+      local_pay_via_qr: 'QR-код',
+      local_pay_preparing: 'Подготовка запроса…',
+      local_pay_delivering: 'Отправка платежа…',
+      local_pay_saving: 'Сохранение платежа…',
+      local_pay_sent: 'Платёж отправлен',
+      local_pay_received: 'Платёж получен',
+      local_pay_added: 'Добавлено в ваш кошелёк.',
+      local_pay_queued: 'Сохранено — платёж будет добавлен в кошелёк автоматически.',
+      local_pay_already_paid: 'Этот запрос уже оплачен.',
+      local_pay_failed: 'Платёж не прошёл',
+      local_pay_network_denied: 'Доступ к локальной сети выключен. Включите его в «Настройках», чтобы платить устройствам поблизости.'
     }
   },
   id: {
@@ -2415,7 +2649,33 @@ const resources = {
       invalid_qr_code: 'Kode QR Tidak Valid',
       wallet_not_ready: 'Dompet belum siap',
       please_log_in_first: 'Silakan masuk terlebih dahulu',
-      unknown_error: 'Kesalahan tidak diketahui'
+      unknown_error: 'Kesalahan tidak diketahui',
+
+      // Local payments
+      local_payments: 'Pembayaran Terdekat',
+      local_payments_subtitle: 'Kirim atau terima pembayaran BSV dengan perangkat di dekat Anda.',
+      local_pay_request: 'Minta Pembayaran',
+      local_pay_send: 'Kirim Pembayaran',
+      local_pay_amount: 'Jumlah',
+      local_pay_enter_amount: 'Berapa jumlah yang ingin Anda minta?',
+      local_pay_show_qr: 'Tunjukkan kode ini kepada pembayar',
+      local_pay_scan_qr: 'Pindai kode penerima',
+      local_pay_scan_payer_qr: 'Pindai kode pembayar',
+      local_pay_waiting: 'Menunggu pembayar…',
+      local_pay_show_payment_qr: 'Tunjukkan kode ini kepada penerima',
+      local_pay_show_qr_instead: 'Tampilkan kode QR saja',
+      local_pay_via_nearby: 'Wi-Fi terdekat',
+      local_pay_via_qr: 'Kode QR',
+      local_pay_preparing: 'Menyiapkan permintaan…',
+      local_pay_delivering: 'Mengirim pembayaran…',
+      local_pay_saving: 'Menyimpan pembayaran…',
+      local_pay_sent: 'Pembayaran terkirim',
+      local_pay_received: 'Pembayaran diterima',
+      local_pay_added: 'Ditambahkan ke dompet Anda.',
+      local_pay_queued: 'Tersimpan — akan ditambahkan ke dompet Anda secara otomatis.',
+      local_pay_already_paid: 'Permintaan ini sudah dibayar.',
+      local_pay_failed: 'Pembayaran gagal',
+      local_pay_network_denied: 'Akses Jaringan Lokal nonaktif. Aktifkan di Pengaturan untuk membayar perangkat di dekat Anda.'
     }
   },
   ja: {
@@ -2660,7 +2920,33 @@ const resources = {
       invalid_qr_code: '無効なQRコード',
       wallet_not_ready: 'ウォレットの準備ができていません',
       please_log_in_first: 'まずログインしてください',
-      unknown_error: '不明なエラー'
+      unknown_error: '不明なエラー',
+
+      // Local payments
+      local_payments: '近くの端末との支払い',
+      local_payments_subtitle: '近くの端末とBSVの支払いを送受信します。',
+      local_pay_request: '支払いをリクエスト',
+      local_pay_send: '支払いを送信',
+      local_pay_amount: '金額',
+      local_pay_enter_amount: 'いくらリクエストしますか？',
+      local_pay_show_qr: 'このコードを支払う側に見せてください',
+      local_pay_scan_qr: '受け取る側のコードをスキャン',
+      local_pay_scan_payer_qr: '支払う側のコードをスキャン',
+      local_pay_waiting: '支払う側を待っています…',
+      local_pay_show_payment_qr: 'このコードを受け取る側に見せてください',
+      local_pay_show_qr_instead: '代わりにQRコードを表示',
+      local_pay_via_nearby: '近くのWi-Fi',
+      local_pay_via_qr: 'QRコード',
+      local_pay_preparing: 'リクエストを準備しています…',
+      local_pay_delivering: '支払いを送信しています…',
+      local_pay_saving: '支払いを保存しています…',
+      local_pay_sent: '支払いを送信しました',
+      local_pay_received: '支払いを受け取りました',
+      local_pay_added: 'ウォレットに追加しました。',
+      local_pay_queued: '保存しました — 自動的にウォレットへ追加されます。',
+      local_pay_already_paid: 'このリクエストはすでに支払われています。',
+      local_pay_failed: '支払いに失敗しました',
+      local_pay_network_denied: 'ローカルネットワークへのアクセスがオフです。近くの端末に支払うには「設定」でオンにしてください。'
     }
   },
   pl: {
@@ -2906,7 +3192,33 @@ const resources = {
       invalid_qr_code: 'Nieprawidłowy kod QR',
       wallet_not_ready: 'Portfel nie jest gotowy',
       please_log_in_first: 'Najpierw się zaloguj',
-      unknown_error: 'Nieznany błąd'
+      unknown_error: 'Nieznany błąd',
+
+      // Local payments
+      local_payments: 'Płatności w pobliżu',
+      local_payments_subtitle: 'Wysyłaj i odbieraj płatności BSV z urządzeniem w pobliżu.',
+      local_pay_request: 'Poproś o płatność',
+      local_pay_send: 'Wyślij płatność',
+      local_pay_amount: 'Kwota',
+      local_pay_enter_amount: 'O jaką kwotę chcesz poprosić?',
+      local_pay_show_qr: 'Pokaż ten kod osobie płacącej',
+      local_pay_scan_qr: 'Zeskanuj kod odbiorcy',
+      local_pay_scan_payer_qr: 'Zeskanuj kod osoby płacącej',
+      local_pay_waiting: 'Oczekiwanie na osobę płacącą…',
+      local_pay_show_payment_qr: 'Pokaż ten kod odbiorcy',
+      local_pay_show_qr_instead: 'Pokaż zamiast tego kod QR',
+      local_pay_via_nearby: 'Wi-Fi w pobliżu',
+      local_pay_via_qr: 'Kod QR',
+      local_pay_preparing: 'Przygotowywanie prośby…',
+      local_pay_delivering: 'Wysyłanie płatności…',
+      local_pay_saving: 'Zapisywanie płatności…',
+      local_pay_sent: 'Płatność wysłana',
+      local_pay_received: 'Płatność odebrana',
+      local_pay_added: 'Dodano do Twojego portfela.',
+      local_pay_queued: 'Zapisano — zostanie automatycznie dodane do portfela.',
+      local_pay_already_paid: 'Ta prośba została już opłacona.',
+      local_pay_failed: 'Płatność nie powiodła się',
+      local_pay_network_denied: 'Dostęp do sieci lokalnej jest wyłączony. Włącz go w Ustawieniach, aby płacić urządzeniom w pobliżu.'
     }
   }
 }
