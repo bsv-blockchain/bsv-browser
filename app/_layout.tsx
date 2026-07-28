@@ -146,6 +146,10 @@ export default function RootLayout() {
                             <Stack.Screen name="auth/mnemonic" />
                             <Stack.Screen name="transactions" />
                             <Stack.Screen name="wallet-config" />
+                            <Stack.Screen name="pay" />
+                            {/* The three below become redirect stubs into /pay (Task 14).
+                                They stay registered so an old link resolves instead of
+                                hitting +not-found. */}
                             <Stack.Screen name="legacy-payments" />
                             <Stack.Screen name="payments" />
                             <Stack.Screen name="local-payments" />
