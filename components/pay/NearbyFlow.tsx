@@ -108,6 +108,7 @@ import { AmountInput } from '@/components/wallet/AmountInput'
 import Celebration from '@/components/ui/Celebration'
 import PressableScale from '@/components/ui/PressableScale'
 import PresenceRow, { type PresenceState } from '@/components/localpay/PresenceRow'
+import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { durations, springs } from '@/context/theme/motion'
@@ -338,6 +339,13 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   const [celebrating, setCelebrating] = useState(false)
 
   /**
+   * The payee's full-screen receipt, held until they acknowledge it. Set only
+   * once funds are provably in the wallet — see settleReceived, where a merely
+   * queued payment deliberately does NOT raise it.
+   */
+  const [receivedOverlay, setReceivedOverlay] = useState<{ amount: number } | null>(null)
+
+  /**
    * A frame that was delivered but could not be persisted. Held so the payee can
    * retry against the SAME session: dropping it would lose a payment the payer
    * already considers sent, and reset() would mint a session that can never
@@ -469,6 +477,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     setPeerName(null)
     setLinked(false)
     setCelebrating(false)
+    setReceivedOverlay(null)
   }, [abortAll, initialRole])
 
   const goBack = useCallback(() => {
@@ -668,11 +677,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       }
       try {
         const results = await processPending(wallet, storage, adminOriginator)
+        const credited = results.some(r => r.success)
         setNotice(
-          results.some(r => r.success)
-            ? { text: t('local_pay_added'), tone: 'success' }
-            : { text: t('local_pay_queued'), tone: 'info' }
+          credited ? { text: t('local_pay_added'), tone: 'success' } : { text: t('local_pay_queued'), tone: 'info' }
         )
+        // The full-screen moment, held until acknowledged — but ONLY once the
+        // funds are actually in the wallet. Queued money is safe and not yet
+        // spendable, and a receipt claiming otherwise is the one thing the tone
+        // rule above exists to prevent. A queued settle keeps the neutral notice
+        // on the done screen instead.
+        if (credited) setReceivedOverlay({ amount: frame.amount })
       } catch (e) {
         console.warn('[localpay] processPending failed:', messageOf(e))
         setNotice({ text: t('local_pay_queued'), tone: 'info' })
@@ -1034,13 +1048,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   useEffect(() => {
     if (phase !== 'done') return
+    // The overlay owns this moment when it is up: it draws its own mark, which
+    // fires the success haptic, and plays its own tone. Two of each reads as an error.
+    if (receivedOverlay) return
     const mark = setTimeout(() => setCelebrating(true), CELEBRATION_DELAY_MS)
     const tone = setTimeout(() => sounds.confirmation(), CELEBRATION_DELAY_MS + TONE_DELAY_MS)
     return () => {
       clearTimeout(mark)
       clearTimeout(tone)
     }
-  }, [phase])
+  }, [phase, receivedOverlay])
 
   // ── Receive: retry a settle that never reached storage ──
 
@@ -1673,6 +1690,12 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         <View style={styles.celebrationOverlay} pointerEvents="none">
           <Celebration onDone={() => setCelebrating(false)} />
         </View>
+      )}
+
+      {/* The payee's receipt. Full screen, and it stays until acknowledged —
+          being paid in person is the one moment both people are watching for. */}
+      {receivedOverlay && (
+        <ReceivedOverlay amount={receivedOverlay.amount} onDismiss={() => setReceivedOverlay(null)} />
       )}
     </View>
   )

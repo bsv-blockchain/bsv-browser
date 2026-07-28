@@ -35,6 +35,7 @@ import type { DisplayableIdentity } from '@bsv/sdk'
 
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import ResultBanner from '@/components/pay/ResultBanner'
+import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
 import { ConfigPanel, MessageBoxBar, useMessageBoxConfig } from '@/components/pay/MessageBoxConfig'
 import { showToast } from '@/components/ui/Toast'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -252,6 +253,12 @@ export default function HandleReceive() {
   const [senderIdentities, setSenderIdentities] = useState<Record<string, DisplayableIdentity | null>>({})
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
+  /**
+   * The success moment, held until the payee acknowledges it. Set by the credit
+   * pass; cleared only by the overlay's Done.
+   */
+  const [received, setReceived] = useState<{ amount: number; count: number } | null>(null)
+
   /** Payments the wallet has failed to credit, keyed by message id. */
   const [attempts, setAttempts] = useState<Record<string, InboxAttempt>>({})
   /** The row whose retry or discard is running. */
@@ -449,16 +456,23 @@ export default function HandleReceive() {
         attemptsRef.current = outcome.attempts
         setAttempts(outcome.attempts)
         if (outcome.accepted > 0) {
-          showToast(
-            outcome.accepted === 1 ? t('local_pay_added') : t('local_pay_added_multiple', { count: outcome.accepted }),
-            { type: 'success' }
-          )
+          // Full screen and held until acknowledged, not a toast. Money arriving
+          // can be missed entirely — phone face down, in a pocket, not being
+          // looked at — and whether it landed is the one thing a payee must never
+          // be left unsure about. Everything not left in the attempt map was
+          // credited, so that is what the figure sums.
+          const credited = list.filter(p => !outcome.attempts[String(p.messageId)])
+          setReceived({
+            amount: credited.reduce((sum, p) => sum + (p.token?.amount ?? 0), 0),
+            count: outcome.accepted
+          })
         }
       } finally {
         acceptingRef.current = false
       }
     },
-    [peerPayClient, messageBoxUrl, internalize, t]
+    // No `t`: the copy moved into ReceivedOverlay, which translates it itself.
+    [peerPayClient, messageBoxUrl, internalize]
   )
 
   // The credit pass is invoked from fetchPayments, which is declared above it —
@@ -620,6 +634,11 @@ export default function HandleReceive() {
         />
       )}
       {result && <ResultBanner result={result} onDismiss={() => setResult(null)} colors={colors} />}
+
+      {/* The moment money arrives. A Modal, so it covers the header too. */}
+      {received && (
+        <ReceivedOverlay amount={received.amount} count={received.count} onDismiss={() => setReceived(null)} />
+      )}
     </ScrollView>
   )
 }

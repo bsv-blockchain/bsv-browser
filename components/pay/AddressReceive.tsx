@@ -8,8 +8,9 @@
  * lost money — which is why it is behind a disclosure rather than on the main
  * view.
  */
-import React, { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { useFocusEffect } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import Clipboard from '@react-native-clipboard/clipboard'
 import QRCode from 'react-native-qrcode-svg'
@@ -17,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { formatDistanceToNow } from 'date-fns'
 
 import AmountDisplay from '@/components/wallet/AmountDisplay'
+import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
@@ -33,6 +35,16 @@ import {
 } from '@/utils/pay/rails/address'
 import { watchAddress } from '@/utils/pay/watchlist'
 
+/**
+ * How often this screen re-reads its own imported history while it is in front.
+ *
+ * The sweep itself lives in WalletContext and runs on its own 30s cycle whether
+ * or not anyone is looking. This is only the screen noticing — it exists so a
+ * payee standing in front of the address gets the arrival moment rather than a
+ * silently-updated list.
+ */
+const HISTORY_POLL_MS = 5000
+
 export default function AddressReceive() {
   const { t } = useTranslation()
   const { colors } = useTheme()
@@ -48,6 +60,33 @@ export default function AddressReceive() {
   const [showRecovery, setShowRecovery] = useState(false)
   const [sweeping, setSweeping] = useState(false)
 
+  /** The success moment, held until the payee acknowledges it. */
+  const [received, setReceived] = useState<{ amount: number; count: number } | null>(null)
+
+  /**
+   * What this screen had already seen imported, so a poll can tell an arrival
+   * from the history it loaded with. Null until the first read establishes the
+   * baseline — without that, opening the screen on an address with past imports
+   * would celebrate them all over again.
+   */
+  const baselineRef = useRef<{ total: number; count: number } | null>(null)
+  const focusedRef = useRef(true)
+  const pollingRef = useRef(false)
+  useFocusEffect(
+    useCallback(() => {
+      focusedRef.current = true
+      return () => {
+        focusedRef.current = false
+      }
+    }, [])
+  )
+
+  /** Sum and count of everything imported to the address on screen. */
+  const tally = (rows: ProcessedTx[]) => ({
+    total: rows.reduce((sum, tx) => sum + tx.satoshis, 0),
+    count: rows.length
+  })
+
   const load = useCallback(
     async (offset: number) => {
       if (!wallet) return
@@ -61,7 +100,11 @@ export default function AddressReceive() {
         // Registering is what makes the background sweeper poll it. Every
         // address the user is shown gets watched — including a recovered one.
         if (storage) await watchAddress(storage as any, { address: next, date, derivationPrefix })
-        setProcessed(await getProcessedTransactions(wallet as any, adminOriginator, next))
+        const rows = await getProcessedTransactions(wallet as any, adminOriginator, next)
+        setProcessed(rows)
+        // A different address means a different history: re-baseline, or stepping
+        // to a recovered day would read its existing imports as new arrivals.
+        baselineRef.current = tally(rows)
       } catch (e: any) {
         showToast(e?.message || t('unable_to_generate_address'), { type: 'error' })
       } finally {
@@ -82,6 +125,57 @@ export default function AddressReceive() {
     setTimeout(() => setCopied(false), 2000)
   }, [address])
 
+  // ── Notice what the background sweep credited ──
+  //
+  // The sweeper in WalletContext does the work and raises a global toast, which
+  // is right when the user is elsewhere in the app. But when they are standing on
+  // this screen watching the address, the arrival deserves the same full-screen
+  // moment every other way of being paid gets. This only reads the wallet's own
+  // imported history — it never sweeps, so it cannot race the sweeper.
+  useEffect(() => {
+    if (!wallet || !address) return
+    let cancelled = false
+
+    const tick = async () => {
+      if (cancelled || !focusedRef.current) return
+      if (AppState.currentState !== 'active') return
+      if (pollingRef.current) return
+      pollingRef.current = true
+      try {
+        const rows = await getProcessedTransactions(wallet as any, adminOriginator, address)
+        if (cancelled) return
+        setProcessed(rows)
+        const now = tally(rows)
+        const before = baselineRef.current
+        baselineRef.current = now
+        // Compare on total AND count: two imports of equal size in one interval
+        // move the count when the delta alone would look like one payment.
+        if (before && (now.total > before.total || now.count > before.count)) {
+          setReceived({
+            amount: Math.max(0, now.total - before.total),
+            count: Math.max(1, now.count - before.count)
+          })
+        }
+      } catch {
+        // A failed history read is not worth reporting: the next tick retries and
+        // the money is already credited either way.
+      } finally {
+        pollingRef.current = false
+      }
+    }
+
+    const interval = setInterval(() => void tick(), HISTORY_POLL_MS)
+    const appSubscription = AppState.addEventListener('change', next => {
+      if (next === 'active') void tick()
+    })
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      appSubscription.remove()
+    }
+  }, [wallet, address, adminOriginator])
+
   /**
    * Sweep this address now. The background pass covers the common case; this
    * exists for a recovered day, where the user is standing in front of the
@@ -98,10 +192,16 @@ export default function AddressReceive() {
         address,
         derivationPrefix: derivationPrefixFor(getCurrentDate(daysOffset))
       })
-      showToast(importedSatoshis > 0 ? t('local_pay_added') : t('no_pending_payments'), {
-        type: importedSatoshis > 0 ? 'success' : 'info'
-      })
-      setProcessed(await getProcessedTransactions(wallet as any, adminOriginator, address))
+      const rows = await getProcessedTransactions(wallet as any, adminOriginator, address)
+      setProcessed(rows)
+      baselineRef.current = tally(rows)
+      if (importedSatoshis > 0) {
+        // The arrival gets the full-screen moment, same as every other way of
+        // being paid. Nothing found is not an event — a toast is right for that.
+        setReceived({ amount: importedSatoshis, count: 1 })
+      } else {
+        showToast(t('no_pending_payments'), { type: 'info' })
+      }
     } catch (e: any) {
       showToast(e?.message || t('unknown_error'), { type: 'error' })
     } finally {
@@ -246,6 +346,11 @@ export default function AddressReceive() {
             </View>
           )}
         </>
+      )}
+      {/* The moment money arrives. A Modal, so it covers the header too, and it
+          stays until acknowledged. */}
+      {received && (
+        <ReceivedOverlay amount={received.amount} count={received.count} onDismiss={() => setReceived(null)} />
       )}
     </ScrollView>
   )
