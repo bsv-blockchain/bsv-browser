@@ -5,7 +5,12 @@ import { PEERPAY_LABEL, PEERPAY_PROTOCOL_ID } from './pending'
 
 interface PayingWallet {
   getPublicKey(args: unknown, originator?: string): Promise<{ publicKey: string }>
-  createAction(args: unknown, originator?: string): Promise<{ tx?: number[]; txid?: string }>
+  createAction(args: unknown, originator?: string): Promise<{
+    tx?: number[]
+    txid?: string
+    signableTransaction?: { reference: string }
+  }>
+  signAction(args: unknown, originator?: string): Promise<{ tx?: number[]; txid?: string }>
 }
 
 /**
@@ -34,7 +39,7 @@ export async function buildPaymentFrame(
     .lock(PublicKey.fromString(derived).toAddress())
     .toHex()
 
-  const result = await wallet.createAction(
+  let result = await wallet.createAction(
     {
       description: 'Payment to a nearby device',
       labels: [PEERPAY_LABEL],
@@ -49,6 +54,24 @@ export async function buildPaymentFrame(
     },
     originator
   )
+
+  // createAction may return an unsigned `signableTransaction` instead of a
+  // final `tx` when signing is deferred — reachable via WalletPermissionsManager
+  // after a spending-authorization grant (same failure mode as the 402 flow in
+  // utils/webview/bsvPaymentHandler.ts). We have no caller-supplied inputs — all
+  // inputs are wallet-funded — so finalize by signing with empty `spends`.
+  // noSend stays true: the payee internalizes and broadcasts, not the payer.
+  if (!result.tx && result.signableTransaction) {
+    const signed = await wallet.signAction(
+      {
+        reference: result.signableTransaction.reference,
+        spends: {},
+        options: { noSend: true },
+      },
+      originator
+    )
+    result = { ...result, ...signed }
+  }
 
   if (!result.tx) throw new Error('createAction returned no transaction')
 
