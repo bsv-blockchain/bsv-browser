@@ -9,7 +9,7 @@
  *
  * Phase machine
  *
- *   role
+ *   entry
  *    ├─ receive_amount → receive_minting → receive_wait
  *    │      receive_wait always renders the pairing QR, and additionally runs an
  *    │      AWDL listener when this device supports it. Either arrival lands in:
@@ -84,7 +84,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
-  I18nManager,
   Linking,
   Modal,
   Platform,
@@ -95,7 +94,7 @@ import {
 } from 'react-native'
 import Animated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated'
 import { Ionicons } from '@expo/vector-icons'
-import { router, useFocusEffect } from 'expo-router'
+import { useFocusEffect } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
@@ -115,20 +114,36 @@ import { durations, springs } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
-import { MAX_FRAME_QR_CHARS, frameFromQr, frameToQr, type PaymentFrame } from '@/utils/localpay/codec'
-import { decodeSession, encodeSession, mintSession, type Session } from '@/utils/localpay/session'
-import { isSessionSpent, markSessionSpent, processPending, savePending } from '@/utils/localpay/pending'
-import { buildPaymentFrame, finalizeDelivery } from '@/utils/localpay/build'
-import { awdlTransport } from '@/utils/localpay/transport/awdl'
-import { isDeclineReason, type Ack, type ConfirmDelivery, type DeclineReason } from '@/utils/localpay/transport/types'
-import { localSupportsAwdl, selectTransport } from '@/utils/localpay/transport/select'
+import {
+  MAX_FRAME_QR_CHARS,
+  awdlTransport,
+  buildPaymentFrame,
+  decodeSession,
+  encodeSession,
+  finalizeDelivery,
+  frameFromQr,
+  frameToQr,
+  isDeclineReason,
+  isSessionSpent,
+  localSupportsAwdl,
+  markSessionSpent,
+  mintSession,
+  processPending,
+  savePending,
+  selectTransport,
+  type Ack,
+  type ConfirmDelivery,
+  type DeclineReason,
+  type PaymentFrame,
+  type Session
+} from '@/utils/pay/rails/nearby'
 
 // ── Types ──
 
 type PayingWalletArg = Parameters<typeof buildPaymentFrame>[0]
 
 type Phase =
-  | 'role'
+  | 'entry'
   | 'receive_amount'
   | 'receive_minting'
   | 'receive_wait'
@@ -267,7 +282,14 @@ function satsFrom(text: string): number {
 
 // ── Screen ──
 
-export default function LocalPaymentsScreen() {
+export interface NearbyFlowProps {
+  /** Which side of the exchange this device is on. Set by the cell that mounted it. */
+  role: 'payer' | 'payee'
+  /** Leave the flow. The Pay screen decides what that means (back to the grid). */
+  onExit: () => void
+}
+
+export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
@@ -275,8 +297,8 @@ export default function LocalPaymentsScreen() {
   const { managers, adminOriginator, storage } = useWallet()
   const wallet = managers?.permissionsManager ?? null
 
-  const [phase, setPhase] = useState<Phase>('role')
-  const [role, setRole] = useState<'payee' | 'payer' | null>(null)
+  const [phase, setPhase] = useState<Phase>('entry')
+  const [role, setRole] = useState<'payee' | 'payer' | null>(initialRole)
 
   /** The payee's own minted session — drives the pairing QR and the AWDL listener. */
   const [hostedSession, setHostedSession] = useState<Session | null>(null)
@@ -397,6 +419,22 @@ export default function LocalPaymentsScreen() {
     }, [abortAll])
   )
 
+  const openScanner = useCallback((next: 'send_scan' | 'receive_scan') => {
+    scanLatchRef.current = false
+    setPhase(next)
+  }, [])
+
+  // The grid already asked which side the user is on, so the old role screen is
+  // gone. A payee goes straight to naming an amount; a payer straight to the
+  // camera. Runs once per mount.
+  const enteredRef = useRef(false)
+  useEffect(() => {
+    if (enteredRef.current) return
+    enteredRef.current = true
+    if (initialRole === 'payee') setPhase('receive_amount')
+    else openScanner('send_scan')
+  }, [initialRole, openScanner])
+
   const fail = useCallback(
     (kind: 'network' | 'generic', detail?: string) => {
       setFailure(
@@ -413,8 +451,8 @@ export default function LocalPaymentsScreen() {
     abortAll()
     settlingRef.current = false
     scanLatchRef.current = false
-    setPhase('role')
-    setRole(null)
+    setPhase(initialRole === 'payee' ? 'receive_amount' : 'entry')
+    setRole(initialRole)
     setHostedSession(null)
     setScannedSession(null)
     setRequestAmount('')
@@ -431,12 +469,12 @@ export default function LocalPaymentsScreen() {
     setPeerName(null)
     setLinked(false)
     setCelebrating(false)
-  }, [abortAll])
+  }, [abortAll, initialRole])
 
   const goBack = useCallback(() => {
     abortAll()
-    router.back()
-  }, [abortAll])
+    onExit()
+  }, [abortAll, onExit])
 
   // ── Peer identity ──
   //
@@ -1095,16 +1133,11 @@ export default function LocalPaymentsScreen() {
     return null
   }, [phase, role, linked, awdlActive, sendKind, t])
 
-  const openScanner = useCallback((next: 'send_scan' | 'receive_scan') => {
-    scanLatchRef.current = false
-    setPhase(next)
-  }, [])
-
   // Dismissing the camera returns to whatever raised it. A payee's request must
   // survive this: closing the scanner is not cancelling the payment.
   const closeScanner = useCallback(() => {
     scanLatchRef.current = false
-    setPhase(current => (current === 'receive_scan' ? 'receive_wait' : 'role'))
+    setPhase(current => (current === 'receive_scan' ? 'receive_wait' : 'entry'))
   }, [])
 
   const styles = useMemo(() => makeStyles(), [])
@@ -1194,29 +1227,7 @@ export default function LocalPaymentsScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
-      <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <PressableScale
-          onPress={goBack}
-          haptic="tap"
-          style={styles.headerBtn}
-          accessibilityRole="button"
-          accessibilityLabel={t('back')}
-        >
-          <Ionicons
-            // Back points the way the language runs. RN flips row layout in RTL
-            // but never glyphs, so this one is explicit.
-            name={I18nManager.isRTL ? 'chevron-forward' : 'chevron-back'}
-            size={24}
-            color={colors.accent}
-          />
-        </PressableScale>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          {t('local_payments')}
-        </Text>
-        <View style={styles.headerBtn} />
-      </View>
-
+    <View style={[styles.container, { backgroundColor: colors.backgroundSecondary }]}>
       <ScrollView
         style={{ flex: 1, backgroundColor: colors.background }}
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.xxxl }]}
@@ -1227,28 +1238,20 @@ export default function LocalPaymentsScreen() {
             the session — so Request is the filled default and Send is demoted to
             an outline. Two equally-weighted buttons would leave the view with no
             focal point at all. */}
-        {phase === 'role' && (
+        {phase === 'entry' && initialRole === 'payer' && (
           <Animated.View entering={settleIn} style={styles.stage}>
             <View style={[styles.heroCircle, { backgroundColor: colors.fillTertiary }]}>
-              <Ionicons name="wifi" size={44} color={colors.textSecondary} />
+              <Ionicons name="qr-code-outline" size={44} color={colors.textSecondary} />
             </View>
             <View style={styles.gapLg} />
-            {phaseTitle(t('local_payments'))}
-            {supportText(t('local_payments_subtitle'))}
+            {phaseTitle(t('local_pay_scan_qr'))}
+            {supportText(t('pay_pre_nearby'))}
             <View style={styles.gapXl} />
             <PrimaryButton
               styles={styles}
               colors={colors}
-              icon="arrow-down"
-              label={t('local_pay_request')}
-              onPress={() => setPhase('receive_amount')}
-            />
-            <View style={styles.gapMd} />
-            <SecondaryButton
-              styles={styles}
-              colors={colors}
-              icon="arrow-up"
-              label={t('local_pay_send')}
+              icon="scan-outline"
+              label={t('local_pay_scan_qr')}
               onPress={() => openScanner('send_scan')}
             />
 
