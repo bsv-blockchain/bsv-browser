@@ -93,8 +93,8 @@ function inferRail(target: PayTarget): RailId
 Behaviour that exists today and must not be lost, because losing it strands users or money:
 
 1. **Legacy send** — pay to a standard address. The only route between this wallet and conventional ones.
-2. **Legacy receive, including the date-keyed derivation.** `getCurrentDate(daysOffset)` as the derivation prefix, with the day-offset control that reaches previous days' addresses. A user given yesterday's address must still be able to sweep it.
-3. **Manual sweep** — check balance, then import found UTXOs.
+2. **Legacy receive, including the date-keyed derivation.** `getCurrentDate(daysOffset)` as the derivation prefix, and the ability to reach previous days' addresses. A user given yesterday's address must still be able to sweep it — this is why the offset control survives even after same-day sweeping becomes automatic.
+3. **The sweep itself** — the balance check and the UTXO import. The *mechanism* must survive verbatim; only its trigger changes, from a user tapping to the background poll described below.
 4. **PeerPay incoming** — list, accept, internalize.
 5. **Identity search** and PeerPay URI scanning (`validatePeerPayURI`).
 6. **Everything in `local-payments.tsx`**, unchanged in behaviour.
