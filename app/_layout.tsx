@@ -23,7 +23,7 @@ import { ThemeProvider } from '@/context/theme/ThemeContext'
 import LocalStorageProvider from '@/context/LocalStorageProvider'
 import PermissionSheet from '@/components/ui/PermissionSheet'
 import { AlertHost } from '@/components/ui/AlertCard'
-import { ToastHost } from '@/components/ui/Toast'
+import { ToastHost, showToast } from '@/components/ui/Toast'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
 import DefaultBrowserPrompt from '@/components/onboarding/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/context/i18n/translations'
@@ -76,6 +76,22 @@ function DeepLinkHandler() {
   return null
 }
 
+// Surfaces background local-payment internalization (e.g. a payment queued
+// while offline that was internalized after wallet build or on reconnect)
+// via the existing global ToastHost snackbar, so it is visible from any
+// screen — not just the local-payments screen itself.
+function LocalPayNotificationBridge() {
+  const { localPayNotification, clearLocalPayNotification } = useWallet()
+
+  useEffect(() => {
+    if (!localPayNotification) return
+    showToast(localPayNotification.message, { type: localPayNotification.type })
+    clearLocalPayNotification()
+  }, [localPayNotification, clearLocalPayNotification])
+
+  return null
+}
+
 // const DebuggerDisplay = () => {
 //   const [toggle, setToggle] = React.useState(false);
 //   const v = useWallet()
@@ -116,6 +132,7 @@ export default function RootLayout() {
                           {/* <TranslationTester /> */}
                           <DefaultBrowserPrompt />
                           <PermissionSheet />
+                          <LocalPayNotificationBridge />
                           <AlertHost />
                           <Stack
                             screenOptions={{
@@ -131,6 +148,7 @@ export default function RootLayout() {
                             <Stack.Screen name="wallet-config" />
                             <Stack.Screen name="legacy-payments" />
                             <Stack.Screen name="payments" />
+                            <Stack.Screen name="local-payments" />
                             <Stack.Screen name="connections" />
                             <Stack.Screen name="pair" />
                             <Stack.Screen name="not-found" />

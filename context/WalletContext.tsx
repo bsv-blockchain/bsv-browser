@@ -73,6 +73,7 @@ class QuietEventSource extends (RNEventSource as any) {
   }
 }
 import NetInfo from '@react-native-community/netinfo'
+import { processPending } from '@/utils/localpay/pending'
 
 
 // Global, origin-agnostic rate limit for auto-approved spending.
@@ -133,11 +134,13 @@ export interface WalletContextValue {
   /** True once the wallet has been successfully built (mnemonic/key provisioned) */
   walletBuilt: boolean
   /**
-   * Notification from background BLE payment processing.
+   * Notification from background local payment processing.
    * Set when pending payments are internalized in the background (e.g. on
    * wallet build or when connectivity is restored). Cleared by the UI after
    * display. null = no pending notification.
    */
+  localPayNotification: { message: string; type: 'success' | 'error' | 'info' } | null
+  clearLocalPayNotification: () => void
   /** Run a named monitor task and return its log output */
   runMonitorTask: (taskName: string) => Promise<string>
   /** List available monitor task names */
@@ -179,6 +182,8 @@ export const WalletContext = createContext<WalletContextValue>({
   txStatusVersion: 0,
   walletBuilding: false,
   walletBuilt: false,
+  localPayNotification: null,
+  clearLocalPayNotification: () => {},
   runMonitorTask: async () => '',
   getMonitorTaskNames: () => [],
   checkUtxoSpendability: async () => ''
@@ -314,6 +319,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
   const walletBuildingRef = useRef<boolean>(false)
   const [walletBuilding, setWalletBuilding] = useState<boolean>(false)
+  const [localPayNotification, setLocalPayNotification] = useState<{
+    message: string
+    type: 'success' | 'error' | 'info'
+  } | null>(null)
+  const clearLocalPayNotification = useCallback(() => setLocalPayNotification(null), [])
+  // Guards against overlapping background retry runs (triggered by both wallet
+  // build and NetInfo reconnect events)
+  const localPayProcessingRef = useRef<boolean>(false)
   // Auto-approve: cached threshold (satoshis) and managers ref for use in callback
   const autoApproveThresholdRef = useRef<number>(DEFAULT_AUTO_APPROVE_THRESHOLD)
   const managersRef = useRef<ManagerState>({})
@@ -1207,6 +1220,52 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   // Settings are AsyncStorage-only — no on-chain sync needed
 
+  // ── Background local payment pending-queue processing ──
+  // After wallet build completes, attempt to internalize any local payments
+  // that were received while offline. A NetInfo listener then re-triggers
+  // whenever the device comes back online so the queue drains automatically.
+  useEffect(() => {
+    if (!walletBuilt || !managers.permissionsManager || !storage) return
+
+    const tryProcess = async () => {
+      // Two triggers (wallet build + reconnect) can fire close together;
+      // processPending mutates a shared queue, so only let one run at a time.
+      if (localPayProcessingRef.current) return
+      localPayProcessingRef.current = true
+      try {
+        const netState = await NetInfo.fetch()
+        if (!netState.isConnected || netState.isInternetReachable === false) return
+        const results = await processPending(managers.permissionsManager as any, storage, adminOriginator)
+        const successes = results.filter(r => r.success)
+        if (successes.length > 0) {
+          setLocalPayNotification({
+            message:
+              successes.length === 1
+                ? 'A local payment was added to your wallet'
+                : `${successes.length} local payments were added to your wallet`,
+            type: 'success'
+          })
+        }
+      } catch {
+        // Best-effort — failures are recorded per-entry in the queue
+      } finally {
+        localPayProcessingRef.current = false
+      }
+    }
+
+    // Run immediately after wallet build
+    tryProcess()
+
+    // Also run when connectivity is restored
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected && state.isInternetReachable !== false) {
+        tryProcess()
+      }
+    })
+
+    return () => unsubscribe()
+  }, [walletBuilt, managers.permissionsManager, storage, adminOriginator])
+
   // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
@@ -1491,6 +1550,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       txStatusVersion,
       walletBuilding,
       walletBuilt,
+      localPayNotification,
+      clearLocalPayNotification,
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability
@@ -1528,6 +1589,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       txStatusVersion,
       walletBuilding,
       walletBuilt,
+      localPayNotification,
+      clearLocalPayNotification,
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability

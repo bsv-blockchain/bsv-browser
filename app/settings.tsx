@@ -131,6 +131,12 @@ export default function SettingsScreen() {
             iconColor="#FF9500"
             onPress={() => router.push('/legacy-payments' as any)}
           />
+          <ListRow
+            label={t('local_payments')}
+            icon="wifi"
+            iconColor="#007AFF"
+            onPress={() => router.push('/local-payments' as any)}
+          />
           {identityKey ? (
             <ListRow
               label={t('identity_key')}
