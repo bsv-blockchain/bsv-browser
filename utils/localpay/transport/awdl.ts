@@ -1,7 +1,7 @@
 import { getLocalPayTransport } from 'react-native-localpay-transport'
 import { decodeFrame, encodeFrame, type PaymentFrame } from '../codec'
 import { instanceName, type Session } from '../session'
-import type { Ack, LocalPaymentTransport } from './types'
+import { AckError, type Ack, type LocalPaymentTransport } from './types'
 
 const SEND_TIMEOUT_MS = 20_000
 
@@ -15,12 +15,38 @@ function fromBase64(s: string): Uint8Array {
   return Uint8Array.from(globalThis.atob(s), c => c.charCodeAt(0))
 }
 
+/**
+ * Decode and validate an ack payload. Throws AckError for anything that
+ * isn't a well-formed { ok: boolean, error?: string } object — a genuine
+ * peer decline (ok: false) is not an error and must be returned normally.
+ */
+function parseAck(ackBase64: string): Ack {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(fromBase64(ackBase64)))
+  } catch {
+    throw new AckError('malformed ack: invalid base64 or JSON')
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new AckError('malformed ack: expected an object')
+  }
+  const { ok, error } = parsed as Record<string, unknown>
+  if (typeof ok !== 'boolean') {
+    throw new AckError('malformed ack: missing boolean "ok"')
+  }
+  if (error !== undefined && typeof error !== 'string') {
+    throw new AckError('malformed ack: "error" must be a string')
+  }
+  return error === undefined ? { ok } : { ok, error }
+}
+
 export const awdlTransport: LocalPaymentTransport = {
   kind: 'awdl',
 
   receive(session: Session, signal: AbortSignal): Promise<PaymentFrame> {
     const native = getLocalPayTransport()
     if (!native) return Promise.reject(new Error('AWDL transport unavailable'))
+    if (signal.aborted) return Promise.reject(new Error('cancelled'))
     const name = instanceName(session.sessionId)
 
     return new Promise<PaymentFrame>((resolve, reject) => {
@@ -28,10 +54,12 @@ export const awdlTransport: LocalPaymentTransport = {
       const finish = (fn: () => void) => {
         if (settled) return
         settled = true
-        void native.stopListening()
+        signal.removeEventListener('abort', onAbort)
+        void native.stopListening().catch(() => {})
         fn()
       }
-      signal.addEventListener('abort', () => finish(() => reject(new Error('cancelled'))))
+      const onAbort = () => finish(() => reject(new Error('cancelled')))
+      signal.addEventListener('abort', onAbort)
 
       native
         .startListening(
@@ -50,19 +78,47 @@ export const awdlTransport: LocalPaymentTransport = {
     })
   },
 
-  async send(session: Session, frame: PaymentFrame): Promise<Ack> {
+  send(session: Session, frame: PaymentFrame, signal: AbortSignal): Promise<Ack> {
     const native = getLocalPayTransport()
-    if (!native) throw new Error('AWDL transport unavailable')
-    const ackBase64 = await native.sendFrame(
-      instanceName(session.sessionId),
-      toBase64(session.psk),
-      toBase64(encodeFrame(frame)),
-      SEND_TIMEOUT_MS
-    )
-    try {
-      return JSON.parse(new TextDecoder().decode(fromBase64(ackBase64))) as Ack
-    } catch {
-      return { ok: false, error: 'malformed ack' }
-    }
+    if (!native) return Promise.reject(new Error('AWDL transport unavailable'))
+    if (signal.aborted) return Promise.reject(new Error('cancelled'))
+
+    return new Promise<Ack>((resolve, reject) => {
+      let settled = false
+      const cleanup = () => signal.removeEventListener('abort', onAbort)
+      const onAbort = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(new Error('cancelled'))
+      }
+      signal.addEventListener('abort', onAbort)
+
+      native
+        .sendFrame(
+          instanceName(session.sessionId),
+          toBase64(session.psk),
+          toBase64(encodeFrame(frame)),
+          SEND_TIMEOUT_MS
+        )
+        .then(
+          ackBase64 => {
+            if (settled) return
+            settled = true
+            cleanup()
+            try {
+              resolve(parseAck(ackBase64))
+            } catch (e) {
+              reject(e)
+            }
+          },
+          e => {
+            if (settled) return
+            settled = true
+            cleanup()
+            reject(e)
+          }
+        )
+    })
   },
 }

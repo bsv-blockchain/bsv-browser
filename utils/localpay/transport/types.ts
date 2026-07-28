@@ -18,3 +18,11 @@ export class QrHandoffRequired extends Error {
     this.name = 'QrHandoffRequired'
   }
 }
+
+/** Thrown when an ack cannot be decoded or does not have the shape of a valid Ack. */
+export class AckError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AckError'
+  }
+}
