@@ -74,6 +74,9 @@ class QuietEventSource extends (RNEventSource as any) {
 }
 import NetInfo from '@react-native-community/netinfo'
 import { processPending } from '@/utils/localpay/pending'
+import { wocConfigFor } from '@/utils/pay/rails/address'
+import { SWEEP_INTERVAL_MS, runSweep, shouldSweepNow, sweptTotal } from '@/utils/pay/sweeper'
+import { formatAmount } from '@/utils/amountFormatHelpers'
 import { useTranslation } from 'react-i18next'
 
 
@@ -329,6 +332,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // Guards against overlapping background retry runs (triggered by both wallet
   // build and NetInfo reconnect events)
   const localPayProcessingRef = useRef<boolean>(false)
+  // Guards overlapping address-sweep passes. Same reason as the localpay guard
+  // above: a pass writes to the wallet, so two at once can race an internalize.
+  const addressSweepingRef = useRef<boolean>(false)
   // Auto-approve: cached threshold (satoshis) and managers ref for use in callback
   const autoApproveThresholdRef = useRef<number>(DEFAULT_AUTO_APPROVE_THRESHOLD)
   const managersRef = useRef<ManagerState>({})
@@ -1267,6 +1273,81 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
     return () => unsubscribe()
   }, [walletBuilt, managers.permissionsManager, storage, adminOriginator, t])
+
+  // ── Background legacy-address sweep ──
+  // "Get paid → a conventional wallet" is: show the address, and money appears.
+  // The user never has to return to a screen, so the poll cannot live in one.
+  // Bounds live in utils/pay/watchlist.ts (which addresses are eligible) and
+  // utils/pay/sweeper.ts (when a pass may run at all).
+  useEffect(() => {
+    const wallet = managers.permissionsManager
+    if (!walletBuilt || !wallet || !storage) return
+
+    let cancelled = false
+    // Assume online until NetInfo says otherwise: a first pass that fails on a
+    // dead network is harmless (every address stays watched), while waiting for
+    // the first NetInfo event would delay the common case.
+    let online = true
+    const woc = wocConfigFor(selectedNetwork)
+
+    const tick = async () => {
+      if (cancelled) return
+      if (
+        !shouldSweepNow({
+          walletBuilt: true,
+          appActive: AppState.currentState === 'active',
+          online,
+          inFlight: addressSweepingRef.current
+        })
+      ) {
+        return
+      }
+      addressSweepingRef.current = true
+      try {
+        const outcomes = await runSweep({
+          wallet: wallet as any,
+          storage: storage as any,
+          adminOriginator,
+          woc
+        })
+        const total = sweptTotal(outcomes)
+        if (total > 0 && !cancelled) {
+          // The internalizeAction inside the sweep IS the inbound history entry
+          // (labels: legacy, inbound, …), so a toast is all that is left to do.
+          // Formatted in BSV deliberately: formatAmount divides by
+          // satoshisPerUSD for a USD display, and this context has no exchange
+          // rate — sats are always correct, a fiat figure computed from a zero
+          // rate is not.
+          setLocalPayNotification({
+            message: t('pay_address_swept', { amount: formatAmount(total, 'BSV') }),
+            type: 'success'
+          })
+        }
+      } catch {
+        // Best-effort. Every address stays watched and the next tick retries.
+      } finally {
+        addressSweepingRef.current = false
+      }
+    }
+
+    const netUnsubscribe = NetInfo.addEventListener(state => {
+      online = !!state.isConnected && state.isInternetReachable !== false
+      // Coming back online is worth a pass now rather than at the next tick.
+      if (online) void tick()
+    })
+    const appSubscription = AppState.addEventListener('change', next => {
+      if (next === 'active') void tick()
+    })
+    const interval = setInterval(() => void tick(), SWEEP_INTERVAL_MS)
+    void tick()
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      netUnsubscribe()
+      appSubscription.remove()
+    }
+  }, [walletBuilt, managers.permissionsManager, storage, adminOriginator, selectedNetwork, t])
 
   // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
