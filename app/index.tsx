@@ -23,7 +23,7 @@ import Animated, {
 } from 'react-native-reanimated'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
-import { router, useFocusEffect } from 'expo-router'
+import { router } from 'expo-router'
 
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useWalletManagers } from '@/context/WalletContext'
@@ -826,21 +826,17 @@ const Browser = observer(function Browser() {
   // Stable identity so passing it to the memoized WebViewHost doesn't break memo.
   const onExitFullscreen = useCallback(() => setIsFullscreen(false), [])
 
-  // When the Browser screen regains focus after returning from a pushed route
-  // (transactions, payments, wallet-config, …) close any lingering menu sheet so
-  // the wallet menu's Settings sheet doesn't sit open over the page on back.
-  // Opening an in-screen sheet does NOT blur Browser, so normal sheet use is
-  // unaffected — this only fires on return from a full-screen route. `sheet` is
-  // read through a ref so this callback stays stable (depending on `sheet`
-  // directly would re-run on every sheet open and instantly close it).
+  // Deliberately NO close-sheet-on-focus here. Returning to Browser is not by
+  // itself a reason to dismiss the wallet menu: back-chevron and swipe-back from
+  // a pushed route (transactions, payments, …) mean "I'm switching menu section",
+  // and closing the sheet forces the user to reopen and re-navigate every time.
+  //
+  // A focus effect cannot tell those apart from a real page load, because
+  // `handleExplorerLink` also ends in `router.back()` — focus looks identical.
+  // So closing is the job of whoever loads a URL: any screen that hands a URL to
+  // the browser calls `sheet.close()` itself (see app/transactions.tsx). Plain
+  // back-navigation leaves the menu exactly as the user left it.
   // (The menu-popover close + glass remount on focus live in AddressBar.)
-  const sheetRef = useRef(sheet)
-  sheetRef.current = sheet
-  useFocusEffect(
-    useCallback(() => {
-      sheetRef.current.close()
-    }, [])
-  )
 
   // Geometry used by native chrome overlays and scroll indicators. The WebView
   // itself remains full-height; users can collapse the address bar when it

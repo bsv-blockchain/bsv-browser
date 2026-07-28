@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
+import { useSheet } from '@/context/SheetContext'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import tabStore from '@/stores/TabStore'
 import type { WalletAction } from '@bsv/sdk'
@@ -43,6 +44,7 @@ function getStatusInfo(status: string, colors: any, t: (key: string) => string):
 
 export default function TransactionsScreen() {
   const { t } = useTranslation()
+  const sheet = useSheet()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   const { managers, adminOriginator, selectedNetwork, storage, txStatusVersion, refreshProof } = useWallet()
@@ -110,12 +112,17 @@ export default function TransactionsScreen() {
       : 'https://test.whatsonchain.com'
     const url = `${baseUrl}/tx/${txid}`
     tabStore.updateTab(tabStore.activeTabId, { url })
+    // We are loading a page, not switching menu section, so dismiss the wallet
+    // menu. Browser deliberately does NOT close the sheet on focus: back-chevron
+    // and swipe-back must leave it open. Closing is the caller's job precisely
+    // because this path and a plain back are indistinguishable from focus.
+    sheet.close()
     // Return to the existing Browser screen — never push('/'), which stacks a
     // SECOND index/Browser on top of the live one (native-stack keeps both
     // mounted → two concurrent Browser instances doubling all render work).
     if (router.canGoBack()) router.back()
     else router.replace('/')
-  }, [selectedNetwork])
+  }, [selectedNetwork, sheet])
 
   const handleCopyRawTx = useCallback(async (txid: string) => {
     if (!storage || copyingTxid) return
