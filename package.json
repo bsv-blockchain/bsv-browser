@@ -3,7 +3,7 @@
   "description": "BSV Browser - Enabling identity, micropayments, and use of BSV websites on mobile devices",
   "author": "BSV Association",
   "main": "index.js",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "license": "Open BSV",
   "scripts": {
     "start": "expo start --dev-client",
@@ -168,7 +168,7 @@
     "moduleNameMapper": {
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
       "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js",
-    "^expo-audio$": "<rootDir>/__tests__/__mocks__/expo-audio.js"
+      "^expo-audio$": "<rootDir>/__tests__/__mocks__/expo-audio.js"
     },
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1)/)",
