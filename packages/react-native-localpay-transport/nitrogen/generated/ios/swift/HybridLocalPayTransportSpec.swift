@@ -16,6 +16,7 @@ public protocol HybridLocalPayTransportSpec_protocol: HybridObject {
   func isSupported() throws -> Bool
   func startListening(instanceName: String, pskBase64: String, onFrame: @escaping (_ frameBase64: String) -> Void, onError: @escaping (_ message: String) -> Void) throws -> Promise<Void>
   func stopListening() throws -> Promise<Void>
+  func confirmFrame(accepted: Bool, reason: String) throws -> Promise<Void>
   func sendFrame(instanceName: String, pskBase64: String, frameBase64: String, timeoutMs: Double) throws -> Promise<String>
 }
 

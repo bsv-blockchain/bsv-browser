@@ -92,6 +92,14 @@ namespace margelo::nitro::localpaytransport {
       auto __value = std::move(__result.value());
       return __value;
     }
+    inline std::shared_ptr<Promise<void>> confirmFrame(bool accepted, const std::string& reason) override {
+      auto __result = _swiftPart.confirmFrame(std::forward<decltype(accepted)>(accepted), reason);
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
     inline std::shared_ptr<Promise<std::string>> sendFrame(const std::string& instanceName, const std::string& pskBase64, const std::string& frameBase64, double timeoutMs) override {
       auto __result = _swiftPart.sendFrame(instanceName, pskBase64, frameBase64, std::forward<decltype(timeoutMs)>(timeoutMs));
       if (__result.hasError()) [[unlikely]] {

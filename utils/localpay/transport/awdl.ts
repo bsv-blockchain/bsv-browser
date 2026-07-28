@@ -1,7 +1,14 @@
-import { getLocalPayTransport } from 'react-native-localpay-transport'
+import { getLocalPayTransport, type LocalPayTransport } from 'react-native-localpay-transport'
 import { decodeFrame, encodeFrame, type PaymentFrame } from '../codec'
 import { instanceName, type Session } from '../session'
-import { AckError, type Ack, type LocalPaymentTransport } from './types'
+import {
+  AckError,
+  type Ack,
+  type ConfirmDelivery,
+  type DeclineReason,
+  type LocalPaymentTransport,
+  type ReceivedFrame
+} from './types'
 
 const SEND_TIMEOUT_MS = 20_000
 
@@ -40,25 +47,76 @@ function parseAck(ackBase64: string): Ack {
   return error === undefined ? { ok } : { ok, error }
 }
 
+/**
+ * Wraps the native `confirmFrame` in the contract ConfirmDelivery promises:
+ * at most one ack per delivery, and never a rejection.
+ *
+ * The latch is defence in depth against a second ack contradicting the first:
+ * `settleReceived` has many exits and each one confirms, so a missed `return`
+ * would otherwise let a decline follow an acceptance for the same payment. The
+ * swallow matters because the payee's copy is already durable by the time a
+ * positive ack is sent — a socket error here is a payer-side retry problem,
+ * not a reason to tell the payee its payment failed.
+ */
+function makeConfirm(native: LocalPayTransport): ConfirmDelivery {
+  let acked = false
+  return (accepted, reason) => {
+    if (acked) return Promise.resolve()
+    acked = true
+    try {
+      return native.confirmFrame(accepted, reason ?? '').catch(warnAckFailure)
+    } catch (e) {
+      warnAckFailure(e)
+      return Promise.resolve()
+    }
+  }
+}
+
+function warnAckFailure(e: unknown): void {
+  console.warn('[localpay] confirmFrame failed:', e instanceof Error ? e.message : String(e))
+}
+
+/**
+ * Decline without a handle, from inside a native callback. Cannot throw: a
+ * throw here would unwind into Swift's `onFrame` invocation rather than into
+ * any JS caller.
+ */
+function declineQuietly(native: LocalPayTransport, reason: DeclineReason): void {
+  try {
+    void native.confirmFrame(false, reason).catch(warnAckFailure)
+  } catch (e) {
+    warnAckFailure(e)
+  }
+}
+
 export const awdlTransport: LocalPaymentTransport = {
   kind: 'awdl',
 
-  receive(session: Session, signal: AbortSignal): Promise<PaymentFrame> {
+  receive(session: Session, signal: AbortSignal): Promise<ReceivedFrame> {
     const native = getLocalPayTransport()
     if (!native) return Promise.reject(new Error('AWDL transport unavailable'))
     if (signal.aborted) return Promise.reject(new Error('cancelled'))
     const name = instanceName(session.sessionId)
 
-    return new Promise<PaymentFrame>((resolve, reject) => {
+    return new Promise<ReceivedFrame>((resolve, reject) => {
       let settled = false
-      const finish = (fn: () => void) => {
+      /**
+       * `teardown` says whether settling should also tear the native listener
+       * down. It must be FALSE on the success path: the native side already
+       * cancelled the listener itself the instant it accepted (first-success-
+       * wins), and it is now holding the payer's connection open waiting for
+       * confirmFrame(). stopListening() cancels held connections, so calling
+       * it here would destroy the very socket the ack has to travel back over
+       * — the payer would time out on a payment the payee successfully saved.
+       */
+      const finish = (teardown: boolean, fn: () => void) => {
         if (settled) return
         settled = true
         signal.removeEventListener('abort', onAbort)
-        void native.stopListening().catch(() => {})
+        if (teardown) void native.stopListening().catch(() => {})
         fn()
       }
-      const onAbort = () => finish(() => reject(new Error('cancelled')))
+      const onAbort = () => finish(true, () => reject(new Error('cancelled')))
       signal.addEventListener('abort', onAbort)
 
       native
@@ -76,13 +134,25 @@ export const awdlTransport: LocalPaymentTransport = {
             try {
               frame = decodeFrame(fromBase64(frameBase64))
             } catch (e) {
-              return finish(() => reject(e))
+              // The only decline the caller can never issue itself: receive()
+              // rejects here, so no ReceivedFrame — and therefore no confirm
+              // handle — ever reaches the screen. Declining from inside the
+              // transport is what stops the payer sitting on a green "Sent"
+              // until its own timeout. Nothing was persisted, so this is a
+              // provable "queued nothing" and the payer may release its inputs.
+              //
+              // teardown is false here for the same reason as on success:
+              // stopListening() would cancel the connection the decline has
+              // to go out on. confirmFrame does the full teardown itself, and
+              // the native listener was already cancelled at accept time.
+              declineQuietly(native, 'decode_failed')
+              return finish(false, () => reject(e))
             }
-            finish(() => resolve(frame))
+            finish(false, () => resolve({ frame, confirm: makeConfirm(native) }))
           },
-          message => finish(() => reject(new Error(message)))
+          message => finish(true, () => reject(new Error(message)))
         )
-        .catch(e => finish(() => reject(e)))
+        .catch(e => finish(true, () => reject(e)))
     })
   },
 

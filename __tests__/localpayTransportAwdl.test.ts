@@ -17,6 +17,7 @@ function fakeNative(overrides: Partial<LocalPayTransport> = {}) {
     isSupported: () => true,
     startListening: jest.fn(),
     stopListening: jest.fn().mockResolvedValue(undefined),
+    confirmFrame: jest.fn().mockResolvedValue(undefined),
     sendFrame: jest.fn(),
     ...overrides,
   }
@@ -101,7 +102,7 @@ describe('awdlTransport.receive', () => {
     expect(native.startListening).not.toHaveBeenCalled()
   })
 
-  it('resolves the decoded frame and stops the listener exactly once', async () => {
+  it('resolves the decoded frame with a confirm handle', async () => {
     const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
       onFrame(toBase64(encodeFrame(frame)))
       return Promise.resolve()
@@ -109,10 +110,75 @@ describe('awdlTransport.receive', () => {
     const native = fakeNative({ startListening: startListening as never })
     getLocalPayTransport.mockReturnValue(native)
 
-    await expect(awdlTransport.receive(session, new AbortController().signal)).resolves.toEqual(frame)
+    const received = await awdlTransport.receive(session, new AbortController().signal)
+    expect(received.frame).toEqual(frame)
+    expect(typeof received.confirm).toBe('function')
     expect(startListening).toHaveBeenCalledTimes(1)
     expect(startListening.mock.calls[0][0]).toBe(instanceName(session.sessionId))
-    expect(native.stopListening).toHaveBeenCalledTimes(1)
+  })
+
+  // Money-safety: the native side is HOLDING the payer's connection open for
+  // the ack when onFrame fires, and stopListening() cancels held connections.
+  // Tearing down on the success path would destroy the socket the ack has to
+  // travel back over — the payer would time out on a payment the payee saved.
+  it('does NOT stop the listener on the success path', async () => {
+    const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
+      onFrame(toBase64(encodeFrame(frame)))
+      return Promise.resolve()
+    })
+    const native = fakeNative({ startListening: startListening as never })
+    getLocalPayTransport.mockReturnValue(native)
+
+    await awdlTransport.receive(session, new AbortController().signal)
+    expect(native.stopListening).not.toHaveBeenCalled()
+  })
+
+  it('acks positively through the native confirmFrame, exactly once', async () => {
+    const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
+      onFrame(toBase64(encodeFrame(frame)))
+      return Promise.resolve()
+    })
+    const native = fakeNative({ startListening: startListening as never })
+    getLocalPayTransport.mockReturnValue(native)
+
+    const { confirm } = await awdlTransport.receive(session, new AbortController().signal)
+    await confirm(true)
+    await confirm(true)
+    expect(native.confirmFrame).toHaveBeenCalledTimes(1)
+    expect(native.confirmFrame).toHaveBeenCalledWith(true, '')
+  })
+
+  it('forwards a decline reason verbatim so the payer can localize it', async () => {
+    const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
+      onFrame(toBase64(encodeFrame(frame)))
+      return Promise.resolve()
+    })
+    const native = fakeNative({ startListening: startListening as never })
+    getLocalPayTransport.mockReturnValue(native)
+
+    const { confirm } = await awdlTransport.receive(session, new AbortController().signal)
+    await confirm(false, 'already_paid')
+    expect(native.confirmFrame).toHaveBeenCalledWith(false, 'already_paid')
+  })
+
+  // A failed ack is not a failed payment on the payee's side: the frame is
+  // already durable by then, so this must never surface as a rejection that
+  // could flip a settled screen.
+  it('never rejects when the native ack fails', async () => {
+    const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
+      onFrame(toBase64(encodeFrame(frame)))
+      return Promise.resolve()
+    })
+    const native = fakeNative({
+      startListening: startListening as never,
+      confirmFrame: jest.fn().mockRejectedValue(new Error('socket closed')) as never,
+    })
+    getLocalPayTransport.mockReturnValue(native)
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    const { confirm } = await awdlTransport.receive(session, new AbortController().signal)
+    await expect(confirm(true)).resolves.toBeUndefined()
+    warn.mockRestore()
   })
 
   // Regression: `finish` latches and tears the listener down BEFORE invoking its
@@ -140,7 +206,6 @@ describe('awdlTransport.receive', () => {
     clearTimeout(timer)
 
     expect(outcome).toBe('rejected')
-    expect(native.stopListening).toHaveBeenCalledTimes(1)
   })
 
   it('rejects with the CodecError raised by the decoder', async () => {
@@ -151,5 +216,23 @@ describe('awdlTransport.receive', () => {
     getLocalPayTransport.mockReturnValue(fakeNative({ startListening: startListening as never }))
 
     await expect(awdlTransport.receive(session, new AbortController().signal)).rejects.toThrow(CodecError)
+  })
+
+  // receive() rejects on a decode failure, so no confirm handle ever reaches
+  // the screen. Without the transport declining here the payer would sit on a
+  // green "Sent" until its own timeout, having queued nothing at the payee.
+  it('declines to the payer when the delivered frame cannot be decoded', async () => {
+    const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
+      onFrame(toBase64(new Uint8Array([0xff, 0xff, 0xff])))
+      return Promise.resolve()
+    })
+    const native = fakeNative({ startListening: startListening as never })
+    getLocalPayTransport.mockReturnValue(native)
+
+    await expect(awdlTransport.receive(session, new AbortController().signal)).rejects.toThrow(CodecError)
+    expect(native.confirmFrame).toHaveBeenCalledWith(false, 'decode_failed')
+    // Same reason as the success path: stopListening would cancel the very
+    // connection the decline has to go out on.
+    expect(native.stopListening).not.toHaveBeenCalled()
   })
 })

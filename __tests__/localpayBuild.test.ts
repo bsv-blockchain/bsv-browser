@@ -1,4 +1,4 @@
-import { buildPaymentFrame } from '@/utils/localpay/build'
+import { broadcastPayment, buildPaymentFrame, finalizeDelivery } from '@/utils/localpay/build'
 import { mintSession } from '@/utils/localpay/session'
 import { PEERPAY_PROTOCOL_ID } from '@/utils/localpay/pending'
 
@@ -129,5 +129,144 @@ describe('buildPaymentFrame', () => {
       'admin.com'
     )
     expect(Array.from(built.frame.transaction)).toEqual([1, 2, 3])
+  })
+
+  // `options.sendWith` addresses a withheld action by TXID, not by reference,
+  // so without this the payer has no handle to broadcast with and the action
+  // stays 'nosend' forever — nothing in storage ever sweeps that status.
+  it('returns the signed txid so the payment can be broadcast later', async () => {
+    const built = await buildPaymentFrame(walletStub() as never, session(), 'admin.com')
+    expect(built.txid).toBe('finalized')
+  })
+
+  it('takes the txid from createAction when the wallet finalizes it itself', async () => {
+    const w = walletStub()
+    w.createAction.mockResolvedValue({ tx: [4, 5, 6], txid: 'deadbeef' })
+    const built = await buildPaymentFrame(w as never, session(), 'admin.com')
+    expect(built.txid).toBe('deadbeef')
+  })
+})
+
+describe('broadcastPayment', () => {
+  function releaseStub(sendWithResults?: { txid: string; status: string }[]) {
+    return {
+      getPublicKey: jest.fn(),
+      createAction: jest.fn().mockResolvedValue({ sendWithResults }),
+      signAction: jest.fn(),
+      abortAction: jest.fn().mockResolvedValue({ aborted: true }),
+    }
+  }
+
+  // Verified against @bsv/sdk validationHelpers.js:458-460 — sendWith with no
+  // inputs and no outputs leaves isNewTx false, so this builds nothing; and
+  // :438 — description is mandatory anyway (5-2000 bytes).
+  it('releases the txid through a createAction that builds nothing', async () => {
+    const w = releaseStub([{ txid: 'abc', status: 'sending' }])
+    await broadcastPayment(w as never, 'abc', 'admin.com')
+
+    const [args, originator] = w.createAction.mock.calls[0]
+    expect(args.options).toEqual({ sendWith: ['abc'] })
+    expect(args.inputs).toBeUndefined()
+    expect(args.outputs).toBeUndefined()
+    expect(String(args.description).length).toBeGreaterThanOrEqual(5)
+    expect(originator).toBe('admin.com')
+  })
+
+  it('returns the toolbox status for this txid', async () => {
+    const w = releaseStub([
+      { txid: 'other', status: 'failed' },
+      { txid: 'abc', status: 'unproven' },
+    ])
+    await expect(broadcastPayment(w as never, 'abc', 'admin.com')).resolves.toBe('unproven')
+  })
+
+  it('throws when the toolbox reports failed for this txid', async () => {
+    const w = releaseStub([{ txid: 'abc', status: 'failed' }])
+    await expect(broadcastPayment(w as never, 'abc', 'admin.com')).rejects.toThrow('abc')
+  })
+})
+
+// The payer's money decision, in full. Every branch here either releases real
+// money onto the network or reclaims inputs that are otherwise locked forever.
+describe('finalizeDelivery', () => {
+  function payerStub() {
+    return {
+      getPublicKey: jest.fn(),
+      createAction: jest.fn().mockResolvedValue({ sendWithResults: [{ txid: 'tx-1', status: 'sending' }] }),
+      signAction: jest.fn(),
+      abortAction: jest.fn().mockResolvedValue({ aborted: true }),
+    }
+  }
+
+  const built = { frame: {} as never, reference: 'ref-1', txid: 'tx-1' }
+
+  it('broadcasts on a positive ack', async () => {
+    const w = payerStub()
+    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com')
+
+    expect(outcome).toEqual({ kind: 'sent', broadcast: 'ok' })
+    expect(w.createAction).toHaveBeenCalledTimes(1)
+    expect(w.createAction.mock.calls[0][0].options).toEqual({ sendWith: ['tx-1'] })
+    // Aborting after a positive ack frees inputs the payee is about to spend.
+    expect(w.abortAction).not.toHaveBeenCalled()
+  })
+
+  it('does NOT broadcast on a negative ack, and releases the inputs instead', async () => {
+    const w = payerStub()
+    const outcome = await finalizeDelivery(w as never, built, { ok: false, error: 'save_failed' }, 'admin.com')
+
+    expect(outcome).toEqual({ kind: 'declined', reason: 'save_failed' })
+    expect(w.createAction).not.toHaveBeenCalled()
+    expect(w.abortAction).toHaveBeenCalledWith({ reference: 'ref-1' }, 'admin.com')
+  })
+
+  it('still declines cleanly when there is no reference to abort', async () => {
+    const w = payerStub()
+    const outcome = await finalizeDelivery(w as never, { ...built, reference: undefined }, { ok: false }, 'admin.com')
+
+    expect(outcome).toEqual({ kind: 'declined', reason: undefined })
+    expect(w.createAction).not.toHaveBeenCalled()
+    expect(w.abortAction).not.toHaveBeenCalled()
+  })
+
+  // A broadcast failure after a positive ack is NOT a failed payment: the
+  // payee holds the frame and will internalize it. Reporting failure would put
+  // the payer on a retry that mints a second transaction for the same request.
+  it('reports a thrown broadcast as sent-but-pending, never as failed', async () => {
+    const w = payerStub()
+    w.createAction.mockRejectedValue(new Error('no network'))
+    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com')
+
+    expect(outcome.kind).toBe('sent')
+    expect(outcome).toMatchObject({ broadcast: 'pending', detail: 'no network' })
+    expect(w.abortAction).not.toHaveBeenCalled()
+  })
+
+  it('reports a toolbox-rejected broadcast as sent-but-pending', async () => {
+    const w = payerStub()
+    w.createAction.mockResolvedValue({ sendWithResults: [{ txid: 'tx-1', status: 'failed' }] })
+    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com')
+
+    expect(outcome).toMatchObject({ kind: 'sent', broadcast: 'pending' })
+    expect(w.abortAction).not.toHaveBeenCalled()
+  })
+
+  it('reports sent-but-pending when there is no txid to broadcast', async () => {
+    const w = payerStub()
+    const outcome = await finalizeDelivery(w as never, { ...built, txid: undefined }, { ok: true }, 'admin.com')
+
+    expect(outcome).toMatchObject({ kind: 'sent', broadcast: 'pending' })
+    expect(w.createAction).not.toHaveBeenCalled()
+    expect(w.abortAction).not.toHaveBeenCalled()
+  })
+
+  it('does not let a failed abort mask the decline', async () => {
+    const w = payerStub()
+    w.abortAction.mockRejectedValue(new Error('storage down'))
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await expect(finalizeDelivery(w as never, built, { ok: false, error: 'already_paid' }, 'admin.com'))
+      .resolves.toEqual({ kind: 'declined', reason: 'already_paid' })
+    warn.mockRestore()
   })
 })

@@ -28,6 +28,15 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
   /// before JS gets around to calling `stopListening()` can never be
   /// mistaken for a second successful payment (see Critical 1 in review).
   private var hasAccepted = false
+  /// The accepted connection whose frame has been handed to JS but not yet
+  /// acknowledged. Held open -- deliberately un-acked -- until JS calls
+  /// `confirmFrame`. See that method for why delivery and acknowledgement are
+  /// two separate steps. Confined to `queue` like everything else here.
+  private var pendingAck: NWConnection?
+  /// Reaper for `pendingAck`. Same cancellation discipline as `readTimeouts`:
+  /// whichever of the timeout and the confirm runs first takes the entry by
+  /// clearing `pendingAck`, and the other bails.
+  private var pendingAckTimeout: DispatchWorkItem?
   private let queue = DispatchQueue(label: "org.bsvassociation.localpay")
 
   /// Ceiling on how long an accepted-but-not-yet-completed inbound connection
@@ -37,6 +46,40 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
   /// a resource-exhaustion vector against payment code on an open local
   /// network. Named so the value only needs stating once.
   private static let acceptedConnectionReadTimeout: DispatchTimeInterval = .seconds(30)
+
+  /// Ceiling on how long the accepted connection is held open waiting for JS
+  /// to call `confirmFrame`. A JS crash, a backgrounded app or a wedged
+  /// storage write must not leak the socket.
+  ///
+  /// Deliberately LONGER than the payer's own `sendFrame` timeout (20s, see
+  /// SEND_TIMEOUT_MS in utils/localpay/transport/awdl.ts), and expiry tears
+  /// the connection down SILENTLY -- it never synthesises a negative ack.
+  /// Both properties matter: a negative ack instructs the payer to release
+  /// the inputs its `noSend` action is holding, and a payee that is merely
+  /// slow to commit may still succeed, at which point those inputs are free
+  /// to be respent into a transaction that conflicts with the one the payee
+  /// is about to broadcast. Staying silent instead drops the payer onto its
+  /// existing "delivered, unconfirmed" path, which neither aborts nor
+  /// broadcasts -- the strictly safer of the two failure modes.
+  private static let pendingAckConfirmTimeout: DispatchTimeInterval = .seconds(60)
+
+  /// `{"ok":false,"error":<reason>}` with `reason` correctly escaped.
+  ///
+  /// `reason` originates in JS and is not a literal we control, so it is
+  /// serialized rather than interpolated: a raw quote, backslash or newline
+  /// interpolated into the literal would produce a payload the payer's
+  /// `JSON.parse` rejects. The payer treats an unparseable ack as a transport
+  /// fault (AckError) rather than a decline -- so it would NOT release its
+  /// inputs, turning a clean decline into a stuck `noSend` action.
+  private static func declineJson(reason: String) -> String {
+    let fallback = "{\"ok\":false,\"error\":\"declined\"}"
+    let text = reason.isEmpty ? "declined" : reason
+    guard let data = try? JSONSerialization.data(withJSONObject: ["ok": false, "error": text]),
+          let json = String(data: data, encoding: .utf8) else {
+      return fallback
+    }
+    return json
+  }
 
   /// Genuine capability probe. The podspec's deployment target (iOS 15.1) already
   /// implies Network.framework peer-to-peer APIs exist, so an `#available(iOS 15.0, *)`
@@ -85,6 +128,9 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
       self.live.removeAll()
       self.readTimeouts.values.forEach { $0.cancel() }
       self.readTimeouts.removeAll()
+      self.pendingAckTimeout?.cancel()
+      self.pendingAckTimeout = nil
+      self.pendingAck = nil
       self.hasAccepted = false
 
       do {
@@ -187,22 +233,38 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
         self.listener?.cancel()
         self.listener = nil
 
-        onFrame(data.base64EncodedString())
-        let ack = AwdlSession.lengthPrefixed(Data("{\"ok\":true}".utf8))
-        conn.send(content: ack, completion: .contentProcessed { [weak self] error in
+        // Arm the hold BEFORE handing the frame over. No ack is sent here:
+        // `conn` stays open and stays in `live` until JS calls
+        // `confirmFrame`, because only JS knows whether the payment was
+        // durably queued. See confirmFrame.
+        //
+        // Ordering is deliberate. Nitro dispatches `onFrame` to the JS
+        // runtime rather than running it inline on this queue, so JS cannot
+        // in practice call back in before the next statement -- but arming
+        // first makes that an invariant rather than a dependency on callback
+        // scheduling. Confirming into a nil `pendingAck` is a silent no-op
+        // that would strand the payer.
+        self.pendingAck = conn
+        let ackTimeout = DispatchWorkItem { [weak self] in
           guard let self else { return }
-          if let error {
-            // The frame was already handed to JS via onFrame, so the payee's
-            // JS layer believes it holds the payment. If the ack never
-            // reached the payer, the payer's sendFrame will time out
-            // believing nothing arrived -- surface this instead of
-            // swallowing it, so there is at least a native-side record of
-            // the mismatch.
-            onError(error.localizedDescription)
-          }
+          dispatchPrecondition(condition: .onQueue(self.queue))
+          // Same take-the-entry gate as the read timeout above: if the
+          // confirm already ran it cleared `pendingAck` (and cancelled this
+          // item), so anything else here would be acting on a dead socket.
+          guard self.pendingAck === conn else { return }
+          self.pendingAck = nil
+          self.pendingAckTimeout = nil
           self.live.removeValue(forKey: key)
           conn.cancel()
-        })
+          // No ack, by design (see pendingAckConfirmTimeout). onError is only
+          // a native-side record -- JS has long since settled its receive()
+          // promise, so this cannot flip a settled screen.
+          onError("payee never confirmed the payment; connection released")
+        }
+        self.pendingAckTimeout = ackTimeout
+        self.queue.asyncAfter(deadline: .now() + Self.pendingAckConfirmTimeout, execute: ackTimeout)
+
+        onFrame(data.base64EncodedString())
       case .failure(let error):
         self.live.removeValue(forKey: key)
         onError(error.localizedDescription)
@@ -211,12 +273,78 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
     }
   }
 
+  /// Sends the ack on the connection held open since `onFrame`, then tears the
+  /// session down.
+  ///
+  /// `accepted: true` sends `{"ok":true}` and must be called only once the
+  /// payment is durably queued -- that is the whole point of splitting this
+  /// out of `acceptConnection`. `accepted: false` sends
+  /// `{"ok":false,"error":reason}`, which tells the payer nothing was queued
+  /// and it may release the inputs its `noSend` action is holding; only send
+  /// it where that is provably true.
+  ///
+  /// Idempotent: with no held connection (the confirm timeout already fired,
+  /// `stopListening` already ran, or JS is confirming twice) it resolves and
+  /// does nothing. Rejects only when the ack could not be written.
+  func confirmFrame(accepted: Bool, reason: String) throws -> Promise<Void> {
+    let promise = Promise<Void>()
+    // Called from the JS-bridge thread, never from `queue` itself, so
+    // `queue.sync` here cannot deadlock. Doing the bookkeeping synchronously
+    // also fixes the ordering against a `stopListening()` that JS may issue
+    // immediately afterwards: by the time this returns, `conn` is out of
+    // `live`, so that teardown cannot cancel the socket the ack is on.
+    queue.sync {
+      self.pendingAckTimeout?.cancel()
+      self.pendingAckTimeout = nil
+      guard let conn = self.pendingAck else {
+        promise.resolve(withResult: ())
+        return
+      }
+      self.pendingAck = nil
+      self.live.removeValue(forKey: ObjectIdentifier(conn))
+
+      // This session is over either way. The listener was already cancelled
+      // at accept time; clear the rest so a `startListening` that is never
+      // preceded by `stopListening` cannot inherit stale bookkeeping.
+      self.listener?.cancel()
+      self.listener = nil
+      self.live.values.forEach { $0.cancel() }
+      self.live.removeAll()
+      self.readTimeouts.values.forEach { $0.cancel() }
+      self.readTimeouts.removeAll()
+
+      let body = accepted ? "{\"ok\":true}" : Self.declineJson(reason: reason)
+      conn.send(content: AwdlSession.lengthPrefixed(Data(body.utf8)), completion: .contentProcessed { error in
+        // NWConnection dispatches send completions on the queue the
+        // connection was started with, which is `queue` for everything
+        // `acceptConnection` accepts.
+        dispatchPrecondition(condition: .onQueue(self.queue))
+        conn.cancel()
+        if let error {
+          promise.reject(withError: error)
+        } else {
+          promise.resolve(withResult: ())
+        }
+      })
+    }
+    return promise
+  }
+
   func stopListening() throws -> Promise<Void> {
     let promise = Promise<Void>()
     // Called from the JS-bridge thread, never from `queue` itself.
+    //
+    // This cancels a connection still held for `confirmFrame`, so JS must not
+    // call it on the success path -- see the `teardown` flag in
+    // utils/localpay/transport/awdl.ts. `acceptConnection` already cancels the
+    // listener itself the instant a frame is accepted, so there is nothing
+    // left for this to do there anyway.
     queue.sync {
       self.listener?.cancel()
       self.listener = nil
+      self.pendingAckTimeout?.cancel()
+      self.pendingAckTimeout = nil
+      self.pendingAck = nil
       self.live.values.forEach { $0.cancel() }
       self.live.removeAll()
       self.readTimeouts.values.forEach { $0.cancel() }

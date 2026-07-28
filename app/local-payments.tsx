@@ -87,8 +87,9 @@ import { useWallet } from '@/context/WalletContext'
 import { MAX_FRAME_QR_CHARS, frameFromQr, frameToQr, type PaymentFrame } from '@/utils/localpay/codec'
 import { decodeSession, encodeSession, mintSession, type Session } from '@/utils/localpay/session'
 import { isSessionSpent, markSessionSpent, processPending, savePending } from '@/utils/localpay/pending'
-import { buildPaymentFrame } from '@/utils/localpay/build'
+import { buildPaymentFrame, finalizeDelivery } from '@/utils/localpay/build'
 import { awdlTransport } from '@/utils/localpay/transport/awdl'
+import { isDeclineReason, type Ack, type ConfirmDelivery, type DeclineReason } from '@/utils/localpay/transport/types'
 import { localSupportsAwdl, selectTransport } from '@/utils/localpay/transport/select'
 
 // ── Types ──
@@ -117,7 +118,16 @@ interface Failure {
   settings: boolean
 }
 
-/** A frame that reached this device but could not be persisted. Retried, never discarded. */
+/**
+ * A frame that reached this device but could not be persisted, held for a retry.
+ *
+ * Only ever set for a delivery that was NOT declined — in practice, the QR
+ * path, which has no ack channel. Once the payer has been told nothing was
+ * queued it releases the inputs its `noSend` action holds, and re-settling the
+ * same frame afterwards would queue a payment against a transaction the payer
+ * now considers abandoned and free to respend. An AWDL payer recovers by
+ * building afresh, which is clean; this one cannot.
+ */
 interface Unsettled {
   frame: PaymentFrame
   session: Session
@@ -125,6 +135,19 @@ interface Unsettled {
 
 /** Rendered edge length in points. The brief floors payment QRs at 280. */
 const PAYMENT_QR_SIZE = 288
+
+/**
+ * Decline codes as the PAYER renders them. The payee sends a stable machine
+ * code precisely so the sentence can be produced here, in this device's locale.
+ * Anything unrecognised falls through to the raw text, preserving the old
+ * behaviour for a peer running a different build.
+ */
+const DECLINE_KEYS: Record<DeclineReason, string> = {
+  session_mismatch: 'local_pay_declined_mismatch',
+  already_paid: 'local_pay_declined_already_paid',
+  save_failed: 'local_pay_declined_save',
+  decode_failed: 'local_pay_declined_decode'
+}
 
 // ── Helpers ──
 
@@ -316,8 +339,22 @@ export default function LocalPaymentsScreen() {
   // with whichever Session is live at that moment.
 
   const settleReceived = useCallback(
-    async (frame: PaymentFrame, session: Session) => {
-      if (settlingRef.current) return
+    async (frame: PaymentFrame, session: Session, confirm?: ConfirmDelivery) => {
+      // `confirm` is how the payer learns what happened. It is undefined on the
+      // QR path, which has no socket to ack over. On the AWDL path it MUST be
+      // called on every exit below: with `true` only once savePending has
+      // resolved (a positive ack is what releases the payer's transaction for
+      // broadcast), and with `false` on every path that queued nothing, so the
+      // payer aborts its build instead of resting on a green "Sent".
+      //
+      // Fire-and-forget throughout: ConfirmDelivery never rejects, and the
+      // payee's own outcome must not depend on the ack reaching the payer.
+      if (settlingRef.current) {
+        // Another delivery is mid-settle (an AWDL arrival racing a QR scan).
+        // Nothing was written for THIS frame, so it is a provable decline.
+        void confirm?.(false, 'save_failed')
+        return
+      }
 
       // (0) Bind the frame to THIS session, before the one-shot latch and before
       //     any write. Two distinct holes close here:
@@ -343,6 +380,7 @@ export default function LocalPaymentsScreen() {
         frame.derivationSuffix !== session.derivationSuffix ||
         frame.amount !== session.amount
       ) {
+        void confirm?.(false, 'session_mismatch')
         scanLatchRef.current = false
         setSessionMismatch(true)
         // Back to the waiting screen with the pairing QR still up, and restart
@@ -357,10 +395,12 @@ export default function LocalPaymentsScreen() {
       setPhase('receive_settling')
 
       if (!storage) {
-        // The frame already reached this device — the payer believes it is sent —
-        // so hold it for a retry rather than discarding it.
+        // The frame already reached this device, but with nowhere to write it
+        // there is provably nothing queued — decline, so the payer releases its
+        // inputs rather than believing the payment landed.
+        void confirm?.(false, 'save_failed')
         settlingRef.current = false
-        setUnsettled({ frame, session })
+        setUnsettled(confirm ? null : { frame, session })
         fail('generic', t('wallet_not_ready'))
         return
       }
@@ -372,9 +412,12 @@ export default function LocalPaymentsScreen() {
         // (1) One-shot session guard, before anything is written. A re-scanned
         //     or replayed session must never credit twice.
         if (await isSessionSpent(storage, session.sessionId)) {
-          // Not a failure: that session's payment is already queued. Terminal,
-          // and deliberately without a retry — retrying mints a new session and
-          // would ask the payer to pay a second time.
+          // Not a failure for the PAYEE: that session's payment is already
+          // queued. It is a decline for the PAYER, though, and must be — this
+          // delivery queued nothing, and each executeSend builds a fresh
+          // action from fresh UTXOs, so acking it would broadcast a second
+          // transaction for a request already paid.
+          void confirm?.(false, 'already_paid')
           setHostedSession(null)
           setUnsettled(null)
           setPhase('already_paid')
@@ -401,12 +444,24 @@ export default function LocalPaymentsScreen() {
       } catch (e) {
         // Reached only while the frame is still un-persisted, so this is a real
         // failure. Keep the frame and the session so the payee can retry the
-        // same settle instead of losing a payment to a transient SQLite error.
+        // same settle instead of losing a payment to a transient SQLite error —
+        // but only where no decline went out (see Unsettled). A declined AWDL
+        // payer has already released its inputs; retrying against that frame
+        // would queue a payment its transaction no longer backs.
+        void confirm?.(false, 'save_failed')
         settlingRef.current = false
-        setUnsettled({ frame, session })
+        setUnsettled(confirm ? null : { frame, session })
         fail('generic', messageOf(e))
         return
       }
+
+      // (3a) ACK. The one place a positive ack may be sent: savePending has
+      //      resolved, so the claim it makes to the payer — "this payee has
+      //      durably queued your payment" — is now true. It is also the payer's
+      //      cue to broadcast, which is why it must not be sent one line
+      //      earlier. Sent before the UI updates below so the payer's screen
+      //      moves as soon as possible.
+      void confirm?.(true)
 
       // ── Past here the frame is durably queued ──
       // The payment cannot be lost, so nothing below may flip the screen to a
@@ -464,9 +519,15 @@ export default function LocalPaymentsScreen() {
 
     awdlTransport
       .receive(hostedSession, controller.signal)
-      .then(frame => {
-        if (controller.signal.aborted) return
-        void settleRef.current(frame, hostedSession)
+      .then(({ frame, confirm }) => {
+        if (controller.signal.aborted) {
+          // The screen went away between delivery and here. The payer is
+          // holding an un-acked connection and nothing was written, so tell it
+          // rather than leaving it to time out on a green "Sent".
+          void confirm(false, 'save_failed')
+          return
+        }
+        void settleRef.current(frame, hostedSession, confirm)
       })
       .catch(e => {
         if (controller.signal.aborted) return
@@ -602,6 +663,20 @@ export default function LocalPaymentsScreen() {
     [wallet, adminOriginator]
   )
 
+  /**
+   * Renders a peer's decline in THIS device's locale. The payee sends a stable
+   * machine code rather than a sentence, so a Japanese payer never sees Polish.
+   * Anything unrecognised is echoed verbatim, which keeps a peer on a different
+   * build readable rather than silent.
+   */
+  const declineMessage = useCallback(
+    (reason: string | undefined) => {
+      if (reason && isDeclineReason(reason)) return t(DECLINE_KEYS[reason])
+      return reason && reason.length > 0 ? reason : t('local_pay_failed')
+    },
+    [t]
+  )
+
   // ── Send: build and deliver ──
 
   const executeSend = useCallback(async () => {
@@ -661,46 +736,73 @@ export default function LocalPaymentsScreen() {
         return
       }
 
+      let ack: Ack
       try {
-        const ack = await awdlTransport.send(session, built.frame, controller.signal)
-        if (controller.signal.aborted) return
-        if (!ack.ok) {
-          // An explicit decline: the peer processed the frame and refused it, so
-          // nothing was accepted and the inputs can be released. Because they
-          // are released, the frame must NOT then be offered as a QR fallback —
-          // handing over a transaction whose inputs this wallet now considers
-          // free invites a double-spend. Clearing paymentQr also drops any stale
-          // QR left by an earlier attempt.
-          abortBuild(built.reference)
-          setPaymentQr(null)
-          fail('generic', ack.error ?? t('local_pay_failed'))
-          return
-        }
-        setSettledAmount(session.amount)
-        setPhase('done')
+        ack = await awdlTransport.send(session, built.frame, controller.signal)
       } catch (e) {
         if (controller.signal.aborted) return
-        // Deliberately NOT aborted. A throw here does not prove non-delivery —
-        // the bytes may have reached the peer before the ack was lost — so the
-        // action must stay intact and spendable-by-the-payee. The frame is
-        // signed but noSend, so offering it as a QR lets the payment still
-        // complete. `qr` is null when it would not fit, hiding that offer.
+        // Deliberately NOT aborted, and deliberately NOT broadcast. A throw
+        // here proves nothing either way — the bytes may have reached the peer
+        // before the ack was lost — so the action must stay intact and
+        // spendable-by-the-payee, and this device must not race the payee onto
+        // the network. The frame is signed but noSend, so offering it as a QR
+        // lets the payment still complete. `qr` is null when it would not fit,
+        // hiding that offer.
         setPaymentQr(qr)
         const message = messageOf(e)
         // The heuristic is scoped to the transport call: only here can a message
         // legitimately be about Local Network access.
         fail(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', message)
+        return
       }
+
+      // The ack is a money decision, so it is acted on even if the screen has
+      // since been abandoned — releasing or reclaiming the transaction must not
+      // depend on this component still being mounted. Only the UI writes below
+      // are gated on the abort.
+      const outcome = await finalizeDelivery(
+        wallet as unknown as PayingWalletArg,
+        built,
+        ack,
+        adminOriginator
+      )
+      if (controller.signal.aborted) return
+
+      if (outcome.kind === 'declined') {
+        // An explicit decline: the peer processed the frame and refused it, so
+        // nothing was queued there and finalizeDelivery has released the inputs.
+        // Because they are released, the frame must NOT then be offered as a QR
+        // fallback — handing over a transaction whose inputs this wallet now
+        // considers free invites a double-spend. Clearing paymentQr also drops
+        // any stale QR left by an earlier attempt.
+        setPaymentQr(null)
+        fail('generic', declineMessage(outcome.reason))
+        return
+      }
+
+      // Positive ack: the payee has durably queued this payment, so it is sent
+      // whatever happened to the broadcast. `broadcast: 'pending'` means only
+      // that this device could not get the transaction out itself — the payee
+      // holds a copy and will internalize it — so it is a retryable notice, not
+      // a failure. Reporting it as a failure would invite a second payment.
+      if (outcome.broadcast === 'pending') {
+        console.warn('[localpay] broadcast after a positive ack failed:', outcome.detail ?? '')
+        setNotice(t('local_pay_broadcast_pending'))
+      }
+      setSettledAmount(session.amount)
+      setPhase('done')
     } finally {
       registry.delete(controller)
     }
-  }, [scannedSession, sendKind, wallet, adminOriginator, abortBuild, fail, t])
+  }, [scannedSession, sendKind, wallet, adminOriginator, abortBuild, declineMessage, fail, t])
 
   // ── Receive: retry a settle that never reached storage ──
 
   const retrySettle = useCallback(() => {
     if (!unsettled) return
     setFailure(null)
+    // No confirm handle by construction: Unsettled is only ever populated for
+    // a delivery that was not declined, which today means the QR path.
     void settleRef.current(unsettled.frame, unsettled.session)
   }, [unsettled])
 

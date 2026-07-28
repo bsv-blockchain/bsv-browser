@@ -2,14 +2,21 @@ import { P2PKH, PublicKey } from '@bsv/sdk'
 import { FRAME_VERSION, type PaymentFrame } from './codec'
 import type { Session } from './session'
 import { PEERPAY_LABEL, PEERPAY_PROTOCOL_ID } from './pending'
+import type { Ack } from './transport/types'
+
+/** The toolbox's per-txid verdict on a `sendWith` release. */
+type SendWithStatus = 'unproven' | 'sending' | 'failed'
+
+interface CreateActionOutcome {
+  tx?: number[]
+  txid?: string
+  signableTransaction?: { reference: string }
+  sendWithResults?: { txid: string; status: string }[]
+}
 
 interface PayingWallet {
   getPublicKey(args: unknown, originator?: string): Promise<{ publicKey: string }>
-  createAction(args: unknown, originator?: string): Promise<{
-    tx?: number[]
-    txid?: string
-    signableTransaction?: { reference: string }
-  }>
+  createAction(args: unknown, originator?: string): Promise<CreateActionOutcome>
   signAction(args: unknown, originator?: string): Promise<{ tx?: number[]; txid?: string }>
   /**
    * Releases the inputs a `noSend` action is holding. Required, not optional:
@@ -19,7 +26,7 @@ interface PayingWallet {
   abortAction(args: { reference: string }, originator?: string): Promise<{ aborted: boolean }>
 }
 
-/** A signed, undelivered payment plus the handle needed to unwind it. */
+/** A signed, undelivered payment plus the handles needed to unwind or release it. */
 export interface BuiltPayment {
   frame: PaymentFrame
   /**
@@ -37,7 +44,27 @@ export interface BuiltPayment {
    * surfacing a reference; nothing can be aborted in that case.
    */
   reference?: string
+  /**
+   * The txid of the signed `noSend` transaction, for `broadcastPayment`.
+   *
+   * `options.sendWith` addresses a withheld action by txid, not by reference,
+   * so this is the only handle that can release it. Undefined only if a wallet
+   * returns no txid from either `createAction` or `signAction`; the action then
+   * cannot be broadcast by the payer at all.
+   */
+  txid?: string
 }
+
+/**
+ * What became of a delivered payment, from the payer's side.
+ *
+ * `broadcast: 'pending'` is NOT a failed payment. It means the payee acked
+ * positively — the money is durably queued there and will be internalized —
+ * but this device could not get the transaction out itself.
+ */
+export type DeliveryOutcome =
+  | { kind: 'sent'; broadcast: 'ok' | 'pending'; detail?: string }
+  | { kind: 'declined'; reason?: string }
 
 /**
  * Builds the frame a payer sends. BRC-29: the output locks to a key derived
@@ -127,5 +154,110 @@ export async function buildPaymentFrame(
       transaction: new Uint8Array(result.tx),
     },
     reference,
+    txid: result.txid,
   }
+}
+
+/**
+ * Releases the `noSend` payment identified by `txid` so this device broadcasts it.
+ *
+ * BRC-100 releases a previously withheld action by naming its txid in
+ * `options.sendWith` on a follow-up `createAction` that creates nothing of its
+ * own. Verified end to end in @bsv/wallet-toolbox-mobile / @bsv/sdk:
+ *
+ *  · sdk validationHelpers.js:458-460 — `isSendWith = sendWith.length > 0`, and
+ *    `isNewTx` stays FALSE when there are no inputs and no outputs, so this
+ *    builds nothing. `description` is still mandatory (5–2000 bytes, :438).
+ *  · signer/methods/createAction.js:10-46 — with `isNewTx` false it skips
+ *    straight to `processAction`, whose args carry `sendWith` and a null
+ *    reference/txid/rawTx.
+ *  · storage/methods/processAction.js:26 — the sendWith txids become
+ *    `txidsOfReqsToShareWithWorld` and go to `shareReqsWithWorld`.
+ *  · storage/storageProviderHelpers.js:14 — `readyToSendStatuses` includes
+ *    'nosend', so a withheld req classifies as `readyToSend` (:28-35) →
+ *    `SendWithResult.status = 'sending'` (processAction.js:64-66).
+ *  · processAction.js:127-136 — on the default delayed path the req moves to
+ *    'unsent' and the transaction to 'sending'. That is the escape from
+ *    'nosend': monitor/tasks/TaskFailAbandoned.js:35 only ever sweeps
+ *    ['unprocessed', 'unsigned'], so nothing else would have moved it.
+ *
+ * Reaching this through WalletPermissionsManager raises no prompt and cannot
+ * abort the action: with no inputs or outputs the underlying createAction
+ * returns no `signableTransaction`, and the manager returns at
+ * WalletPermissionsManager.js:2856 before its spending-authorization gate.
+ *
+ * Throws when the toolbox reports 'failed' for this txid. Callers must treat
+ * that as retryable, never as a failed payment — see finalizeDelivery.
+ */
+export async function broadcastPayment(
+  wallet: PayingWallet,
+  txid: string,
+  originator: string
+): Promise<SendWithStatus | undefined> {
+  const result = await wallet.createAction(
+    {
+      // Mandatory even though this creates nothing; must be 5–2000 bytes.
+      description: 'Broadcast a nearby payment',
+      options: { sendWith: [txid] },
+    },
+    originator
+  )
+  const status = result.sendWithResults?.find(r => r.txid === txid)?.status
+  if (status === 'failed') {
+    throw new Error(`the wallet could not broadcast ${txid}`)
+  }
+  return status === 'unproven' || status === 'sending' ? status : undefined
+}
+
+/**
+ * The payer's post-delivery decision. Extracted from the screen so the whole
+ * state machine is testable, because it is the point where real money is
+ * either released or reclaimed.
+ *
+ *   POSITIVE ack — the payee has DURABLY QUEUED the payment. Broadcast now.
+ *     Never abort: the payee holds a copy and will internalize it, and freeing
+ *     the inputs here lets this wallet respend them into a conflict.
+ *
+ *   NEGATIVE ack — the payee provably queued nothing (see DeclineReason).
+ *     Abort to release the inputs, and never broadcast.
+ *
+ *   NO ack (a throw from the transport) — not this function's business. The
+ *     caller must neither abort nor broadcast: a lost ack does not prove
+ *     non-delivery, so the frame may still be with the payee.
+ *
+ * A broadcast failure after a positive ack returns `broadcast: 'pending'`, not
+ * a failure. The money is safe at the payee; what is stuck is this device's
+ * copy of the transaction, which is a retryable notice, not a failed payment.
+ */
+export async function finalizeDelivery(
+  wallet: PayingWallet,
+  built: BuiltPayment,
+  ack: Ack,
+  originator: string
+): Promise<DeliveryOutcome> {
+  if (!ack.ok) {
+    if (built.reference) {
+      // Fire and forget: a failed abort is a stuck UTXO, not a lost payment,
+      // and must not displace the decline reason the caller is about to show.
+      await wallet
+        .abortAction({ reference: built.reference }, originator)
+        .catch((e: unknown) => console.warn('[localpay] abortAction failed:', messageOf(e)))
+    }
+    return { kind: 'declined', reason: ack.error }
+  }
+
+  if (!built.txid) {
+    return { kind: 'sent', broadcast: 'pending', detail: 'the wallet returned no txid to broadcast' }
+  }
+
+  try {
+    await broadcastPayment(wallet, built.txid, originator)
+    return { kind: 'sent', broadcast: 'ok' }
+  } catch (e) {
+    return { kind: 'sent', broadcast: 'pending', detail: messageOf(e) }
+  }
+}
+
+function messageOf(e: unknown): string {
+  return e instanceof Error && e.message ? e.message : String(e)
 }

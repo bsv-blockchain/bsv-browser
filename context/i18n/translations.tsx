@@ -373,7 +373,12 @@ const resources = {
       local_pay_too_large: 'This payment is too large for a QR code. Both devices need to be on iOS to pay it nearby.',
       local_pay_nearby_unavailable: 'Nearby Wi-Fi is unavailable. The code above still works.',
       local_pay_retry_save: 'Try saving again',
-      local_pay_wrong_session: 'That payment doesn’t match this request and was not accepted. Ask the payer to scan the code again.'
+      local_pay_wrong_session: 'That payment doesn’t match this request and was not accepted. Ask the payer to scan the code again.',
+      local_pay_declined_mismatch: 'The recipient didn’t accept this payment — it doesn’t match their request. Scan their code again.',
+      local_pay_declined_already_paid: 'That request has already been paid. Nothing was sent.',
+      local_pay_declined_save: 'The recipient couldn’t save the payment. Nothing was sent — try again.',
+      local_pay_declined_decode: 'The recipient couldn’t read the payment. Nothing was sent — try again.',
+      local_pay_broadcast_pending: 'Sent. This device couldn’t publish it to the network yet — the recipient will.'
     }
   },
   zh: {
@@ -635,7 +640,12 @@ const resources = {
       local_pay_too_large: '此付款金额对应的数据太大，无法放入二维码。两台设备都需使用 iOS 才能就近付款。',
       local_pay_nearby_unavailable: '附近 Wi-Fi 不可用。上方的二维码仍然有效。',
       local_pay_retry_save: '重新尝试保存',
-      local_pay_wrong_session: '该付款与此请求不匹配，未被接受。请让付款方重新扫描上方的二维码。'
+      local_pay_wrong_session: '该付款与此请求不匹配，未被接受。请让付款方重新扫描上方的二维码。',
+      local_pay_declined_mismatch: '收款方未接受这笔付款 — 它与对方的请求不匹配。请重新扫描对方的二维码。',
+      local_pay_declined_already_paid: '该请求已经支付过了，本次未发送任何款项。',
+      local_pay_declined_save: '收款方无法保存这笔付款。本次未发送任何款项 — 请重试。',
+      local_pay_declined_decode: '收款方无法读取这笔付款。本次未发送任何款项 — 请重试。',
+      local_pay_broadcast_pending: '已发送。本设备暂时无法将其发布到网络 — 收款方会完成发布。'
     }
   },
   hi: {
@@ -900,7 +910,12 @@ const resources = {
       local_pay_too_large: 'यह भुगतान QR कोड के लिए बहुत बड़ा है। इसे नज़दीक से चुकाने के लिए दोनों डिवाइस iOS पर होने चाहिए।',
       local_pay_nearby_unavailable: 'नज़दीकी Wi-Fi उपलब्ध नहीं है। ऊपर दिया गया कोड अब भी काम करता है।',
       local_pay_retry_save: 'फिर से सहेजने की कोशिश करें',
-      local_pay_wrong_session: 'वह भुगतान इस अनुरोध से मेल नहीं खाता, इसलिए स्वीकार नहीं किया गया। भुगतानकर्ता से कोड दोबारा स्कैन करने को कहें।'
+      local_pay_wrong_session: 'वह भुगतान इस अनुरोध से मेल नहीं खाता, इसलिए स्वीकार नहीं किया गया। भुगतानकर्ता से कोड दोबारा स्कैन करने को कहें।',
+      local_pay_declined_mismatch: 'प्राप्तकर्ता ने यह भुगतान स्वीकार नहीं किया — यह उनके अनुरोध से मेल नहीं खाता। उनका कोड दोबारा स्कैन करें।',
+      local_pay_declined_already_paid: 'उस अनुरोध का भुगतान पहले ही हो चुका है। कुछ भी नहीं भेजा गया।',
+      local_pay_declined_save: 'प्राप्तकर्ता भुगतान सहेज नहीं सका। कुछ भी नहीं भेजा गया — फिर से कोशिश करें।',
+      local_pay_declined_decode: 'प्राप्तकर्ता भुगतान पढ़ नहीं सका। कुछ भी नहीं भेजा गया — फिर से कोशिश करें।',
+      local_pay_broadcast_pending: 'भेज दिया गया। यह डिवाइस इसे अभी नेटवर्क पर प्रकाशित नहीं कर सका — प्राप्तकर्ता कर देगा।'
     }
   },
   es: {
@@ -1167,7 +1182,12 @@ const resources = {
       local_pay_too_large: 'Este pago es demasiado grande para un código QR. Ambos dispositivos deben usar iOS para pagarlo de cerca.',
       local_pay_nearby_unavailable: 'El Wi-Fi cercano no está disponible. El código de arriba sigue funcionando.',
       local_pay_retry_save: 'Intentar guardar de nuevo',
-      local_pay_wrong_session: 'Ese pago no coincide con esta solicitud y no se aceptó. Pide a quien paga que vuelva a escanear el código.'
+      local_pay_wrong_session: 'Ese pago no coincide con esta solicitud y no se aceptó. Pide a quien paga que vuelva a escanear el código.',
+      local_pay_declined_mismatch: 'Quien recibe no aceptó este pago: no coincide con su solicitud. Vuelve a escanear su código.',
+      local_pay_declined_already_paid: 'Esa solicitud ya se pagó. No se envió nada.',
+      local_pay_declined_save: 'Quien recibe no pudo guardar el pago. No se envió nada; inténtalo de nuevo.',
+      local_pay_declined_decode: 'Quien recibe no pudo leer el pago. No se envió nada; inténtalo de nuevo.',
+      local_pay_broadcast_pending: 'Enviado. Este dispositivo aún no pudo publicarlo en la red; quien recibe lo hará.'
     }
   },
   fr: {
@@ -1428,7 +1448,12 @@ const resources = {
       local_pay_too_large: 'Ce paiement est trop volumineux pour un code QR. Les deux appareils doivent être sous iOS pour le régler à proximité.',
       local_pay_nearby_unavailable: 'Le Wi-Fi à proximité est indisponible. Le code ci-dessus fonctionne toujours.',
       local_pay_retry_save: 'Réessayer d’enregistrer',
-      local_pay_wrong_session: 'Ce paiement ne correspond pas à cette demande et n’a pas été accepté. Demandez au payeur de scanner le code à nouveau.'
+      local_pay_wrong_session: 'Ce paiement ne correspond pas à cette demande et n’a pas été accepté. Demandez au payeur de scanner le code à nouveau.',
+      local_pay_declined_mismatch: 'Le bénéficiaire n’a pas accepté ce paiement : il ne correspond pas à sa demande. Scannez à nouveau son code.',
+      local_pay_declined_already_paid: 'Cette demande a déjà été payée. Rien n’a été envoyé.',
+      local_pay_declined_save: 'Le bénéficiaire n’a pas pu enregistrer le paiement. Rien n’a été envoyé — réessayez.',
+      local_pay_declined_decode: 'Le bénéficiaire n’a pas pu lire le paiement. Rien n’a été envoyé — réessayez.',
+      local_pay_broadcast_pending: 'Envoyé. Cet appareil n’a pas encore pu le publier sur le réseau — le bénéficiaire s’en chargera.'
     }
   },
   ar: {
@@ -1685,7 +1710,12 @@ const resources = {
       local_pay_too_large: 'هذه الدفعة أكبر من أن يتسع لها رمز QR. يجب أن يعمل الجهازان بنظام iOS لدفعها عن قرب.',
       local_pay_nearby_unavailable: 'شبكة Wi-Fi القريبة غير متاحة. الرمز أعلاه ما زال يعمل.',
       local_pay_retry_save: 'حاول الحفظ مرة أخرى',
-      local_pay_wrong_session: 'هذه الدفعة لا تطابق هذا الطلب ولم يتم قبولها. اطلب من الدافع مسح الرمز مرة أخرى.'
+      local_pay_wrong_session: 'هذه الدفعة لا تطابق هذا الطلب ولم يتم قبولها. اطلب من الدافع مسح الرمز مرة أخرى.',
+      local_pay_declined_mismatch: 'لم يقبل المستلم هذه الدفعة لأنها لا تطابق طلبه. امسح رمزه مرة أخرى.',
+      local_pay_declined_already_paid: 'تم دفع هذا الطلب من قبل. لم يُرسل أي شيء.',
+      local_pay_declined_save: 'تعذّر على المستلم حفظ الدفعة. لم يُرسل أي شيء — حاول مرة أخرى.',
+      local_pay_declined_decode: 'تعذّر على المستلم قراءة الدفعة. لم يُرسل أي شيء — حاول مرة أخرى.',
+      local_pay_broadcast_pending: 'تم الإرسال. لم يتمكن هذا الجهاز من نشرها على الشبكة بعد — سيقوم المستلم بذلك.'
     }
   },
   pt: {
@@ -1946,7 +1976,12 @@ const resources = {
       local_pay_too_large: 'Este pagamento é grande demais para um código QR. Os dois dispositivos precisam usar iOS para pagá-lo por perto.',
       local_pay_nearby_unavailable: 'O Wi-Fi por perto está indisponível. O código acima continua funcionando.',
       local_pay_retry_save: 'Tentar salvar de novo',
-      local_pay_wrong_session: 'Esse pagamento não corresponde a esta solicitação e não foi aceito. Peça a quem vai pagar para escanear o código de novo.'
+      local_pay_wrong_session: 'Esse pagamento não corresponde a esta solicitação e não foi aceito. Peça a quem vai pagar para escanear o código de novo.',
+      local_pay_declined_mismatch: 'Quem recebe não aceitou este pagamento: ele não corresponde à solicitação. Escaneie o código novamente.',
+      local_pay_declined_already_paid: 'Essa solicitação já foi paga. Nada foi enviado.',
+      local_pay_declined_save: 'Quem recebe não conseguiu salvar o pagamento. Nada foi enviado — tente de novo.',
+      local_pay_declined_decode: 'Quem recebe não conseguiu ler o pagamento. Nada foi enviado — tente de novo.',
+      local_pay_broadcast_pending: 'Enviado. Este aparelho ainda não conseguiu publicá-lo na rede — quem recebe vai publicar.'
     }
   },
   bn: {
@@ -2205,7 +2240,12 @@ const resources = {
       local_pay_too_large: 'এই পেমেন্টটি QR কোডের জন্য অনেক বড়। কাছাকাছি থেকে এটি পরিশোধ করতে দুটি ডিভাইসেই iOS থাকা দরকার।',
       local_pay_nearby_unavailable: 'কাছাকাছি Wi-Fi পাওয়া যাচ্ছে না। উপরের কোডটি এখনও কাজ করে।',
       local_pay_retry_save: 'আবার সংরক্ষণের চেষ্টা করুন',
-      local_pay_wrong_session: 'সেই পেমেন্টটি এই অনুরোধের সঙ্গে মেলে না, তাই গ্রহণ করা হয়নি। পেমেন্টকারীকে কোডটি আবার স্ক্যান করতে বলুন।'
+      local_pay_wrong_session: 'সেই পেমেন্টটি এই অনুরোধের সঙ্গে মেলে না, তাই গ্রহণ করা হয়নি। পেমেন্টকারীকে কোডটি আবার স্ক্যান করতে বলুন।',
+      local_pay_declined_mismatch: 'প্রাপক এই পেমেন্ট গ্রহণ করেননি — এটি তাঁর অনুরোধের সঙ্গে মেলে না। তাঁর কোডটি আবার স্ক্যান করুন।',
+      local_pay_declined_already_paid: 'সেই অনুরোধের অর্থ ইতিমধ্যেই পরিশোধ হয়েছে। কিছুই পাঠানো হয়নি।',
+      local_pay_declined_save: 'প্রাপক পেমেন্টটি সংরক্ষণ করতে পারেননি। কিছুই পাঠানো হয়নি — আবার চেষ্টা করুন।',
+      local_pay_declined_decode: 'প্রাপক পেমেন্টটি পড়তে পারেননি। কিছুই পাঠানো হয়নি — আবার চেষ্টা করুন।',
+      local_pay_broadcast_pending: 'পাঠানো হয়েছে। এই ডিভাইসটি এখনও নেটওয়ার্কে প্রকাশ করতে পারেনি — প্রাপক সেটি করবেন।'
     }
   },
   ru: {
@@ -2466,7 +2506,12 @@ const resources = {
       local_pay_too_large: 'Этот платёж слишком велик для QR-кода. Чтобы оплатить его поблизости, оба устройства должны быть на iOS.',
       local_pay_nearby_unavailable: 'Wi-Fi поблизости недоступен. Код выше всё ещё работает.',
       local_pay_retry_save: 'Попробовать сохранить снова',
-      local_pay_wrong_session: 'Этот платёж не соответствует запросу и не был принят. Попросите плательщика отсканировать код ещё раз.'
+      local_pay_wrong_session: 'Этот платёж не соответствует запросу и не был принят. Попросите плательщика отсканировать код ещё раз.',
+      local_pay_declined_mismatch: 'Получатель не принял этот платёж — он не соответствует запросу. Отсканируйте его код ещё раз.',
+      local_pay_declined_already_paid: 'Этот запрос уже оплачен. Ничего не отправлено.',
+      local_pay_declined_save: 'Получатель не смог сохранить платёж. Ничего не отправлено — попробуйте ещё раз.',
+      local_pay_declined_decode: 'Получатель не смог прочитать платёж. Ничего не отправлено — попробуйте ещё раз.',
+      local_pay_broadcast_pending: 'Отправлено. Это устройство пока не смогло опубликовать платёж в сети — это сделает получатель.'
     }
   },
   id: {
@@ -2725,7 +2770,12 @@ const resources = {
       local_pay_too_large: 'Pembayaran ini terlalu besar untuk kode QR. Kedua perangkat harus menggunakan iOS untuk membayarnya dari dekat.',
       local_pay_nearby_unavailable: 'Wi-Fi terdekat tidak tersedia. Kode di atas tetap berfungsi.',
       local_pay_retry_save: 'Coba simpan lagi',
-      local_pay_wrong_session: 'Pembayaran itu tidak cocok dengan permintaan ini dan tidak diterima. Minta pembayar memindai kodenya lagi.'
+      local_pay_wrong_session: 'Pembayaran itu tidak cocok dengan permintaan ini dan tidak diterima. Minta pembayar memindai kodenya lagi.',
+      local_pay_declined_mismatch: 'Penerima tidak menerima pembayaran ini — tidak cocok dengan permintaannya. Pindai kodenya lagi.',
+      local_pay_declined_already_paid: 'Permintaan itu sudah dibayar. Tidak ada yang dikirim.',
+      local_pay_declined_save: 'Penerima tidak dapat menyimpan pembayaran. Tidak ada yang dikirim — coba lagi.',
+      local_pay_declined_decode: 'Penerima tidak dapat membaca pembayaran. Tidak ada yang dikirim — coba lagi.',
+      local_pay_broadcast_pending: 'Terkirim. Perangkat ini belum bisa mempublikasikannya ke jaringan — penerima yang akan melakukannya.'
     }
   },
   ja: {
@@ -3001,7 +3051,12 @@ const resources = {
       local_pay_too_large: 'この支払いはQRコードに収まらない大きさです。近くの端末で支払うには、両方の端末がiOSである必要があります。',
       local_pay_nearby_unavailable: '近くのWi-Fiを利用できません。上のコードは引き続き使えます。',
       local_pay_retry_save: 'もう一度保存する',
-      local_pay_wrong_session: 'その支払いはこのリクエストと一致しないため、受け取りませんでした。支払う方にコードをもう一度スキャンしてもらってください。'
+      local_pay_wrong_session: 'その支払いはこのリクエストと一致しないため、受け取りませんでした。支払う方にコードをもう一度スキャンしてもらってください。',
+      local_pay_declined_mismatch: '受取人がこの支払いを受け付けませんでした。リクエストと一致しません。もう一度コードをスキャンしてください。',
+      local_pay_declined_already_paid: 'そのリクエストはすでに支払い済みです。何も送金されていません。',
+      local_pay_declined_save: '受取人が支払いを保存できませんでした。何も送金されていません — もう一度お試しください。',
+      local_pay_declined_decode: '受取人が支払いを読み取れませんでした。何も送金されていません — もう一度お試しください。',
+      local_pay_broadcast_pending: '送金しました。この端末ではまだネットワークに公開できていません — 受取人が公開します。'
     }
   },
   pl: {
@@ -3278,7 +3333,12 @@ const resources = {
       local_pay_too_large: 'Ta płatność jest za duża na kod QR. Aby zapłacić ją w pobliżu, oba urządzenia muszą działać na iOS.',
       local_pay_nearby_unavailable: 'Wi-Fi w pobliżu jest niedostępne. Kod powyżej nadal działa.',
       local_pay_retry_save: 'Spróbuj zapisać ponownie',
-      local_pay_wrong_session: 'Ta płatność nie pasuje do tego żądania i nie została przyjęta. Poproś płatnika o ponowne zeskanowanie kodu.'
+      local_pay_wrong_session: 'Ta płatność nie pasuje do tego żądania i nie została przyjęta. Poproś płatnika o ponowne zeskanowanie kodu.',
+      local_pay_declined_mismatch: 'Odbiorca nie przyjął tej płatności — nie pasuje do jego żądania. Zeskanuj jego kod ponownie.',
+      local_pay_declined_already_paid: 'To żądanie zostało już opłacone. Nic nie wysłano.',
+      local_pay_declined_save: 'Odbiorca nie mógł zapisać płatności. Nic nie wysłano — spróbuj ponownie.',
+      local_pay_declined_decode: 'Odbiorca nie mógł odczytać płatności. Nic nie wysłano — spróbuj ponownie.',
+      local_pay_broadcast_pending: 'Wysłano. To urządzenie nie zdołało jeszcze opublikować płatności w sieci — zrobi to odbiorca.'
     }
   }
 }
