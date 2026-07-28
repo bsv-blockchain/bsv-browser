@@ -1251,6 +1251,42 @@ export default function LocalPaymentsScreen() {
               label={t('local_pay_send')}
               onPress={() => openScanner('send_scan')}
             />
+
+            {/* TEMPORARY simulator affordance — __DEV__ only, never ships.
+                The simulator has no camera, so the payer flow is unreachable
+                there. This mints an OPEN session (no amount) and feeds it
+                through the real `onSessionScanned`, so decodeSession and every
+                downstream branch run exactly as they would from a real scan —
+                what you see is the genuine payer UI, not a mock.
+                supportsAwdl is false so selectTransport picks the QR path,
+                which is the one a simulator can actually complete. */}
+            {__DEV__ && (
+              <>
+                <View style={styles.gapMd} />
+                <SecondaryButton
+                  styles={styles}
+                  colors={colors}
+                  icon="construct"
+                  label="DEV: pay an open request"
+                  onPress={() => {
+                    scanLatchRef.current = false
+                    onSessionScanned(
+                      encodeSession(
+                        mintSession({
+                          // secp256k1 generator point: a genuinely valid
+                          // compressed pubkey, so key derivation won't throw.
+                          identityKey:
+                            '0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798',
+                          derivationPrefix: 'ZGV2LXByZWZpeA==',
+                          derivationSuffix: 'ZGV2LXN1ZmZpeA==',
+                          supportsAwdl: false
+                        })
+                      )
+                    )
+                  }}
+                />
+              </>
+            )}
           </Animated.View>
         )}
 
