@@ -133,7 +133,7 @@ export default function SettingsScreen() {
           />
           <ListRow
             label={t('local_payments')}
-            icon="wifi"
+            icon="wifi-outline"
             iconColor="#007AFF"
             onPress={() => router.push('/local-payments' as any)}
           />

@@ -74,6 +74,7 @@ class QuietEventSource extends (RNEventSource as any) {
 }
 import NetInfo from '@react-native-community/netinfo'
 import { processPending } from '@/utils/localpay/pending'
+import { useTranslation } from 'react-i18next'
 
 
 // Global, origin-agnostic rate limit for auto-approved spending.
@@ -309,6 +310,7 @@ interface WalletContextProps {
 }
 
 export const WalletContextProvider: React.FC<WalletContextProps> = ({ children = <></> }) => {
+  const { t } = useTranslation()
   const [managers, setManagers] = useState<ManagerState>({})
   const [storage, setStorage] = useState<StorageExpoSQLite | null>(null)
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
@@ -1241,8 +1243,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           setLocalPayNotification({
             message:
               successes.length === 1
-                ? 'A local payment was added to your wallet'
-                : `${successes.length} local payments were added to your wallet`,
+                ? t('local_pay_added')
+                : t('local_pay_added_multiple', { count: successes.length }),
             type: 'success'
           })
         }
@@ -1264,7 +1266,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })
 
     return () => unsubscribe()
-  }, [walletBuilt, managers.permissionsManager, storage, adminOriginator])
+  }, [walletBuilt, managers.permissionsManager, storage, adminOriginator, t])
 
   // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
