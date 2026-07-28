@@ -98,10 +98,9 @@ export default function AddressReceive() {
         address,
         derivationPrefix: derivationPrefixFor(getCurrentDate(daysOffset))
       })
-      showToast(
-        importedSatoshis > 0 ? t('local_pay_added') : t('no_pending_payments'),
-        { type: importedSatoshis > 0 ? 'success' : 'info' }
-      )
+      showToast(importedSatoshis > 0 ? t('local_pay_added') : t('no_pending_payments'), {
+        type: importedSatoshis > 0 ? 'success' : 'info'
+      })
       setProcessed(await getProcessedTransactions(wallet as any, adminOriginator, address))
     } catch (e: any) {
       showToast(e?.message || t('unknown_error'), { type: 'error' })
@@ -130,7 +129,11 @@ export default function AddressReceive() {
           </View>
 
           <TouchableOpacity onPress={handleCopy} style={[styles.addressChip, { backgroundColor: colors.fillTertiary }]}>
-            <Text style={[styles.addressText, { color: colors.textSecondary }]} numberOfLines={1} ellipsizeMode="middle">
+            <Text
+              style={[styles.addressText, { color: colors.textSecondary }]}
+              numberOfLines={1}
+              ellipsizeMode="middle"
+            >
               {address}
             </Text>
             <View style={[styles.copyPill, { backgroundColor: copied ? colors.success + '20' : colors.fill }]}>
@@ -177,7 +180,11 @@ export default function AddressReceive() {
                         {formatDistanceToNow(tx.importedAt, { addSuffix: true })}
                       </Text>
                     ) : (
-                      <Text style={[styles.logTxid, { color: colors.textTertiary }]} numberOfLines={1} ellipsizeMode="middle">
+                      <Text
+                        style={[styles.logTxid, { color: colors.textTertiary }]}
+                        numberOfLines={1}
+                        ellipsizeMode="middle"
+                      >
                         {tx.txid}
                       </Text>
                     )}
@@ -274,7 +281,13 @@ const styles = StyleSheet.create({
   totalLabel: { ...typography.subhead },
   totalValue: { ...typography.headline, fontWeight: '700' },
   log: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radii.md, overflow: 'hidden' },
-  logRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
+  logRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md
+  },
   logSats: { ...typography.subhead, fontWeight: '600' },
   logTxid: { ...typography.caption1, fontFamily: 'monospace', flex: 1 },
   logTime: { ...typography.caption1, fontFamily: 'monospace' },

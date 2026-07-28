@@ -88,10 +88,7 @@ async function writeAll(storage: KVStorage, list: WatchedAddress[]): Promise<voi
 }
 
 /** Register (or refresh) an address the user has just been shown. */
-export async function watchAddress(
-  storage: KVStorage,
-  entry: Omit<WatchedAddress, 'lastActivityAt'>
-): Promise<void> {
+export async function watchAddress(storage: KVStorage, entry: Omit<WatchedAddress, 'lastActivityAt'>): Promise<void> {
   return withQueueLock(async () => {
     const now = Date.now()
     const existing = (await readAll(storage)).filter(e => e.address !== entry.address)
@@ -111,9 +108,7 @@ export async function touchWatched(storage: KVStorage, address: string): Promise
     const all = await readAll(storage)
     if (!all.some(e => e.address === address)) return
     const now = Date.now()
-    const next = all.map(e =>
-      e.address === address ? { ...e, lastActivityAt: new Date(now).toISOString() } : e
-    )
+    const next = all.map(e => (e.address === address ? { ...e, lastActivityAt: new Date(now).toISOString() } : e))
     await writeAll(storage, pruneWatchlist(next, now))
   })
 }

@@ -11,8 +11,9 @@ import { legacyRedirectTarget } from '@/utils/pay/rails'
 
 export default function RetiredLocalPaymentsRoute() {
   const params = useLocalSearchParams<Record<string, string | string[]>>()
-  const flat = Object.fromEntries(
-    Object.entries(params).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])
-  ) as Record<string, string | undefined>
+  const flat = Object.fromEntries(Object.entries(params).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])) as Record<
+    string,
+    string | undefined
+  >
   return <Redirect href={legacyRedirectTarget('local-payments', flat)} />
 }

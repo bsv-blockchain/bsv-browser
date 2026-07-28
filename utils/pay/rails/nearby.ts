@@ -22,9 +22,4 @@ export {
 export { buildPaymentFrame, finalizeDelivery } from '@/utils/localpay/build'
 export { awdlTransport } from '@/utils/localpay/transport/awdl'
 export { localSupportsAwdl, selectTransport } from '@/utils/localpay/transport/select'
-export {
-  isDeclineReason,
-  type Ack,
-  type ConfirmDelivery,
-  type DeclineReason
-} from '@/utils/localpay/transport/types'
+export { isDeclineReason, type Ack, type ConfirmDelivery, type DeclineReason } from '@/utils/localpay/transport/types'

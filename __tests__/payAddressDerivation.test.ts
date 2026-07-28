@@ -52,7 +52,7 @@ describe('derivation key material', () => {
     expect(BRC29_PROTOCOL_ID).toEqual([2, '3241645161d8'])
   })
 
-  it("derives the prefix as base64 of the date string", () => {
+  it('derives the prefix as base64 of the date string', () => {
     expect(derivationPrefixFor('2026-07-28')).toBe(Utils.toBase64(Utils.toArray('2026-07-28', 'utf8')))
   })
 

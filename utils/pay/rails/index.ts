@@ -59,7 +59,10 @@ export const CONSEQUENCE_KEYS: Record<RailId, string> = {
 
 /** Strips a `bitcoin:` scheme and any query string, leaving a bare address candidate. */
 export function normalizeAddressInput(raw: string): string {
-  return raw.replace(/^bitcoin:/i, '').split('?')[0].trim()
+  return raw
+    .replace(/^bitcoin:/i, '')
+    .split('?')[0]
+    .trim()
 }
 
 export function isValidBsvAddress(text: string): boolean {
@@ -127,8 +130,7 @@ export function legacyRedirectTarget(
   route: 'payments' | 'legacy-payments' | 'local-payments',
   params: Record<string, string | undefined>
 ): { pathname: '/pay'; params: Record<string, string> } {
-  const cell: PayCell =
-    route === 'payments' ? 'pay-handle' : route === 'legacy-payments' ? 'get-address' : 'get-nearby'
+  const cell: PayCell = route === 'payments' ? 'pay-handle' : route === 'legacy-payments' ? 'get-address' : 'get-nearby'
   const forwarded: Record<string, string> = { cell }
   for (const key of ['peerpay', 'identityKey', 'sats'] as const) {
     const value = params[key]

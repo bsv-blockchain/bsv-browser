@@ -148,16 +148,7 @@ interface ConfigPanelProps {
   readonly onNone: () => void
 }
 
-export function ConfigPanel({
-  urlInput,
-  isSaving,
-  colors,
-  t,
-  onChangeUrl,
-  onSave,
-  onReset,
-  onNone
-}: ConfigPanelProps) {
+export function ConfigPanel({ urlInput, isSaving, colors, t, onChangeUrl, onSave, onReset, onNone }: ConfigPanelProps) {
   const hasUrl = !!urlInput.trim()
   const isNonDefault = urlInput.trim() !== DEFAULT_MESSAGE_BOX_URL && urlInput !== NO_MESSAGE_BOX
   return (
@@ -201,10 +192,7 @@ export function ConfigPanel({
       {/* Secondary / destructive row */}
       <View style={styles.configSecondaryActions}>
         {isNonDefault && (
-          <TouchableOpacity
-            onPress={onReset}
-            style={[styles.configResetPill, { borderColor: colors.textSecondary }]}
-          >
+          <TouchableOpacity onPress={onReset} style={[styles.configResetPill, { borderColor: colors.textSecondary }]}>
             <Ionicons name="refresh" size={12} color={colors.textSecondary} />
             <Text style={[styles.configResetText, { color: colors.textSecondary }]}>Default</Text>
           </TouchableOpacity>

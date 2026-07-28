@@ -20,23 +20,23 @@ jest.mock('expo-haptics', () => ({
   impactAsync: jest.fn(() => Promise.resolve()),
   notificationAsync: jest.fn(() => Promise.resolve()),
   ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
-  NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
+  NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' }
 }))
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }))
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-  SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children,
+  SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children
 }))
 
 // `t` returns the key, so every assertion below names the key it depends on.
 jest.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }),
+  useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } })
 }))
 
 jest.mock('@/context/WalletContext', () => ({
-  useWallet: () => ({ walletBuilding: false, walletBuilt: true }),
+  useWallet: () => ({ walletBuilding: false, walletBuilt: true })
 }))
 
 const mockParams: Record<string, string> = {}
@@ -61,7 +61,12 @@ import { ThemeProvider } from '@/context/theme/ThemeContext'
 // so an uppercase key is rejected as malformed.
 const KEY = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
 
-const draw = () => render(<ThemeProvider><PayScreen /></ThemeProvider>)
+const draw = () =>
+  render(
+    <ThemeProvider>
+      <PayScreen />
+    </ThemeProvider>
+  )
 
 describe('PayScreen', () => {
   beforeEach(() => {

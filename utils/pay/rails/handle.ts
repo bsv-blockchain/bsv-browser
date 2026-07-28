@@ -9,12 +9,7 @@
  * makes a crash recoverable.
  */
 import type { IncomingPayment, PaymentToken, PeerPayClient } from '@bsv/message-box-client'
-import {
-  markOutboxSent,
-  saveOutboxEntry,
-  updateOutboxEntry,
-  type OutboxEntry
-} from '@/utils/peerpay/outbox'
+import { markOutboxSent, saveOutboxEntry, updateOutboxEntry, type OutboxEntry } from '@/utils/peerpay/outbox'
 
 export const MESSAGE_BOX_URL_KEY = 'message_box_url'
 export const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
@@ -44,9 +39,7 @@ interface InternalizingWallet {
  */
 export function peerPayLinkFor(identityKey: string, sats?: number): string {
   const amount = sats !== undefined ? Math.round(Number(sats)) : NaN
-  return Number.isFinite(amount) && amount > 0
-    ? `peerpay:${identityKey}?sats=${amount}`
-    : `peerpay:${identityKey}`
+  return Number.isFinite(amount) && amount > 0 ? `peerpay:${identityKey}?sats=${amount}` : `peerpay:${identityKey}`
 }
 
 /** Credit an incoming payment, then acknowledge it. Never acknowledge first. */

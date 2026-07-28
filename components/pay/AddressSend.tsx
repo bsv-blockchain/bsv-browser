@@ -74,7 +74,11 @@ export default function AddressSend({ initialAddress }: { initialAddress?: strin
   }, [wallet, adminOriginator, address, amount, currency, satoshisPerUSD, t])
 
   return (
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+    <ScrollView
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
       <View style={styles.fieldGroup}>
         <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>{t('recipient_address').toUpperCase()}</Text>
         <View
@@ -92,7 +96,11 @@ export default function AddressSend({ initialAddress }: { initialAddress?: strin
             autoCorrect={false}
             style={[styles.input, { color: colors.textPrimary }]}
           />
-          <TouchableOpacity onPress={() => setScannerVisible(true)} style={styles.inputAction} accessibilityLabel={t('scan_qr_code')}>
+          <TouchableOpacity
+            onPress={() => setScannerVisible(true)}
+            style={styles.inputAction}
+            accessibilityLabel={t('scan_qr_code')}
+          >
             <Ionicons name="qr-code-outline" size={20} color={colors.accent} />
           </TouchableOpacity>
         </View>
@@ -131,9 +139,19 @@ export default function AddressSend({ initialAddress }: { initialAddress?: strin
         )}
       </PressableScale>
 
-      <Modal visible={scannerVisible} animationType="slide" onRequestClose={() => setScannerVisible(false)} statusBarTranslucent>
+      <Modal
+        visible={scannerVisible}
+        animationType="slide"
+        onRequestClose={() => setScannerVisible(false)}
+        statusBarTranslucent
+      >
         <StatusBar style="light" />
-        <QRScanner multiScan onScan={onScan} onClose={() => setScannerVisible(false)} hintText={t('scan_bsv_address_hint')} />
+        <QRScanner
+          multiScan
+          onScan={onScan}
+          onClose={() => setScannerVisible(false)}
+          hintText={t('scan_bsv_address_hint')}
+        />
       </Modal>
     </ScrollView>
   )

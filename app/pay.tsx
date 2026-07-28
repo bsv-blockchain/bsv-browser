@@ -43,14 +43,44 @@ interface CellSpec {
 
 const CELLS: Record<Direction, CellSpec[]> = {
   pay: [
-    { cell: 'pay-nearby', titleKey: 'pay_cell_nearby_pay', subtitleKey: 'pay_cell_nearby_pay_sub', icon: 'scan-outline' },
-    { cell: 'pay-handle', titleKey: 'pay_cell_handle_pay', subtitleKey: 'pay_cell_handle_pay_sub', icon: 'person-outline' },
-    { cell: 'pay-address', titleKey: 'pay_cell_address_pay', subtitleKey: 'pay_cell_address_pay_sub', icon: 'wallet-outline' }
+    {
+      cell: 'pay-nearby',
+      titleKey: 'pay_cell_nearby_pay',
+      subtitleKey: 'pay_cell_nearby_pay_sub',
+      icon: 'scan-outline'
+    },
+    {
+      cell: 'pay-handle',
+      titleKey: 'pay_cell_handle_pay',
+      subtitleKey: 'pay_cell_handle_pay_sub',
+      icon: 'person-outline'
+    },
+    {
+      cell: 'pay-address',
+      titleKey: 'pay_cell_address_pay',
+      subtitleKey: 'pay_cell_address_pay_sub',
+      icon: 'wallet-outline'
+    }
   ],
   get: [
-    { cell: 'get-nearby', titleKey: 'pay_cell_nearby_get', subtitleKey: 'pay_cell_nearby_get_sub', icon: 'qr-code-outline' },
-    { cell: 'get-handle', titleKey: 'pay_cell_handle_get', subtitleKey: 'pay_cell_handle_get_sub', icon: 'person-outline' },
-    { cell: 'get-address', titleKey: 'pay_cell_address_get', subtitleKey: 'pay_cell_address_get_sub', icon: 'wallet-outline' }
+    {
+      cell: 'get-nearby',
+      titleKey: 'pay_cell_nearby_get',
+      subtitleKey: 'pay_cell_nearby_get_sub',
+      icon: 'qr-code-outline'
+    },
+    {
+      cell: 'get-handle',
+      titleKey: 'pay_cell_handle_get',
+      subtitleKey: 'pay_cell_handle_get_sub',
+      icon: 'person-outline'
+    },
+    {
+      cell: 'get-address',
+      titleKey: 'pay_cell_address_get',
+      subtitleKey: 'pay_cell_address_get_sub',
+      icon: 'wallet-outline'
+    }
   ]
 }
 
@@ -130,9 +160,7 @@ export default function PayScreen() {
               accessibilityState={{ selected: active }}
               accessibilityLabel={t(d === 'pay' ? 'pay_direction_pay' : 'pay_direction_receive')}
             >
-              <Text
-                style={[styles.segmentLabel, { color: active ? colors.textPrimary : colors.textTertiary }]}
-              >
+              <Text style={[styles.segmentLabel, { color: active ? colors.textPrimary : colors.textTertiary }]}>
                 {t(d === 'pay' ? 'pay_direction_pay' : 'pay_direction_receive')}
               </Text>
             </PressableScale>
@@ -162,11 +190,7 @@ export default function PayScreen() {
         return <NearbyFlow role="payee" onExit={() => setCell(null)} />
       case 'pay-handle':
         return (
-          <HandleSend
-            initialIdentityKey={initialIdentityKey}
-            initialSats={initialSats}
-            initialNotice={peerPayNotice}
-          />
+          <HandleSend initialIdentityKey={initialIdentityKey} initialSats={initialSats} initialNotice={peerPayNotice} />
         )
       case 'get-handle':
         return <HandleReceive />

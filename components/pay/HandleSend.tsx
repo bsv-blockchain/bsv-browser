@@ -32,11 +32,7 @@ import { ExchangeRateContext } from '@/context/ExchangeRateContext'
 import { formatAmount } from '@/utils/amountFormatHelpers'
 import { CONSEQUENCE_KEYS } from '@/utils/pay/rails'
 import { NO_MESSAGE_BOX, retryDelivery, sendViaHandle } from '@/utils/pay/rails/handle'
-import {
-  getOutboxEntries,
-  removeOutboxEntry,
-  type OutboxEntry
-} from '@/utils/peerpay/outbox'
+import { getOutboxEntries, removeOutboxEntry, type OutboxEntry } from '@/utils/peerpay/outbox'
 import { haptics } from '@/hooks/useHaptics'
 
 const FIRST_PAYMENT_KEY = 'hasSentFirstPayment'

@@ -170,7 +170,13 @@ describe('sendViaHandle', () => {
       createPaymentToken: jest.fn().mockResolvedValue(token),
       sendMessage: jest.fn().mockResolvedValue(undefined)
     }
-    await sendViaHandle({ client: client as never, storage: s, recipient: KEY, satoshis: 700, messageBoxUrl: 'https://mb' })
+    await sendViaHandle({
+      client: client as never,
+      storage: s,
+      recipient: KEY,
+      satoshis: 700,
+      messageBoxUrl: 'https://mb'
+    })
     expect((await getOutboxEntries(s))[0].status).toBe('sent')
   })
 
@@ -194,7 +200,13 @@ describe('sendViaHandle', () => {
       createPaymentToken: jest.fn().mockResolvedValue(token),
       sendMessage: jest.fn().mockResolvedValue(undefined)
     }
-    await sendViaHandle({ client: client as never, storage: s, recipient: KEY, satoshis: 700, messageBoxUrl: 'https://mb' })
+    await sendViaHandle({
+      client: client as never,
+      storage: s,
+      recipient: KEY,
+      satoshis: 700,
+      messageBoxUrl: 'https://mb'
+    })
     expect(client.sendMessage).toHaveBeenCalledWith({
       recipient: KEY,
       messageBox: 'payment_inbox',
