@@ -131,6 +131,7 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
     // is scoped to the one accepted payment per session.
     let timeout = DispatchWorkItem { [weak self] in
       guard let self else { return }
+      dispatchPrecondition(condition: .onQueue(self.queue))
       self.live.removeValue(forKey: key)
       self.readTimeouts.removeValue(forKey: key)
       conn.cancel()
@@ -143,7 +144,25 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
       // the queue it was started with, which is `queue` for every
       // connection accepted here.
       guard let self else { return }
-      self.readTimeouts.removeValue(forKey: key)?.cancel()
+      dispatchPrecondition(condition: .onQueue(self.queue))
+
+      // The read timeout and this completion are two independently
+      // scheduled callbacks feeding the same serial queue, with no shared
+      // gate between them otherwise. Removing our own entry from
+      // `readTimeouts` doubles as that gate, mirroring `settled` in
+      // `sendFrame`: whichever of the two runs first "wins" by taking the
+      // entry, and the other must bail. If it's already gone here, the
+      // timeout fired first, already reaped `live`, and already cancelled
+      // `conn` -- so bail before touching `result` at all. Neither success
+      // nor failure may proceed on a connection the timeout already
+      // terminated (a `.success` here would otherwise call `onFrame` with
+      // real payment data for a connection whose ack send is doomed to
+      // fail, telling the payee's JS layer it holds a payment before the
+      // ack failure is even reported).
+      guard let timeoutItem = self.readTimeouts.removeValue(forKey: key) else {
+        return
+      }
+      timeoutItem.cancel()
 
       switch result {
       case .success(let data):
