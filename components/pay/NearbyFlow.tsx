@@ -1233,11 +1233,12 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.xxxl }]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ══ Choose a role ══
-            Focal: the primary action. The payee starts the exchange — they mint
-            the session — so Request is the filled default and Send is demoted to
-            an outline. Two equally-weighted buttons would leave the view with no
-            focal point at all. */}
+        {/* ══ Payer entry ══
+            The Pay screen's grid already asked which side of the exchange this
+            device is on, so there is no role choice left to make here and only
+            one action: raise the camera again. Reached only by dismissing the
+            scanner that opens on mount — a payee never sees this view, they go
+            straight to naming an amount. */}
         {phase === 'entry' && initialRole === 'payer' && (
           <Animated.View entering={settleIn} style={styles.stage}>
             <View style={[styles.heroCircle, { backgroundColor: colors.fillTertiary }]}>
