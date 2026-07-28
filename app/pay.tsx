@@ -216,7 +216,8 @@ export default function PayScreen() {
           <Ionicons name={I18nManager.isRTL ? 'chevron-forward' : 'chevron-back'} size={24} color={colors.accent} />
         </PressableScale>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          {cell ? t(CELL_TITLE_KEYS[cell]) : t('pay')}
+          {/* The screen is Payments; `pay` is the direction tab and the CTA. */}
+          {cell ? t(CELL_TITLE_KEYS[cell]) : t('payments')}
         </Text>
         <View style={styles.headerBtn} />
       </View>

@@ -104,7 +104,7 @@ export default function SettingsScreen() {
               which is why four rows (and the identity-key QR, now Get paid →
               handle) collapse into this one. */}
           <ListRow
-            label={t('pay')}
+            label={t('payments')}
             icon="swap-horizontal-outline"
             iconColor={colors.success}
             onPress={() => router.push('/pay')}

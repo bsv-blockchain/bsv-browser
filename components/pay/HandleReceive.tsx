@@ -11,9 +11,10 @@
  * one internalizes it — so the list, the per-payment note and Accept all are
  * carried over from the old Payments screen unchanged.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  AppState,
   Image,
   ScrollView,
   Share,
@@ -23,6 +24,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native'
+import { useFocusEffect } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import Clipboard from '@react-native-clipboard/clipboard'
 import QRCode from 'react-native-qrcode-svg'
@@ -39,6 +41,15 @@ import { radii, spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import { makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
 import { NO_MESSAGE_BOX, acceptWithRetry, internalizeIncoming, peerPayLinkFor } from '@/utils/pay/rails/handle'
+
+/**
+ * How often the inbox is re-read while this screen is in front.
+ *
+ * Five seconds is the "it just appeared" threshold without making the poll the
+ * app's most frequent network call: it is one MessageBox list read, and it stops
+ * entirely on blur, on background and during an accept.
+ */
+const INBOX_POLL_MS = 5000
 
 // ── Incoming Section ─────────────────────────────────────────────────────────
 //
@@ -280,6 +291,24 @@ export default function HandleReceive() {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
+  /** One inbox read at a time — see fetchPayments. */
+  const fetchingRef = useRef(false)
+  /** An accept is running; it refreshes the list itself, so the poll stands off. */
+  const acceptingRef = useRef(false)
+  /**
+   * Whether this screen is the one on top. Pushing another route leaves this
+   * component mounted, so mount alone is not "the user is looking at it".
+   */
+  const focusedRef = useRef(true)
+  useFocusEffect(
+    useCallback(() => {
+      focusedRef.current = true
+      return () => {
+        focusedRef.current = false
+      }
+    }, [])
+  )
+
   useEffect(() => {
     wallet?.getPublicKey({ identityKey: true }, adminOriginator).then(r => r && setIdentityKey(r.publicKey))
   }, [wallet, adminOriginator])
@@ -313,29 +342,84 @@ export default function HandleReceive() {
     void Share.share({ message: link }).catch(() => {})
   }, [link])
 
-  const fetchPayments = useCallback(async () => {
-    const client = peerPayClient
-    if (!client || !messageBoxUrl || messageBoxUrl === NO_MESSAGE_BOX) return
-    setLoading(true)
-    try {
-      const list = await client.listIncomingPayments(messageBoxUrl)
-      setPayments(list)
-      const idClient = makeIdentityClient(wallet as any, adminOriginator)
-      if (idClient) {
-        const senders = [...new Set(list.map(p => p.sender).filter(Boolean))] as string[]
-        const entries = await Promise.all(senders.map(s => resolveIdentity(idClient, s)))
-        setSenderIdentities(Object.fromEntries(entries))
+  const fetchPayments = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      const client = peerPayClient
+      if (!client || !messageBoxUrl || messageBoxUrl === NO_MESSAGE_BOX) return
+      // One read at a time. The poll, the refresh button and every accept all
+      // reach this, and two overlapping reads can land out of order — the older
+      // response winning would resurrect a row that was just internalized.
+      if (fetchingRef.current) return
+      fetchingRef.current = true
+      if (!options.silent) setLoading(true)
+      try {
+        const list = await client.listIncomingPayments(messageBoxUrl)
+        setPayments(list)
+        const idClient = makeIdentityClient(wallet as any, adminOriginator)
+        if (idClient) {
+          const senders = [...new Set(list.map(p => p.sender).filter(Boolean))] as string[]
+          const entries = await Promise.all(senders.map(s => resolveIdentity(idClient, s)))
+          setSenderIdentities(Object.fromEntries(entries))
+        }
+      } catch (error: any) {
+        // A silent read is a poll the user did not ask for, so it fails quietly:
+        // at one read every few seconds, a dead network would otherwise raise a
+        // toast per tick. Only a read the user triggered reports failure.
+        if (!options.silent) {
+          showToast(`${t('connection_failed')}: ${error?.message || t('unknown_error')}`, { type: 'error' })
+        }
+      } finally {
+        fetchingRef.current = false
+        if (!options.silent) setLoading(false)
       }
-    } catch (error: any) {
-      showToast(`${t('connection_failed')}: ${error?.message || t('unknown_error')}`, { type: 'error' })
-    } finally {
-      setLoading(false)
-    }
-  }, [peerPayClient, messageBoxUrl, wallet, adminOriginator, t])
+    },
+    [peerPayClient, messageBoxUrl, wallet, adminOriginator, t]
+  )
 
   useEffect(() => {
     void fetchPayments()
   }, [fetchPayments])
+
+  // Read through a ref so the poll below depends only on the client, and is
+  // never torn down and restarted by an unrelated re-render.
+  const fetchRef = useRef(fetchPayments)
+  useEffect(() => {
+    fetchRef.current = fetchPayments
+  }, [fetchPayments])
+
+  // ── Poll the inbox ──
+  //
+  // A payment arrives whenever the sender's wallet delivers it and MessageBox has
+  // no push channel here, so "it appears on its own" means polling — but only
+  // while someone is actually looking at this screen. Three gates, each for its
+  // own reason: unmount and blur stop it because a poll nobody can see spends
+  // battery to update a screen that is not on; a backgrounded app stops it for
+  // the same reason and because iOS will suspend the timer anyway; and an accept
+  // in flight stops it because that path refreshes the list itself.
+  useEffect(() => {
+    if (!peerPayClient) return
+    let cancelled = false
+
+    const tick = () => {
+      if (cancelled || !focusedRef.current) return
+      if (AppState.currentState !== 'active') return
+      if (acceptingRef.current) return
+      void fetchRef.current({ silent: true })
+    }
+
+    const interval = setInterval(tick, INBOX_POLL_MS)
+    // Returning to the app should show what arrived while it was away, rather
+    // than waiting out the rest of an interval.
+    const appSubscription = AppState.addEventListener('change', next => {
+      if (next === 'active') tick()
+    })
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      appSubscription.remove()
+    }
+  }, [peerPayClient])
 
   const internalize = useCallback(
     async (payment: IncomingPayment, description: string) => {
@@ -354,13 +438,17 @@ export default function HandleReceive() {
       const description = notes[id]?.trim() || 'Identity Payment'
       setAcceptingId(id)
       setEditingNoteId(null)
+      acceptingRef.current = true
       try {
         await acceptWithRetry(client, messageBoxUrl, payment, description, internalize)
         setResult({ type: 'success', message: t('local_pay_added') })
-        void fetchPayments()
+        await fetchPayments()
       } catch (e: any) {
         setResult({ type: 'error', message: e?.message || t('unknown_error') })
       } finally {
+        // Released only after the refresh above has resolved, so the next poll
+        // reads a list that already reflects this accept.
+        acceptingRef.current = false
         setAcceptingId(null)
         setTimeout(() => setResult(null), 5000)
       }
@@ -373,6 +461,7 @@ export default function HandleReceive() {
     if (!client || payments.length === 0) return
     setAcceptingAll(true)
     setEditingNoteId(null)
+    acceptingRef.current = true
     let successCount = 0
     let lastError: string | null = null
     for (const payment of payments) {
@@ -392,10 +481,11 @@ export default function HandleReceive() {
           ? `${t('local_pay_added_multiple', { count: successCount })} (${lastError})`
           : t('local_pay_added_multiple', { count: successCount })
       })
-      void fetchPayments()
+      await fetchPayments()
     } else if (lastError) {
       setResult({ type: 'error', message: lastError })
     }
+    acceptingRef.current = false
     setAcceptingAll(false)
     setTimeout(() => setResult(null), 5000)
   }, [peerPayClient, payments, notes, messageBoxUrl, internalize, fetchPayments, t])

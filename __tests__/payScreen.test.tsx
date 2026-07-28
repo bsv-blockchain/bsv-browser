@@ -80,6 +80,15 @@ describe('PayScreen', () => {
     expect(getByText('pay_cell_address_pay')).toBeTruthy()
   })
 
+  it('titles the screen Payments, keeping Pay for the direction tab', () => {
+    // The screen is a destination ("Payments"); `pay` is a direction and a verb
+    // on the button. Conflating them was the original naming mistake.
+    const { getByText } = draw()
+    expect(getByText('payments')).toBeTruthy()
+    expect(getByText('pay_direction_pay')).toBeTruthy()
+    expect(getByText('pay_direction_receive')).toBeTruthy()
+  })
+
   it('opens the handle cell when a deep link names it', () => {
     mockParams.cell = 'pay-handle'
     const { UNSAFE_getByType } = draw()
