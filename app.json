@@ -135,7 +135,9 @@
           "blob",
           "data"
         ],
-        "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use."
+        "NSLocationWhenInUseUsageDescription": "BSV Browser may request your location to enable features like discovering nearby devices/services and providing region-specific functionality. Your location is only used while the app is in use.",
+        "NSBonjourServices": ["_bsvpay._tcp"],
+        "NSLocalNetworkUsageDescription": "BSV Browser uses the local network to send and receive payments directly between nearby devices."
       }
     },
     "owner": "bsvb"
