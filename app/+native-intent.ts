@@ -3,7 +3,7 @@ import { isExternalBrowserUrl, setPendingInitialBrowserUrl } from '@/utils/exter
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }) {
   try {
     if (path?.toLowerCase().startsWith('peerpay:')) {
-      return `/payments?peerpay=${encodeURIComponent(path)}`
+      return `/pay?cell=pay-handle&peerpay=${encodeURIComponent(path)}`
     }
 
     // http/https links are opened in-browser by useDeepLinking, which reads the

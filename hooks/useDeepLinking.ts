@@ -92,7 +92,7 @@ export function useDeepLinking() {
   )
 
   const handlePeerPayLink = useCallback((url: string) => {
-    router.replace({ pathname: '/payments', params: { peerpay: url } })
+    router.replace({ pathname: '/pay', params: { cell: 'pay-handle', peerpay: url } })
   }, [])
 
   /**

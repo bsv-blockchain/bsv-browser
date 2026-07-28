@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Modal, Pressable } from 'react-native'
+import { View, Text, ScrollView, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { spacing, typography, radii } from '@/context/theme/tokens'
-import { Ionicons } from '@expo/vector-icons'
+import { spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import { useBrowserMode } from '@/context/BrowserModeContext'
 import { GroupedSection } from '@/components/ui/GroupedList'
@@ -12,8 +11,6 @@ import { router } from 'expo-router'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { sdk } from '@bsv/wallet-toolbox-mobile'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import Clipboard from '@react-native-clipboard/clipboard'
-import QRCode from 'react-native-qrcode-svg'
 
 const CACHE_DURATION = 30000
 
@@ -25,25 +22,8 @@ export default function SettingsScreen() {
   const balanceCacheKey = `cached_wallet_balance_${selectedNetwork}`
   const balanceCacheTimestampKey = `cached_wallet_balance_ts_${selectedNetwork}`
   const { isWeb2Mode } = useBrowserMode()
-  const [identityKey, setIdentityKey] = useState('')
-  const [copiedKey, setCopiedKey] = useState(false)
-  const [showQr, setShowQr] = useState(false)
   const [accountBalance, setAccountBalance] = useState<number | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
-
-  // Fetch identity key
-  useEffect(() => {
-    managers?.permissionsManager
-      ?.getPublicKey({ identityKey: true }, adminOriginator)
-      .then(r => r && setIdentityKey(r.publicKey))
-  }, [managers, adminOriginator])
-
-  const handleCopyKey = () => {
-    if (!identityKey) return
-    Clipboard.setString(identityKey)
-    setCopiedKey(true)
-    setTimeout(() => setCopiedKey(false), 2000)
-  }
 
   // Fetch wallet balance — keep last known value visible during network switch
   const refreshBalance = useCallback(async () => {
@@ -119,52 +99,17 @@ export default function SettingsScreen() {
             iconColor="#32ADE6"
             onPress={() => router.push('/transactions')}
           />
+          {/* One row for every money path. Direction and counterparty are chosen
+              inside /pay, where the transport is inferred rather than picked —
+              which is why four rows (and the identity-key QR, now Get paid →
+              handle) collapse into this one. */}
           <ListRow
-            label={t('payments')}
-            icon="people-outline"
+            label={t('pay')}
+            icon="swap-horizontal-outline"
             iconColor={colors.success}
-            onPress={() => router.push('/payments' as any)}
+            onPress={() => router.push('/pay')}
+            isLast
           />
-          <ListRow
-            label={t('legacy_bridge')}
-            icon="qr-code-outline"
-            iconColor="#FF9500"
-            onPress={() => router.push('/legacy-payments' as any)}
-          />
-          <ListRow
-            label={t('local_payments')}
-            icon="wifi-outline"
-            iconColor="#007AFF"
-            onPress={() => router.push('/local-payments' as any)}
-          />
-          {identityKey ? (
-            <ListRow
-              label={t('identity_key')}
-              icon="finger-print-outline"
-              iconColor="#5856D6"
-              showChevron={false}
-              onPress={handleCopyKey}
-              trailing={
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <TouchableOpacity onPress={handleCopyKey} style={{ padding: spacing.xs, marginLeft: spacing.xs }}>
-                    <Ionicons
-                      name={copiedKey ? 'checkmark' : 'copy-outline'}
-                      size={18}
-                      color={copiedKey ? colors.success : colors.textSecondary}
-                    />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => setShowQr(true)}
-                    style={{ padding: spacing.xs, marginLeft: spacing.xs }}
-                    accessibilityLabel={t('identity_key')}
-                  >
-                    <Ionicons name="qr-code-outline" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                </View>
-              }
-              isLast
-            />
-          ) : null}
         </GroupedSection>
 
         {/* ── Settings drill-down ── */}
@@ -178,34 +123,6 @@ export default function SettingsScreen() {
           />
         </GroupedSection>
       </ScrollView>
-
-      {/* ── Identity Key QR popover ── */}
-      <Modal visible={showQr} transparent animationType="fade" onRequestClose={() => setShowQr(false)}>
-        <Pressable style={localStyles.qrBackdrop} onPress={() => setShowQr(false)}>
-          <Pressable style={[localStyles.qrPopover, { backgroundColor: colors.backgroundElevated }]} onPress={() => {}}>
-            <View style={localStyles.qrPopoverHeader}>
-              <Text style={[localStyles.qrPopoverTitle, { color: colors.textPrimary }]}>{t('identity_key')}</Text>
-              <TouchableOpacity
-                onPress={() => setShowQr(false)}
-                style={localStyles.qrCloseBtn}
-                accessibilityLabel={t('go_back')}
-              >
-                <Ionicons name="close" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <View style={localStyles.qrCard}>
-              <QRCode value={identityKey} size={260} color="#000" backgroundColor="#fff" />
-            </View>
-            <Text
-              style={[localStyles.qrKeyLabel, { color: colors.textSecondary }]}
-              numberOfLines={1}
-              ellipsizeMode="middle"
-            >
-              {identityKey}
-            </Text>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </View>
   )
 }
@@ -228,61 +145,5 @@ const localStyles = StyleSheet.create({
     letterSpacing: 0.4,
     minHeight: 42,
     lineHeight: 42
-  },
-
-  /* ── QR popover ── */
-  qrBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xxxl
-  },
-  qrPopover: {
-    width: '100%',
-    maxWidth: 360,
-    borderRadius: radii.xl,
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xl,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 12
-  },
-  qrPopoverHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.md
-  },
-  qrPopoverTitle: {
-    ...typography.headline,
-    fontWeight: '600'
-  },
-  qrCloseBtn: {
-    width: 30,
-    height: 30,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  qrCard: {
-    alignItems: 'center',
-    marginVertical: spacing.md,
-    padding: spacing.lg,
-    borderRadius: radii.lg,
-    backgroundColor: '#fff',
-    alignSelf: 'center',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 4
-  },
-  qrKeyLabel: {
-    ...typography.caption1,
-    fontFamily: 'monospace',
-    textAlign: 'center',
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs
   }
 })
