@@ -142,6 +142,62 @@ describe('localpay session', () => {
     expect(decodeSession(amountQr(5000)).amount).toBe(5000)
   })
 
+  // ── Open requests: the payee names no figure and the payer chooses ──
+  //
+  // The distinction that matters is ABSENT vs PRESENT-BUT-BAD. Absent is a
+  // legitimate request shape; anything else is a payee asserting a number, and
+  // a bad one must be refused rather than degraded into "any amount", which
+  // would put a live Send button under a corrupt value.
+
+  it('mints an open session with no amount', () => {
+    const s = mintSession({ ...args, amount: undefined })
+    expect(s.amount).toBeUndefined()
+    expect('amount' in s).toBe(false)
+  })
+
+  it('refuses to mint a session with a bad amount', () => {
+    expect(() => mintSession({ ...args, amount: 0 })).toThrow(CodecError)
+    expect(() => mintSession({ ...args, amount: -1 })).toThrow(CodecError)
+    expect(() => mintSession({ ...args, amount: 1.5 })).toThrow(CodecError)
+  })
+
+  it('round-trips an open session', () => {
+    const s = mintSession({ ...args, amount: undefined })
+    const back = decodeSession(encodeSession(s))
+    expect(back).toEqual(s)
+    expect(back.amount).toBeUndefined()
+  })
+
+  it('omits the amount key entirely rather than encoding null', () => {
+    const s = mintSession({ ...args, amount: undefined })
+    const b64 = encodeSession(s).slice('bsvpay1:'.length).replace(/-/g, '+').replace(/_/g, '/')
+    const body = globalThis.atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4))
+    expect(body).not.toContain('"a"')
+  })
+
+  it('treats an absent amount as an open request', () => {
+    const qr = encodeCustomQR({
+      v: SESSION_VERSION,
+      c: 0,
+      s: 'A'.repeat(22),
+      k: 'A'.repeat(43),
+      i: args.identityKey,
+      p: 'cHJlZml4',
+      x: 'c3VmZml4',
+    })
+    expect(decodeSession(qr).amount).toBeUndefined()
+  })
+
+  // An explicit null is a shape encodeSession never produces. Accepting it
+  // would widen the payer-chooses path to something no honest peer sends.
+  it('rejects an explicit null amount rather than reading it as open', () => {
+    expect(() => decodeSession(amountQr(null))).toThrow(CodecError)
+  })
+
+  it('keeps an open session small enough for one static QR', () => {
+    expect(encodeSession(mintSession({ ...args, amount: undefined })).length).toBeLessThan(300)
+  })
+
   it('rejects non-numeric caps', () => {
     const qr = encodeCustomQR({
       v: SESSION_VERSION,

@@ -15,7 +15,22 @@
  *  - A stuck UIVisualEffectView is cured by remounting via a changed `key`.
  */
 
+import { Easing } from 'react-native-reanimated'
 import type { WithSpringConfig } from 'react-native-reanimated'
+
+/**
+ * Easing curves for `withTiming`.
+ *
+ * There is exactly one, and it decelerates. UI motion in this app models
+ * something arriving and coming to rest, so it must start at full speed and
+ * settle — an ease-IN reads as the interface hesitating before it obeys, and is
+ * never correct for a response to a tap. Where a curve is not expressive enough
+ * on its own, reach for `springs` instead of inventing a second curve.
+ */
+export const easings = {
+  /** cubic-bezier(0.23, 1, 0.32, 1) — a long, soft deceleration. */
+  out: Easing.bezier(0.23, 1, 0.32, 1),
+} as const
 
 export const springs = {
   /** Buttons, small elements, alert cards. Custom-tuned — NOT Reanimated's built-in presets. */

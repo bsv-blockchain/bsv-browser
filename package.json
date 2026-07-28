@@ -61,6 +61,7 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.1.3",
     "expo": "^55.0.0",
+    "expo-audio": "~55.0.16",
     "expo-blur": "~55.0.14",
     "expo-build-properties": "~55.0.14",
     "expo-camera": "~55.0.19",
@@ -166,7 +167,8 @@
     ],
     "moduleNameMapper": {
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
-      "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js"
+      "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js",
+    "^expo-audio$": "<rootDir>/__tests__/__mocks__/expo-audio.js"
     },
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1)/)",

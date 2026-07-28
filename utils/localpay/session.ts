@@ -10,29 +10,58 @@ export interface Session {
   sessionId: Uint8Array
   psk: Uint8Array
   identityKey: string
-  amount: number
+  /**
+   * The satoshis the payee is asking for, or undefined for an OPEN request
+   * where the payer chooses.
+   *
+   * Optional is a money-safety-relevant distinction, not a cosmetic one. When
+   * present it is a binding term of the request: the payee's settle path
+   * refuses any frame carrying a different figure, which is what stops a payer
+   * sending 1 satoshi against a 100,000 request while the payee's screen reads
+   * "Received 100,000". When absent there is no figure to bind, so that check
+   * cannot run and MUST NOT be faked — the derivation nonces are what prove the
+   * frame belongs to this request, and they apply either way.
+   */
+  amount?: number
   derivationPrefix: string
   derivationSuffix: string
 }
 
 export function mintSession(args: {
   identityKey: string
-  amount: number
+  /** Omit for an open request — the payer enters the amount. */
+  amount?: number
   derivationPrefix: string
   derivationSuffix: string
   supportsAwdl: boolean
 }): Session {
   if (args.identityKey.length !== 66) throw new CodecError('identityKey must be 66 hex chars')
+  // Validated at the mint too, not only at decode: an invalid figure minted
+  // here would render on the payee's own screen and be echoed to the payer as
+  // an authentic request before any decoder ever saw it.
+  if (args.amount !== undefined && !isRequestableAmount(args.amount)) {
+    throw new CodecError('bad amount')
+  }
   return {
     version: SESSION_VERSION,
     caps: args.supportsAwdl ? CAP_AWDL : 0,
     sessionId: new Uint8Array(Random(16)),
     psk: new Uint8Array(Random(32)),
     identityKey: args.identityKey,
-    amount: args.amount,
+    ...(args.amount === undefined ? {} : { amount: args.amount }),
     derivationPrefix: args.derivationPrefix,
     derivationSuffix: args.derivationSuffix,
   }
+}
+
+/**
+ * Satoshis: a whole, positive, exactly-representable count.
+ *
+ * A bare typeof check admits 0, negatives, NaN and fractions — and a fractional
+ * amount renders as a blank figure directly above a live Send button.
+ */
+export function isRequestableAmount(a: unknown): a is number {
+  return typeof a === 'number' && Number.isSafeInteger(a) && a > 0
 }
 
 // Base64url, no padding — QR alphanumeric-safe and dependency-free.
@@ -50,13 +79,16 @@ function fromB64url(s: unknown): Uint8Array {
 }
 
 export function encodeSession(s: Session): string {
+  // `a` is omitted entirely for an open request rather than written as null.
+  // JSON.stringify already drops an undefined value, so this is explicit only
+  // to make the wire shape obvious: absent key === payer chooses.
   const body = JSON.stringify({
     v: s.version,
     c: s.caps,
     s: toB64url(s.sessionId),
     k: toB64url(s.psk),
     i: s.identityKey,
-    a: s.amount,
+    ...(s.amount === undefined ? {} : { a: s.amount }),
     p: s.derivationPrefix,
     x: s.derivationSuffix,
   })
@@ -75,10 +107,17 @@ export function decodeSession(text: string): Session {
   const { v, c, s, k, i, a, p, x } = parsed as Record<string, unknown>
   if (v !== SESSION_VERSION) throw new CodecError(`unsupported session version ${String(v)}`)
   if (typeof i !== 'string' || i.length !== 66) throw new CodecError('bad identityKey')
-  // Satoshis: a whole, positive, exactly-representable count. A bare typeof
-  // check admits 0, negatives, NaN and fractions — and a fractional amount
-  // renders as a blank figure directly above a live Send button.
-  if (typeof a !== 'number' || !Number.isSafeInteger(a) || a <= 0) throw new CodecError('bad amount')
+  // An ABSENT `a` is an OPEN request: the payer chooses.
+  //
+  // Absent means absent. An explicit `null` is refused, not read as open:
+  // encodeSession omits the key entirely for an open request, so no peer this
+  // codec talks to ever emits null, and accepting it would widen the "payer
+  // picks the number" path to a shape nothing legitimately produces. Every
+  // other value is a figure the payee is asserting, and a bad one must be
+  // refused rather than quietly reinterpreted as "any amount" — that would turn
+  // a corrupt 0 into an open request with a live Send button under it.
+  const open = a === undefined
+  if (!open && !isRequestableAmount(a)) throw new CodecError('bad amount')
   if (typeof s !== 'string') throw new CodecError('bad sessionId encoding')
   if (typeof k !== 'string') throw new CodecError('bad psk encoding')
   if (typeof p !== 'string') throw new CodecError('bad derivationPrefix encoding')
@@ -94,7 +133,7 @@ export function decodeSession(text: string): Session {
     sessionId,
     psk,
     identityKey: i,
-    amount: a,
+    ...(open ? {} : { amount: a }),
     derivationPrefix: p,
     derivationSuffix: x,
   }

@@ -378,7 +378,19 @@ const resources = {
       local_pay_declined_already_paid: 'That request has already been paid. Nothing was sent.',
       local_pay_declined_save: 'The recipient couldn’t save the payment. Nothing was sent — try again.',
       local_pay_declined_decode: 'The recipient couldn’t read the payment. Nothing was sent — try again.',
-      local_pay_broadcast_pending: 'Sent. This device couldn’t publish it to the network yet — the recipient will.'
+      local_pay_broadcast_pending: 'Sent. This device couldn’t publish it to the network yet — the recipient will.',
+      local_pay_amount_specific: 'Specific amount',
+      local_pay_any_amount: 'Any amount',
+      local_pay_open_request: 'The payer decides how much to send.',
+      local_pay_choose_amount: 'Choose an amount',
+      local_pay_enter_amount_send: 'How much would you like to send?',
+      local_pay_qr_unavailable: 'This code could not be created. Start the request again.',
+      local_pay_presence_qr: 'By code — no live connection',
+      local_pay_presence_ready: 'Encrypted nearby link ready',
+      local_pay_presence_waiting_payee: 'Waiting for a nearby device',
+      local_pay_presence_waiting_payer: 'Finding the recipient’s device…',
+      local_pay_presence_linked: 'Encrypted link open',
+      local_pay_presence_paid: 'Payment confirmed'
     }
   },
   zh: {
@@ -645,7 +657,19 @@ const resources = {
       local_pay_declined_already_paid: '该请求已经支付过了，本次未发送任何款项。',
       local_pay_declined_save: '收款方无法保存这笔付款。本次未发送任何款项 — 请重试。',
       local_pay_declined_decode: '收款方无法读取这笔付款。本次未发送任何款项 — 请重试。',
-      local_pay_broadcast_pending: '已发送。本设备暂时无法将其发布到网络 — 收款方会完成发布。'
+      local_pay_broadcast_pending: '已发送。本设备暂时无法将其发布到网络 — 收款方会完成发布。',
+      local_pay_amount_specific: '指定金额',
+      local_pay_any_amount: '任意金额',
+      local_pay_open_request: '由付款方决定支付多少。',
+      local_pay_choose_amount: '选择金额',
+      local_pay_enter_amount_send: '您想支付多少金额？',
+      local_pay_qr_unavailable: '无法生成此二维码。请重新发起请求。',
+      local_pay_presence_qr: '通过二维码交付 — 没有实时连接',
+      local_pay_presence_ready: '附近的加密连接已就绪',
+      local_pay_presence_waiting_payee: '正在等待附近的设备',
+      local_pay_presence_waiting_payer: '正在查找收款人的设备…',
+      local_pay_presence_linked: '加密连接已建立',
+      local_pay_presence_paid: '付款已确认'
     }
   },
   hi: {
@@ -915,7 +939,19 @@ const resources = {
       local_pay_declined_already_paid: 'उस अनुरोध का भुगतान पहले ही हो चुका है। कुछ भी नहीं भेजा गया।',
       local_pay_declined_save: 'प्राप्तकर्ता भुगतान सहेज नहीं सका। कुछ भी नहीं भेजा गया — फिर से कोशिश करें।',
       local_pay_declined_decode: 'प्राप्तकर्ता भुगतान पढ़ नहीं सका। कुछ भी नहीं भेजा गया — फिर से कोशिश करें।',
-      local_pay_broadcast_pending: 'भेज दिया गया। यह डिवाइस इसे अभी नेटवर्क पर प्रकाशित नहीं कर सका — प्राप्तकर्ता कर देगा।'
+      local_pay_broadcast_pending: 'भेज दिया गया। यह डिवाइस इसे अभी नेटवर्क पर प्रकाशित नहीं कर सका — प्राप्तकर्ता कर देगा।',
+      local_pay_amount_specific: 'निश्चित राशि',
+      local_pay_any_amount: 'कोई भी राशि',
+      local_pay_open_request: 'कितना भेजना है यह भुगतानकर्ता तय करेगा।',
+      local_pay_choose_amount: 'राशि चुनें',
+      local_pay_enter_amount_send: 'आप कितनी राशि भेजना चाहते हैं?',
+      local_pay_qr_unavailable: 'यह कोड नहीं बनाया जा सका। अनुरोध दोबारा शुरू करें।',
+      local_pay_presence_qr: 'कोड के ज़रिए — कोई लाइव कनेक्शन नहीं',
+      local_pay_presence_ready: 'पास का एन्क्रिप्टेड कनेक्शन तैयार है',
+      local_pay_presence_waiting_payee: 'पास के डिवाइस की प्रतीक्षा हो रही है',
+      local_pay_presence_waiting_payer: 'प्राप्तकर्ता का डिवाइस खोजा जा रहा है…',
+      local_pay_presence_linked: 'एन्क्रिप्टेड कनेक्शन चालू है',
+      local_pay_presence_paid: 'भुगतान की पुष्टि हो गई'
     }
   },
   es: {
@@ -1187,7 +1223,19 @@ const resources = {
       local_pay_declined_already_paid: 'Esa solicitud ya se pagó. No se envió nada.',
       local_pay_declined_save: 'Quien recibe no pudo guardar el pago. No se envió nada; inténtalo de nuevo.',
       local_pay_declined_decode: 'Quien recibe no pudo leer el pago. No se envió nada; inténtalo de nuevo.',
-      local_pay_broadcast_pending: 'Enviado. Este dispositivo aún no pudo publicarlo en la red; quien recibe lo hará.'
+      local_pay_broadcast_pending: 'Enviado. Este dispositivo aún no pudo publicarlo en la red; quien recibe lo hará.',
+      local_pay_amount_specific: 'Importe concreto',
+      local_pay_any_amount: 'Cualquier importe',
+      local_pay_open_request: 'Quien paga decide cuánto enviar.',
+      local_pay_choose_amount: 'Elige un importe',
+      local_pay_enter_amount_send: '¿Cuánto quieres enviar?',
+      local_pay_qr_unavailable: 'No se pudo crear este código. Vuelve a iniciar la solicitud.',
+      local_pay_presence_qr: 'Por código: sin conexión en directo',
+      local_pay_presence_ready: 'Enlace cifrado cercano listo',
+      local_pay_presence_waiting_payee: 'Esperando un dispositivo cercano',
+      local_pay_presence_waiting_payer: 'Buscando el dispositivo del destinatario…',
+      local_pay_presence_linked: 'Enlace cifrado abierto',
+      local_pay_presence_paid: 'Pago confirmado'
     }
   },
   fr: {
@@ -1453,7 +1501,19 @@ const resources = {
       local_pay_declined_already_paid: 'Cette demande a déjà été payée. Rien n’a été envoyé.',
       local_pay_declined_save: 'Le bénéficiaire n’a pas pu enregistrer le paiement. Rien n’a été envoyé — réessayez.',
       local_pay_declined_decode: 'Le bénéficiaire n’a pas pu lire le paiement. Rien n’a été envoyé — réessayez.',
-      local_pay_broadcast_pending: 'Envoyé. Cet appareil n’a pas encore pu le publier sur le réseau — le bénéficiaire s’en chargera.'
+      local_pay_broadcast_pending: 'Envoyé. Cet appareil n’a pas encore pu le publier sur le réseau — le bénéficiaire s’en chargera.',
+      local_pay_amount_specific: 'Montant précis',
+      local_pay_any_amount: 'Montant libre',
+      local_pay_open_request: 'C’est le payeur qui décide du montant.',
+      local_pay_choose_amount: 'Choisissez un montant',
+      local_pay_enter_amount_send: 'Quel montant souhaitez-vous envoyer ?',
+      local_pay_qr_unavailable: 'Ce code n’a pas pu être créé. Relancez la demande.',
+      local_pay_presence_qr: 'Par code — aucune connexion en direct',
+      local_pay_presence_ready: 'Liaison chiffrée à proximité prête',
+      local_pay_presence_waiting_payee: 'En attente d’un appareil à proximité',
+      local_pay_presence_waiting_payer: 'Recherche de l’appareil du destinataire…',
+      local_pay_presence_linked: 'Liaison chiffrée ouverte',
+      local_pay_presence_paid: 'Paiement confirmé'
     }
   },
   ar: {
@@ -1715,7 +1775,19 @@ const resources = {
       local_pay_declined_already_paid: 'تم دفع هذا الطلب من قبل. لم يُرسل أي شيء.',
       local_pay_declined_save: 'تعذّر على المستلم حفظ الدفعة. لم يُرسل أي شيء — حاول مرة أخرى.',
       local_pay_declined_decode: 'تعذّر على المستلم قراءة الدفعة. لم يُرسل أي شيء — حاول مرة أخرى.',
-      local_pay_broadcast_pending: 'تم الإرسال. لم يتمكن هذا الجهاز من نشرها على الشبكة بعد — سيقوم المستلم بذلك.'
+      local_pay_broadcast_pending: 'تم الإرسال. لم يتمكن هذا الجهاز من نشرها على الشبكة بعد — سيقوم المستلم بذلك.',
+      local_pay_amount_specific: 'مبلغ محدد',
+      local_pay_any_amount: 'أي مبلغ',
+      local_pay_open_request: 'الدافع هو من يحدد المبلغ المُرسَل.',
+      local_pay_choose_amount: 'اختر المبلغ',
+      local_pay_enter_amount_send: 'ما المبلغ الذي تريد إرساله؟',
+      local_pay_qr_unavailable: 'تعذّر إنشاء هذا الرمز. ابدأ الطلب من جديد.',
+      local_pay_presence_qr: 'عبر الرمز — لا يوجد اتصال مباشر',
+      local_pay_presence_ready: 'الاتصال القريب المشفّر جاهز',
+      local_pay_presence_waiting_payee: 'في انتظار جهاز قريب',
+      local_pay_presence_waiting_payer: 'جارٍ البحث عن جهاز المستلم…',
+      local_pay_presence_linked: 'الاتصال المشفّر مفتوح',
+      local_pay_presence_paid: 'تم تأكيد الدفع'
     }
   },
   pt: {
@@ -1981,7 +2053,19 @@ const resources = {
       local_pay_declined_already_paid: 'Essa solicitação já foi paga. Nada foi enviado.',
       local_pay_declined_save: 'Quem recebe não conseguiu salvar o pagamento. Nada foi enviado — tente de novo.',
       local_pay_declined_decode: 'Quem recebe não conseguiu ler o pagamento. Nada foi enviado — tente de novo.',
-      local_pay_broadcast_pending: 'Enviado. Este aparelho ainda não conseguiu publicá-lo na rede — quem recebe vai publicar.'
+      local_pay_broadcast_pending: 'Enviado. Este aparelho ainda não conseguiu publicá-lo na rede — quem recebe vai publicar.',
+      local_pay_amount_specific: 'Valor específico',
+      local_pay_any_amount: 'Qualquer valor',
+      local_pay_open_request: 'Quem vai pagar decide quanto enviar.',
+      local_pay_choose_amount: 'Escolha um valor',
+      local_pay_enter_amount_send: 'Quanto você quer enviar?',
+      local_pay_qr_unavailable: 'Não foi possível criar este código. Comece a solicitação de novo.',
+      local_pay_presence_qr: 'Por código — sem conexão ao vivo',
+      local_pay_presence_ready: 'Conexão próxima criptografada pronta',
+      local_pay_presence_waiting_payee: 'Aguardando um aparelho por perto',
+      local_pay_presence_waiting_payer: 'Procurando o aparelho do destinatário…',
+      local_pay_presence_linked: 'Conexão criptografada aberta',
+      local_pay_presence_paid: 'Pagamento confirmado'
     }
   },
   bn: {
@@ -2245,7 +2329,19 @@ const resources = {
       local_pay_declined_already_paid: 'সেই অনুরোধের অর্থ ইতিমধ্যেই পরিশোধ হয়েছে। কিছুই পাঠানো হয়নি।',
       local_pay_declined_save: 'প্রাপক পেমেন্টটি সংরক্ষণ করতে পারেননি। কিছুই পাঠানো হয়নি — আবার চেষ্টা করুন।',
       local_pay_declined_decode: 'প্রাপক পেমেন্টটি পড়তে পারেননি। কিছুই পাঠানো হয়নি — আবার চেষ্টা করুন।',
-      local_pay_broadcast_pending: 'পাঠানো হয়েছে। এই ডিভাইসটি এখনও নেটওয়ার্কে প্রকাশ করতে পারেনি — প্রাপক সেটি করবেন।'
+      local_pay_broadcast_pending: 'পাঠানো হয়েছে। এই ডিভাইসটি এখনও নেটওয়ার্কে প্রকাশ করতে পারেনি — প্রাপক সেটি করবেন।',
+      local_pay_amount_specific: 'নির্দিষ্ট পরিমাণ',
+      local_pay_any_amount: 'যেকোনো পরিমাণ',
+      local_pay_open_request: 'কত পাঠাবেন তা প্রদানকারী ঠিক করবেন।',
+      local_pay_choose_amount: 'পরিমাণ বেছে নিন',
+      local_pay_enter_amount_send: 'আপনি কত পরিমাণ পাঠাতে চান?',
+      local_pay_qr_unavailable: 'এই কোডটি তৈরি করা যায়নি। অনুরোধটি আবার শুরু করুন।',
+      local_pay_presence_qr: 'কোডের মাধ্যমে — কোনও সরাসরি সংযোগ নেই',
+      local_pay_presence_ready: 'কাছের এনক্রিপ্ট করা সংযোগ প্রস্তুত',
+      local_pay_presence_waiting_payee: 'কাছের ডিভাইসের জন্য অপেক্ষা করা হচ্ছে',
+      local_pay_presence_waiting_payer: 'প্রাপকের ডিভাইস খোঁজা হচ্ছে…',
+      local_pay_presence_linked: 'এনক্রিপ্ট করা সংযোগ চালু আছে',
+      local_pay_presence_paid: 'পেমেন্ট নিশ্চিত হয়েছে'
     }
   },
   ru: {
@@ -2511,7 +2607,19 @@ const resources = {
       local_pay_declined_already_paid: 'Этот запрос уже оплачен. Ничего не отправлено.',
       local_pay_declined_save: 'Получатель не смог сохранить платёж. Ничего не отправлено — попробуйте ещё раз.',
       local_pay_declined_decode: 'Получатель не смог прочитать платёж. Ничего не отправлено — попробуйте ещё раз.',
-      local_pay_broadcast_pending: 'Отправлено. Это устройство пока не смогло опубликовать платёж в сети — это сделает получатель.'
+      local_pay_broadcast_pending: 'Отправлено. Это устройство пока не смогло опубликовать платёж в сети — это сделает получатель.',
+      local_pay_amount_specific: 'Точная сумма',
+      local_pay_any_amount: 'Любая сумма',
+      local_pay_open_request: 'Сумму выбирает плательщик.',
+      local_pay_choose_amount: 'Выберите сумму',
+      local_pay_enter_amount_send: 'Какую сумму вы хотите отправить?',
+      local_pay_qr_unavailable: 'Не удалось создать этот код. Начните запрос заново.',
+      local_pay_presence_qr: 'По коду — прямого соединения нет',
+      local_pay_presence_ready: 'Шифрованное соединение поблизости готово',
+      local_pay_presence_waiting_payee: 'Ожидание устройства поблизости',
+      local_pay_presence_waiting_payer: 'Поиск устройства получателя…',
+      local_pay_presence_linked: 'Шифрованное соединение открыто',
+      local_pay_presence_paid: 'Платёж подтверждён'
     }
   },
   id: {
@@ -2775,7 +2883,19 @@ const resources = {
       local_pay_declined_already_paid: 'Permintaan itu sudah dibayar. Tidak ada yang dikirim.',
       local_pay_declined_save: 'Penerima tidak dapat menyimpan pembayaran. Tidak ada yang dikirim — coba lagi.',
       local_pay_declined_decode: 'Penerima tidak dapat membaca pembayaran. Tidak ada yang dikirim — coba lagi.',
-      local_pay_broadcast_pending: 'Terkirim. Perangkat ini belum bisa mempublikasikannya ke jaringan — penerima yang akan melakukannya.'
+      local_pay_broadcast_pending: 'Terkirim. Perangkat ini belum bisa mempublikasikannya ke jaringan — penerima yang akan melakukannya.',
+      local_pay_amount_specific: 'Jumlah tertentu',
+      local_pay_any_amount: 'Jumlah bebas',
+      local_pay_open_request: 'Pembayar yang menentukan jumlahnya.',
+      local_pay_choose_amount: 'Pilih jumlah',
+      local_pay_enter_amount_send: 'Berapa jumlah yang ingin Anda kirim?',
+      local_pay_qr_unavailable: 'Kode ini tidak dapat dibuat. Mulai permintaan lagi.',
+      local_pay_presence_qr: 'Lewat kode — tanpa koneksi langsung',
+      local_pay_presence_ready: 'Koneksi terenkripsi di dekat Anda siap',
+      local_pay_presence_waiting_payee: 'Menunggu perangkat di dekat Anda',
+      local_pay_presence_waiting_payer: 'Mencari perangkat penerima…',
+      local_pay_presence_linked: 'Koneksi terenkripsi terbuka',
+      local_pay_presence_paid: 'Pembayaran dikonfirmasi'
     }
   },
   ja: {
@@ -3056,7 +3176,19 @@ const resources = {
       local_pay_declined_already_paid: 'そのリクエストはすでに支払い済みです。何も送金されていません。',
       local_pay_declined_save: '受取人が支払いを保存できませんでした。何も送金されていません — もう一度お試しください。',
       local_pay_declined_decode: '受取人が支払いを読み取れませんでした。何も送金されていません — もう一度お試しください。',
-      local_pay_broadcast_pending: '送金しました。この端末ではまだネットワークに公開できていません — 受取人が公開します。'
+      local_pay_broadcast_pending: '送金しました。この端末ではまだネットワークに公開できていません — 受取人が公開します。',
+      local_pay_amount_specific: '金額を指定',
+      local_pay_any_amount: '金額は任意',
+      local_pay_open_request: '送る金額は支払う側が決めます。',
+      local_pay_choose_amount: '金額を選択',
+      local_pay_enter_amount_send: 'いくら送金しますか？',
+      local_pay_qr_unavailable: 'このコードを作成できませんでした。もう一度リクエストを始めてください。',
+      local_pay_presence_qr: 'コードで受け渡し — 接続はありません',
+      local_pay_presence_ready: '近くの暗号化リンクの準備ができました',
+      local_pay_presence_waiting_payee: '近くの端末を待っています',
+      local_pay_presence_waiting_payer: '受取人の端末を探しています…',
+      local_pay_presence_linked: '暗号化リンクが確立しました',
+      local_pay_presence_paid: '支払いを確認しました'
     }
   },
   pl: {
@@ -3338,7 +3470,19 @@ const resources = {
       local_pay_declined_already_paid: 'To żądanie zostało już opłacone. Nic nie wysłano.',
       local_pay_declined_save: 'Odbiorca nie mógł zapisać płatności. Nic nie wysłano — spróbuj ponownie.',
       local_pay_declined_decode: 'Odbiorca nie mógł odczytać płatności. Nic nie wysłano — spróbuj ponownie.',
-      local_pay_broadcast_pending: 'Wysłano. To urządzenie nie zdołało jeszcze opublikować płatności w sieci — zrobi to odbiorca.'
+      local_pay_broadcast_pending: 'Wysłano. To urządzenie nie zdołało jeszcze opublikować płatności w sieci — zrobi to odbiorca.',
+      local_pay_amount_specific: 'Konkretna kwota',
+      local_pay_any_amount: 'Dowolna kwota',
+      local_pay_open_request: 'To osoba płacąca decyduje, ile wysłać.',
+      local_pay_choose_amount: 'Wybierz kwotę',
+      local_pay_enter_amount_send: 'Jaką kwotę chcesz wysłać?',
+      local_pay_qr_unavailable: 'Nie udało się utworzyć tego kodu. Rozpocznij prośbę od nowa.',
+      local_pay_presence_qr: 'Przez kod — brak połączenia na żywo',
+      local_pay_presence_ready: 'Szyfrowane połączenie w pobliżu gotowe',
+      local_pay_presence_waiting_payee: 'Czekam na urządzenie w pobliżu',
+      local_pay_presence_waiting_payer: 'Szukam urządzenia odbiorcy…',
+      local_pay_presence_linked: 'Szyfrowane połączenie otwarte',
+      local_pay_presence_paid: 'Płatność potwierdzona'
     }
   }
 }

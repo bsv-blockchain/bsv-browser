@@ -32,10 +32,16 @@
  *   An AWDL listener error does NOT terminate the screen: the fast path is
  *   optional, so it degrades to a QR-only request with the pairing QR still up.
  *
+ * The amount may come from EITHER side. A payee can name a figure or leave the
+ * request open, in which case the payer enters it on the confirm screen. See
+ * `Session.amount` and the settle-binding note below — the two cases differ in
+ * exactly one check, and the difference is load-bearing.
+ *
  * Money safety (see settleReceived below, which is the only write path):
  *   0. The frame is bound to the session before anything else: a frame whose
- *      derivation nonces or amount do not match the live request is refused
- *      without burning the session, so the real payer can still pay.
+ *      derivation nonces do not match the live request — or whose amount
+ *      contradicts an amount the payee actually asked for — is refused without
+ *      burning the session, so the real payer can still pay.
  *   1. isSessionSpent() is consulted before anything is written.
  *   2. savePending() completes before markSessionSpent(). Never the reverse:
  *      a crash between the two would burn a one-shot session whose payment was
@@ -48,6 +54,8 @@
  *      nor PendingPayment carries a sessionId, so it cannot be recovered later.
  *   5. Every decode sits in a bare `catch`, which catches non-Error throws from
  *      atob and destructuring too, not just CodecError.
+ *   6. Nothing decorative — identity lookup, the confirmation tone, presence —
+ *      is ever awaited on a money path. They are all fire-and-forget.
  *
  * Money safety, payer side (see abortBuild below):
  *   The frame is built `noSend`, which holds `amount + fee` in inputs marked
@@ -56,20 +64,36 @@
  *   but ONLY on paths where the frame provably never left the device. Once
  *   delivery is even possible the action must stay intact, because the payee may
  *   still broadcast it and a freed input can be respent into a conflict.
+ *
+ * ── Design notes (see .superpowers/sdd/2026-07-27-local-payments-awdl/phase-b-report.md) ──
+ *
+ *   Density   8pt vertical rhythm throughout. 16pt gutter, 24pt between
+ *             sections, 8pt within a group. Every vertical value on this screen
+ *             is a multiple of 8 except hairlines and optical nudges.
+ *   Type      Four levels, doing the hierarchy work together with weight and
+ *             colour: display(44/700) · title2(22/700) · subhead(15/400) ·
+ *             footnote(13/400). Never size alone.
+ *   Colour    Green means confirmed money and nothing else. It appears on the
+ *             celebration mark, the `paid` presence state, and the "added to
+ *             your wallet" notice — nowhere decorative. Everything else is
+ *             neutral structure.
+ *   Motion    Transforms and opacity only, under 300ms, springs.snappy or
+ *             easings.out. Nothing eases in; nothing starts from scale(0).
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  I18nManager,
   Linking,
   Modal,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View
 } from 'react-native'
+import Animated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useFocusEffect } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
@@ -77,13 +101,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import QRCode from 'react-native-qrcode-svg'
 import { createNonce } from '@bsv/sdk'
+import type { WalletInterface } from '@bsv/sdk'
 
 import QRScanner from '@/components/QRScanner'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { AmountInput } from '@/components/wallet/AmountInput'
+import Celebration from '@/components/ui/Celebration'
+import PressableScale from '@/components/ui/PressableScale'
+import PresenceRow, { type PresenceState } from '@/components/localpay/PresenceRow'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
+import { durations, springs } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
+import { haptics } from '@/hooks/useHaptics'
+import { sounds } from '@/hooks/useConfirmationSound'
+import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
 import { MAX_FRAME_QR_CHARS, frameFromQr, frameToQr, type PaymentFrame } from '@/utils/localpay/codec'
 import { decodeSession, encodeSession, mintSession, type Session } from '@/utils/localpay/session'
 import { isSessionSpent, markSessionSpent, processPending, savePending } from '@/utils/localpay/pending'
@@ -119,6 +151,21 @@ interface Failure {
 }
 
 /**
+ * The tone of the notice on a terminal screen.
+ *
+ * Separate from the text because tone is a claim about money, not a style
+ * choice. `success` is green and states that funds are in the wallet;
+ * `broadcast pending` is emphatically NOT that, and wearing success styling was
+ * the one piece of UX debt Phase A left behind (a warning dressed as a receipt).
+ */
+type NoticeTone = 'success' | 'info' | 'warning'
+
+interface Notice {
+  text: string
+  tone: NoticeTone
+}
+
+/**
  * A frame that reached this device but could not be persisted, held for a retry.
  *
  * Only ever set for a delivery that was NOT declined — in practice, the QR
@@ -137,6 +184,16 @@ interface Unsettled {
 const PAYMENT_QR_SIZE = 288
 
 /**
+ * Staging for the success moment. The amount lands, the mark is drawn, the tone
+ * sounds — three beats, never one. Firing them on the same frame reads as a
+ * single blunt event and buries the thing that actually matters, which is the
+ * figure. Both delays are sequencing, not animation, so they apply under
+ * reduced motion too; only the drawing inside Celebration is suppressed there.
+ */
+const CELEBRATION_DELAY_MS = durations.quick
+const TONE_DELAY_MS = 120
+
+/**
  * Decline codes as the PAYER renders them. The payee sends a stable machine
  * code precisely so the sentence can be produced here, in this device's locale.
  * Anything unrecognised falls through to the raw text, preserving the old
@@ -147,6 +204,12 @@ const DECLINE_KEYS: Record<DeclineReason, string> = {
   already_paid: 'local_pay_declined_already_paid',
   save_failed: 'local_pay_declined_save',
   decode_failed: 'local_pay_declined_decode'
+}
+
+const NOTICE_ICONS: Record<NoticeTone, keyof typeof Ionicons.glyphMap> = {
+  success: 'wallet',
+  info: 'time-outline',
+  warning: 'cloud-offline-outline'
 }
 
 // ── Helpers ──
@@ -197,12 +260,19 @@ function abbreviateKey(key: string): string {
   return key.length > 16 ? `${key.slice(0, 10)}…${key.slice(-6)}` : key
 }
 
+/** Satoshis from a free-text field, or 0 when it is not yet a usable figure. */
+function satsFrom(text: string): number {
+  const n = Math.round(Number(text))
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
 // ── Screen ──
 
 export default function LocalPaymentsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
+  const reducedMotion = useReducedMotion()
   const { managers, adminOriginator, storage } = useWallet()
   const wallet = managers?.permissionsManager ?? null
 
@@ -215,10 +285,37 @@ export default function LocalPaymentsScreen() {
   const [scannedSession, setScannedSession] = useState<Session | null>(null)
 
   const [requestAmount, setRequestAmount] = useState('')
+  /**
+   * The payee is raising an OPEN request — no figure, the payer decides.
+   *
+   * Kept separate from an empty `requestAmount` because they are different
+   * intents: an empty field is an unfinished specific request and must keep
+   * Continue disabled, while this is a complete request that happens to name no
+   * amount.
+   */
+  const [requestOpen, setRequestOpen] = useState(false)
+  /** The payer's own entry, used only when the scanned session left the amount open. */
+  const [sendAmount, setSendAmount] = useState('')
+
   const [paymentQr, setPaymentQr] = useState<string | null>(null)
   const [settledAmount, setSettledAmount] = useState(0)
   const [failure, setFailure] = useState<Failure | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
+
+  /**
+   * The other device's identity key, once one is known, and the display name it
+   * resolves to. Presentation only: the lookup is a network call that may never
+   * complete on a screen two people are using precisely because the network is
+   * poor, so nothing waits on it and a null name is a normal outcome.
+   */
+  const [peerKey, setPeerKey] = useState<string | null>(null)
+  const [peerName, setPeerName] = useState<string | null>(null)
+
+  /** True once the AWDL link has provably carried this session's frame. */
+  const [linked, setLinked] = useState(false)
+
+  /** Drives the celebration mark on the success screen. Staged, not immediate. */
+  const [celebrating, setCelebrating] = useState(false)
 
   /**
    * A frame that was delivered but could not be persisted. Held so the payee can
@@ -287,6 +384,11 @@ export default function LocalPaymentsScreen() {
 
   useEffect(() => () => abortAll(), [abortAll])
 
+  // Hand the shared audio player back when the screen goes away. Not required
+  // for correctness — a failed release is swallowed — but this screen may sit
+  // open on a counter all day and there is no reason to hold a native object.
+  useEffect(() => () => sounds.release(), [])
+
   useFocusEffect(
     useCallback(() => {
       setFocused(true)
@@ -318,6 +420,8 @@ export default function LocalPaymentsScreen() {
     setHostedSession(null)
     setScannedSession(null)
     setRequestAmount('')
+    setRequestOpen(false)
+    setSendAmount('')
     setPaymentQr(null)
     setSettledAmount(0)
     setFailure(null)
@@ -326,12 +430,35 @@ export default function LocalPaymentsScreen() {
     setNearbyError(null)
     setSessionQrBroken(false)
     setSessionMismatch(false)
+    setPeerKey(null)
+    setPeerName(null)
+    setLinked(false)
+    setCelebrating(false)
   }, [abortAll])
 
   const goBack = useCallback(() => {
     abortAll()
     router.back()
   }, [abortAll])
+
+  // ── Peer identity ──
+  //
+  // Best-effort and strictly presentational. Never awaited by a money path, and
+  // a failure is indistinguishable from "nobody has vouched for this key" by
+  // design — both mean the presence row simply shows no name.
+
+  useEffect(() => {
+    if (!peerKey || !wallet) return
+    const client = makeIdentityClient(wallet as unknown as WalletInterface, adminOriginator)
+    if (!client) return
+    let live = true
+    void resolveIdentity(client, peerKey).then(([, identity]) => {
+      if (live) setPeerName(identityLabel(identity))
+    })
+    return () => {
+      live = false
+    }
+  }, [peerKey, wallet, adminOriginator])
 
   // ── Receive: settle ──
   //
@@ -368,17 +495,27 @@ export default function LocalPaymentsScreen() {
       //       this session. The real payer would then be told already_paid, acked
       //       ok, and silently discarded.
       //
-      //     The nonces are the load-bearing check: derivationPrefix/Suffix are the
+      //     THE NONCE CHECKS ALWAYS APPLY. derivationPrefix/Suffix are the
       //     per-session values the payee minted and the payer echoed back, so
       //     matching them is what makes the frame provably intended for this
-      //     request. The amount check rides along to pin the displayed figure.
+      //     request. They are the whole binding, and nothing below weakens them.
+      //
+      //     The amount check applies ONLY where the payee actually named a
+      //     figure. On an open request there is no requested amount to
+      //     contradict — the payer chose it — so there is nothing to compare
+      //     against, and inventing a comparison (against 0, or against whatever
+      //     the frame itself claims) would either reject every legitimate open
+      //     payment or be a check that always passes and merely looks like one.
+      //     What the check does when it does run is unchanged: it pins the
+      //     figure the payee is about to see to the figure they asked for.
       //
       //     Deliberately NOT terminal, and deliberately does NOT mark the session
       //     spent: the request stays live so the genuine payer can still complete.
+      const amountDisagrees = session.amount !== undefined && frame.amount !== session.amount
       if (
         frame.derivationPrefix !== session.derivationPrefix ||
         frame.derivationSuffix !== session.derivationSuffix ||
-        frame.amount !== session.amount
+        amountDisagrees
       ) {
         void confirm?.(false, 'session_mismatch')
         scanLatchRef.current = false
@@ -392,6 +529,10 @@ export default function LocalPaymentsScreen() {
 
       settlingRef.current = true
       setSessionMismatch(false)
+      // The frame crossed the encrypted link and decoded against this session:
+      // the peer is provably present. Presentation only — this drives nothing
+      // but the presence row.
+      if (confirm) setLinked(true)
       setPhase('receive_settling')
 
       if (!storage) {
@@ -472,6 +613,9 @@ export default function LocalPaymentsScreen() {
       setRole('payee')
       setPhase('done')
       setUnsettled(null)
+      // Who paid. Starts a best-effort identity lookup for the presence row;
+      // deliberately after the durable write, and never awaited.
+      setPeerKey(frame.senderIdentityKey)
       // Clearing the hosted session stops the AWDL listener: this request is settled.
       setHostedSession(null)
 
@@ -479,16 +623,24 @@ export default function LocalPaymentsScreen() {
       //     failure only downgrades the notice. processPending awaits storage
       //     outside its own per-entry try, so it can reject as a whole; the entry
       //     stays queued either way for the background retry.
+      //
+      //     Tone is a claim about money: `success` (green) is reserved for funds
+      //     actually in the wallet. "Queued" is safe but not yet spendable, so it
+      //     is neutral.
       if (!wallet) {
-        setNotice(t('local_pay_queued'))
+        setNotice({ text: t('local_pay_queued'), tone: 'info' })
         return
       }
       try {
         const results = await processPending(wallet, storage, adminOriginator)
-        setNotice(results.some(r => r.success) ? t('local_pay_added') : t('local_pay_queued'))
+        setNotice(
+          results.some(r => r.success)
+            ? { text: t('local_pay_added'), tone: 'success' }
+            : { text: t('local_pay_queued'), tone: 'info' }
+        )
       } catch (e) {
         console.warn('[localpay] processPending failed:', messageOf(e))
-        setNotice(t('local_pay_queued'))
+        setNotice({ text: t('local_pay_queued'), tone: 'info' })
       }
     },
     [storage, wallet, adminOriginator, fail, t]
@@ -547,8 +699,11 @@ export default function LocalPaymentsScreen() {
   // ── Receive: mint the request ──
 
   const startRequest = useCallback(async () => {
-    const sats = Math.round(Number(requestAmount))
-    if (!Number.isFinite(sats) || sats <= 0) return
+    // An open request carries no figure at all. Undefined, never 0 — the codec
+    // refuses a non-positive amount precisely so a corrupt zero can never be
+    // read back as "any amount".
+    const sats = requestOpen ? undefined : satsFrom(requestAmount)
+    if (sats !== undefined && sats <= 0) return
     // Gate on storage too, not just the wallet. Advertising with storage null
     // means a payer can deliver a frame the payee then cannot persist, after the
     // transport has already acked it as accepted.
@@ -579,7 +734,7 @@ export default function LocalPaymentsScreen() {
     } catch (e) {
       fail('generic', messageOf(e))
     }
-  }, [requestAmount, wallet, storage, adminOriginator, supportsAwdl, fail, t])
+  }, [requestAmount, requestOpen, wallet, storage, adminOriginator, supportsAwdl, fail, t])
 
   // ── Receive: scan the payer's frame ──
 
@@ -621,6 +776,10 @@ export default function LocalPaymentsScreen() {
         return
       }
       setScannedSession(session)
+      // Who is being paid. Best-effort lookup for the presence row and the
+      // recipient card; nothing waits on it.
+      setPeerKey(session.identityKey)
+      setSendAmount('')
       setRole('payer')
       setPhase('send_confirm')
     },
@@ -639,6 +798,19 @@ export default function LocalPaymentsScreen() {
     () => (scannedSession ? selectTransport(scannedSession) : null),
     [scannedSession]
   )
+
+  /**
+   * The figure this payment will actually carry.
+   *
+   * The payee's request wins outright when they named one — the payer must not
+   * be able to talk it down, and the payee's settle check would refuse anything
+   * else anyway. Otherwise it is the payer's own entry. 0 means "not a usable
+   * amount yet" and keeps Send disabled.
+   */
+  const payAmount = useMemo(() => {
+    if (!scannedSession) return 0
+    return scannedSession.amount ?? satsFrom(sendAmount)
+  }, [scannedSession, sendAmount])
 
   // ── Send: release an abandoned build ──
   //
@@ -682,6 +854,9 @@ export default function LocalPaymentsScreen() {
   const executeSend = useCallback(async () => {
     const session = scannedSession
     if (!session || !sendKind) return
+    // Guards the open-request path: with no figure there is nothing to build,
+    // and buildPaymentFrame would refuse it anyway.
+    if (payAmount <= 0) return
     if (!wallet) {
       fail('generic', t('wallet_not_ready'))
       return
@@ -699,7 +874,12 @@ export default function LocalPaymentsScreen() {
         // `number[]`, while the SDK's `AtomicBEEF` is `Byte[] | Uint8Array`. The
         // manager satisfies the contract at runtime — build.ts wraps the result in
         // `new Uint8Array(...)`, which accepts either — so this is nominal only.
-        built = await buildPaymentFrame(wallet as unknown as PayingWalletArg, session, adminOriginator)
+        built = await buildPaymentFrame(
+          wallet as unknown as PayingWalletArg,
+          session,
+          adminOriginator,
+          payAmount
+        )
       } catch (e) {
         // Build errors are wallet errors and must keep their own message. A
         // declined spending prompt reads "Permission denied", which the Local
@@ -756,6 +936,10 @@ export default function LocalPaymentsScreen() {
         return
       }
 
+      // An ack of any kind proves the encrypted link carried this frame to the
+      // peer. Presentation only.
+      if (!controller.signal.aborted) setLinked(true)
+
       // The ack is a money decision, so it is acted on even if the screen has
       // since been abandoned — releasing or reclaiming the transaction must not
       // depend on this component still being mounted. Only the UI writes below
@@ -785,16 +969,39 @@ export default function LocalPaymentsScreen() {
       // that this device could not get the transaction out itself — the payee
       // holds a copy and will internalize it — so it is a retryable notice, not
       // a failure. Reporting it as a failure would invite a second payment.
+      //
+      // It is a WARNING, not a success: this device's copy of the transaction is
+      // inert and its inputs stay locked. Green on this screen means confirmed
+      // money, and a stuck broadcast is not that.
       if (outcome.broadcast === 'pending') {
         console.warn('[localpay] broadcast after a positive ack failed:', outcome.detail ?? '')
-        setNotice(t('local_pay_broadcast_pending'))
+        setNotice({ text: t('local_pay_broadcast_pending'), tone: 'warning' })
       }
-      setSettledAmount(session.amount)
+      setSettledAmount(payAmount)
       setPhase('done')
     } finally {
       registry.delete(controller)
     }
-  }, [scannedSession, sendKind, wallet, adminOriginator, abortBuild, declineMessage, fail, t])
+  }, [scannedSession, sendKind, payAmount, wallet, adminOriginator, abortBuild, declineMessage, fail, t])
+
+  // ── The success moment ──
+  //
+  // Three beats, staged. The amount has already landed by the time this runs
+  // (it animates in with the phase); then the mark is drawn, which fires the
+  // success haptic from inside Celebration — this screen must NOT fire a second
+  // one; then the tone. `sounds.confirmation()` returns immediately and cannot
+  // throw, so a device with no audio session simply completes the payment
+  // quietly.
+
+  useEffect(() => {
+    if (phase !== 'done') return
+    const mark = setTimeout(() => setCelebrating(true), CELEBRATION_DELAY_MS)
+    const tone = setTimeout(() => sounds.confirmation(), CELEBRATION_DELAY_MS + TONE_DELAY_MS)
+    return () => {
+      clearTimeout(mark)
+      clearTimeout(tone)
+    }
+  }, [phase])
 
   // ── Receive: retry a settle that never reached storage ──
 
@@ -838,9 +1045,55 @@ export default function LocalPaymentsScreen() {
 
   /** Listening over AWDL right now. Goes false once the fast path gives up. */
   const awdlActive = hostedSession !== null && supportsAwdl && nearbyError === null
-  const requestedSats = Math.round(Number(requestAmount))
-  const canRequest = Number.isFinite(requestedSats) && requestedSats > 0
+  const canRequest = requestOpen || satsFrom(requestAmount) > 0
+  const canSend = payAmount > 0
   const scannerOpen = phase === 'send_scan' || phase === 'receive_scan'
+
+  /**
+   * What the presence row is entitled to claim, per phase.
+   *
+   * Every branch is driven by something observed. There is no branch for "the
+   * peer is probably nearby": `ready` says a route exists, `waiting` says this
+   * device is genuinely listening or searching, `linked` is only ever set after
+   * bytes crossed the encrypted channel, and `qr` admits there is no link at all.
+   */
+  const presence = useMemo<{ state: PresenceState; label: string } | null>(() => {
+    const at = (state: PresenceState, key: string) => ({ state, label: t(key) })
+    const qr = () => at('qr', 'local_pay_presence_qr')
+
+    // Terminal first: `paid` is the only state that may be green, and nothing
+    // below can override it.
+    if (phase === 'done') return at('paid', 'local_pay_presence_paid')
+
+    // `linked` is a proven fact — bytes crossed the encrypted channel — so it
+    // outranks anything the phase alone would guess about the peer.
+    if (linked) return at('linked', 'local_pay_presence_linked')
+
+    if (role === 'payee') {
+      if (phase === 'receive_settling') return at('linked', 'local_pay_presence_linked')
+      if (phase === 'receive_wait') {
+        // No AWDL listener means no live link at all, whatever the reason —
+        // an Android device, a denied permission, or a fast path that gave up.
+        return awdlActive ? at('waiting', 'local_pay_presence_waiting_payee') : qr()
+      }
+      return null
+    }
+
+    if (role === 'payer') {
+      // Every payer branch degrades to `qr` when the QR transport was selected,
+      // because on that path the two devices genuinely never speak.
+      if (phase === 'send_working') {
+        return sendKind === 'awdl' ? at('waiting', 'local_pay_presence_waiting_payer') : qr()
+      }
+      if (phase === 'send_qr') return qr()
+      if (phase === 'send_confirm') {
+        return sendKind === 'awdl' ? at('ready', 'local_pay_presence_ready') : qr()
+      }
+      return null
+    }
+
+    return null
+  }, [phase, role, linked, awdlActive, sendKind, t])
 
   const openScanner = useCallback((next: 'send_scan' | 'receive_scan') => {
     scanLatchRef.current = false
@@ -856,233 +1109,399 @@ export default function LocalPaymentsScreen() {
 
   const styles = useMemo(() => makeStyles(), [])
 
+  // Entrances: opacity + translate only, springs.snappy. Suppressed entirely
+  // under reduced motion rather than shortened, and never applied to an
+  // ancestor of a blur surface.
+  const settleIn = reducedMotion
+    ? undefined
+    : FadeInDown.springify()
+        .mass(springs.snappy.mass)
+        .damping(springs.snappy.damping)
+        .stiffness(springs.snappy.stiffness)
+  const fadeIn = reducedMotion ? undefined : FadeIn.duration(durations.instant)
+
   // ── Render ──
 
+  const amountBlock = (sats: number, key?: string) => (
+    <Animated.View key={key} entering={settleIn} style={styles.amountBlock}>
+      <Text
+        style={[styles.amountDisplay, { color: colors.textPrimary }]}
+        maxFontSizeMultiplier={1.3}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        accessibilityRole="text"
+      >
+        <AmountDisplay>{sats}</AmountDisplay>
+      </Text>
+    </Animated.View>
+  )
+
+  const presenceBlock = presence ? (
+    <View style={styles.presenceSlot}>
+      <PresenceRow state={presence.state} label={presence.label} peer={peerName} />
+    </View>
+  ) : null
+
+  const phaseTitle = (label: string) => (
+    <Text
+      style={[styles.title, { color: colors.textPrimary }]}
+      // The nearest RN has to `text-wrap: balance`. Android honours it; iOS has
+      // no equivalent, so headings are also kept short enough to fit two lines
+      // at the default size in every locale.
+      textBreakStrategy="balanced"
+      maxFontSizeMultiplier={1.4}
+    >
+      {label}
+    </Text>
+  )
+
+  const supportText = (label: string) => (
+    <Text style={[styles.support, { color: colors.textSecondary }]} textBreakStrategy="balanced">
+      {label}
+    </Text>
+  )
+
   const spinnerBlock = (label: string) => (
-    <View style={styles.center}>
-      <ActivityIndicator size="large" color={colors.info} style={{ marginBottom: spacing.lg }} />
-      <Text style={[styles.phaseSub, { color: colors.textSecondary }]}>{label}</Text>
+    <View style={styles.stage} accessibilityRole="progressbar" accessibilityLabel={label}>
+      <ActivityIndicator size="large" color={colors.textSecondary} />
+      <View style={styles.gapLg} />
+      {supportText(label)}
+      {presenceBlock}
     </View>
   )
+
+  const noticeBlock = (n: Notice) => {
+    const tint =
+      n.tone === 'success' ? colors.success : n.tone === 'warning' ? colors.warning : colors.textSecondary
+    return (
+      <Animated.View
+        entering={fadeIn}
+        style={[
+          styles.notice,
+          {
+            backgroundColor: n.tone === 'info' ? colors.fillTertiary : tint + '15',
+            borderColor: n.tone === 'info' ? colors.separator : tint + '40'
+          }
+        ]}
+        accessibilityRole="text"
+      >
+        <Ionicons name={NOTICE_ICONS[n.tone]} size={16} color={tint} />
+        <Text style={[styles.noticeText, { color: n.tone === 'info' ? colors.textSecondary : tint }]}>
+          {n.text}
+        </Text>
+      </Animated.View>
+    )
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
       <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <TouchableOpacity onPress={goBack} style={styles.headerBtn} accessibilityRole="button">
-          <Ionicons name="chevron-back" size={24} color={colors.accent} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('local_payments')}</Text>
+        <PressableScale
+          onPress={goBack}
+          haptic="tap"
+          style={styles.headerBtn}
+          accessibilityRole="button"
+          accessibilityLabel={t('back')}
+        >
+          <Ionicons
+            // Back points the way the language runs. RN flips row layout in RTL
+            // but never glyphs, so this one is explicit.
+            name={I18nManager.isRTL ? 'chevron-forward' : 'chevron-back'}
+            size={24}
+            color={colors.accent}
+          />
+        </PressableScale>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+          {t('local_payments')}
+        </Text>
         <View style={styles.headerBtn} />
       </View>
 
       <ScrollView
         style={{ flex: 1, backgroundColor: colors.background }}
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.xxxl }]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ══ Choose a role ══ */}
+        {/* ══ Choose a role ══
+            Focal: the primary action. The payee starts the exchange — they mint
+            the session — so Request is the filled default and Send is demoted to
+            an outline. Two equally-weighted buttons would leave the view with no
+            focal point at all. */}
         {phase === 'role' && (
-          <>
-            <View style={styles.center}>
-              <View style={[styles.heroCircle, { backgroundColor: colors.info + '12' }]}>
-                <Ionicons name="wifi" size={52} color={colors.info} />
-              </View>
-              <Text style={[styles.heroText, { color: colors.textSecondary }]}>{t('local_payments_subtitle')}</Text>
+          <Animated.View entering={settleIn} style={styles.stage}>
+            <View style={[styles.heroCircle, { backgroundColor: colors.fillTertiary }]}>
+              <Ionicons name="wifi" size={44} color={colors.textSecondary} />
             </View>
-            <TouchableOpacity
-              style={[styles.bigBtn, { backgroundColor: colors.accent }]}
+            <View style={styles.gapLg} />
+            {phaseTitle(t('local_payments'))}
+            {supportText(t('local_payments_subtitle'))}
+            <View style={styles.gapXl} />
+            <PrimaryButton
+              styles={styles}
+              colors={colors}
+              icon="arrow-down"
+              label={t('local_pay_request')}
               onPress={() => setPhase('receive_amount')}
-            >
-              <Ionicons name="download-outline" size={22} color={colors.textOnAccent} />
-              <Text style={[styles.bigBtnText, { color: colors.textOnAccent }]}>{t('local_pay_request')}</Text>
-            </TouchableOpacity>
-            <View style={{ height: spacing.md }} />
-            <TouchableOpacity
-              style={[styles.bigBtn, { backgroundColor: colors.success }]}
+            />
+            <View style={styles.gapMd} />
+            <SecondaryButton
+              styles={styles}
+              colors={colors}
+              icon="arrow-up"
+              label={t('local_pay_send')}
               onPress={() => openScanner('send_scan')}
-            >
-              <Ionicons name="send-outline" size={22} color="#fff" />
-              <Text style={[styles.bigBtnText, { color: '#fff' }]}>{t('local_pay_send')}</Text>
-            </TouchableOpacity>
-          </>
+            />
+          </Animated.View>
         )}
 
-        {/* ══ Receive: amount ══ */}
+        {/* ══ Receive: amount ══
+            Focal: the amount field. Everything else on the view is a label. */}
         {phase === 'receive_amount' && (
-          <View>
-            <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>{t('local_pay_request')}</Text>
-            <Text style={[styles.phaseSub, { color: colors.textSecondary }]}>{t('local_pay_enter_amount')}</Text>
-            <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
-              {t('local_pay_amount').toUpperCase()}
-            </Text>
-            <AmountInput value={requestAmount} onChangeText={setRequestAmount} />
-            <TouchableOpacity
-              style={[
-                styles.bigBtn,
-                { backgroundColor: canRequest ? colors.accent : colors.fill, marginTop: spacing.xl }
-              ]}
-              onPress={() => void startRequest()}
+          <Animated.View entering={settleIn}>
+            {phaseTitle(t('local_pay_request'))}
+            {supportText(requestOpen ? t('local_pay_open_request') : t('local_pay_enter_amount'))}
+            <View style={styles.gapXl} />
+
+            <AmountModeToggle
+              styles={styles}
+              colors={colors}
+              open={requestOpen}
+              onChange={setRequestOpen}
+              specificLabel={t('local_pay_amount_specific')}
+              openLabel={t('local_pay_amount_any')}
+            />
+            <View style={styles.gapLg} />
+
+            {requestOpen ? (
+              <Animated.View
+                entering={fadeIn}
+                style={[styles.openChip, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator }]}
+              >
+                <Ionicons name="infinite" size={20} color={colors.textSecondary} />
+                <Text style={[styles.openChipText, { color: colors.textPrimary }]}>{t('local_pay_any_amount')}</Text>
+              </Animated.View>
+            ) : (
+              <Animated.View entering={fadeIn}>
+                <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
+                  {t('local_pay_amount').toUpperCase()}
+                </Text>
+                <AmountInput value={requestAmount} onChangeText={setRequestAmount} />
+              </Animated.View>
+            )}
+
+            <View style={styles.gapXl} />
+            <PrimaryButton
+              styles={styles}
+              colors={colors}
+              label={t('continue_action')}
               disabled={!canRequest}
-            >
-              <Text style={[styles.bigBtnText, { color: canRequest ? colors.textOnAccent : colors.textTertiary }]}>
-                {t('continue_action')}
-              </Text>
-            </TouchableOpacity>
-            <CancelBtn colors={colors} styles={styles} label={t('cancel')} onPress={reset} />
-          </View>
+              onPress={() => void startRequest()}
+            />
+            <CancelButton styles={styles} colors={colors} label={t('cancel')} onPress={reset} />
+          </Animated.View>
         )}
 
+        {/* Focal on each of these: the single status line. */}
         {phase === 'receive_minting' && spinnerBlock(t('local_pay_preparing'))}
         {phase === 'receive_settling' && spinnerBlock(t('local_pay_saving'))}
         {phase === 'send_working' && spinnerBlock(t('local_pay_delivering'))}
 
-        {/* ══ Receive: pairing QR (always) + AWDL listener (when supported) ══ */}
+        {/* ══ Receive: pairing QR (always) + AWDL listener (when supported) ══
+            Focal: the pairing code. This is the one view whose focal element is
+            not the amount, and deliberately: the code is the object being
+            physically held up to another person, and shrinking a working
+            scanner target to win a typographic argument would be the wrong
+            trade. The amount sits above it at title scale, as the code's price. */}
         {phase === 'receive_wait' && hostedSession && (
-          <View style={styles.center}>
-            <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>{t('local_pay_show_qr')}</Text>
-            <Text style={[styles.phaseSub, { color: colors.textSecondary }]}>
-              <AmountDisplay>{hostedSession.amount}</AmountDisplay>
+          <Animated.View entering={settleIn} style={styles.stage}>
+            {phaseTitle(t('local_pay_show_qr'))}
+            <Text
+              style={[styles.amountTitle, { color: colors.textSecondary }]}
+              maxFontSizeMultiplier={1.4}
+              numberOfLines={1}
+            >
+              {hostedSession.amount === undefined ? (
+                t('local_pay_any_amount')
+              ) : (
+                <AmountDisplay>{hostedSession.amount}</AmountDisplay>
+              )}
             </Text>
+            <View style={styles.gapLg} />
 
             {sessionQr && !sessionQrBroken ? (
               <View style={[styles.qrCard, { shadowColor: colors.textPrimary }]}>
-                {/* onError is mandatory: without it the encoder rethrows from
-                    render and the app-level ErrorBoundary swallows the app. */}
-                <QRCode
-                  value={sessionQr}
-                  size={PAYMENT_QR_SIZE}
-                  ecl="M"
-                  color="#000"
-                  backgroundColor="#fff"
-                  onError={onSessionQrError}
-                />
+                <View style={styles.qrPlate}>
+                  {/* onError is mandatory: without it the encoder rethrows from
+                      render and the app-level ErrorBoundary swallows the app. */}
+                  <QRCode
+                    value={sessionQr}
+                    size={PAYMENT_QR_SIZE}
+                    ecl="M"
+                    color="#000"
+                    backgroundColor="#fff"
+                    onError={onSessionQrError}
+                  />
+                </View>
               </View>
             ) : (
-              <Text style={[styles.phaseSub, { color: colors.error }]}>{t('local_pay_failed')}</Text>
-            )}
-
-            <View style={[styles.badge, { backgroundColor: colors.fillTertiary }]}>
-              <Ionicons
-                name={awdlActive ? 'wifi' : 'qr-code-outline'}
-                size={14}
-                color={awdlActive ? colors.info : colors.textSecondary}
-              />
-              <Text style={[styles.badgeText, { color: colors.textSecondary }]}>
-                {awdlActive ? t('local_pay_via_nearby') : t('local_pay_via_qr')}
-              </Text>
-            </View>
-
-            {awdlActive && (
-              <View style={styles.waitingRow}>
-                <ActivityIndicator size="small" color={colors.info} />
-                <Text style={[styles.waitingText, { color: colors.textTertiary }]}>{t('local_pay_waiting')}</Text>
+              // Error state for this data area. The session cannot be handed
+              // over at all, so the only way forward is a fresh one.
+              <View
+                style={[styles.qrError, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}
+                accessibilityRole="alert"
+              >
+                <Ionicons name="alert-circle-outline" size={28} color={colors.error} />
+                <View style={styles.gapSm} />
+                <Text style={[styles.support, { color: colors.textSecondary }]}>{t('local_pay_qr_unavailable')}</Text>
               </View>
             )}
+
+            <View style={styles.gapLg} />
+            {presenceBlock}
 
             {/* A frame arrived that belongs to a different request. Advisory,
                 not a failure: this session was deliberately NOT marked spent,
                 so the pairing QR above is still live for the real payer. */}
             {sessionMismatch && (
-              <View style={[styles.note, { backgroundColor: colors.error + '15', borderColor: colors.error + '40' }]}>
-                <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
-                <Text style={[styles.noteText, { color: colors.error }]}>{t('local_pay_wrong_session')}</Text>
-              </View>
+              <>
+                <View style={styles.gapLg} />
+                <Animated.View
+                  entering={fadeIn}
+                  style={[styles.notice, { backgroundColor: colors.error + '15', borderColor: colors.error + '40' }]}
+                  accessibilityRole="alert"
+                >
+                  <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
+                  <Text style={[styles.noticeText, { color: colors.error }]}>{t('local_pay_wrong_session')}</Text>
+                </Animated.View>
+              </>
             )}
 
             {/* The fast path gave up. The request is still live over QR, so this
                 is an advisory, not a failure — the pairing QR above still works. */}
             {nearbyError && (
-              <View style={[styles.note, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}>
-                <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
-                <Text style={[styles.noteText, { color: colors.textSecondary }]}>
-                  {nearbyError.networkDenied ? t('local_pay_network_denied') : t('local_pay_nearby_unavailable')}
-                </Text>
-              </View>
+              <>
+                <View style={styles.gapLg} />
+                <Animated.View
+                  entering={fadeIn}
+                  style={[styles.notice, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}
+                >
+                  <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
+                  <Text style={[styles.noticeText, { color: colors.textSecondary }]}>
+                    {nearbyError.networkDenied ? t('local_pay_network_denied') : t('local_pay_nearby_unavailable')}
+                  </Text>
+                </Animated.View>
+              </>
             )}
 
+            <View style={styles.gapXl} />
             {nearbyError?.networkDenied && (
-              <TouchableOpacity
-                style={[styles.outlineBtn, { borderColor: colors.separator }]}
-                onPress={() => void Linking.openSettings()}
-              >
-                <Ionicons name="settings-outline" size={18} color={colors.accent} />
-                <Text style={[styles.outlineBtnText, { color: colors.accent }]}>{t('open_settings')}</Text>
-              </TouchableOpacity>
+              <>
+                <SecondaryButton
+                  styles={styles}
+                  colors={colors}
+                  icon="settings-outline"
+                  label={t('open_settings')}
+                  onPress={() => void Linking.openSettings()}
+                />
+                <View style={styles.gapMd} />
+              </>
+            )}
+            <SecondaryButton
+              styles={styles}
+              colors={colors}
+              icon="scan-outline"
+              label={t('local_pay_scan_payer_qr')}
+              onPress={() => openScanner('receive_scan')}
+            />
+            <CancelButton styles={styles} colors={colors} label={t('cancel')} onPress={reset} />
+          </Animated.View>
+        )}
+
+        {/* ══ Send: confirm ══
+            Focal: the amount — the figure being handed over, at display scale
+            when the payee fixed it, or the live field when they left it open. */}
+        {phase === 'send_confirm' && scannedSession && (
+          <Animated.View entering={settleIn}>
+            {phaseTitle(scannedSession.amount === undefined ? t('local_pay_choose_amount') : t('local_pay_send'))}
+
+            {scannedSession.amount === undefined ? (
+              <>
+                {supportText(t('local_pay_enter_amount_send'))}
+                <View style={styles.gapXl} />
+                <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
+                  {t('local_pay_amount').toUpperCase()}
+                </Text>
+                <AmountInput value={sendAmount} onChangeText={setSendAmount} />
+              </>
+            ) : (
+              <View style={styles.stageTight}>{amountBlock(scannedSession.amount)}</View>
             )}
 
-            <TouchableOpacity
-              style={[styles.outlineBtn, { borderColor: colors.separator }]}
-              onPress={() => openScanner('receive_scan')}
-            >
-              <Ionicons name="scan-outline" size={18} color={colors.accent} />
-              <Text style={[styles.outlineBtnText, { color: colors.accent }]}>{t('local_pay_scan_payer_qr')}</Text>
-            </TouchableOpacity>
-
-            <CancelBtn colors={colors} styles={styles} label={t('cancel')} onPress={reset} />
-          </View>
-        )}
-
-        {/* ══ Send: confirm ══ */}
-        {phase === 'send_confirm' && scannedSession && (
-          <View>
-            <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>{t('local_pay_send')}</Text>
-            <View style={styles.center}>
-              <Text style={[styles.bigAmount, { color: colors.textPrimary }]}>
-                <AmountDisplay>{scannedSession.amount}</AmountDisplay>
-              </Text>
-            </View>
-            <View
-              style={[styles.idCard, { backgroundColor: colors.backgroundElevated, borderColor: colors.separator }]}
-            >
-              <View style={[styles.avatarPlaceholder, { backgroundColor: colors.info + '15' }]}>
-                <Ionicons name="person" size={22} color={colors.info} />
+            <View style={styles.gapXl} />
+            <View style={[styles.idCard, { backgroundColor: colors.backgroundElevated, borderColor: colors.separator }]}>
+              <View style={[styles.avatar, { backgroundColor: colors.fillTertiary }]}>
+                <Ionicons name="person" size={20} color={colors.textSecondary} />
               </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[styles.idName, { color: colors.textPrimary }]}>{t('recipient')}</Text>
-                <Text style={[styles.idKey, { color: colors.textTertiary }]} numberOfLines={1} ellipsizeMode="middle">
-                  {abbreviateKey(scannedSession.identityKey)}
+              <View style={styles.idText}>
+                <Text style={[styles.idLabel, { color: colors.textTertiary }]}>{t('recipient').toUpperCase()}</Text>
+                <Text style={[styles.idName, { color: colors.textPrimary }]} numberOfLines={1}>
+                  {peerName ?? abbreviateKey(scannedSession.identityKey)}
                 </Text>
+                {!!peerName && (
+                  <Text style={[styles.idKey, { color: colors.textTertiary }]} numberOfLines={1} ellipsizeMode="middle">
+                    {abbreviateKey(scannedSession.identityKey)}
+                  </Text>
+                )}
               </View>
             </View>
 
-            <View style={[styles.badge, { backgroundColor: colors.fillTertiary, alignSelf: 'center' }]}>
-              <Ionicons
-                name={sendKind === 'awdl' ? 'wifi' : 'qr-code-outline'}
-                size={14}
-                color={colors.textSecondary}
-              />
-              <Text style={[styles.badgeText, { color: colors.textSecondary }]}>
-                {sendKind === 'awdl' ? t('local_pay_via_nearby') : t('local_pay_via_qr')}
-              </Text>
-            </View>
+            <View style={styles.gapLg} />
+            {presenceBlock}
 
-            <TouchableOpacity
-              style={[styles.bigBtn, { backgroundColor: colors.success, marginTop: spacing.lg }]}
+            <View style={styles.gapXl} />
+            <PrimaryButton
+              styles={styles}
+              colors={colors}
+              icon="arrow-up"
+              label={t('local_pay_send')}
+              disabled={!canSend}
               onPress={() => void executeSend()}
-            >
-              <Ionicons name="send" size={20} color="#fff" />
-              <Text style={[styles.bigBtnText, { color: '#fff' }]}>{t('local_pay_send')}</Text>
-            </TouchableOpacity>
-            <CancelBtn colors={colors} styles={styles} label={t('cancel')} onPress={reset} />
-          </View>
+            />
+            <CancelButton styles={styles} colors={colors} label={t('cancel')} onPress={reset} />
+          </Animated.View>
         )}
 
-        {/* ══ Send: hand the frame over as a QR ══ */}
+        {/* ══ Send: hand the frame over as a QR ══
+            Focal: the payment code. The amount is settled by this point and
+            demotes to a caption. */}
         {phase === 'send_qr' && paymentQr && (
-          <View style={styles.center}>
-            <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>{t('local_pay_show_payment_qr')}</Text>
+          <Animated.View entering={settleIn} style={styles.stage}>
+            {phaseTitle(t('local_pay_show_payment_qr'))}
+            <Text
+              style={[styles.amountTitle, { color: colors.textSecondary }]}
+              maxFontSizeMultiplier={1.4}
+              numberOfLines={1}
+            >
+              <AmountDisplay>{payAmount}</AmountDisplay>
+            </Text>
+            <View style={styles.gapLg} />
             <View style={[styles.qrCard, { shadowColor: colors.textPrimary }]}>
-              {/* onError is mandatory: without it an oversize payload rethrows
-                  from render and the app-level ErrorBoundary swallows the app. */}
-              <QRCode
-                value={paymentQr}
-                size={PAYMENT_QR_SIZE}
-                ecl="M"
-                color="#000"
-                backgroundColor="#fff"
-                onError={onPaymentQrError}
-              />
+              <View style={styles.qrPlate}>
+                {/* onError is mandatory: without it an oversize payload rethrows
+                    from render and the app-level ErrorBoundary swallows the app. */}
+                <QRCode
+                  value={paymentQr}
+                  size={PAYMENT_QR_SIZE}
+                  ecl="M"
+                  color="#000"
+                  backgroundColor="#fff"
+                  onError={onPaymentQrError}
+                />
+              </View>
             </View>
+            <View style={styles.gapLg} />
+            {presenceBlock}
+            <View style={styles.gapXl} />
             {/* Deliberately does NOT abort the build.
                 The QR path has no ack by design, so this screen cannot know
                 whether the payee scanned. "Done" is modelled as the SUCCESS
@@ -1092,109 +1511,124 @@ export default function LocalPaymentsScreen() {
                 let this wallet respend them into a conflicting transaction,
                 turning a stuck UTXO into a failed payment. The abandoned-build
                 lock is the strictly safer of the two failure modes here. */}
-            <TouchableOpacity
-              style={[styles.bigBtn, { backgroundColor: colors.accent, marginTop: spacing.lg }]}
+            <PrimaryButton
+              styles={styles}
+              colors={colors}
+              label={t('done')}
               onPress={() => {
-                setSettledAmount(scannedSession?.amount ?? 0)
+                setSettledAmount(payAmount)
                 setRole('payer')
                 setPhase('done')
               }}
-            >
-              <Text style={[styles.bigBtnText, { color: colors.textOnAccent }]}>{t('done')}</Text>
-            </TouchableOpacity>
-          </View>
+            />
+          </Animated.View>
         )}
 
-        {/* ══ Done ══ */}
+        {/* ══ Done ══
+            Focal: the amount. The celebration mark is a transient overlay that
+            owns attention for ~700ms and then hands it back, so the two never
+            compete for the same beat. */}
         {phase === 'done' && (
-          <View style={styles.center}>
-            <Ionicons name="checkmark-circle" size={72} color={colors.success} style={{ marginBottom: spacing.md }} />
-            <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>
-              {role === 'payer' ? t('local_pay_sent') : t('local_pay_received')}
-            </Text>
-            <Text style={[styles.bigAmount, { color: colors.textPrimary }]}>
-              <AmountDisplay>{settledAmount}</AmountDisplay>
-            </Text>
-            {notice && (
-              <View
-                style={[styles.note, { backgroundColor: colors.success + '15', borderColor: colors.success + '40' }]}
-              >
-                <Ionicons name="wallet-outline" size={16} color={colors.success} />
-                <Text style={[styles.noteText, { color: colors.success }]}>{notice}</Text>
-              </View>
+          <View style={styles.stage}>
+            {phaseTitle(role === 'payer' ? t('local_pay_sent') : t('local_pay_received'))}
+            <View style={styles.gapSm} />
+            {amountBlock(settledAmount, 'done-amount')}
+            <View style={styles.gapMd} />
+            {presenceBlock}
+            {!!notice && (
+              <>
+                <View style={styles.gapXl} />
+                {noticeBlock(notice)}
+              </>
             )}
-            <TouchableOpacity style={[styles.bigBtn, { backgroundColor: colors.accent }]} onPress={goBack}>
-              <Text style={[styles.bigBtnText, { color: colors.textOnAccent }]}>{t('done')}</Text>
-            </TouchableOpacity>
+            <View style={styles.gapXl} />
+            <PrimaryButton styles={styles} colors={colors} label={t('done')} onPress={goBack} />
           </View>
         )}
 
-        {/* ══ Already paid — a success terminal, not an error ══ */}
+        {/* ══ Already paid — a success terminal, not an error ══
+            Focal: the headline. There is no figure to show — this device never
+            saw a second payment — so nothing here is at display scale. */}
         {phase === 'already_paid' && (
-          <View style={styles.center}>
-            <Ionicons name="checkmark-done-circle" size={72} color={colors.info} style={{ marginBottom: spacing.md }} />
-            <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>{t('local_pay_already_paid')}</Text>
-            <Text style={[styles.phaseSub, { color: colors.textSecondary }]}>{t('local_pay_queued')}</Text>
+          <Animated.View entering={settleIn} style={styles.stage}>
+            <Ionicons name="checkmark-done-circle-outline" size={56} color={colors.textSecondary} />
+            <View style={styles.gapLg} />
+            {phaseTitle(t('local_pay_already_paid'))}
+            {supportText(t('local_pay_queued'))}
+            <View style={styles.gapXl} />
             {/* Deliberately no retry: reset() would mint a fresh session and ask
                 the payer to pay a second time for money already queued here. */}
-            <TouchableOpacity style={[styles.bigBtn, { backgroundColor: colors.accent }]} onPress={goBack}>
-              <Text style={[styles.bigBtnText, { color: colors.textOnAccent }]}>{t('done')}</Text>
-            </TouchableOpacity>
-          </View>
+            <PrimaryButton styles={styles} colors={colors} label={t('done')} onPress={goBack} />
+          </Animated.View>
         )}
 
-        {/* ══ Failed ══ */}
+        {/* ══ Failed ══
+            Focal: the reason. The title is generic by design, so the sentence
+            under it carries the information and gets the weight. */}
         {phase === 'failed' && (
-          <View style={styles.center}>
-            <Ionicons name="alert-circle" size={72} color={colors.error} style={{ marginBottom: spacing.md }} />
-            <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>{t('local_pay_failed')}</Text>
-            <Text style={[styles.phaseSub, { color: colors.textSecondary }]}>{failure?.detail}</Text>
+          <Animated.View entering={settleIn} style={styles.stage} accessibilityRole="alert">
+            <View style={[styles.heroCircle, { backgroundColor: colors.error + '15' }]}>
+              <Ionicons name="alert-circle-outline" size={40} color={colors.error} />
+            </View>
+            <View style={styles.gapLg} />
+            {phaseTitle(t('local_pay_failed'))}
+            <Text style={[styles.reason, { color: colors.textPrimary }]} textBreakStrategy="balanced">
+              {failure?.detail}
+            </Text>
+            <View style={styles.gapXl} />
 
             {/* A frame reached this device but never reached storage. Retry the
                 SAME session — reset() would mint one that can never receive it. */}
             {unsettled && (
-              <TouchableOpacity
-                style={[styles.bigBtn, { backgroundColor: colors.info, marginBottom: spacing.md }]}
-                onPress={retrySettle}
-              >
-                <Ionicons name="refresh" size={18} color="#fff" />
-                <Text style={[styles.bigBtnText, { color: '#fff' }]}>{t('local_pay_retry_save')}</Text>
-              </TouchableOpacity>
+              <>
+                <PrimaryButton
+                  styles={styles}
+                  colors={colors}
+                  icon="refresh"
+                  label={t('local_pay_retry_save')}
+                  onPress={retrySettle}
+                />
+                <View style={styles.gapMd} />
+              </>
             )}
 
             {failure?.settings && (
-              <TouchableOpacity
-                style={[styles.bigBtn, { backgroundColor: colors.info, marginBottom: spacing.md }]}
-                onPress={() => void Linking.openSettings()}
-              >
-                <Ionicons name="settings-outline" size={18} color="#fff" />
-                <Text style={[styles.bigBtnText, { color: '#fff' }]}>{t('open_settings')}</Text>
-              </TouchableOpacity>
+              <>
+                <SecondaryButton
+                  styles={styles}
+                  colors={colors}
+                  icon="settings-outline"
+                  label={t('open_settings')}
+                  onPress={() => void Linking.openSettings()}
+                />
+                <View style={styles.gapMd} />
+              </>
             )}
 
             {paymentQr && (
-              <TouchableOpacity
-                style={[styles.outlineBtn, { borderColor: colors.separator, marginBottom: spacing.md }]}
-                onPress={() => {
-                  setFailure(null)
-                  setPhase('send_qr')
-                }}
-              >
-                <Ionicons name="qr-code-outline" size={18} color={colors.accent} />
-                <Text style={[styles.outlineBtnText, { color: colors.accent }]}>{t('local_pay_show_qr_instead')}</Text>
-              </TouchableOpacity>
+              <>
+                <SecondaryButton
+                  styles={styles}
+                  colors={colors}
+                  icon="qr-code-outline"
+                  label={t('local_pay_show_qr_instead')}
+                  onPress={() => {
+                    setFailure(null)
+                    setPhase('send_qr')
+                  }}
+                />
+                <View style={styles.gapMd} />
+              </>
             )}
 
             {/* With a frame in hand, reset() means abandoning it — the frame lives
                 only in memory — so it is demoted to the secondary action. */}
             {unsettled ? (
-              <CancelBtn colors={colors} styles={styles} label={t('cancel')} onPress={reset} />
+              <CancelButton styles={styles} colors={colors} label={t('cancel')} onPress={reset} />
             ) : (
-              <TouchableOpacity style={[styles.bigBtn, { backgroundColor: colors.accent }]} onPress={reset}>
-                <Text style={[styles.bigBtnText, { color: colors.textOnAccent }]}>{t('retry')}</Text>
-              </TouchableOpacity>
+              <PrimaryButton styles={styles} colors={colors} label={t('retry')} onPress={reset} />
             )}
-          </View>
+          </Animated.View>
         )}
       </ScrollView>
 
@@ -1208,31 +1642,186 @@ export default function LocalPaymentsScreen() {
           hintText={phase === 'send_scan' ? t('local_pay_scan_qr') : t('local_pay_scan_payer_qr')}
         />
       </Modal>
+
+      {/* ══ The moment ══
+          Celebration fires haptics.success() itself. This screen must never fire
+          a second one — two success notifications in a row read as an error. */}
+      {celebrating && (
+        <View style={styles.celebrationOverlay} pointerEvents="none">
+          <Celebration onDone={() => setCelebrating(false)} />
+        </View>
+      )}
     </View>
   )
 }
 
 // ── Small components ──
+//
+// Every control below covers the full interaction set RN can express: default,
+// pressed (PressableScale's 0.97 spring, plus a fill change where the shape is
+// not already filled), disabled (dimmed AND announced through
+// accessibilityState, not colour alone), and focus, which on this platform is
+// VoiceOver's focus and is served by the role/label/state triple. There is no
+// hover on a touch device; a pointer-capable iPad hover falls back to the
+// pressed treatment.
 
-function CancelBtn({
-  colors,
+type Colors = ReturnType<typeof useTheme>['colors']
+type Styles = ReturnType<typeof makeStyles>
+
+function PrimaryButton({
   styles,
+  colors,
+  label,
+  icon,
+  onPress,
+  disabled
+}: {
+  styles: Styles
+  colors: Colors
+  label: string
+  icon?: keyof typeof Ionicons.glyphMap
+  onPress: () => void
+  disabled?: boolean
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      disabled={disabled}
+      haptic="confirm"
+      style={[styles.button, { backgroundColor: disabled ? colors.fill : colors.accent }]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+    >
+      {!!icon && <Ionicons name={icon} size={20} color={disabled ? colors.textTertiary : colors.textOnAccent} />}
+      <Text style={[styles.buttonText, { color: disabled ? colors.textTertiary : colors.textOnAccent }]}>
+        {label}
+      </Text>
+    </PressableScale>
+  )
+}
+
+function SecondaryButton({
+  styles,
+  colors,
+  label,
+  icon,
+  onPress,
+  disabled
+}: {
+  styles: Styles
+  colors: Colors
+  label: string
+  icon?: keyof typeof Ionicons.glyphMap
+  onPress: () => void
+  disabled?: boolean
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      disabled={disabled}
+      haptic="tap"
+      style={[styles.button, styles.buttonOutline, { borderColor: colors.separator }]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+    >
+      {!!icon && <Ionicons name={icon} size={18} color={disabled ? colors.textTertiary : colors.accent} />}
+      <Text style={[styles.buttonText, { color: disabled ? colors.textTertiary : colors.accent }]}>{label}</Text>
+    </PressableScale>
+  )
+}
+
+function CancelButton({
+  styles,
+  colors,
   label,
   onPress
 }: {
-  colors: ReturnType<typeof useTheme>['colors']
-  styles: ReturnType<typeof makeStyles>
+  styles: Styles
+  colors: Colors
   label: string
   onPress: () => void
 }) {
   return (
-    <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.separator }]} onPress={onPress}>
-      <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>{label}</Text>
-    </TouchableOpacity>
+    <PressableScale
+      onPress={onPress}
+      haptic="tap"
+      style={styles.cancel}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Text style={[styles.cancelText, { color: colors.textSecondary }]}>{label}</Text>
+    </PressableScale>
+  )
+}
+
+/**
+ * Specific amount vs any amount.
+ *
+ * Concentric by construction: the track's 10pt radius is the segment's 8pt plus
+ * the 2pt inset between them, so the selected pill sits parallel to the outer
+ * edge instead of drifting away from it at the corners.
+ */
+function AmountModeToggle({
+  styles,
+  colors,
+  open,
+  onChange,
+  specificLabel,
+  openLabel
+}: {
+  styles: Styles
+  colors: Colors
+  open: boolean
+  onChange: (open: boolean) => void
+  specificLabel: string
+  openLabel: string
+}) {
+  const segment = (isOpen: boolean, label: string) => {
+    const selected = open === isOpen
+    return (
+      <PressableScale
+        key={label}
+        onPress={() => {
+          if (!selected) {
+            haptics.tap()
+            onChange(isOpen)
+          }
+        }}
+        scaleTo={0.98}
+        style={[styles.segment, selected && { backgroundColor: colors.backgroundElevated }]}
+        accessibilityRole="radio"
+        accessibilityLabel={label}
+        accessibilityState={{ selected }}
+      >
+        <Text
+          style={[
+            styles.segmentText,
+            { color: selected ? colors.textPrimary : colors.textSecondary },
+            selected && styles.segmentTextSelected
+          ]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+      </PressableScale>
+    )
+  }
+  return (
+    <View style={[styles.segmentTrack, { backgroundColor: colors.fillTertiary }]} accessibilityRole="radiogroup">
+      {segment(false, specificLabel)}
+      {segment(true, openLabel)}
+    </View>
   )
 }
 
 // ── Styles ──
+//
+// Density: 8pt vertical rhythm, 16pt gutter (spacing.lg), 24pt between sections
+// (spacing.xxl), 8pt within a group (spacing.sm). Horizontal insets use
+// Start/End rather than Left/Right so Arabic mirrors correctly; `row` is flipped
+// by Yoga itself.
 
 function makeStyles() {
   return StyleSheet.create({
@@ -1245,110 +1834,151 @@ function makeStyles() {
       paddingVertical: spacing.sm,
       borderBottomWidth: StyleSheet.hairlineWidth
     },
+    // 44×44 — the HIG minimum, and the reason the header is 8pt-padded rather
+    // than sized to the glyph.
     headerBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-    headerTitle: { ...typography.headline, fontWeight: '600' },
-    scroll: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+    headerTitle: { ...typography.headline, flexShrink: 1, textAlign: 'center' },
+    scroll: { padding: spacing.lg },
 
-    center: { alignItems: 'center', paddingVertical: spacing.xl },
+    stage: { alignItems: 'center', paddingVertical: spacing.xxl },
+    stageTight: { alignItems: 'center' },
+
+    // Rhythm spacers. Named for the token so the 8pt grid stays visible in the
+    // markup rather than hiding inside a dozen one-off margins.
+    gapSm: { height: spacing.sm },
+    gapMd: { height: spacing.md },
+    gapLg: { height: spacing.lg },
+    gapXl: { height: spacing.xxl },
+
     heroCircle: {
-      width: 100,
-      height: 100,
-      borderRadius: 50,
+      width: 88,
+      height: 88,
+      borderRadius: 44,
       alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: spacing.md
+      justifyContent: 'center'
     },
-    heroText: { ...typography.subhead, textAlign: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.xl },
 
-    bigBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      alignSelf: 'stretch',
-      gap: spacing.sm,
-      paddingVertical: 14,
-      borderRadius: radii.md
-    },
-    bigBtnText: { ...typography.body, fontWeight: '600' },
-
-    outlineBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      alignSelf: 'stretch',
-      gap: spacing.sm,
-      paddingVertical: spacing.md,
-      borderRadius: radii.md,
-      borderWidth: StyleSheet.hairlineWidth,
-      marginTop: spacing.lg
-    },
-    outlineBtnText: { ...typography.subhead, fontWeight: '500' },
-
-    phaseTitle: { ...typography.title3, fontWeight: '700', textAlign: 'center' },
-    phaseSub: { ...typography.subhead, textAlign: 'center', marginBottom: spacing.lg },
+    // ── Type: four levels, hierarchy from size + weight + colour together ──
+    // L1 display 44/700  the amount, and only the amount
+    // L2 title2  22/700  the phase heading
+    // L3 subhead 15/400  supporting sentence, textSecondary
+    // L4 footnote 13/400 status and metadata, textTertiary
+    amountBlock: { alignItems: 'center' },
+    amountDisplay: { ...typography.display, fontVariant: ['tabular-nums'], textAlign: 'center' },
+    amountTitle: { ...typography.title2, fontVariant: ['tabular-nums'], textAlign: 'center' },
+    title: { ...typography.title2, textAlign: 'center' },
+    support: { ...typography.subhead, textAlign: 'center', marginTop: spacing.sm },
+    reason: { ...typography.subhead, fontWeight: '500', textAlign: 'center', marginTop: spacing.sm },
     fieldLabel: { ...typography.caption2, fontWeight: '600', letterSpacing: 0.8, marginBottom: spacing.sm },
 
+    presenceSlot: { alignSelf: 'stretch', alignItems: 'center' },
+
+    // Concentric: outer 20 = inner plate 4 + padding 16.
     qrCard: {
       backgroundColor: '#fff',
       padding: spacing.lg,
       borderRadius: radii.xl,
-      marginBottom: spacing.lg,
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.1,
       shadowRadius: 16,
       elevation: 6
     },
+    qrPlate: { borderRadius: 4, overflow: 'hidden', backgroundColor: '#fff' },
+    qrError: {
+      alignSelf: 'stretch',
+      alignItems: 'center',
+      paddingVertical: spacing.xxxl,
+      paddingHorizontal: spacing.lg,
+      borderRadius: radii.xl,
+      borderWidth: StyleSheet.hairlineWidth
+    },
 
-    badge: {
+    button: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: spacing.xs,
-      borderRadius: radii.pill,
-      paddingVertical: spacing.xs,
-      paddingHorizontal: spacing.md
+      justifyContent: 'center',
+      alignSelf: 'stretch',
+      gap: spacing.sm,
+      minHeight: 48,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      borderRadius: radii.md
     },
-    badgeText: { ...typography.caption1, fontWeight: '500' },
+    buttonOutline: { borderWidth: StyleSheet.hairlineWidth },
+    buttonText: { ...typography.body, fontWeight: '600' },
 
-    waitingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
-    waitingText: { ...typography.footnote },
+    cancel: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      alignSelf: 'stretch',
+      minHeight: 44,
+      paddingVertical: spacing.md,
+      borderRadius: radii.md,
+      marginTop: spacing.lg
+    },
+    cancelText: { ...typography.body, fontWeight: '500' },
+
+    // Concentric: track 10 = segment 8 + 2pt inset.
+    segmentTrack: {
+      flexDirection: 'row',
+      alignSelf: 'stretch',
+      padding: 2,
+      borderRadius: radii.md
+    },
+    segment: {
+      flex: 1,
+      minHeight: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: spacing.md,
+      borderRadius: 8
+    },
+    segmentText: { ...typography.subhead },
+    segmentTextSelected: { fontWeight: '600' },
+
+    openChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      alignSelf: 'stretch',
+      minHeight: 56,
+      paddingHorizontal: spacing.lg,
+      borderRadius: radii.md,
+      borderWidth: StyleSheet.hairlineWidth
+    },
+    openChipText: { ...typography.title3 },
 
     idCard: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.md,
+      alignSelf: 'stretch',
       padding: spacing.md,
       borderRadius: radii.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      marginBottom: spacing.lg
+      borderWidth: StyleSheet.hairlineWidth
     },
-    avatarPlaceholder: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-    idName: { ...typography.body, fontWeight: '600', marginBottom: 1 },
+    avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+    idText: { flex: 1, minWidth: 0, gap: 2 },
+    idLabel: { ...typography.caption2, fontWeight: '600', letterSpacing: 0.8 },
+    idName: { ...typography.body, fontWeight: '600' },
     idKey: { ...typography.caption2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 
-    bigAmount: { fontSize: 34, fontWeight: '700', letterSpacing: 0.4, marginBottom: spacing.lg },
-
-    note: {
+    notice: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.sm,
-      paddingVertical: spacing.sm,
+      alignSelf: 'stretch',
+      paddingVertical: spacing.md,
       paddingHorizontal: spacing.md,
       borderRadius: radii.md,
-      borderWidth: 1,
-      marginBottom: spacing.lg,
-      alignSelf: 'stretch'
+      borderWidth: StyleSheet.hairlineWidth
     },
-    noteText: { ...typography.subhead, flex: 1 },
+    noticeText: { ...typography.footnote, flex: 1 },
 
-    cancelBtn: {
+    celebrationOverlay: {
+      ...StyleSheet.absoluteFillObject,
       alignItems: 'center',
-      alignSelf: 'stretch',
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.lg,
-      borderRadius: radii.md,
-      borderWidth: 1,
-      marginTop: spacing.xl
-    },
-    cancelBtnText: { ...typography.body, fontWeight: '500' }
+      justifyContent: 'center'
+    }
   })
 }

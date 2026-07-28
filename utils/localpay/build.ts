@@ -1,6 +1,6 @@
 import { P2PKH, PublicKey } from '@bsv/sdk'
 import { FRAME_VERSION, type PaymentFrame } from './codec'
-import type { Session } from './session'
+import { isRequestableAmount, type Session } from './session'
 import { PEERPAY_LABEL, PEERPAY_PROTOCOL_ID } from './pending'
 import type { Ack } from './transport/types'
 
@@ -74,12 +74,32 @@ export type DeliveryOutcome =
  * specified as bare rawtx to shrink the symbol, but the payee needs ancestry to
  * internalize offline, and MAX_FRAME_QR_CHARS already rejects frames too large
  * to render — so one encoding serves both paths.
+ *
+ * `amount` is passed in rather than read off the session because the session's
+ * own amount is optional: on an open request the payer chooses. Making it an
+ * explicit argument means the one figure that becomes a real output — and the
+ * one the payee binds its settle check to — is chosen at exactly one call site
+ * and cannot silently fall back to `undefined` satoshis. It is validated here
+ * rather than trusted, since a fractional or negative value reaching
+ * createAction is a malformed transaction, not a UI glitch.
  */
 export async function buildPaymentFrame(
   wallet: PayingWallet,
   session: Session,
-  originator: string
+  originator: string,
+  amount: number
 ): Promise<BuiltPayment> {
+  if (!isRequestableAmount(amount)) {
+    throw new Error('amount must be a positive whole number of satoshis')
+  }
+  // A payee that named a figure is stating a binding term of the request, and
+  // its settle path refuses anything else. Catching the disagreement here — on
+  // the payer, before an action exists — turns a burnt build and a remote
+  // decline into a plain refusal with nothing to unwind.
+  if (session.amount !== undefined && session.amount !== amount) {
+    throw new Error('amount does not match the payee’s request')
+  }
+
   const { publicKey: senderIdentityKey } = await wallet.getPublicKey({ identityKey: true }, originator)
 
   const { publicKey: derived } = await wallet.getPublicKey(
@@ -103,7 +123,7 @@ export async function buildPaymentFrame(
       outputs: [
         {
           lockingScript,
-          satoshis: session.amount,
+          satoshis: amount,
           outputDescription: 'Nearby payment',
         },
       ],
@@ -147,7 +167,7 @@ export async function buildPaymentFrame(
     frame: {
       version: FRAME_VERSION,
       senderIdentityKey,
-      amount: session.amount,
+      amount,
       outputIndex: 0,
       derivationPrefix: session.derivationPrefix,
       derivationSuffix: session.derivationSuffix,

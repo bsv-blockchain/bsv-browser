@@ -77,11 +77,35 @@ The payee mints a session and renders it as a QR:
 | `sessionId` | 16 | random; becomes the Bonjour instance name |
 | `psk` | 32 | random; TLS pre-shared key |
 | `identityKey` | 33 | payee compressed pubkey |
-| `amount` | ~5 | varint satoshis |
+| `amount` | ~5, **optional** | varint satoshis; **absent = open request, the payer chooses** |
 | `derivationPrefix` | ~16 | BRC-29 nonce |
 | `derivationSuffix` | ~16 | BRC-29 nonce |
 
 ≈ 120 bytes → a small static QR, instant to scan.
+
+**`amount` is optional** (resolves open question 1 below). The payee either names a
+figure or leaves the request open; on an open request the payer enters the amount on
+their confirm screen. On the wire the key is *omitted*, never written as null —
+`decodeSession` treats absent as open and refuses an explicit null, so the
+"payer chooses" path can only be reached by a shape `encodeSession` actually
+produces. Present-but-invalid stays a hard `CodecError`
+(`Number.isSafeInteger(a) && a > 0`): degrading a corrupt `0` into "any amount"
+would put a live Send button under a value nobody chose.
+
+This changes exactly one check in the payee's settle path, and the distinction is
+load-bearing:
+
+| Check | Applies when | Why |
+|---|---|---|
+| `derivationPrefix` / `derivationSuffix` match | **always** | The nonces are the whole binding — they are the per-session values the payee minted and the payer echoed back, and matching them is what proves the frame was built for *this* request. Never conditional. |
+| `frame.amount === session.amount` | **only when the payee named an amount** | It pins the figure the payee is about to read to the figure they asked for. On an open request there is no requested figure to contradict, so there is nothing to compare against; inventing a comparison would either reject every legitimate open payment or merely look like a check while always passing. |
+
+The payer side mirrors this: `buildPaymentFrame` takes the amount as an explicit
+argument rather than reading `session.amount`, so the single figure that becomes a
+real output is chosen at one call site and cannot fall back to `undefined`
+satoshis. It refuses a non-satoshi value, and refuses any value that contradicts an
+amount the payee did name — before `createAction` runs, so a disagreement costs a
+plain error rather than a `noSend` action holding inputs.
 
 `sessionId` is rendered as base32 for the Bonjour instance name (`bsvpay-<26 chars>`), keeping it within DNS-SD label limits.
 
@@ -195,6 +219,6 @@ No entitlement. No background modes.
 
 ## Open questions
 
-1. Should the payee be able to raise a request with **no amount** (payer chooses)? The BLE version required an amount up front.
+1. ~~Should the payee be able to raise a request with **no amount** (payer chooses)? The BLE version required an amount up front.~~ **Resolved: yes.** `Session.amount` is optional — see the Pairing table above for the wire shape and the one settle check that becomes conditional.
 2. Retention policy for `completed` entries in the pending store.
 3. Does the QR path need a payee→payer confirmation QR, or is the snackbar sufficient?

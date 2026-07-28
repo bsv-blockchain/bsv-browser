@@ -41,7 +41,17 @@ export const radii = {
 
 /* ------------------------------- Typography ------------------------------ */
 
+/**
+ * The iOS type scale, which is very close to a 1.25 (major third) ratio anchored
+ * on `body` at 17pt: 13 · 17 · 22 · 28 · 34 — each step ≈ the previous × 1.25.
+ *
+ * `display` continues that ratio one step past `largeTitle` (34 × 1.25 ≈ 42,
+ * rounded to 44 to sit on the 4pt grid). It is for a single focal figure on a
+ * screen that has one — an amount being handed to another person — and nothing
+ * else. Two `display` elements on one view means the view has no focal point.
+ */
 export const typography = {
+  display: { fontSize: 44, fontWeight: '700' as const, lineHeight: 52, letterSpacing: -0.5 },
   largeTitle: { fontSize: 34, fontWeight: '700' as const, lineHeight: 41 },
   title1: { fontSize: 28, fontWeight: '700' as const, lineHeight: 34 },
   title2: { fontSize: 22, fontWeight: '700' as const, lineHeight: 28 },

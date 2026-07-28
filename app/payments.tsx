@@ -19,8 +19,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { showToast } from '@/components/ui/Toast'
 import { PeerPayClient, IncomingPayment, PaymentToken } from '@bsv/message-box-client'
-import { IdentityClient, PublicKey, StorageDownloader } from '@bsv/sdk'
+import { IdentityClient, PublicKey } from '@bsv/sdk'
 import type { DisplayableIdentity } from '@bsv/sdk'
+import { resolveIdentity, searchIdentities } from '@/utils/identity/resolveIdentity'
 
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -62,66 +63,6 @@ function peerPayValidationMessage(result: PeerPayValidationResult | null) {
   if (!result || !result.isPeerPay) return null
   const messages = [result.errors.identityKey, result.errors.sats].filter(Boolean)
   return messages.length ? messages.join('. ') : null
-}
-
-const unique = (results: DisplayableIdentity[]) => {
-  return results.filter((identity, index) => {
-    return results.findIndex(i => i.identityKey === identity.identityKey) === index
-  })
-}
-
-async function resolveAvatarURL(urls: (string | undefined)[]): Promise<string | undefined> {
-  const defined = urls.filter((u): u is string => !!u)
-  const httpUrl = defined.find(u => u.startsWith('http'))
-  if (httpUrl) return httpUrl
-  const nonHttp = defined.find(u => !!u)
-  if (!nonHttp) return undefined
-  try {
-    const downloader = new StorageDownloader()
-    const resolved = await downloader.resolve(nonHttp)
-    return resolved[0] ?? nonHttp
-  } catch {
-    return nonHttp
-  }
-}
-
-async function mergeIdentityRecords(records: DisplayableIdentity[]): Promise<DisplayableIdentity | null> {
-  const merged = records.reduce<DisplayableIdentity | null>((acc, cur) => {
-    if (!acc) return cur
-    return {
-      identityKey: acc.identityKey,
-      name: acc.name || cur.name,
-      avatarURL: acc.avatarURL || cur.avatarURL,
-      abbreviatedKey: acc.abbreviatedKey || cur.abbreviatedKey,
-      badgeIconURL: acc.badgeIconURL || cur.badgeIconURL,
-      badgeLabel: acc.badgeLabel || cur.badgeLabel,
-      badgeClickURL: acc.badgeClickURL || cur.badgeClickURL
-    }
-  }, null)
-  if (!merged) return null
-  const avatarURL = (await resolveAvatarURL(records.map(r => r.avatarURL))) || ''
-  return { ...merged, avatarURL }
-}
-
-async function resolveIdentity(
-  idClient: IdentityClient,
-  sender: string
-): Promise<readonly [string, DisplayableIdentity | null]> {
-  try {
-    const results = await idClient.resolveByIdentityKey({ identityKey: sender, seekPermission: false })
-    return [sender, await mergeIdentityRecords(results)] as const
-  } catch {
-    return [sender, null] as const
-  }
-}
-
-async function searchIdentities(idClient: IdentityClient, text: string): Promise<DisplayableIdentity[]> {
-  const results = await idClient.resolveByAttributes({
-    attributes: { any: text.trim() },
-    limit: 5,
-    seekPermission: false
-  })
-  return unique(results)
 }
 
 function useIdentitySearch(
