@@ -113,7 +113,6 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { durations, springs } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
-import { haptics } from '@/hooks/useHaptics'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
 import { MAX_FRAME_QR_CHARS, frameFromQr, frameToQr, type PaymentFrame } from '@/utils/localpay/codec'
@@ -293,7 +292,6 @@ export default function LocalPaymentsScreen() {
    * Continue disabled, while this is a complete request that happens to name no
    * amount.
    */
-  const [requestOpen, setRequestOpen] = useState(false)
   /** The payer's own entry, used only when the scanned session left the amount open. */
   const [sendAmount, setSendAmount] = useState('')
 
@@ -420,7 +418,6 @@ export default function LocalPaymentsScreen() {
     setHostedSession(null)
     setScannedSession(null)
     setRequestAmount('')
-    setRequestOpen(false)
     setSendAmount('')
     setPaymentQr(null)
     setSettledAmount(0)
@@ -702,8 +699,12 @@ export default function LocalPaymentsScreen() {
     // An open request carries no figure at all. Undefined, never 0 — the codec
     // refuses a non-positive amount precisely so a corrupt zero can never be
     // read back as "any amount".
-    const sats = requestOpen ? undefined : satsFrom(requestAmount)
-    if (sats !== undefined && sats <= 0) return
+    // Zero (or blank) is the user asking the payer to choose, so it becomes an
+    // open session rather than a rejected input. Undefined, never 0 — the codec
+    // refuses a non-positive amount precisely so a corrupt zero can never be
+    // read back as "any amount".
+    const requested = satsFrom(requestAmount)
+    const sats = requested > 0 ? requested : undefined
     // Gate on storage too, not just the wallet. Advertising with storage null
     // means a payer can deliver a frame the payee then cannot persist, after the
     // transport has already acked it as accepted.
@@ -734,7 +735,7 @@ export default function LocalPaymentsScreen() {
     } catch (e) {
       fail('generic', messageOf(e))
     }
-  }, [requestAmount, requestOpen, wallet, storage, adminOriginator, supportsAwdl, fail, t])
+  }, [requestAmount, wallet, storage, adminOriginator, supportsAwdl, fail, t])
 
   // ── Receive: scan the payer's frame ──
 
@@ -1045,7 +1046,6 @@ export default function LocalPaymentsScreen() {
 
   /** Listening over AWDL right now. Goes false once the fast path gives up. */
   const awdlActive = hostedSession !== null && supportsAwdl && nearbyError === null
-  const canRequest = requestOpen || satsFrom(requestAmount) > 0
   const canSend = payAmount > 0
   const scannerOpen = phase === 'send_scan' || phase === 'receive_scan'
 
@@ -1259,42 +1259,25 @@ export default function LocalPaymentsScreen() {
         {phase === 'receive_amount' && (
           <Animated.View entering={settleIn}>
             {phaseTitle(t('local_pay_request'))}
-            {supportText(requestOpen ? t('local_pay_open_request') : t('local_pay_enter_amount'))}
+            {supportText(t('local_pay_amount_optional_hint'))}
             <View style={styles.gapXl} />
 
-            <AmountModeToggle
-              styles={styles}
-              colors={colors}
-              open={requestOpen}
-              onChange={setRequestOpen}
-              specificLabel={t('local_pay_amount_specific')}
-              openLabel={t('local_pay_amount_any')}
-            />
-            <View style={styles.gapLg} />
-
-            {requestOpen ? (
-              <Animated.View
-                entering={fadeIn}
-                style={[styles.openChip, { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator }]}
-              >
-                <Ionicons name="infinite" size={20} color={colors.textSecondary} />
-                <Text style={[styles.openChipText, { color: colors.textPrimary }]}>{t('local_pay_any_amount')}</Text>
-              </Animated.View>
-            ) : (
-              <Animated.View entering={fadeIn}>
-                <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
-                  {t('local_pay_amount').toUpperCase()}
-                </Text>
-                <AmountInput value={requestAmount} onChangeText={setRequestAmount} />
-              </Animated.View>
-            )}
+            <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
+              {t('local_pay_amount').toUpperCase()}
+            </Text>
+            {/* No max button: this asks the payer for money, so "entire wallet
+                balance" would mean the requester's own balance — meaningless here. */}
+            <AmountInput value={requestAmount} onChangeText={setRequestAmount} showMax={false} />
 
             <View style={styles.gapXl} />
+            {/* Never disabled. Leaving the amount at zero is a real choice — it
+                means "payer decides" — so gating Continue on a non-zero amount
+                would make that choice unreachable. startRequest maps 0 to an
+                open session. */}
             <PrimaryButton
               styles={styles}
               colors={colors}
               label={t('continue_action')}
-              disabled={!canRequest}
               onPress={() => void startRequest()}
             />
             <CancelButton styles={styles} colors={colors} label={t('cancel')} onPress={reset} />
@@ -1763,59 +1746,6 @@ function CancelButton({
  * the 2pt inset between them, so the selected pill sits parallel to the outer
  * edge instead of drifting away from it at the corners.
  */
-function AmountModeToggle({
-  styles,
-  colors,
-  open,
-  onChange,
-  specificLabel,
-  openLabel
-}: {
-  styles: Styles
-  colors: Colors
-  open: boolean
-  onChange: (open: boolean) => void
-  specificLabel: string
-  openLabel: string
-}) {
-  const segment = (isOpen: boolean, label: string) => {
-    const selected = open === isOpen
-    return (
-      <PressableScale
-        key={label}
-        onPress={() => {
-          if (!selected) {
-            haptics.tap()
-            onChange(isOpen)
-          }
-        }}
-        scaleTo={0.98}
-        style={[styles.segment, selected && { backgroundColor: colors.backgroundElevated }]}
-        accessibilityRole="radio"
-        accessibilityLabel={label}
-        accessibilityState={{ selected }}
-      >
-        <Text
-          style={[
-            styles.segmentText,
-            { color: selected ? colors.textPrimary : colors.textSecondary },
-            selected && styles.segmentTextSelected
-          ]}
-          numberOfLines={1}
-        >
-          {label}
-        </Text>
-      </PressableScale>
-    )
-  }
-  return (
-    <View style={[styles.segmentTrack, { backgroundColor: colors.fillTertiary }]} accessibilityRole="radiogroup">
-      {segment(false, specificLabel)}
-      {segment(true, openLabel)}
-    </View>
-  )
-}
-
 // ── Styles ──
 //
 // Density: 8pt vertical rhythm, 16pt gutter (spacing.lg), 24pt between sections
@@ -1925,28 +1855,7 @@ function makeStyles() {
       padding: 2,
       borderRadius: radii.md
     },
-    segment: {
-      flex: 1,
-      minHeight: 40,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: spacing.md,
-      borderRadius: 8
-    },
-    segmentText: { ...typography.subhead },
     segmentTextSelected: { fontWeight: '600' },
-
-    openChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.md,
-      alignSelf: 'stretch',
-      minHeight: 56,
-      paddingHorizontal: spacing.lg,
-      borderRadius: radii.md,
-      borderWidth: StyleSheet.hairlineWidth
-    },
-    openChipText: { ...typography.title3 },
 
     idCard: {
       flexDirection: 'row',

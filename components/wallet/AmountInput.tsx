@@ -13,6 +13,12 @@ import { parseDisplayToSatoshis, formatAmount } from '@/utils/amountFormatHelper
 export const SEND_MAX_VALUE = '2099999999999999'
 
 interface AmountInputProps {
+  /**
+   * Show the "Send Max" shortcut. Defaults to true for send flows.
+   * Pass false when asking someone ELSE to pay: the max there would be the
+   * requester's own balance, which is meaningless to the payer.
+   */
+  showMax?: boolean
   value: string
   onChangeText: (text: string) => void
 }
@@ -27,7 +33,7 @@ interface AmountInputProps {
  * The `onChangeText` callback always emits satoshi integer strings.
  * The `value` prop is always satoshi integer strings.
  */
-export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText }) => {
+export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText, showMax = true }) => {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const { settings } = useWallet()
@@ -130,12 +136,14 @@ export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText })
             <Text style={[styles.unitLabel, { color: colors.textSecondary }]}>{unitLabel}</Text>
           </Animated.View>
         </View>
-        <TouchableOpacity
-          onPress={() => onChangeText(SEND_MAX_VALUE)}
-          style={[styles.maxButton, { backgroundColor: colors.accent + '15' }]}
-        >
-          <Text style={[styles.maxText, { color: colors.accent }]}>{t('send_max')}</Text>
-        </TouchableOpacity>
+        {showMax && (
+          <TouchableOpacity
+            onPress={() => onChangeText(SEND_MAX_VALUE)}
+            style={[styles.maxButton, { backgroundColor: colors.accent + '15' }]}
+          >
+            <Text style={[styles.maxText, { color: colors.accent }]}>{t('send_max')}</Text>
+          </TouchableOpacity>
+        )}
       </View>
       {secondaryText != null && (
         <Text style={[styles.secondaryAmount, { color: colors.textSecondary }]}>{secondaryText}</Text>
