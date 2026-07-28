@@ -368,7 +368,10 @@ const resources = {
       local_pay_queued: 'Saved — it will be added to your wallet automatically.',
       local_pay_already_paid: 'This request has already been paid.',
       local_pay_failed: 'Payment failed',
-      local_pay_network_denied: 'Local Network access is off. Enable it in Settings to pay nearby devices.'
+      local_pay_network_denied: 'Local Network access is off. Enable it in Settings to pay nearby devices.',
+      local_pay_too_large: 'This payment is too large for a QR code. Both devices need to be on iOS to pay it nearby.',
+      local_pay_nearby_unavailable: 'Nearby Wi-Fi is unavailable. The code above still works.',
+      local_pay_retry_save: 'Try saving again'
     }
   },
   zh: {
@@ -625,7 +628,10 @@ const resources = {
       local_pay_queued: '已保存 — 稍后会自动添加到您的钱包。',
       local_pay_already_paid: '此请求已经支付过了。',
       local_pay_failed: '付款失败',
-      local_pay_network_denied: '本地网络访问已关闭。请在“设置”中开启，才能向附近的设备付款。'
+      local_pay_network_denied: '本地网络访问已关闭。请在“设置”中开启，才能向附近的设备付款。',
+      local_pay_too_large: '此付款金额对应的数据太大，无法放入二维码。两台设备都需使用 iOS 才能就近付款。',
+      local_pay_nearby_unavailable: '附近 Wi-Fi 不可用。上方的二维码仍然有效。',
+      local_pay_retry_save: '重新尝试保存'
     }
   },
   hi: {
@@ -885,7 +891,10 @@ const resources = {
       local_pay_queued: 'सहेज लिया गया — यह अपने आप आपके वॉलेट में जुड़ जाएगा।',
       local_pay_already_paid: 'इस अनुरोध का भुगतान पहले ही हो चुका है।',
       local_pay_failed: 'भुगतान विफल',
-      local_pay_network_denied: 'लोकल नेटवर्क एक्सेस बंद है। नज़दीकी डिवाइस को भुगतान करने के लिए इसे सेटिंग्स में चालू करें।'
+      local_pay_network_denied: 'लोकल नेटवर्क एक्सेस बंद है। नज़दीकी डिवाइस को भुगतान करने के लिए इसे सेटिंग्स में चालू करें।',
+      local_pay_too_large: 'यह भुगतान QR कोड के लिए बहुत बड़ा है। इसे नज़दीक से चुकाने के लिए दोनों डिवाइस iOS पर होने चाहिए।',
+      local_pay_nearby_unavailable: 'नज़दीकी Wi-Fi उपलब्ध नहीं है। ऊपर दिया गया कोड अब भी काम करता है।',
+      local_pay_retry_save: 'फिर से सहेजने की कोशिश करें'
     }
   },
   es: {
@@ -1147,7 +1156,10 @@ const resources = {
       local_pay_queued: 'Guardado: se añadirá a tu billetera automáticamente.',
       local_pay_already_paid: 'Esta solicitud ya fue pagada.',
       local_pay_failed: 'El pago falló',
-      local_pay_network_denied: 'El acceso a la red local está desactivado. Actívalo en Configuración para pagar a dispositivos cercanos.'
+      local_pay_network_denied: 'El acceso a la red local está desactivado. Actívalo en Configuración para pagar a dispositivos cercanos.',
+      local_pay_too_large: 'Este pago es demasiado grande para un código QR. Ambos dispositivos deben usar iOS para pagarlo de cerca.',
+      local_pay_nearby_unavailable: 'El Wi-Fi cercano no está disponible. El código de arriba sigue funcionando.',
+      local_pay_retry_save: 'Intentar guardar de nuevo'
     }
   },
   fr: {
@@ -1403,7 +1415,10 @@ const resources = {
       local_pay_queued: 'Enregistré — il sera ajouté automatiquement à votre portefeuille.',
       local_pay_already_paid: 'Cette demande a déjà été payée.',
       local_pay_failed: 'Échec du paiement',
-      local_pay_network_denied: 'L’accès au réseau local est désactivé. Activez-le dans Réglages pour payer les appareils à proximité.'
+      local_pay_network_denied: 'L’accès au réseau local est désactivé. Activez-le dans Réglages pour payer les appareils à proximité.',
+      local_pay_too_large: 'Ce paiement est trop volumineux pour un code QR. Les deux appareils doivent être sous iOS pour le régler à proximité.',
+      local_pay_nearby_unavailable: 'Le Wi-Fi à proximité est indisponible. Le code ci-dessus fonctionne toujours.',
+      local_pay_retry_save: 'Réessayer d’enregistrer'
     }
   },
   ar: {
@@ -1655,7 +1670,10 @@ const resources = {
       local_pay_queued: 'تم الحفظ — ستُضاف إلى محفظتك تلقائيًا.',
       local_pay_already_paid: 'تم دفع هذا الطلب بالفعل.',
       local_pay_failed: 'فشلت عملية الدفع',
-      local_pay_network_denied: 'الوصول إلى الشبكة المحلية مُعطَّل. فعّله من الإعدادات للدفع إلى الأجهزة القريبة.'
+      local_pay_network_denied: 'الوصول إلى الشبكة المحلية مُعطَّل. فعّله من الإعدادات للدفع إلى الأجهزة القريبة.',
+      local_pay_too_large: 'هذه الدفعة أكبر من أن يتسع لها رمز QR. يجب أن يعمل الجهازان بنظام iOS لدفعها عن قرب.',
+      local_pay_nearby_unavailable: 'شبكة Wi-Fi القريبة غير متاحة. الرمز أعلاه ما زال يعمل.',
+      local_pay_retry_save: 'حاول الحفظ مرة أخرى'
     }
   },
   pt: {
@@ -1911,7 +1929,10 @@ const resources = {
       local_pay_queued: 'Salvo — será adicionado à sua carteira automaticamente.',
       local_pay_already_paid: 'Esta solicitação já foi paga.',
       local_pay_failed: 'Falha no pagamento',
-      local_pay_network_denied: 'O acesso à rede local está desativado. Ative-o em Ajustes para pagar dispositivos por perto.'
+      local_pay_network_denied: 'O acesso à rede local está desativado. Ative-o em Ajustes para pagar dispositivos por perto.',
+      local_pay_too_large: 'Este pagamento é grande demais para um código QR. Os dois dispositivos precisam usar iOS para pagá-lo por perto.',
+      local_pay_nearby_unavailable: 'O Wi-Fi por perto está indisponível. O código acima continua funcionando.',
+      local_pay_retry_save: 'Tentar salvar de novo'
     }
   },
   bn: {
@@ -2165,7 +2186,10 @@ const resources = {
       local_pay_queued: 'সংরক্ষিত হয়েছে — এটি স্বয়ংক্রিয়ভাবে আপনার ওয়ালেটে যোগ হবে।',
       local_pay_already_paid: 'এই অনুরোধের পেমেন্ট আগেই হয়ে গেছে।',
       local_pay_failed: 'পেমেন্ট ব্যর্থ হয়েছে',
-      local_pay_network_denied: 'লোকাল নেটওয়ার্ক অ্যাক্সেস বন্ধ আছে। কাছের ডিভাইসে পেমেন্ট করতে সেটিংসে এটি চালু করুন।'
+      local_pay_network_denied: 'লোকাল নেটওয়ার্ক অ্যাক্সেস বন্ধ আছে। কাছের ডিভাইসে পেমেন্ট করতে সেটিংসে এটি চালু করুন।',
+      local_pay_too_large: 'এই পেমেন্টটি QR কোডের জন্য অনেক বড়। কাছাকাছি থেকে এটি পরিশোধ করতে দুটি ডিভাইসেই iOS থাকা দরকার।',
+      local_pay_nearby_unavailable: 'কাছাকাছি Wi-Fi পাওয়া যাচ্ছে না। উপরের কোডটি এখনও কাজ করে।',
+      local_pay_retry_save: 'আবার সংরক্ষণের চেষ্টা করুন'
     }
   },
   ru: {
@@ -2421,7 +2445,10 @@ const resources = {
       local_pay_queued: 'Сохранено — платёж будет добавлен в кошелёк автоматически.',
       local_pay_already_paid: 'Этот запрос уже оплачен.',
       local_pay_failed: 'Платёж не прошёл',
-      local_pay_network_denied: 'Доступ к локальной сети выключен. Включите его в «Настройках», чтобы платить устройствам поблизости.'
+      local_pay_network_denied: 'Доступ к локальной сети выключен. Включите его в «Настройках», чтобы платить устройствам поблизости.',
+      local_pay_too_large: 'Этот платёж слишком велик для QR-кода. Чтобы оплатить его поблизости, оба устройства должны быть на iOS.',
+      local_pay_nearby_unavailable: 'Wi-Fi поблизости недоступен. Код выше всё ещё работает.',
+      local_pay_retry_save: 'Попробовать сохранить снова'
     }
   },
   id: {
@@ -2675,7 +2702,10 @@ const resources = {
       local_pay_queued: 'Tersimpan — akan ditambahkan ke dompet Anda secara otomatis.',
       local_pay_already_paid: 'Permintaan ini sudah dibayar.',
       local_pay_failed: 'Pembayaran gagal',
-      local_pay_network_denied: 'Akses Jaringan Lokal nonaktif. Aktifkan di Pengaturan untuk membayar perangkat di dekat Anda.'
+      local_pay_network_denied: 'Akses Jaringan Lokal nonaktif. Aktifkan di Pengaturan untuk membayar perangkat di dekat Anda.',
+      local_pay_too_large: 'Pembayaran ini terlalu besar untuk kode QR. Kedua perangkat harus menggunakan iOS untuk membayarnya dari dekat.',
+      local_pay_nearby_unavailable: 'Wi-Fi terdekat tidak tersedia. Kode di atas tetap berfungsi.',
+      local_pay_retry_save: 'Coba simpan lagi'
     }
   },
   ja: {
@@ -2946,7 +2976,10 @@ const resources = {
       local_pay_queued: '保存しました — 自動的にウォレットへ追加されます。',
       local_pay_already_paid: 'このリクエストはすでに支払われています。',
       local_pay_failed: '支払いに失敗しました',
-      local_pay_network_denied: 'ローカルネットワークへのアクセスがオフです。近くの端末に支払うには「設定」でオンにしてください。'
+      local_pay_network_denied: 'ローカルネットワークへのアクセスがオフです。近くの端末に支払うには「設定」でオンにしてください。',
+      local_pay_too_large: 'この支払いはQRコードに収まらない大きさです。近くの端末で支払うには、両方の端末がiOSである必要があります。',
+      local_pay_nearby_unavailable: '近くのWi-Fiを利用できません。上のコードは引き続き使えます。',
+      local_pay_retry_save: 'もう一度保存する'
     }
   },
   pl: {
@@ -3218,7 +3251,10 @@ const resources = {
       local_pay_queued: 'Zapisano — zostanie automatycznie dodane do portfela.',
       local_pay_already_paid: 'Ta prośba została już opłacona.',
       local_pay_failed: 'Płatność nie powiodła się',
-      local_pay_network_denied: 'Dostęp do sieci lokalnej jest wyłączony. Włącz go w Ustawieniach, aby płacić urządzeniom w pobliżu.'
+      local_pay_network_denied: 'Dostęp do sieci lokalnej jest wyłączony. Włącz go w Ustawieniach, aby płacić urządzeniom w pobliżu.',
+      local_pay_too_large: 'Ta płatność jest za duża na kod QR. Aby zapłacić ją w pobliżu, oba urządzenia muszą działać na iOS.',
+      local_pay_nearby_unavailable: 'Wi-Fi w pobliżu jest niedostępne. Kod powyżej nadal działa.',
+      local_pay_retry_save: 'Spróbuj zapisać ponownie'
     }
   }
 }

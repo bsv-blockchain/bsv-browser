@@ -14,21 +14,33 @@
  *    │      receive_wait always renders the pairing QR, and additionally runs an
  *    │      AWDL listener when this device supports it. Either arrival lands in:
  *    │        · AWDL listener resolves ─┐
- *    │        · receive_scan (payer QR) ─┴→ receive_settling → done
+ *    │        · receive_scan (payer QR) ─┴→ receive_settling → done | already_paid
  *    └─ send_scan → send_confirm → send_working
  *           ├─ selectTransport() === 'awdl' → awdlTransport.send → done
  *           └─ selectTransport() === 'qr'   → send_qr → done
  *
+ *   already_paid is a SUCCESS terminal, not an error: the session was settled by
+ *   an earlier delivery, so that money is already queued. It is the expected end
+ *   of both legitimate rescan paths and must never offer a retry, because a retry
+ *   mints a fresh session and invites a second payment.
+ *
  *   failed is terminal for either role. It offers a retry, a route to Settings
- *   when Local Network access is the cause, and — on a failed AWDL send — the
- *   already-built frame as a QR so the payment can still complete.
+ *   when Local Network access is the cause, a re-settle when a delivered frame
+ *   could not be persisted, and — on a failed AWDL send — the already-built frame
+ *   as a QR so the payment can still complete.
+ *
+ *   An AWDL listener error does NOT terminate the screen: the fast path is
+ *   optional, so it degrades to a QR-only request with the pairing QR still up.
  *
  * Money safety (see settleReceived below, which is the only write path):
  *   1. isSessionSpent() is consulted before anything is written.
  *   2. savePending() completes before markSessionSpent(). Never the reverse:
  *      a crash between the two would burn a one-shot session whose payment was
  *      never persisted, and that money is unrecoverable.
- *   3. processPending() runs only after savePending() has resolved.
+ *   3. processPending() runs only after savePending() has resolved, outside the
+ *      try that can flip the screen to a failure. Once the frame is queued the
+ *      payment cannot be lost, so reporting failure past that line would invite
+ *      a duplicate payment — the same misreport refused for markSessionSpent.
  *   4. The live Session is threaded in as an argument — neither PaymentFrame
  *      nor PendingPayment carries a sessionId, so it cannot be recovered later.
  *   5. Every decode sits in a bare `catch`, which catches non-Error throws from
@@ -61,7 +73,7 @@ import { AmountInput } from '@/components/wallet/AmountInput'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { decodeFrame, encodeFrame, type PaymentFrame } from '@/utils/localpay/codec'
+import { MAX_FRAME_QR_CHARS, frameFromQr, frameToQr, type PaymentFrame } from '@/utils/localpay/codec'
 import { decodeSession, encodeSession, mintSession, type Session } from '@/utils/localpay/session'
 import { isSessionSpent, markSessionSpent, processPending, savePending } from '@/utils/localpay/pending'
 import { buildPaymentFrame } from '@/utils/localpay/build'
@@ -84,6 +96,7 @@ type Phase =
   | 'send_working'
   | 'send_qr'
   | 'done'
+  | 'already_paid'
   | 'failed'
 
 interface Failure {
@@ -93,48 +106,34 @@ interface Failure {
   settings: boolean
 }
 
-// ── Frame ⇄ QR ──
-//
-// encodeFrame() yields bytes; a QR carries a string. base64url keeps the payload
-// inside the alphanumeric-safe ASCII range so the encoder never widens a byte to
-// two in UTF-8. A ~450-byte frame becomes ~600 chars, well inside a v40 symbol at
-// error-correction level M (2,331 bytes).
+/** A frame that reached this device but could not be persisted. Retried, never discarded. */
+interface Unsettled {
+  frame: PaymentFrame
+  session: Session
+}
 
-const FRAME_QR_PREFIX = 'bsvpayf1:'
 /** Rendered edge length in points. The brief floors payment QRs at 280. */
 const PAYMENT_QR_SIZE = 288
 
-function toB64url(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return globalThis.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
+// ── Helpers ──
 
-function fromB64url(text: string): Uint8Array {
-  const padded = text.replace(/-/g, '+').replace(/_/g, '/')
-  const binary = globalThis.atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))
-  return Uint8Array.from(binary, c => c.charCodeAt(0))
-}
-
-function frameToQr(frame: PaymentFrame): string {
-  return FRAME_QR_PREFIX + toB64url(encodeFrame(frame))
-}
-
-function frameFromQr(text: string): PaymentFrame {
-  if (!text.startsWith(FRAME_QR_PREFIX)) throw new Error('not a nearby-payment QR')
-  return decodeFrame(fromB64url(text.slice(FRAME_QR_PREFIX.length)))
-}
-
-/** Never throws — used on failure paths where losing the fallback QR is worse than a null. */
-function safeFrameToQr(frame: PaymentFrame): string | null {
+/**
+ * A QR payload for `frame`, or null when it cannot be rendered.
+ *
+ * `react-native-qrcode-svg` rethrows out of render when a payload does not fit
+ * the symbol, and the app-level ErrorBoundary then replaces the whole app — so
+ * an oversize frame must be caught here, before it is ever handed to <QRCode>.
+ * `PaymentFrame.transaction` is AtomicBEEF, whose size tracks input count, so
+ * multi-input payments routinely exceed the ceiling.
+ */
+function frameQrOrNull(frame: PaymentFrame): string | null {
   try {
-    return frameToQr(frame)
+    const qr = frameToQr(frame)
+    return qr.length <= MAX_FRAME_QR_CHARS ? qr : null
   } catch {
     return null
   }
 }
-
-// ── Helpers ──
 
 function messageOf(e: unknown): string {
   if (e instanceof Error && e.message) return e.message
@@ -186,6 +185,24 @@ export default function LocalPaymentsScreen() {
   const [settledAmount, setSettledAmount] = useState(0)
   const [failure, setFailure] = useState<Failure | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  /**
+   * A frame that was delivered but could not be persisted. Held so the payee can
+   * retry against the SAME session: dropping it would lose a payment the payer
+   * already considers sent, and reset() would mint a session that can never
+   * receive it.
+   */
+  const [unsettled, setUnsettled] = useState<Unsettled | null>(null)
+
+  /**
+   * The AWDL fast path gave up. Non-fatal by design — the pairing QR is still on
+   * screen and a QR-path payer can still complete, so this only downgrades the
+   * request to QR-only.
+   */
+  const [nearbyError, setNearbyError] = useState<{ networkDenied: boolean } | null>(null)
+
+  /** The encoder rejected the pairing payload. Should be unreachable at ~170 chars. */
+  const [sessionQrBroken, setSessionQrBroken] = useState(false)
 
   /** Blur must abort the AWDL listener; refocus must bring it back. */
   const [focused, setFocused] = useState(true)
@@ -247,6 +264,9 @@ export default function LocalPaymentsScreen() {
     setSettledAmount(0)
     setFailure(null)
     setNotice(null)
+    setUnsettled(null)
+    setNearbyError(null)
+    setSessionQrBroken(false)
   }, [abortAll])
 
   const goBack = useCallback(() => {
@@ -266,16 +286,27 @@ export default function LocalPaymentsScreen() {
       setPhase('receive_settling')
 
       if (!storage) {
+        // The frame already reached this device — the payer believes it is sent —
+        // so hold it for a retry rather than discarding it.
         settlingRef.current = false
+        setUnsettled({ frame, session })
         fail('generic', t('wallet_not_ready'))
         return
       }
 
+      // ── Durable-write section ──
+      // Everything that can legitimately be reported as a payment failure lives
+      // in here, and only in here. Past the closing brace the money is safe.
       try {
         // (1) One-shot session guard, before anything is written. A re-scanned
         //     or replayed session must never credit twice.
         if (await isSessionSpent(storage, session.sessionId)) {
-          fail('generic', t('local_pay_already_paid'))
+          // Not a failure: that session's payment is already queued. Terminal,
+          // and deliberately without a retry — retrying mints a new session and
+          // would ask the payer to pay a second time.
+          setHostedSession(null)
+          setUnsettled(null)
+          setPhase('already_paid')
           return
         }
 
@@ -294,24 +325,42 @@ export default function LocalPaymentsScreen() {
           // the same output is the backstop against a replay from here.
           console.warn('[localpay] markSessionSpent failed:', messageOf(e))
         }
+      } catch (e) {
+        // Reached only while the frame is still un-persisted, so this is a real
+        // failure. Keep the frame and the session so the payee can retry the
+        // same settle instead of losing a payment to a transient SQLite error.
+        settlingRef.current = false
+        setUnsettled({ frame, session })
+        fail('generic', messageOf(e))
+        return
+      }
 
-        setSettledAmount(frame.amount)
-        setRole('payee')
-        setPhase('done')
-        // Clearing the hosted session stops the AWDL listener: this request is settled.
-        setHostedSession(null)
+      // ── Past here the frame is durably queued ──
+      // The payment cannot be lost, so nothing below may flip the screen to a
+      // failure. A payee who is told "failed" taps Retry, mints a fresh session,
+      // and the payer builds a second createAction from different UTXOs: both
+      // internalize, the payee is credited twice and the payer pays twice.
+      setSettledAmount(frame.amount)
+      setRole('payee')
+      setPhase('done')
+      setUnsettled(null)
+      // Clearing the hosted session stops the AWDL listener: this request is settled.
+      setHostedSession(null)
 
-        // (4) Internalization is attempted only after the durable write. If it
-        //     fails the entry stays queued for the background retry.
-        if (!wallet) {
-          setNotice(t('local_pay_queued'))
-          return
-        }
+      // (4) Internalization is attempted only after the durable write, and its
+      //     failure only downgrades the notice. processPending awaits storage
+      //     outside its own per-entry try, so it can reject as a whole; the entry
+      //     stays queued either way for the background retry.
+      if (!wallet) {
+        setNotice(t('local_pay_queued'))
+        return
+      }
+      try {
         const results = await processPending(wallet, storage, adminOriginator)
         setNotice(results.some(r => r.success) ? t('local_pay_added') : t('local_pay_queued'))
       } catch (e) {
-        settlingRef.current = false
-        fail('generic', messageOf(e))
+        console.warn('[localpay] processPending failed:', messageOf(e))
+        setNotice(t('local_pay_queued'))
       }
     },
     [storage, wallet, adminOriginator, fail, t]
@@ -320,11 +369,9 @@ export default function LocalPaymentsScreen() {
   // Read through refs so the listener effect below depends only on the session
   // and focus, and is never restarted by an unrelated re-render.
   const settleRef = useRef(settleReceived)
-  const failRef = useRef(fail)
   useEffect(() => {
     settleRef.current = settleReceived
-    failRef.current = fail
-  }, [settleReceived, fail])
+  }, [settleReceived])
 
   // ── Receive: AWDL listener ──
   //
@@ -340,6 +387,7 @@ export default function LocalPaymentsScreen() {
     const registry = abortsRef.current
     const controller = new AbortController()
     registry.add(controller)
+    setNearbyError(null)
 
     awdlTransport
       .receive(hostedSession, controller.signal)
@@ -349,8 +397,11 @@ export default function LocalPaymentsScreen() {
       })
       .catch(e => {
         if (controller.signal.aborted) return
-        const message = messageOf(e)
-        failRef.current(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', message)
+        // Never terminal. AWDL is the optional fast path; failing it must not
+        // unmount the pairing QR a QR-path payer is relying on. One native error
+        // site also fires on a failed ack AFTER the frame reached JS, so flipping
+        // to a failure screen here could contradict a settle already in flight.
+        setNearbyError({ networkDenied: looksLikeLocalNetworkDenial(messageOf(e)) })
       })
 
     return () => {
@@ -364,11 +415,16 @@ export default function LocalPaymentsScreen() {
   const startRequest = useCallback(async () => {
     const sats = Math.round(Number(requestAmount))
     if (!Number.isFinite(sats) || sats <= 0) return
-    if (!wallet) {
+    // Gate on storage too, not just the wallet. Advertising with storage null
+    // means a payer can deliver a frame the payee then cannot persist, after the
+    // transport has already acked it as accepted.
+    if (!wallet || !storage) {
       fail('generic', t('wallet_not_ready'))
       return
     }
     setPhase('receive_minting')
+    setNearbyError(null)
+    setSessionQrBroken(false)
     try {
       const { publicKey: identityKey } = await wallet.getPublicKey({ identityKey: true }, adminOriginator)
       const derivationPrefix = await createNonce(wallet, 'self', adminOriginator)
@@ -388,7 +444,7 @@ export default function LocalPaymentsScreen() {
     } catch (e) {
       fail('generic', messageOf(e))
     }
-  }, [requestAmount, wallet, adminOriginator, fail, t])
+  }, [requestAmount, wallet, storage, adminOriginator, fail, t])
 
   // ── Receive: scan the payer's frame ──
 
@@ -448,44 +504,95 @@ export default function LocalPaymentsScreen() {
     const kind = selectTransport(session)
     setPhase('send_working')
 
+    const registry = abortsRef.current
     const controller = new AbortController()
-    abortsRef.current.add(controller)
-    let built: PaymentFrame | null = null
+    registry.add(controller)
 
     try {
-      // The structural `PayingWallet` in build.ts pins `createAction().tx` to
-      // `number[]`, while the SDK's `AtomicBEEF` is `Byte[] | Uint8Array`. The
-      // manager satisfies the contract at runtime — build.ts wraps the result in
-      // `new Uint8Array(...)`, which accepts either — so this is nominal only.
-      built = await buildPaymentFrame(wallet as unknown as PayingWalletArg, session, kind, adminOriginator)
+      let built: PaymentFrame
+      try {
+        // The structural `PayingWallet` in build.ts pins `createAction().tx` to
+        // `number[]`, while the SDK's `AtomicBEEF` is `Byte[] | Uint8Array`. The
+        // manager satisfies the contract at runtime — build.ts wraps the result in
+        // `new Uint8Array(...)`, which accepts either — so this is nominal only.
+        built = await buildPaymentFrame(wallet as unknown as PayingWalletArg, session, kind, adminOriginator)
+      } catch (e) {
+        // Build errors are wallet errors and must keep their own message. A
+        // declined spending prompt reads "Permission denied", which the Local
+        // Network heuristic would otherwise misread into an Open Settings button
+        // for the wrong permission, discarding the real reason.
+        if (!controller.signal.aborted) fail('generic', messageOf(e))
+        return
+      }
       if (controller.signal.aborted) return
 
+      // Computed once, before anything can render it. Null means the frame is
+      // too large for a symbol — AtomicBEEF grows with input count — and handing
+      // it to <QRCode> would throw during render and take the app down.
+      const qr = frameQrOrNull(built)
+
       if (kind === 'qr') {
-        setPaymentQr(frameToQr(built))
+        if (!qr) {
+          fail('generic', t('local_pay_too_large'))
+          return
+        }
+        setPaymentQr(qr)
         setPhase('send_qr')
         return
       }
 
-      const ack = await awdlTransport.send(session, built, controller.signal)
-      if (controller.signal.aborted) return
-      if (!ack.ok) {
-        setPaymentQr(safeFrameToQr(built))
-        fail('generic', ack.error ?? t('local_pay_failed'))
-        return
+      try {
+        const ack = await awdlTransport.send(session, built, controller.signal)
+        if (controller.signal.aborted) return
+        if (!ack.ok) {
+          setPaymentQr(qr)
+          fail('generic', ack.error ?? t('local_pay_failed'))
+          return
+        }
+        setSettledAmount(session.amount)
+        setPhase('done')
+      } catch (e) {
+        if (controller.signal.aborted) return
+        // The frame is signed but noSend — nothing has left the wallet — so it is
+        // safe to offer it as a QR and let the payment complete over the fallback.
+        // `qr` is null when it would not fit, which correctly hides that offer.
+        setPaymentQr(qr)
+        const message = messageOf(e)
+        // The heuristic is scoped to the transport call: only here can a message
+        // legitimately be about Local Network access.
+        fail(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', message)
       }
-      setSettledAmount(session.amount)
-      setPhase('done')
-    } catch (e) {
-      if (controller.signal.aborted) return
-      // The frame is signed but noSend — nothing has left the wallet — so it is
-      // safe to offer it as a QR and let the payment complete over the fallback.
-      if (built) setPaymentQr(safeFrameToQr(built))
-      const message = messageOf(e)
-      fail(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', message)
     } finally {
-      abortsRef.current.delete(controller)
+      registry.delete(controller)
     }
   }, [scannedSession, wallet, adminOriginator, fail, t])
+
+  // ── Receive: retry a settle that never reached storage ──
+
+  const retrySettle = useCallback(() => {
+    if (!unsettled) return
+    setFailure(null)
+    void settleRef.current(unsettled.frame, unsettled.session)
+  }, [unsettled])
+
+  // ── QR encoder failures ──
+  //
+  // react-native-qrcode-svg calls onError from inside its own render and returns
+  // null; without a handler it rethrows and the app-level ErrorBoundary replaces
+  // the whole app. Flipping parent state synchronously from a child's render
+  // triggers React's cross-component update warning, so both handlers defer by a
+  // microtask. These are backstops — frameQrOrNull() already gates on length.
+
+  const onSessionQrError = useCallback(() => {
+    void Promise.resolve().then(() => setSessionQrBroken(true))
+  }, [])
+
+  const onPaymentQrError = useCallback(() => {
+    void Promise.resolve().then(() => {
+      setPaymentQr(null)
+      fail('generic', t('local_pay_too_large'))
+    })
+  }, [fail, t])
 
   // ── Derived ──
 
@@ -498,7 +605,8 @@ export default function LocalPaymentsScreen() {
     }
   }, [hostedSession])
 
-  const awdlActive = hostedSession !== null && localSupportsAwdl()
+  /** Listening over AWDL right now. Goes false once the fast path gives up. */
+  const awdlActive = hostedSession !== null && localSupportsAwdl() && nearbyError === null
   const requestedSats = Math.round(Number(requestAmount))
   const canRequest = Number.isFinite(requestedSats) && requestedSats > 0
   const scannerOpen = phase === 'send_scan' || phase === 'receive_scan'
@@ -605,9 +713,18 @@ export default function LocalPaymentsScreen() {
               <AmountDisplay>{hostedSession.amount}</AmountDisplay>
             </Text>
 
-            {sessionQr ? (
+            {sessionQr && !sessionQrBroken ? (
               <View style={[styles.qrCard, { shadowColor: colors.textPrimary }]}>
-                <QRCode value={sessionQr} size={PAYMENT_QR_SIZE} ecl="M" color="#000" backgroundColor="#fff" />
+                {/* onError is mandatory: without it the encoder rethrows from
+                    render and the app-level ErrorBoundary swallows the app. */}
+                <QRCode
+                  value={sessionQr}
+                  size={PAYMENT_QR_SIZE}
+                  ecl="M"
+                  color="#000"
+                  backgroundColor="#fff"
+                  onError={onSessionQrError}
+                />
               </View>
             ) : (
               <Text style={[styles.phaseSub, { color: colors.error }]}>{t('local_pay_failed')}</Text>
@@ -629,6 +746,27 @@ export default function LocalPaymentsScreen() {
                 <ActivityIndicator size="small" color={colors.info} />
                 <Text style={[styles.waitingText, { color: colors.textTertiary }]}>{t('local_pay_waiting')}</Text>
               </View>
+            )}
+
+            {/* The fast path gave up. The request is still live over QR, so this
+                is an advisory, not a failure — the pairing QR above still works. */}
+            {nearbyError && (
+              <View style={[styles.note, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}>
+                <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
+                <Text style={[styles.noteText, { color: colors.textSecondary }]}>
+                  {nearbyError.networkDenied ? t('local_pay_network_denied') : t('local_pay_nearby_unavailable')}
+                </Text>
+              </View>
+            )}
+
+            {nearbyError?.networkDenied && (
+              <TouchableOpacity
+                style={[styles.outlineBtn, { borderColor: colors.separator }]}
+                onPress={() => void Linking.openSettings()}
+              >
+                <Ionicons name="settings-outline" size={18} color={colors.accent} />
+                <Text style={[styles.outlineBtnText, { color: colors.accent }]}>{t('open_settings')}</Text>
+              </TouchableOpacity>
             )}
 
             <TouchableOpacity
@@ -693,7 +831,16 @@ export default function LocalPaymentsScreen() {
           <View style={styles.center}>
             <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>{t('local_pay_show_payment_qr')}</Text>
             <View style={[styles.qrCard, { shadowColor: colors.textPrimary }]}>
-              <QRCode value={paymentQr} size={PAYMENT_QR_SIZE} ecl="M" color="#000" backgroundColor="#fff" />
+              {/* onError is mandatory: without it an oversize payload rethrows
+                  from render and the app-level ErrorBoundary swallows the app. */}
+              <QRCode
+                value={paymentQr}
+                size={PAYMENT_QR_SIZE}
+                ecl="M"
+                color="#000"
+                backgroundColor="#fff"
+                onError={onPaymentQrError}
+              />
             </View>
             <TouchableOpacity
               style={[styles.bigBtn, { backgroundColor: colors.accent, marginTop: spacing.lg }]}
@@ -732,12 +879,38 @@ export default function LocalPaymentsScreen() {
           </View>
         )}
 
+        {/* ══ Already paid — a success terminal, not an error ══ */}
+        {phase === 'already_paid' && (
+          <View style={styles.center}>
+            <Ionicons name="checkmark-done-circle" size={72} color={colors.info} style={{ marginBottom: spacing.md }} />
+            <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>{t('local_pay_already_paid')}</Text>
+            <Text style={[styles.phaseSub, { color: colors.textSecondary }]}>{t('local_pay_queued')}</Text>
+            {/* Deliberately no retry: reset() would mint a fresh session and ask
+                the payer to pay a second time for money already queued here. */}
+            <TouchableOpacity style={[styles.bigBtn, { backgroundColor: colors.accent }]} onPress={goBack}>
+              <Text style={[styles.bigBtnText, { color: colors.textOnAccent }]}>{t('done')}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* ══ Failed ══ */}
         {phase === 'failed' && (
           <View style={styles.center}>
             <Ionicons name="alert-circle" size={72} color={colors.error} style={{ marginBottom: spacing.md }} />
             <Text style={[styles.phaseTitle, { color: colors.textPrimary }]}>{t('local_pay_failed')}</Text>
             <Text style={[styles.phaseSub, { color: colors.textSecondary }]}>{failure?.detail}</Text>
+
+            {/* A frame reached this device but never reached storage. Retry the
+                SAME session — reset() would mint one that can never receive it. */}
+            {unsettled && (
+              <TouchableOpacity
+                style={[styles.bigBtn, { backgroundColor: colors.info, marginBottom: spacing.md }]}
+                onPress={retrySettle}
+              >
+                <Ionicons name="refresh" size={18} color="#fff" />
+                <Text style={[styles.bigBtnText, { color: '#fff' }]}>{t('local_pay_retry_save')}</Text>
+              </TouchableOpacity>
+            )}
 
             {failure?.settings && (
               <TouchableOpacity
@@ -762,9 +935,15 @@ export default function LocalPaymentsScreen() {
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity style={[styles.bigBtn, { backgroundColor: colors.accent }]} onPress={reset}>
-              <Text style={[styles.bigBtnText, { color: colors.textOnAccent }]}>{t('retry')}</Text>
-            </TouchableOpacity>
+            {/* With a frame in hand, reset() means abandoning it — the frame lives
+                only in memory — so it is demoted to the secondary action. */}
+            {unsettled ? (
+              <CancelBtn colors={colors} styles={styles} label={t('cancel')} onPress={reset} />
+            ) : (
+              <TouchableOpacity style={[styles.bigBtn, { backgroundColor: colors.accent }]} onPress={reset}>
+                <Text style={[styles.bigBtnText, { color: colors.textOnAccent }]}>{t('retry')}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </ScrollView>

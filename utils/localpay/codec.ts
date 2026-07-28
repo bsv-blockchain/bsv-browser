@@ -115,3 +115,68 @@ export function decodeFrame(b: Uint8Array): PaymentFrame {
   if (pos.i !== b.length) throw new CodecError('trailing bytes after frame')
   return { version, senderIdentityKey, amount, outputIndex, derivationPrefix, derivationSuffix, transaction }
 }
+
+// ── QR handoff ──
+//
+// A QR carries text, not bytes, so a frame is base64url-wrapped behind a prefix
+// that distinguishes it from a session QR (`bsvpay1:`).
+//
+// base64url is NOT QR "alphanumeric mode": `-`, `_` and the `:` in the prefix
+// all fall outside that alphabet, so the encoder uses byte mode. What base64url
+// buys is that every character is single-byte ASCII, so the byte-mode payload
+// length equals the string length and never doubles under UTF-8.
+
+export const FRAME_QR_PREFIX = 'bsvpayf1:'
+
+/**
+ * Largest frame QR this app will render, in characters.
+ *
+ * A version-40 symbol at error-correction level M holds 2,331 bytes, and every
+ * character produced here is single-byte ASCII, so characters and bytes are the
+ * same count. `react-native-qrcode-svg` rethrows out of render when the payload
+ * does not fit, so exceeding this is not a degraded QR — it takes the app down
+ * through the error boundary. Measured against that encoder: 2,276 characters
+ * encodes, 2,343 throws.
+ *
+ * 2,200 sits below the last known-good measurement with ~130 characters of
+ * headroom against the hard limit, so no rounding or encoder overhead can reach
+ * the throw. It admits ~1,643 frame bytes, which covers the single-input
+ * AtomicBEEF range, and rejects the multi-input frames that would be
+ * unscannable at a phone-sized symbol anyway.
+ *
+ * `PaymentFrame.transaction` is AtomicBEEF — every input's source transaction
+ * plus its BUMP — so frame size tracks input count, not output count. Callers
+ * MUST check `frameToQr(...).length` against this before rendering.
+ */
+export const MAX_FRAME_QR_CHARS = 2200
+
+function toB64url(bytes: Uint8Array): string {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return globalThis.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function fromB64url(text: string): Uint8Array {
+  const padded = text.replace(/-/g, '+').replace(/_/g, '/')
+  let binary: string
+  try {
+    binary = globalThis.atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))
+  } catch {
+    // atob throws a platform error, not a CodecError. Normalise it so callers
+    // see one failure type — they must still catch broadly, since a hostile QR
+    // can reach code paths this wrapper does not cover.
+    throw new CodecError('malformed base64url payload')
+  }
+  return Uint8Array.from(binary, c => c.charCodeAt(0))
+}
+
+/** Encodes a frame for display as a QR. May exceed MAX_FRAME_QR_CHARS — check before rendering. */
+export function frameToQr(f: PaymentFrame): string {
+  return FRAME_QR_PREFIX + toB64url(encodeFrame(f))
+}
+
+export function frameFromQr(text: unknown): PaymentFrame {
+  if (typeof text !== 'string') throw new CodecError('expected a QR string')
+  if (!text.startsWith(FRAME_QR_PREFIX)) throw new CodecError('not a nearby-payment QR')
+  return decodeFrame(fromB64url(text.slice(FRAME_QR_PREFIX.length)))
+}
