@@ -92,4 +92,65 @@ describe('HeaderStore', () => {
     const reopened = await HeaderStore.open(fs, 'ttn', TTN_ANCHOR)
     expect(reopened.rootForHeight(7)).toBe('aa'.repeat(32))
   })
+
+  describe('putExtraRoots (batch)', () => {
+    it('persists every entry across a reopen', async () => {
+      const fs = memoryHeaderFs()
+      const store = await HeaderStore.open(fs, 'ttn', TTN_ANCHOR)
+      await store.putExtraRoots([
+        { height: 7, root: 'aa'.repeat(32) },
+        { height: 9, root: 'bb'.repeat(32) }
+      ])
+      expect(store.rootForHeight(7)).toBe('aa'.repeat(32))
+      expect(store.rootForHeight(9)).toBe('bb'.repeat(32))
+      const reopened = await HeaderStore.open(fs, 'ttn', TTN_ANCHOR)
+      expect(reopened.rootForHeight(7)).toBe('aa'.repeat(32))
+      expect(reopened.rootForHeight(9)).toBe('bb'.repeat(32))
+    })
+
+    it('returns the count of newly-added entries', async () => {
+      const store = await HeaderStore.open(memoryHeaderFs(), 'ttn', TTN_ANCHOR)
+      const added = await store.putExtraRoots([
+        { height: 7, root: 'aa'.repeat(32) },
+        { height: 9, root: 'bb'.repeat(32) },
+        { height: 11, root: 'cc'.repeat(32) }
+      ])
+      expect(added).toBe(3)
+    })
+
+    it('skips entries already present with the same root', async () => {
+      const fs = memoryHeaderFs()
+      const store = await HeaderStore.open(fs, 'ttn', TTN_ANCHOR)
+      await store.putExtraRoot(7, 'aa'.repeat(32))
+      const added = await store.putExtraRoots([
+        { height: 7, root: 'aa'.repeat(32) }, // already present, same value
+        { height: 8, root: 'cc'.repeat(32) } // new
+      ])
+      expect(added).toBe(1)
+      expect(store.rootForHeight(8)).toBe('cc'.repeat(32))
+    })
+
+    it('writes the extra-roots file exactly once, not once per entry', async () => {
+      const base = memoryHeaderFs()
+      let writeCount = 0
+      const countingFs = {
+        ...base,
+        writeText: async (path: string, text: string) => {
+          writeCount++
+          await base.writeText(path, text)
+        }
+      }
+      const store = await HeaderStore.open(countingFs, 'ttn', TTN_ANCHOR)
+      writeCount = 0 // ignore the writeMeta() call from open()
+      const added = await store.putExtraRoots([
+        { height: 7, root: 'aa'.repeat(32) },
+        { height: 8, root: 'bb'.repeat(32) },
+        { height: 9, root: 'cc'.repeat(32) },
+        { height: 10, root: 'dd'.repeat(32) },
+        { height: 11, root: 'ee'.repeat(32) }
+      ])
+      expect(added).toBe(5)
+      expect(writeCount).toBe(1)
+    })
+  })
 })

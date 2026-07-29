@@ -201,6 +201,32 @@ export class HeaderStore {
     await this.fs.writeText(this.extraPath, JSON.stringify(this.extra))
   }
 
+  /**
+   * Batch form of `putExtraRoot`. Merges every entry into the in-memory
+   * `extra` map and writes the JSON file once, rather than once per entry —
+   * `putExtraRoot` re-serializes and rewrites the whole file on every call,
+   * so seeding it row-by-row from a proven_txs table is O(n) file writes for
+   * n rows. Callers that resolve one miss at a time (OfflineFirstChaintracks)
+   * should keep using `putExtraRoot`; callers seeding many roots at once
+   * (prewarmOwnRoots) should use this instead. Returns how many entries were
+   * newly added (i.e. not already present in the store with the same root).
+   */
+  async putExtraRoots(entries: { height: number; root: string }[]): Promise<number> {
+    if (entries.length === 0) return 0
+    const merged = { ...this.extra }
+    let added = 0
+    for (const { height, root } of entries) {
+      const key = String(height)
+      if (this.extra[key] === root) continue
+      merged[key] = root
+      added++
+    }
+    if (added === 0) return 0
+    this.extra = merged
+    await this.fs.writeText(this.extraPath, JSON.stringify(this.extra))
+    return added
+  }
+
   private async writeMeta(): Promise<void> {
     const meta: StoredMeta = {
       chain: this.chain,
