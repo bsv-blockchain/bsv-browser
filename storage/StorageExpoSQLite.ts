@@ -57,7 +57,7 @@ import type { PostReqsToNetworkResult } from '@bsv/wallet-toolbox-mobile/out/src
 import { listActionsSql } from './methods/listActionsSql'
 import { listOutputsSql } from './methods/listOutputsSql'
 import { insertOfflineAction, type OfflineActionRole } from './methods/offlineActions'
-import { buildOfflineHoldResult } from '../utils/offline/hold'
+import { buildOfflineHoldResult, groupOfflineHolds } from '../utils/offline/hold'
 import { getOnline } from '../utils/net/online'
 
 export interface StorageExpoSQLiteOptions extends StorageProviderOptions {
@@ -1391,10 +1391,14 @@ export class StorageExpoSQLite extends StorageProvider {
    * (`storage/storageProviderHelpers.js:14`). A row in `offline_actions` then
    * records that it still needs sending.
    *
-   * The transaction row is deliberately left untouched. `internalizeAction` has
-   * already set it to 'unproven' (`storage/methods/internalizeAction.js:352`),
-   * and that status is exactly what keeps the received outputs spendable while
-   * the broadcast waits — the whole point of holding rather than failing.
+   * The transaction row is deliberately left untouched, which makes its current
+   * status a **precondition** rather than an afterthought: callers must only
+   * pass requests whose transaction is already in `holdSafeTxStatuses`. For the
+   * internalize path that is 'unproven'
+   * (`storage/methods/internalizeAction.js:352`), the status that keeps the
+   * received outputs spendable while the broadcast waits — the whole point of
+   * holding rather than failing. See `utils/offline/hold.ts` for what the other
+   * statuses would cost.
    *
    * Both writes are idempotent (a repeat 'nosend' is a no-op, and the queue
    * insert is `INSERT OR IGNORE` on a UNIQUE txid, so it neither duplicates a
@@ -1422,6 +1426,12 @@ export class StorageExpoSQLite extends StorageProvider {
    * directly (`monitor/tasks/TaskSendWaiting.js:180`), so the monitor's
    * ordinary broadcast retries are deliberately NOT intercepted.
    *
+   * Narrower than "offline means hold": only requests whose transaction is
+   * already in a hold-safe status are parked, so in practice this holds the
+   * internalize path the feature needs and leaves the non-delayed `createAction`
+   * path with the `serviceError` and automatic `TaskSendWaiting` retry it has
+   * today. `groupOfflineHolds` makes that call; see `utils/offline/hold.ts`.
+   *
    * The returned 'success' means "accepted for delivery", not "the network has
    * it"; see `utils/offline/hold.ts` for why nothing persisted claims otherwise.
    */
@@ -1442,12 +1452,19 @@ export class StorageExpoSQLite extends StorageProvider {
     }
     if (online) return await super.attemptToPostReqsToNetwork(reqs, trx, logger)
 
-    const holds = await this.resolveOfflineHolds(reqs)
+    const pairs = await this.resolveHoldPairs(reqs)
+    const holds = groupOfflineHolds(pairs)
     if (!holds) {
-      // We could not attribute every request to a user, so we cannot record
-      // that it still needs sending. Refuse to hold rather than accept money we
-      // could never broadcast: fall through to the real post, whose offline
-      // failure takes `internalizeAction`'s existing rollback path unchanged.
+      // Either a request could not be attributed to a user, so we could not
+      // record that it still needs sending, or its transaction is not in a
+      // status that survives being held (see `holdSafeTxStatuses`). Refuse the
+      // whole call and let the ordinary broadcast run: offline its failure takes
+      // the pre-existing paths, either `internalizeAction`'s rollback or a
+      // `serviceError` that leaves the request for `TaskSendWaiting` to retry.
+      devLog(
+        '[StorageExpoSQLite] offline: not holding, delegating to the real post:',
+        pairs.map(p => `${p.req.txid} ${p.tx ? `tx ${p.tx.status}` : 'unattributed'}`).join(', ')
+      )
       return await super.attemptToPostReqsToNetwork(reqs, trx, logger)
     }
 
@@ -1459,46 +1476,29 @@ export class StorageExpoSQLite extends StorageProvider {
   }
 
   /**
-   * Group requests by the (userId, role) their `offline_actions` row needs,
-   * both read off the transaction rows a request notifies
+   * Pair each request with the transaction row it notifies
    * (`EntityProvenTxReq.addNotifyTransactionId`, populated by
    * `storage/methods/internalizeAction.js:523` and
    * `storage/methods/processAction.js:241`).
    *
-   * Resolved per request rather than from `reqs[0]`, because one non-delayed
-   * call can carry a whole `options.sendWith` batch. Such a batch can mix the
-   * user's own outgoing transaction (`isOutgoing` true, set by
-   * `storage/methods/createAction.js:377`) with a released incoming one
-   * (`isOutgoing` false, `internalizeAction.js:364`), so the role genuinely
-   * varies within a call even though the acting user does not.
-   *
-   * Returns undefined if any request cannot be attributed to a transaction
-   * row. `offline_actions.userId` is a foreign key to `users(userId)`, so there
-   * is no placeholder to fall back on: a fabricated id would either violate the
-   * constraint or, worse, park a payment under a user nobody ever queries and
-   * silently lose the record that it still needs broadcasting.
+   * Database reads only: every rule applied to these pairs lives in
+   * `groupOfflineHolds`, which is pure and unit-tested. Read-only on purpose, so
+   * the whole set is resolved before any write and a refusal can never leave a
+   * request half-held.
    */
-  private async resolveOfflineHolds(
+  private async resolveHoldPairs(
     reqs: EntityProvenTxReq[]
-  ): Promise<Map<string, { userId: number; role: OfflineActionRole; reqs: { txid: string }[] }> | undefined> {
-    const groups = new Map<string, { userId: number; role: OfflineActionRole; reqs: { txid: string }[] }>()
+  ): Promise<{ req: EntityProvenTxReq; tx: TableTransaction | undefined }[]> {
+    const pairs: { req: EntityProvenTxReq; tx: TableTransaction | undefined }[] = []
     for (const req of reqs) {
       let tx: TableTransaction | undefined
       for (const transactionId of req.notify?.transactionIds ?? []) {
         tx = (await this.findTransactions({ partial: { transactionId }, noRawTx: true }))[0]
         if (tx) break
       }
-      if (!tx) {
-        console.warn(`[StorageExpoSQLite] offline: cannot attribute req ${req.txid} to a user, not holding it`)
-        return undefined
-      }
-      const role: OfflineActionRole = tx.isOutgoing ? 'sent' : 'received'
-      const key = `${tx.userId} ${role}`
-      const group = groups.get(key) ?? { userId: tx.userId, role, reqs: [] }
-      group.reqs.push({ txid: req.txid })
-      groups.set(key, group)
+      pairs.push({ req, tx })
     }
-    return groups
+    return pairs
   }
 
   // processSyncChunk — delegate to inherited implementation if available, stub otherwise
