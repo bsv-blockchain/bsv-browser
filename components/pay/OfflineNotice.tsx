@@ -48,12 +48,29 @@ export interface OfflineNoticeProps {
    * notice rather than folded into `rejected`'s "who handed you this" copy.
    */
   sentRejected?: OfflineActionRow[]
+  /** Fires TaskSendOffline.requestNow via the caller. Rendered only when online with a queue. */
+  onSendNow?: () => void
+  /** TaskSendOffline.lastStall — set when retrying alone will not drain the queue. */
+  stalled?: string
+  /** Queued/posting rows the user sent. Rows with a framePayload get a re-show affordance. */
+  queuedSent?: OfflineActionRow[]
+  onShowCode?: (row: OfflineActionRow) => void
 }
 
-export default function OfflineNotice({ online, queued, rejected, sentRejected = [] }: OfflineNoticeProps) {
+export default function OfflineNotice({
+  online,
+  queued,
+  rejected,
+  sentRejected = [],
+  onSendNow,
+  stalled,
+  queuedSent,
+  onShowCode
+}: OfflineNoticeProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  if (online && queued === 0 && rejected.length === 0 && sentRejected.length === 0) return null
+  if (online && queued === 0 && rejected.length === 0 && sentRejected.length === 0 && (queuedSent ?? []).length === 0)
+    return null
 
   return (
     <View style={styles.wrap}>
@@ -81,6 +98,16 @@ export default function OfflineNotice({ online, queued, rejected, sentRejected =
             <Text style={[styles.body, { color: colors.textSecondary }]}>
               {t('pay_offline_pending_body', { count: queued })}
             </Text>
+            {!!stalled && (
+              <Text style={[styles.body, { color: colors.warning }]}>
+                {t('pay_offline_stalled_body', { detail: stalled })}
+              </Text>
+            )}
+            {onSendNow && (
+              <Text accessibilityRole="button" onPress={onSendNow} style={[styles.action, { color: colors.info }]}>
+                {t('pay_offline_send_now')}
+              </Text>
+            )}
           </View>
         </View>
       )}
@@ -116,6 +143,26 @@ export default function OfflineNotice({ online, queued, rejected, sentRejected =
           </View>
         </View>
       ))}
+      {(queuedSent ?? [])
+        .filter(r => r.framePayload)
+        .map(r => (
+          <View
+            key={`code-${r.txid}`}
+            style={[styles.card, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}
+          >
+            <Ionicons name="qr-code-outline" size={18} color={colors.textSecondary} />
+            <View style={styles.text}>
+              <Text style={[styles.body, { color: colors.textSecondary }]}>{r.created_at.slice(0, 10)}</Text>
+              <Text
+                accessibilityRole="button"
+                onPress={() => onShowCode?.(r)}
+                style={[styles.action, { color: colors.info }]}
+              >
+                {t('pay_offline_show_code')}
+              </Text>
+            </View>
+          </View>
+        ))}
     </View>
   )
 }
@@ -135,5 +182,6 @@ const styles = StyleSheet.create({
   },
   text: { flex: 1, gap: 2 },
   title: { ...typography.subhead, fontWeight: '600' },
-  body: { ...typography.footnote }
+  body: { ...typography.footnote },
+  action: { ...typography.subhead, fontWeight: '600', marginTop: 4 }
 })

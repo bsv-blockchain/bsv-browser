@@ -11,11 +11,12 @@
  * modal in settings.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { I18nManager, StyleSheet, Text, View } from 'react-native'
+import { I18nManager, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
+import QRCode from 'react-native-qrcode-svg'
 
 import PressableScale from '@/components/ui/PressableScale'
 import PayCellRow from '@/components/pay/PayCellRow'
@@ -31,7 +32,9 @@ import { useWallet } from '@/context/WalletContext'
 import { useOnline } from '@/hooks/useOnline'
 import { validatePeerPayURI } from '@/utils/parsePeerPayURI'
 import { isPayCell, type PayCell } from '@/utils/pay/rails'
+import { MAX_FRAME_QR_CHARS } from '@/utils/pay/rails/nearby'
 import { findOfflineActions, type OfflineActionRow } from '@/storage/methods/offlineActions'
+import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
 
 type Direction = 'pay' | 'get'
 
@@ -101,10 +104,13 @@ export default function PayScreen() {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   const online = useOnline()
-  const { walletBuilding, walletBuilt, storage } = useWallet()
+  const { walletBuilding, walletBuilt, storage, txStatusVersion } = useWallet()
   const [queued, setQueued] = useState(0)
   const [rejected, setRejected] = useState<OfflineActionRow[]>([])
   const [sentRejected, setSentRejected] = useState<OfflineActionRow[]>([])
+  const [queuedSentRows, setQueuedSentRows] = useState<OfflineActionRow[]>([])
+  const [stalled, setStalled] = useState<string | undefined>(undefined)
+  const [showCode, setShowCode] = useState<OfflineActionRow | null>(null)
 
   // Refreshed whenever the wallet finishes building or connectivity changes:
   // the queue only moves when the network state does, so there is no need to
@@ -129,6 +135,8 @@ export default function PayScreen() {
         // else's fraud against them, so it gets its own unattributed notice.
         setRejected(rows.filter(r => r.status === 'rejected' && r.role === 'received'))
         setSentRejected(rows.filter(r => r.status === 'rejected' && r.role === 'sent'))
+        setQueuedSentRows(rows.filter(r => r.status !== 'rejected' && r.role === 'sent'))
+        setStalled(TaskSendOffline.lastStall)
       } catch {
         // This banner is advisory, never load-bearing. A read failure here must
         // not break the rest of the screen — the grid still has to render.
@@ -137,7 +145,7 @@ export default function PayScreen() {
     return () => {
       cancelled = true
     }
-  }, [walletBuilt, storage, online])
+  }, [walletBuilt, storage, online, txStatusVersion])
 
   const params = useLocalSearchParams<{
     cell?: string | string[]
@@ -185,7 +193,16 @@ export default function PayScreen() {
 
   const grid = () => (
     <View style={styles.grid}>
-      <OfflineNotice online={online} queued={queued} rejected={rejected} sentRejected={sentRejected} />
+      <OfflineNotice
+        online={online}
+        queued={queued}
+        rejected={rejected}
+        sentRejected={sentRejected}
+        onSendNow={() => TaskSendOffline.requestNow()}
+        stalled={stalled}
+        queuedSent={queuedSentRows}
+        onShowCode={setShowCode}
+      />
       {/* Direction first: it is what the user already knows. */}
       <View style={[styles.segment, { backgroundColor: colors.fillTertiary }]}>
         {(['pay', 'get'] as const).map(d => {
@@ -277,6 +294,20 @@ export default function PayScreen() {
       <View style={[styles.bodyWrap, { backgroundColor: cell ? colors.background : colors.backgroundSecondary }]}>
         {body()}
       </View>
+      <Modal visible={!!showCode} animationType="slide" transparent onRequestClose={() => setShowCode(null)}>
+        <View style={styles.codeOverlay}>
+          <View style={[styles.codeCard, { backgroundColor: colors.backgroundElevated }]}>
+            {showCode?.framePayload && showCode.framePayload.length <= MAX_FRAME_QR_CHARS ? (
+              <QRCode value={showCode.framePayload} size={288} ecl="M" color="#000" backgroundColor="#fff" />
+            ) : (
+              <Text style={{ color: colors.textSecondary }}>{t('local_pay_too_large')}</Text>
+            )}
+            <TouchableOpacity onPress={() => setShowCode(null)} style={styles.codeClose}>
+              <Text style={{ color: colors.info }}>{t('done')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   )
 }
@@ -304,5 +335,18 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl - 2
   },
   segmentLabel: { ...typography.subhead, fontWeight: '500' },
-  rows: { gap: spacing.md }
+  rows: { gap: spacing.md },
+  codeOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)'
+  },
+  codeCard: {
+    padding: spacing.xl,
+    borderRadius: 16,
+    alignItems: 'center',
+    gap: spacing.lg
+  },
+  codeClose: { padding: spacing.md }
 })

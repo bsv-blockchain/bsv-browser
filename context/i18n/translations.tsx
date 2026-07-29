@@ -421,7 +421,10 @@ const resources = {
       pay_offline_unknown_via: 'an unknown method',
       pay_received_not_broadcast: 'Received offline · not yet broadcast',
       pay_offline_sent_rejected_title: 'A payment could not be delivered',
-      pay_offline_sent_rejected_body: 'The network refused a payment you sent on {{when}}.'
+      pay_offline_sent_rejected_body: 'The network refused a payment you sent on {{when}}.',
+      pay_offline_send_now: 'Send now',
+      pay_offline_stalled_body: 'Some queued payments can’t be sent automatically: {{detail}}',
+      pay_offline_show_code: 'Show code again'
     }
   },
   zh: {
@@ -731,7 +734,10 @@ const resources = {
       pay_offline_unknown_via: '未知方式',
       pay_received_not_broadcast: '离线收到 · 尚未广播',
       pay_offline_sent_rejected_title: '一笔付款未能送达',
-      pay_offline_sent_rejected_body: '网络拒绝了您于 {{when}} 发送的付款。'
+      pay_offline_sent_rejected_body: '网络拒绝了您于 {{when}} 发送的付款。',
+      pay_offline_send_now: '立即发送',
+      pay_offline_stalled_body: '部分排队付款无法自动发送：{{detail}}',
+      pay_offline_show_code: '再次显示付款码'
     }
   },
   hi: {
@@ -1046,7 +1052,10 @@ const resources = {
       pay_offline_unknown_via: 'एक अज्ञात माध्यम',
       pay_received_not_broadcast: 'ऑफ़लाइन प्राप्त हुआ · अभी प्रसारित नहीं हुआ',
       pay_offline_sent_rejected_title: 'एक भुगतान पहुंचाया नहीं जा सका',
-      pay_offline_sent_rejected_body: 'नेटवर्क ने {{when}} को आपके द्वारा भेजा गया भुगतान अस्वीकार कर दिया।'
+      pay_offline_sent_rejected_body: 'नेटवर्क ने {{when}} को आपके द्वारा भेजा गया भुगतान अस्वीकार कर दिया।',
+      pay_offline_send_now: 'अभी भेजें',
+      pay_offline_stalled_body: 'कुछ कतारबद्ध भुगतान स्वतः नहीं भेजे जा सकते: {{detail}}',
+      pay_offline_show_code: 'कोड फिर दिखाएँ'
     }
   },
   es: {
@@ -1362,7 +1371,10 @@ const resources = {
       pay_offline_unknown_via: 'un método desconocido',
       pay_received_not_broadcast: 'Recibido sin conexión · aún no transmitido',
       pay_offline_sent_rejected_title: 'No se pudo entregar un pago',
-      pay_offline_sent_rejected_body: 'La red rechazó un pago que enviaste el {{when}}.'
+      pay_offline_sent_rejected_body: 'La red rechazó un pago que enviaste el {{when}}.',
+      pay_offline_send_now: 'Enviar ahora',
+      pay_offline_stalled_body: 'Algunos pagos en cola no se pueden enviar automáticamente: {{detail}}',
+      pay_offline_show_code: 'Mostrar el código otra vez'
     }
   },
   fr: {
@@ -1672,7 +1684,10 @@ const resources = {
       pay_offline_unknown_via: 'une méthode inconnue',
       pay_received_not_broadcast: 'Reçu hors ligne · pas encore diffusé',
       pay_offline_sent_rejected_title: 'Un paiement n’a pas pu être livré',
-      pay_offline_sent_rejected_body: 'Le réseau a refusé un paiement que vous avez envoyé le {{when}}.'
+      pay_offline_sent_rejected_body: 'Le réseau a refusé un paiement que vous avez envoyé le {{when}}.',
+      pay_offline_send_now: 'Envoyer maintenant',
+      pay_offline_stalled_body: 'Certains paiements en attente ne peuvent pas être envoyés automatiquement : {{detail}}',
+      pay_offline_show_code: 'Réafficher le code'
     }
   },
   ar: {
@@ -1978,7 +1993,10 @@ const resources = {
       pay_offline_unknown_via: 'وسيلة غير معروفة',
       pay_received_not_broadcast: 'تم الاستلام دون اتصال · لم تُنشر بعد',
       pay_offline_sent_rejected_title: 'تعذّر تسليم دفعة',
-      pay_offline_sent_rejected_body: 'رفضت الشبكة دفعة أرسلتها في {{when}}.'
+      pay_offline_sent_rejected_body: 'رفضت الشبكة دفعة أرسلتها في {{when}}.',
+      pay_offline_send_now: 'أرسل الآن',
+      pay_offline_stalled_body: 'تعذّر إرسال بعض المدفوعات في قائمة الانتظار تلقائيًا: {{detail}}',
+      pay_offline_show_code: 'إظهار الرمز مرة أخرى'
     }
   },
   pt: {
@@ -2287,7 +2305,10 @@ const resources = {
       pay_offline_unknown_via: 'um método desconhecido',
       pay_received_not_broadcast: 'Recebido offline · ainda não publicado',
       pay_offline_sent_rejected_title: 'Um pagamento não pôde ser entregue',
-      pay_offline_sent_rejected_body: 'A rede rejeitou um pagamento que você enviou em {{when}}.'
+      pay_offline_sent_rejected_body: 'A rede rejeitou um pagamento que você enviou em {{when}}.',
+      pay_offline_send_now: 'Enviar agora',
+      pay_offline_stalled_body: 'Alguns pagamentos na fila não podem ser enviados automaticamente: {{detail}}',
+      pay_offline_show_code: 'Mostrar o código novamente'
     }
   },
   bn: {
@@ -2596,7 +2617,10 @@ const resources = {
       pay_offline_unknown_via: 'একটি অজানা উপায়',
       pay_received_not_broadcast: 'অফলাইনে গৃহীত · এখনও প্রকাশ করা হয়নি',
       pay_offline_sent_rejected_title: 'একটি পেমেন্ট পাঠানো যায়নি',
-      pay_offline_sent_rejected_body: 'নেটওয়ার্ক {{when}}-এ আপনার পাঠানো একটি পেমেন্ট প্রত্যাখ্যান করেছে।'
+      pay_offline_sent_rejected_body: 'নেটওয়ার্ক {{when}}-এ আপনার পাঠানো একটি পেমেন্ট প্রত্যাখ্যান করেছে।',
+      pay_offline_send_now: 'এখনই পাঠান',
+      pay_offline_stalled_body: 'সারিতে থাকা কিছু পেমেন্ট স্বয়ংক্রিয়ভাবে পাঠানো যাচ্ছে না: {{detail}}',
+      pay_offline_show_code: 'কোড আবার দেখান'
     }
   },
   ru: {
@@ -2906,7 +2930,10 @@ const resources = {
       pay_offline_unknown_via: 'неизвестный способ',
       pay_received_not_broadcast: 'Получено без сети · ещё не опубликовано',
       pay_offline_sent_rejected_title: 'Не удалось доставить платёж',
-      pay_offline_sent_rejected_body: 'Сеть отклонила платёж, который вы отправили {{when}}.'
+      pay_offline_sent_rejected_body: 'Сеть отклонила платёж, который вы отправили {{when}}.',
+      pay_offline_send_now: 'Отправить сейчас',
+      pay_offline_stalled_body: 'Некоторые платежи в очереди не удаётся отправить автоматически: {{detail}}',
+      pay_offline_show_code: 'Показать код снова'
     }
   },
   id: {
@@ -3216,7 +3243,10 @@ const resources = {
       pay_offline_unknown_via: 'metode yang tidak diketahui',
       pay_received_not_broadcast: 'Diterima secara offline · belum dipublikasikan',
       pay_offline_sent_rejected_title: 'Sebuah pembayaran tidak dapat dikirim',
-      pay_offline_sent_rejected_body: 'Jaringan menolak pembayaran yang Anda kirim pada {{when}}.'
+      pay_offline_sent_rejected_body: 'Jaringan menolak pembayaran yang Anda kirim pada {{when}}.',
+      pay_offline_send_now: 'Kirim sekarang',
+      pay_offline_stalled_body: 'Beberapa pembayaran dalam antrean tidak dapat dikirim secara otomatis: {{detail}}',
+      pay_offline_show_code: 'Tampilkan kode lagi'
     }
   },
   ja: {
@@ -3540,7 +3570,10 @@ const resources = {
       pay_offline_unknown_via: '不明な方法',
       pay_received_not_broadcast: 'オフラインで受け取り済み · まだ公開されていません',
       pay_offline_sent_rejected_title: '支払いを届けられませんでした',
-      pay_offline_sent_rejected_body: 'ネットワークは、あなたが{{when}}に送った支払いを拒否しました。'
+      pay_offline_sent_rejected_body: 'ネットワークは、あなたが{{when}}に送った支払いを拒否しました。',
+      pay_offline_send_now: '今すぐ送信',
+      pay_offline_stalled_body: '一部のキュー内の支払いは自動的に送信できません: {{detail}}',
+      pay_offline_show_code: 'コードをもう一度表示'
     }
   },
   pl: {
@@ -3867,7 +3900,10 @@ const resources = {
       pay_offline_unknown_via: 'nieznanej metody',
       pay_received_not_broadcast: 'Odebrano offline · jeszcze nie opublikowano',
       pay_offline_sent_rejected_title: 'Nie udało się dostarczyć płatności',
-      pay_offline_sent_rejected_body: 'Sieć odrzuciła płatność wysłaną przez Ciebie w dniu {{when}}.'
+      pay_offline_sent_rejected_body: 'Sieć odrzuciła płatność wysłaną przez Ciebie w dniu {{when}}.',
+      pay_offline_send_now: 'Wyślij teraz',
+      pay_offline_stalled_body: 'Niektórych oczekujących płatności nie można wysłać automatycznie: {{detail}}',
+      pay_offline_show_code: 'Pokaż kod ponownie'
     }
   }
 }

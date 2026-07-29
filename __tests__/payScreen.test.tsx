@@ -25,6 +25,12 @@ jest.mock('expo-haptics', () => ({
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }))
 
+// The re-show modal renders <QRCode> directly (unlike the six cell components
+// below, which are mocked wholesale) — react-native-qrcode-svg ships ESM and
+// isn't in this repo's transformIgnorePatterns, so it needs the same
+// bare-string stub the icons package gets above.
+jest.mock('react-native-qrcode-svg', () => 'QRCode')
+
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
   SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children

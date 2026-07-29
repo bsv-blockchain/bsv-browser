@@ -13,7 +13,7 @@ jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }))
 import '@/context/i18n/translations'
 
 import React from 'react'
-import { render } from '@testing-library/react-native'
+import { fireEvent, render } from '@testing-library/react-native'
 import OfflineNotice from '@/components/pay/OfflineNotice'
 
 const row = (txid: string) => ({
@@ -102,5 +102,32 @@ describe('OfflineNotice', () => {
     // There is no counterparty to name for the user's own failed send — this
     // must never borrow the received-side "who handed it over" copy.
     expect(queryByText(/handed over/i)).toBeNull()
+  })
+
+  it('shows a Send now button when online with a queue and fires the callback', () => {
+    const onSendNow = jest.fn()
+    const { getByText } = render(<OfflineNotice online queued={2} rejected={[]} onSendNow={onSendNow} />)
+    fireEvent.press(getByText(/send now/i))
+    expect(onSendNow).toHaveBeenCalled()
+  })
+
+  it('renders the stall detail when one exists', () => {
+    const { getByText } = render(<OfflineNotice online queued={1} rejected={[]} stalled="txA has no request" />)
+    expect(getByText(/txA has no request/)).toBeTruthy()
+  })
+
+  it('offers show-code only for queued sent rows that carry a frame', () => {
+    const withFrame = {
+      ...row('cc'.repeat(32)),
+      role: 'sent' as const,
+      status: 'queued' as const,
+      framePayload: 'bsvpayf1:abc'
+    }
+    const without = { ...row('dd'.repeat(32)), role: 'sent' as const, status: 'queued' as const, framePayload: null }
+    const onShowCode = jest.fn()
+    const { getAllByText } = render(
+      <OfflineNotice online queued={0} rejected={[]} queuedSent={[withFrame, without]} onShowCode={onShowCode} />
+    )
+    expect(getAllByText(/show code again/i)).toHaveLength(1)
   })
 })
