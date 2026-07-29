@@ -331,4 +331,30 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       updated_at TEXT NOT NULL
     );
   `)
+
+  // Offline actions — the broadcast queue and provenance record for
+  // transactions accepted with no network. The money itself lives in the normal
+  // transactions/outputs tables the whole time (that is what keeps it
+  // spendable); this table records what still needs sending, in what order it
+  // arrived, and who handed it to us.
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS offline_actions (
+      offlineActionId INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      userId INTEGER NOT NULL,
+      txid TEXT NOT NULL UNIQUE,
+      seq INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      senderIdentityKey TEXT,
+      receivedVia TEXT,
+      status TEXT NOT NULL,
+      rejectedReason TEXT,
+      poisonedByTxid TEXT,
+      FOREIGN KEY (userId) REFERENCES users(userId)
+    );
+    CREATE INDEX IF NOT EXISTS idx_offline_actions_status ON offline_actions(status);
+    CREATE INDEX IF NOT EXISTS idx_offline_actions_userId ON offline_actions(userId);
+    CREATE INDEX IF NOT EXISTS idx_offline_actions_seq ON offline_actions(seq);
+  `)
 }
