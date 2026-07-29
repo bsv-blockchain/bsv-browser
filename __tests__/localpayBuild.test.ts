@@ -244,10 +244,14 @@ describe('finalizeDelivery', () => {
   }
 
   const built = { frame: {} as never, reference: 'ref-1', txid: 'tx-1' }
+  // These tests are pinning the ONLINE path, so connectivity is injected rather
+  // than left to the real default (`@/utils/net/online`'s `getOnline`, which
+  // calls the native NetInfo module and has nothing to answer with under Jest).
+  const online = { online: async () => true }
 
   it('broadcasts on a positive ack', async () => {
     const w = payerStub()
-    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com', online)
 
     expect(outcome).toEqual({ kind: 'sent', broadcast: 'ok' })
     expect(w.createAction).toHaveBeenCalledTimes(1)
@@ -280,7 +284,7 @@ describe('finalizeDelivery', () => {
   it('reports a thrown broadcast as sent-but-pending, never as failed', async () => {
     const w = payerStub()
     w.createAction.mockRejectedValue(new Error('no network'))
-    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com', online)
 
     expect(outcome.kind).toBe('sent')
     expect(outcome).toMatchObject({ broadcast: 'pending', detail: 'no network' })
@@ -290,7 +294,7 @@ describe('finalizeDelivery', () => {
   it('reports a toolbox-rejected broadcast as sent-but-pending', async () => {
     const w = payerStub()
     w.createAction.mockResolvedValue({ sendWithResults: [{ txid: 'tx-1', status: 'failed' }] })
-    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com', online)
 
     expect(outcome).toMatchObject({ kind: 'sent', broadcast: 'pending' })
     expect(w.abortAction).not.toHaveBeenCalled()
@@ -312,6 +316,100 @@ describe('finalizeDelivery', () => {
 
     await expect(finalizeDelivery(w as never, built, { ok: false, error: 'already_paid' }, 'admin.com'))
       .resolves.toEqual({ kind: 'declined', reason: 'already_paid' })
+    warn.mockRestore()
+  })
+})
+
+describe('finalizeDelivery when offline', () => {
+  const built = { frame: {} as never, reference: 'ref-1', txid: 'aa'.repeat(32) }
+
+  it('enqueues instead of broadcasting and reports pending', async () => {
+    const wallet = {
+      createAction: jest.fn(),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn().mockResolvedValue(undefined)
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => false,
+      hold
+    })
+    expect(r).toEqual({ kind: 'sent', broadcast: 'pending', detail: expect.stringMatching(/offline/i) })
+    expect(hold).toHaveBeenCalledWith('aa'.repeat(32))
+    expect(wallet.createAction).not.toHaveBeenCalled()
+  })
+
+  it('still broadcasts when online', async () => {
+    const wallet = {
+      createAction: jest.fn().mockResolvedValue({ sendWithResults: [{ txid: built.txid, status: 'sending' }] }),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn()
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => true,
+      hold
+    })
+    expect(r).toEqual({ kind: 'sent', broadcast: 'ok' })
+    expect(hold).not.toHaveBeenCalled()
+  })
+
+  it('still aborts on a negative ack while offline', async () => {
+    const wallet = {
+      createAction: jest.fn(),
+      abortAction: jest.fn().mockResolvedValue({ aborted: true }),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn()
+    const r = await finalizeDelivery(wallet as never, built, { ok: false, error: 'declined' }, 'admin.com', {
+      online: async () => false,
+      hold
+    })
+    expect(r).toEqual({ kind: 'declined', reason: 'declined' })
+    expect(wallet.abortAction).toHaveBeenCalledWith({ reference: 'ref-1' }, 'admin.com')
+    expect(hold).not.toHaveBeenCalled()
+  })
+
+  it('reports pending when the enqueue itself fails', async () => {
+    const wallet = {
+      createAction: jest.fn(),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn().mockRejectedValue(new Error('db locked'))
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => false,
+      hold
+    })
+    expect(r.kind).toBe('sent')
+    expect((r as { broadcast: string }).broadcast).toBe('pending')
+  })
+
+  // Matches the guard already around every other call to `getOnline` in this
+  // codebase: a failed probe must not flip a reachable device into the offline
+  // branch, so this falls through to the ordinary broadcast instead.
+  it('assumes online when the connectivity probe itself throws', async () => {
+    const wallet = {
+      createAction: jest.fn().mockResolvedValue({ sendWithResults: [{ txid: built.txid, status: 'sending' }] }),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn()
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => {
+        throw new Error('NetInfo native module unavailable')
+      },
+      hold
+    })
+    expect(r).toEqual({ kind: 'sent', broadcast: 'ok' })
+    expect(hold).not.toHaveBeenCalled()
+    expect(wallet.createAction).toHaveBeenCalledTimes(1)
     warn.mockRestore()
   })
 })

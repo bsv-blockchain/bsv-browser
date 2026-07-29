@@ -124,6 +124,7 @@ import {
   finalizeDelivery,
   frameFromQr,
   frameToQr,
+  holdSentPaymentOffline,
   isDeclineReason,
   isSessionSpent,
   localSupportsAwdl,
@@ -997,12 +998,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       // since been abandoned — releasing or reclaiming the transaction must not
       // depend on this component still being mounted. Only the UI writes below
       // are gated on the abort.
-      const outcome = await finalizeDelivery(
-        wallet as unknown as PayingWalletArg,
-        built,
-        ack,
-        adminOriginator
-      )
+      const outcome = await finalizeDelivery(wallet as unknown as PayingWalletArg, built, ack, adminOriginator, {
+        hold: async txid => {
+          // `finalizeDelivery` already treats a thrown hold as non-fatal
+          // (`broadcast: 'pending'`), so a clear error here is strictly
+          // better than the null-dereference `storage as never` would throw
+          // instead — same outward outcome, an honest cause.
+          if (!storage) throw new Error('no local storage to queue this payment in')
+          await holdSentPaymentOffline({ storage, txid })
+        }
+      })
       if (controller.signal.aborted) return
 
       if (outcome.kind === 'declined') {
@@ -1035,7 +1040,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     } finally {
       registry.delete(controller)
     }
-  }, [scannedSession, sendKind, payAmount, wallet, adminOriginator, abortBuild, declineMessage, fail, t])
+  }, [scannedSession, sendKind, payAmount, wallet, adminOriginator, storage, abortBuild, declineMessage, fail, t])
 
   // ── The success moment ──
   //
