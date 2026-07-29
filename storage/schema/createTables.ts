@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
+import type { BindValue } from '../methods/offlineActions'
 
 /**
  * SQL statements to create all wallet storage tables
@@ -351,6 +352,7 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       status TEXT NOT NULL,
       rejectedReason TEXT,
       poisonedByTxid TEXT,
+      framePayload TEXT,
       FOREIGN KEY (userId) REFERENCES users(userId)
     );
     CREATE INDEX IF NOT EXISTS idx_offline_actions_status ON offline_actions(status);
@@ -358,4 +360,26 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_offline_actions_seq ON offline_actions(seq);
     CREATE INDEX IF NOT EXISTS idx_offline_actions_txid ON offline_actions(txid);
   `)
+}
+
+/**
+ * Post-ship column additions to offline_actions. CREATE TABLE IF NOT EXISTS
+ * cannot alter an existing table, so upgrades go through a PRAGMA check + a
+ * guarded ALTER. Add future columns to the COLUMNS list; never remove or
+ * retype one here — SQLite ALTER cannot do either, and this table is live
+ * money bookkeeping on shipped devices.
+ */
+const OFFLINE_ACTIONS_COLUMNS: { name: string; ddl: string }[] = [
+  { name: 'framePayload', ddl: 'ALTER TABLE offline_actions ADD COLUMN framePayload TEXT' }
+]
+
+export async function ensureOfflineActionsColumns(db: {
+  getAllAsync(sql: string, params: BindValue[]): Promise<unknown[]>
+  execAsync(sql: string): Promise<unknown>
+}): Promise<void> {
+  const info = (await db.getAllAsync('PRAGMA table_info(offline_actions)', [])) as { name: string }[]
+  const have = new Set(info.map(c => c.name))
+  for (const col of OFFLINE_ACTIONS_COLUMNS) {
+    if (!have.has(col.name)) await db.execAsync(col.ddl)
+  }
 }

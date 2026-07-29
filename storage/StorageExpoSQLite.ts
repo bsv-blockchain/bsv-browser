@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite'
 import type { SQLiteDatabase } from 'expo-sqlite'
-import { createTables } from './schema/createTables'
+import { createTables, ensureOfflineActionsColumns } from './schema/createTables'
 import { devLog } from '../utils/logging'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import type { StorageProviderOptions } from '@bsv/wallet-toolbox-mobile'
@@ -59,6 +59,7 @@ import { listOutputsSql } from './methods/listOutputsSql'
 import { insertOfflineAction, type OfflineActionRole } from './methods/offlineActions'
 import { buildOfflineHoldResult, groupOfflineHolds } from '../utils/offline/hold'
 import { getOnline } from '../utils/net/online'
+import { TaskSendOffline } from '../utils/monitor/TaskSendOffline'
 
 export interface StorageExpoSQLiteOptions extends StorageProviderOptions {
   databaseName?: string
@@ -87,6 +88,7 @@ export class StorageExpoSQLite extends StorageProvider {
   async migrate(storageName: string, storageIdentityKey: string): Promise<string> {
     this.db = await SQLite.openDatabaseAsync(this.dbName)
     await createTables(this.db)
+    await ensureOfflineActionsColumns(this.db)
 
     // Check/insert settings
     const existing = (await this.db.getFirstAsync('SELECT * FROM settings WHERE storageIdentityKey = ?', [
@@ -1414,6 +1416,7 @@ export class StorageExpoSQLite extends StorageProvider {
       if (row) await this.updateProvenTxReq(row.provenTxReqId, { status: 'nosend' })
       await insertOfflineAction(db, { userId, txid: req.txid, role })
     }
+    TaskSendOffline.noteEnqueued()
   }
 
   /**

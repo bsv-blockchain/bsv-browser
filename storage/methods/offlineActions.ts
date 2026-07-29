@@ -20,6 +20,7 @@ export interface OfflineActionRow {
   status: OfflineActionStatus
   rejectedReason: string | null
   poisonedByTxid: string | null
+  framePayload: string | null
 }
 
 /** The subset of bind values this mapper ever passes (no blobs). */
@@ -48,6 +49,8 @@ export interface NewOfflineAction {
   role: OfflineActionRole
   senderIdentityKey?: string
   receivedVia?: string
+  /** The payer's full `bsvpayf1:` QR string, so the code can be re-shown after an app restart. */
+  framePayload?: string
 }
 
 /**
@@ -61,9 +64,18 @@ export async function insertOfflineAction(db: OfflineDb, entry: NewOfflineAction
   const now = new Date().toISOString()
   await db.runAsync(
     `INSERT OR IGNORE INTO offline_actions
-       (created_at, updated_at, userId, txid, seq, role, senderIdentityKey, receivedVia, status)
-     VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM offline_actions), ?, ?, ?, 'queued')`,
-    [now, now, entry.userId, entry.txid, entry.role, entry.senderIdentityKey ?? null, entry.receivedVia ?? null]
+       (created_at, updated_at, userId, txid, seq, role, senderIdentityKey, receivedVia, status, framePayload)
+     VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM offline_actions), ?, ?, ?, 'queued', ?)`,
+    [
+      now,
+      now,
+      entry.userId,
+      entry.txid,
+      entry.role,
+      entry.senderIdentityKey ?? null,
+      entry.receivedVia ?? null,
+      entry.framePayload ?? null
+    ]
   )
 }
 

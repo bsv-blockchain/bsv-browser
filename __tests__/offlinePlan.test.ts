@@ -34,6 +34,7 @@ const row = (txid: string, over: Partial<OfflineActionRow> = {}): OfflineActionR
   status: 'queued',
   rejectedReason: null,
   poisonedByTxid: null,
+  framePayload: null,
   ...over
 })
 

@@ -92,6 +92,7 @@ const offlineRow = (overrides: Partial<OfflineActionRow>): OfflineActionRow => (
   status: 'queued',
   rejectedReason: null,
   poisonedByTxid: null,
+  framePayload: null,
   ...overrides
 })
 

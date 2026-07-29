@@ -28,7 +28,8 @@ const row = (txid: string) => ({
   receivedVia: 'awdl',
   status: 'rejected' as const,
   rejectedReason: 'the network rejected the transaction as invalid',
-  poisonedByTxid: txid
+  poisonedByTxid: txid,
+  framePayload: null
 })
 
 // A payer's own held payment can be rejected too, but it carries no attribution

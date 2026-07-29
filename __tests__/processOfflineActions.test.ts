@@ -26,6 +26,7 @@ import { Beef, LockingScript, Transaction, UnlockingScript } from '@bsv/sdk'
 import type { TableProvenTxReq } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/tables'
 import { processOfflineActions } from '@/storage/methods/processOfflineActions'
 import type { BindValue, OfflineActionRow } from '@/storage/methods/offlineActions'
+import { ensureOfflineActionsColumns } from '@/storage/schema/createTables'
 
 /** A spendable-looking transaction. Never signed: nothing here evaluates script. */
 function txSpending(sourceTXID: string): Transaction {
@@ -48,6 +49,7 @@ const row = (overrides: Partial<OfflineActionRow>): OfflineActionRow => ({
   status: 'queued',
   rejectedReason: null,
   poisonedByTxid: null,
+  framePayload: null,
   ...overrides
 })
 
@@ -269,3 +271,28 @@ function lastStatusWritten(db: ReturnType<typeof fakeDb>, txid: string): string 
   const last = writes[writes.length - 1]
   return last ? (last.params[1] as string) : undefined
 }
+
+describe('ensureOfflineActionsColumns', () => {
+  function fakeDb(columns: string[]) {
+    const executed: string[] = []
+    return {
+      executed,
+      getAllAsync: async () => columns.map(name => ({ name })),
+      execAsync: async (sql: string) => {
+        executed.push(sql)
+      }
+    }
+  }
+
+  it('adds framePayload when missing', async () => {
+    const db = fakeDb(['offlineActionId', 'txid', 'status'])
+    await ensureOfflineActionsColumns(db)
+    expect(db.executed.some(s => /ALTER TABLE offline_actions ADD COLUMN framePayload TEXT/.test(s))).toBe(true)
+  })
+
+  it('does nothing when the column exists', async () => {
+    const db = fakeDb(['offlineActionId', 'framePayload'])
+    await ensureOfflineActionsColumns(db)
+    expect(db.executed).toEqual([])
+  })
+})

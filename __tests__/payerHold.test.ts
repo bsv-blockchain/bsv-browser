@@ -1,5 +1,6 @@
 import { holdSentPaymentOffline } from '@/utils/offline/payerHold'
 import { insertOfflineAction } from '@/storage/methods/offlineActions'
+import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
 import type { StorageExpoSQLite } from '@/storage/StorageExpoSQLite'
 
 // The DB mapper is its own tested unit (`storage/methods/offlineActions.ts`);
@@ -32,6 +33,7 @@ describe('holdSentPaymentOffline', () => {
   beforeEach(() => {
     mockedInsert.mockClear()
     mockedInsert.mockResolvedValue(undefined)
+    TaskSendOffline.resetForTests()
   })
 
   it('resolves transactionId and userId from the transaction row, not a guess', async () => {
@@ -41,6 +43,24 @@ describe('holdSentPaymentOffline', () => {
     expect(storage.findTransactions).toHaveBeenCalledWith({ partial: { txid: TXID }, noRawTx: true })
     expect(storage.updateTransactionStatus).toHaveBeenCalledWith('unproven', 99)
     expect(mockedInsert).toHaveBeenCalledWith(storage.sqliteDb, { userId: 5, txid: TXID, role: 'sent' })
+  })
+
+  it('persists the frame payload on the queue row when given one', async () => {
+    const storage = storageStub()
+
+    await holdSentPaymentOffline({
+      storage: storage as unknown as StorageExpoSQLite,
+      txid: TXID,
+      framePayload: 'bsvpayf1:abc'
+    })
+
+    expect(mockedInsert).toHaveBeenCalledWith(storage.sqliteDb, {
+      userId: 7,
+      txid: TXID,
+      role: 'sent',
+      framePayload: 'bsvpayf1:abc'
+    })
+    expect(TaskSendOffline.hasPending).toBe(true)
   })
 
   // ORDER MATTERS: the queue-row insert is durable and the status promotion is

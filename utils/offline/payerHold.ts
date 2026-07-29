@@ -53,10 +53,16 @@
  * reused directly via `insertOfflineAction`.
  */
 import { insertOfflineAction } from '@/storage/methods/offlineActions'
+import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
 import type { StorageExpoSQLite } from '@/storage/StorageExpoSQLite'
 
-export async function holdSentPaymentOffline(args: { storage: StorageExpoSQLite; txid: string }): Promise<void> {
-  const { storage, txid } = args
+export async function holdSentPaymentOffline(args: {
+  storage: StorageExpoSQLite
+  txid: string
+  /** The full bsvpayf1: QR string, persisted so the code can be re-shown later. */
+  framePayload?: string
+}): Promise<void> {
+  const { storage, txid, framePayload } = args
   const db = storage.sqliteDb
   if (!db) throw new Error('the database is not open, cannot queue this payment for release')
 
@@ -75,6 +81,7 @@ export async function holdSentPaymentOffline(args: { storage: StorageExpoSQLite;
   if (!tx) throw new Error(`no transaction record for ${txid}, cannot queue it for release`)
 
   // Insert before promote — see the ORDER MATTERS note above.
-  await insertOfflineAction(db, { userId: tx.userId, txid, role: 'sent' })
+  await insertOfflineAction(db, { userId: tx.userId, txid, role: 'sent', framePayload })
+  TaskSendOffline.noteEnqueued()
   await storage.updateTransactionStatus('unproven', tx.transactionId)
 }
