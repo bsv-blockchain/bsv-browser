@@ -16,11 +16,11 @@ import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
-import QRCode from 'react-native-qrcode-svg'
 
 import PressableScale from '@/components/ui/PressableScale'
 import PayCellRow from '@/components/pay/PayCellRow'
 import NearbyFlow from '@/components/pay/NearbyFlow'
+import PaymentQrDisplay from '@/components/pay/PaymentQrDisplay'
 import HandleSend from '@/components/pay/HandleSend'
 import HandleReceive from '@/components/pay/HandleReceive'
 import AddressSend from '@/components/pay/AddressSend'
@@ -32,7 +32,6 @@ import { useWallet } from '@/context/WalletContext'
 import { useOnline } from '@/hooks/useOnline'
 import { validatePeerPayURI } from '@/utils/parsePeerPayURI'
 import { isPayCell, type PayCell } from '@/utils/pay/rails'
-import { MAX_FRAME_QR_CHARS } from '@/utils/pay/rails/nearby'
 import { findOfflineActions, type OfflineActionRow } from '@/storage/methods/offlineActions'
 import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
 
@@ -300,8 +299,8 @@ export default function PayScreen() {
       <Modal visible={!!showCode} animationType="slide" transparent onRequestClose={() => setShowCode(null)}>
         <View style={styles.codeOverlay}>
           <View style={[styles.codeCard, { backgroundColor: colors.backgroundElevated }]}>
-            {showCode?.framePayload && showCode.framePayload.length <= MAX_FRAME_QR_CHARS ? (
-              <QRCode value={showCode.framePayload} size={288} ecl="M" color="#000" backgroundColor="#fff" />
+            {showCode?.framePayload ? (
+              <PaymentQrDisplay frameQr={showCode.framePayload} size={288} />
             ) : (
               <Text style={{ color: colors.textSecondary }}>{t('local_pay_too_large')}</Text>
             )}

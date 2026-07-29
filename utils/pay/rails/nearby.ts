@@ -11,7 +11,21 @@
  * instead.
  */
 export { decodeSession, encodeSession, mintSession, type Session } from '@/utils/localpay/session'
-export { MAX_FRAME_QR_CHARS, frameFromQr, frameToQr, type PaymentFrame } from '@/utils/localpay/codec'
+export {
+  MAX_FRAME_QR_CHARS,
+  encodeFrame,
+  frameBytesFromQr,
+  frameFromQr,
+  frameToQr,
+  type PaymentFrame
+} from '@/utils/localpay/codec'
+export {
+  FOUNTAIN_FRAME_MS,
+  FOUNTAIN_QR_PREFIX,
+  FountainDecoder,
+  FountainEncoder,
+  MAX_MESSAGE_BYTES
+} from '@/utils/localpay/fountain'
 export {
   isSessionSpent,
   markSessionSpent,

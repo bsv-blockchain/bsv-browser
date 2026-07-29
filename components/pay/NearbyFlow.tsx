@@ -111,6 +111,7 @@ import { AmountInput } from '@/components/wallet/AmountInput'
 import Celebration from '@/components/ui/Celebration'
 import PressableScale from '@/components/ui/PressableScale'
 import PresenceRow, { type PresenceState } from '@/components/localpay/PresenceRow'
+import PaymentQrDisplay from '@/components/pay/PaymentQrDisplay'
 import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
@@ -122,9 +123,11 @@ import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/iden
 import { getOnline } from '@/utils/net/online'
 import {
   MAX_FRAME_QR_CHARS,
+  MAX_MESSAGE_BYTES,
   awdlTransport,
   buildPaymentFrame,
   decodeSession,
+  encodeFrame,
   encodeSession,
   finalizeDelivery,
   frameFromQr,
@@ -1011,23 +1014,18 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         return
       }
 
-      // Computed once, before anything can render it. Null means the frame is
-      // too large for a symbol — AtomicBEEF grows with input count — and handing
-      // it to <QRCode> would throw during render and take the app down.
-      const qr = frameQrOrNull(built.frame)
-
       if (sendKind === 'qr') {
-        if (!qr) {
-          // The only transport for this pair is a QR the frame cannot fit in,
-          // so it can never be delivered. Release the inputs — and, having
-          // released them, make sure no earlier frame is left on offer.
+        // The fountain removes the symbol-size ceiling; the only refusal left
+        // is the 64 KB sanity cap, past which QR handover is unreasonable and
+        // something upstream is wrong.
+        if (encodeFrame(built.frame).length > MAX_MESSAGE_BYTES) {
           abortBuild(built.reference)
           setPaymentQr(null)
           fail('generic', t('local_pay_too_large'))
           return
         }
         builtRef.current = built
-        setPaymentQr(qr)
+        setPaymentQr(frameToQr(built.frame))
         setPhase('send_qr')
         return
       }
@@ -1047,7 +1045,10 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // spendable-by-the-payee, and this device must not race the payee onto
         // the network. The frame is signed but noSend, so offering it as a QR
         // lets the payment still complete. `qr` is null when it would not fit,
-        // hiding that offer.
+        // hiding that offer. (Still symbol-gated here, unlike the qr branch
+        // above — this AWDL/Nearby fallback has no fountain UI yet; Task 13
+        // rewrites it onto PaymentQrDisplay too.)
+        const qr = frameQrOrNull(built.frame)
         builtRef.current = qr ? built : null
         setPaymentQr(qr)
         const message = messageOf(e)
@@ -1640,19 +1641,15 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
             >
               <AmountDisplay>{payAmount}</AmountDisplay>
             </Text>
+            {paymentQr.length > MAX_FRAME_QR_CHARS && (
+              <Text style={[styles.support, { color: colors.textSecondary }]}>{t('local_pay_animated_hint')}</Text>
+            )}
             <View style={styles.gapLg} />
             <View style={[styles.qrCard, { shadowColor: colors.textPrimary }]}>
               <View style={styles.qrPlate}>
                 {/* onError is mandatory: without it an oversize payload rethrows
                     from render and the app-level ErrorBoundary swallows the app. */}
-                <QRCode
-                  value={paymentQr}
-                  size={PAYMENT_QR_SIZE}
-                  ecl="M"
-                  color="#000"
-                  backgroundColor="#fff"
-                  onError={onPaymentQrError}
-                />
+                <PaymentQrDisplay frameQr={paymentQr} size={PAYMENT_QR_SIZE} onError={onPaymentQrError} />
               </View>
             </View>
             <View style={styles.gapLg} />
