@@ -243,24 +243,6 @@ const NOTICE_ICONS: Record<NoticeTone, keyof typeof Ionicons.glyphMap> = {
 
 // ── Helpers ──
 
-/**
- * A QR payload for `frame`, or null when it cannot be rendered.
- *
- * `react-native-qrcode-svg` rethrows out of render when a payload does not fit
- * the symbol, and the app-level ErrorBoundary then replaces the whole app — so
- * an oversize frame must be caught here, before it is ever handed to <QRCode>.
- * `PaymentFrame.transaction` is AtomicBEEF, whose size tracks input count, so
- * multi-input payments routinely exceed the ceiling.
- */
-function frameQrOrNull(frame: PaymentFrame): string | null {
-  try {
-    const qr = frameToQr(frame)
-    return qr.length <= MAX_FRAME_QR_CHARS ? qr : null
-  } catch {
-    return null
-  }
-}
-
 function messageOf(e: unknown): string {
   if (e instanceof Error && e.message) return e.message
   const text = String(e)
@@ -1079,22 +1061,24 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         ack = await radio.send(session, built.frame, controller.signal)
       } catch (e) {
         if (controller.signal.aborted) return
-        // Deliberately NOT aborted, and deliberately NOT broadcast. A throw
-        // here proves nothing either way — the bytes may have reached the peer
-        // before the ack was lost — so the action must stay intact and
-        // spendable-by-the-payee, and this device must not race the payee onto
-        // the network. The frame is signed but noSend, so offering it as a QR
-        // lets the payment still complete. `qr` is null when it would not fit,
-        // hiding that offer. (Still symbol-gated here, unlike the qr branch
-        // above — this AWDL/Nearby fallback has no fountain UI yet; Task 13
-        // rewrites it onto PaymentQrDisplay too.)
-        const qr = frameQrOrNull(built.frame)
-        builtRef.current = qr ? built : null
-        setPaymentQr(qr)
+        // The radio path failed: connect timeout (radios off, peer gone),
+        // Local Network denial, or a lost ack. The frame is signed and noSend,
+        // so the QR still completes this payment — fall straight through to
+        // the code instead of a failure screen. Deliberately NOT aborted: a
+        // lost ack does not prove non-delivery, and Done's semantics
+        // (broadcast-or-queue, re-showable) keep the already-delivered case
+        // consistent — the payee's copy merges once this transaction is out.
         const message = messageOf(e)
-        // The heuristic is scoped to the transport call: only here can a message
-        // legitimately be about Local Network access.
-        fail(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', message)
+        console.warn('[localpay] radio send failed, falling back to QR:', message)
+        if (encodeFrame(built.frame).length > MAX_MESSAGE_BYTES) {
+          // No radio and no representable code: the one genuinely dead end.
+          fail(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', t('local_pay_too_large'))
+          return
+        }
+        builtRef.current = built
+        setPaymentQr(frameToQr(built.frame))
+        setNotice({ text: t('local_pay_radio_fallback'), tone: 'info' })
+        setPhase('send_qr')
         return
       }
 
@@ -1232,7 +1216,8 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   // null; without a handler it rethrows and the app-level ErrorBoundary replaces
   // the whole app. Flipping parent state synchronously from a child's render
   // triggers React's cross-component update warning, so both handlers defer by a
-  // microtask. These are backstops — frameQrOrNull() already gates on length.
+  // microtask. These are backstops — every frameToQr() call site already gates
+  // on MAX_MESSAGE_BYTES before calling it.
 
   const onSessionQrError = useCallback(() => {
     void Promise.resolve().then(() => setSessionQrBroken(true))
@@ -1694,6 +1679,12 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
             </View>
             <View style={styles.gapLg} />
             {presenceBlock}
+            {!!notice && (
+              <>
+                <View style={styles.gapLg} />
+                {noticeBlock(notice)}
+              </>
+            )}
             <View style={styles.gapXl} />
             {/* Done asserts delivery: broadcast when online, hold + queue when
                 offline (see completeQrDelivery). Never an abort — the payee may

@@ -11,6 +11,7 @@ import {
 } from './types'
 
 const SEND_TIMEOUT_MS = 20_000
+const CONNECT_TIMEOUT_MS = 4_000
 
 function toBase64(b: Uint8Array): string {
   let s = ''
@@ -185,7 +186,8 @@ export function makeSocketTransport(kind: 'awdl' | 'nearby'): LocalPaymentTransp
             instanceName(session.sessionId),
             toBase64(session.psk),
             toBase64(encodeFrame(frame)),
-            SEND_TIMEOUT_MS
+            SEND_TIMEOUT_MS,
+            CONNECT_TIMEOUT_MS
           )
           .then(
             ackBase64 => {

@@ -358,7 +358,8 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
     instanceName: String,
     pskBase64: String,
     frameBase64: String,
-    timeoutMs: Double
+    timeoutMs: Double,
+    connectTimeoutMs: Double
   ) throws -> Promise<String> {
     let promise = Promise<String>()
     guard let psk = Data(base64Encoded: pskBase64),
@@ -403,9 +404,19 @@ final class HybridLocalPayTransport: HybridLocalPayTransportSpec {
         userInfo: [NSLocalizedDescriptionKey: "timed out waiting for peer"])))
     }
 
+    var becameReady = false
+    queue.asyncAfter(deadline: .now() + .milliseconds(Int(connectTimeoutMs))) {
+      // Same queue-confinement invariant as `settled` — see the comment above.
+      if !becameReady {
+        settle(.failure(NSError(domain: "LocalPayTransport", code: 14,
+          userInfo: [NSLocalizedDescriptionKey: "connect timeout: no route to peer"])))
+      }
+    }
+
     conn.stateUpdateHandler = { state in
       switch state {
       case .ready:
+        becameReady = true
         conn.send(content: AwdlSession.lengthPrefixed(payload), completion: .contentProcessed { error in
           if let error { return settle(.failure(error)) }
           AwdlSession.readFrame(on: conn) { result in

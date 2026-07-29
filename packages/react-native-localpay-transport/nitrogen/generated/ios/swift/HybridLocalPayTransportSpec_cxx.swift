@@ -204,9 +204,9 @@ open class HybridLocalPayTransportSpec_cxx {
   }
   
   @inline(__always)
-  public final func sendFrame(instanceName: std.string, pskBase64: std.string, frameBase64: std.string, timeoutMs: Double) -> bridge.Result_std__shared_ptr_Promise_std__string___ {
+  public final func sendFrame(instanceName: std.string, pskBase64: std.string, frameBase64: std.string, timeoutMs: Double, connectTimeoutMs: Double) -> bridge.Result_std__shared_ptr_Promise_std__string___ {
     do {
-      let __result = try self.__implementation.sendFrame(instanceName: String(instanceName), pskBase64: String(pskBase64), frameBase64: String(frameBase64), timeoutMs: timeoutMs)
+      let __result = try self.__implementation.sendFrame(instanceName: String(instanceName), pskBase64: String(pskBase64), frameBase64: String(frameBase64), timeoutMs: timeoutMs, connectTimeoutMs: connectTimeoutMs)
       let __resultCpp = { () -> bridge.std__shared_ptr_Promise_std__string__ in
         let __promise = bridge.create_std__shared_ptr_Promise_std__string__()
         let __promiseHolder = bridge.wrap_std__shared_ptr_Promise_std__string__(__promise)
