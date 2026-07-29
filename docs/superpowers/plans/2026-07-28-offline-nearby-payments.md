@@ -17,7 +17,9 @@
 - **Nearby rail only.** Do not touch `components/pay/HandleSend.tsx`, `HandleReceive.tsx`, `AddressSend.tsx`, or `AddressReceive.tsx` beyond the offline disabling in Task 12.
 - **SQL modules stay logic-free.** Every decision lives in a pure function unit-tested in `__tests__/`; the SQL layer is a thin mapper validated on device in Task 13. There is no SQLite test harness in this repo (`ls __tests__` — no storage tests exist) and this plan does not add one.
 - **`online` means exactly** `isConnected === true && isInternetReachable !== false`. One implementation, in `utils/net/online.ts`.
-- Tests run with `npx jest <pattern>`. Lint/format with `npm run fix`. Existing suite is 36 files; keep it green.
+- Tests run with `npx jest <pattern>`. Existing suite is 36 files (342 tests) at branch start; keep it green.
+- **Never run `npm run fix` (or `npm run lint:fix`) in this work.** Measured on the branch base: `npx prettier --check .` reports only 4 drifting files, all pre-existing in `utils/webview/`, but `expo lint --fix` rewrites ~175 unrelated files. That buries a task's diff and makes review impossible. Check only the files you touched:
+  `npx prettier --check <your files>` and `npx eslint <your files>`. A repo-wide formatting sweep is its own commit, not part of this feature.
 - Header checkpoint constants are real values fetched 2026-07-28 and are reproduced verbatim in Task 2. Do not substitute placeholders.
 
 ---
