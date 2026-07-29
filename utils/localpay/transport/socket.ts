@@ -11,7 +11,6 @@ import {
 } from './types'
 
 const SEND_TIMEOUT_MS = 20_000
-const CONNECT_TIMEOUT_MS = 4_000
 
 function toBase64(b: Uint8Array): string {
   let s = ''
@@ -98,6 +97,15 @@ function declineQuietly(native: LocalPayTransport, reason: DeclineReason): void 
  * time, so `kind` here is attribution, not dispatch.
  */
 export function makeSocketTransport(kind: 'awdl' | 'nearby'): LocalPaymentTransport {
+  /**
+   * Connect-phase budget before the payer gives up and falls back to the QR.
+   * Radio-specific: AWDL's Bonjour discovery over an already-established
+   * Wi-Fi link resolves (or doesn't) inside ~4s, but Nearby has to do BLE
+   * discovery and then a Wi-Fi/hotspot upgrade before a connection even
+   * exists — 4s there would false-positive "no route to peer" on a link
+   * that just needed more time to come up.
+   */
+  const CONNECT_TIMEOUT_MS = kind === 'awdl' ? 4_000 : 10_000
   return {
     kind,
 
