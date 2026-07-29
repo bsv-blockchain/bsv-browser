@@ -35,8 +35,12 @@ jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } })
 }))
 
+// `storage` starts undefined: the queue effect below reads `storage?.sqliteDb`
+// and returns early when it's absent, so most tests never touch the queue —
+// only the ones that explicitly set mockStorage exercise it.
+let mockStorage: { sqliteDb: unknown } | undefined
 jest.mock('@/context/WalletContext', () => ({
-  useWallet: () => ({ walletBuilding: false, walletBuilt: true })
+  useWallet: () => ({ walletBuilding: false, walletBuilt: true, storage: mockStorage })
 }))
 
 // Without this, the real hook pulls in NetInfo, which has no native module
@@ -61,6 +65,7 @@ import React from 'react'
 import { render } from '@testing-library/react-native'
 import PayScreen from '@/app/pay'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
+import type { OfflineActionRow } from '@/storage/methods/offlineActions'
 
 // Lowercase hex: validatePeerPayURI's compressed-key regex is case-sensitive,
 // so an uppercase key is rejected as malformed.
@@ -73,10 +78,28 @@ const draw = () =>
     </ThemeProvider>
   )
 
+// A minimal OfflineActionRow, letting each test override only what it checks.
+const offlineRow = (overrides: Partial<OfflineActionRow>): OfflineActionRow => ({
+  offlineActionId: 1,
+  created_at: '2026-07-28T00:00:00.000Z',
+  updated_at: '2026-07-28T00:00:00.000Z',
+  userId: 1,
+  txid: 'a'.repeat(64),
+  seq: 1,
+  role: 'received',
+  senderIdentityKey: null,
+  receivedVia: null,
+  status: 'queued',
+  rejectedReason: null,
+  poisonedByTxid: null,
+  ...overrides
+})
+
 describe('PayScreen', () => {
   beforeEach(() => {
     for (const k of Object.keys(mockParams)) delete mockParams[k]
     mockOnline = true
+    mockStorage = undefined
   })
 
   it('renders the three counterparty rows for the Pay direction', () => {
@@ -140,5 +163,44 @@ describe('PayScreen', () => {
     expect(getByLabelText('pay_cell_address_pay. pay_cell_address_pay_sub').props.accessibilityState.disabled).toBe(
       false
     )
+  })
+
+  it('shows a rejected row only for a payment the user received, not one they sent', async () => {
+    // A held transaction can be rejected regardless of which side of it this
+    // device was on (processOfflineActions.ts:rejectOne runs for any held
+    // row). A 'sent' row has no senderIdentityKey/receivedVia — those are only
+    // ever populated on the receiving side (storage/StorageExpoSQLite.ts
+    // holdReqsOffline) — so rendering it through the "who handed you this"
+    // copy would misreport the payer's own failed payment as a fraud someone
+    // else committed against them.
+    const rows = [
+      offlineRow({
+        txid: 'aa'.repeat(32),
+        role: 'received',
+        status: 'rejected',
+        senderIdentityKey: '02'.padEnd(66, 'c'),
+        receivedVia: 'awdl'
+      }),
+      offlineRow({ txid: 'bb'.repeat(32), role: 'sent', status: 'rejected' })
+    ]
+    mockStorage = {
+      sqliteDb: { getAllAsync: async () => rows, runAsync: async () => undefined, getFirstAsync: async () => undefined }
+    }
+    const { findByText, queryAllByText } = draw()
+    await findByText('pay_offline_rejected_title')
+    expect(queryAllByText('pay_offline_rejected_title')).toHaveLength(1)
+  })
+
+  it('counts a queued payment toward the banner regardless of which side sent it', async () => {
+    const rows = [
+      offlineRow({ txid: 'cc'.repeat(32), role: 'received', status: 'queued' }),
+      offlineRow({ txid: 'dd'.repeat(32), role: 'sent', status: 'posting' })
+    ]
+    mockOnline = false
+    mockStorage = {
+      sqliteDb: { getAllAsync: async () => rows, runAsync: async () => undefined, getFirstAsync: async () => undefined }
+    }
+    const { findByText } = draw()
+    await findByText('pay_offline_queued')
   })
 })

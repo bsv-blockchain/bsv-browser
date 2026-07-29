@@ -118,7 +118,13 @@ export default function PayScreen() {
         const rows = await findOfflineActions(db, { status: ['queued', 'posting', 'rejected'] })
         if (cancelled) return
         setQueued(rows.filter(r => r.status !== 'rejected').length)
-        setRejected(rows.filter(r => r.status === 'rejected'))
+        // 'sent'-role rows can be rejected too (a payer's own held payment can be
+        // poisoned), but they carry no senderIdentityKey or receivedVia — those
+        // are only ever recorded on the receiving side (see
+        // storage/StorageExpoSQLite.ts's holdReqsOffline). Showing one through
+        // OfflineNotice's "who handed you this" copy would misreport the user's
+        // own failed payment as someone else's fraud against them.
+        setRejected(rows.filter(r => r.status === 'rejected' && r.role === 'received'))
       } catch {
         // This banner is advisory, never load-bearing. A read failure here must
         // not break the rest of the screen — the grid still has to render.
