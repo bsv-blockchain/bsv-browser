@@ -95,13 +95,39 @@ export async function processOfflineActions(args: {
       blocked.push(`${row.txid} has no request to release it with`)
       continue
     }
+    // The request is remembered whatever happens below. Being in `held` does not
+    // put anything in the plan — the plan comes from the graph — so a row whose
+    // own beef failed can still be released properly if another row's beef
+    // supplied it, ordered, as an ancestor.
     held.set(row.txid, { row, api })
     try {
-      merged.mergeRawTx(api.rawTx)
-      if (api.inputBEEF) merged.mergeBeef(api.inputBEEF)
+      // ALL OR NOTHING, and this is why: `Beef.mergeBeef` is not atomic. It
+      // parses the bytes into a standalone object first, but then merges
+      // transaction by transaction into `this`, and `mergeBeefTx` can throw
+      // partway through. Merging the raw transaction straight into `merged`
+      // before its beef is worse still — a beef that fails to parse at all
+      // leaves the child in the graph with none of its ancestors.
+      //
+      // Nothing downstream can tell that apart from a child whose parents are
+      // already mined: `releaseOrder` finds no in-set input, calls it unblocked
+      // and posts it first, the network refuses it as an orphan, and the cascade
+      // marks it and everything spending it 'failed'. That is received money made
+      // permanently unspendable by our own ordering error rather than by any
+      // verdict the network reached — the one outcome this engine exists to
+      // prevent. So each row is assembled in isolation and folded in only once
+      // the whole of it parsed.
+      //
+      // The fold cannot itself half-succeed the way the parse can: `scratch` is
+      // already a live `Beef`, and `mergeBeefTx` only throws for an entry that is
+      // neither txid-only nor carrying bytes, which `BeefTx.isTxidOnly` makes
+      // unrepresentable.
+      const scratch = new Beef()
+      scratch.mergeRawTx(api.rawTx)
+      if (api.inputBEEF) scratch.mergeBeef(api.inputBEEF)
+      merged.mergeBeef(scratch)
     } catch (e) {
-      // Without its beef this transaction has no place in the graph, so it is
-      // simply not planned and stays queued. Never guess at an order.
+      // Without its whole beef this transaction has no place in the graph, so it
+      // is simply not planned and stays queued. Never guess at an order.
       devLog(`[processOfflineActions] could not merge the beef of ${row.txid}:`, e)
       blocked.push(`the beef of ${row.txid} could not be read`)
     }
