@@ -13,6 +13,7 @@
 export { decodeSession, encodeSession, mintSession, type Session } from '@/utils/localpay/session'
 export {
   MAX_FRAME_QR_CHARS,
+  decodeFrame,
   encodeFrame,
   frameBytesFromQr,
   frameFromQr,

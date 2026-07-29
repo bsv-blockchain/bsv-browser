@@ -26,6 +26,13 @@ interface QRScannerProps {
    */
   multiScan?: boolean
   /**
+   * Forward every recognised barcode immediately — no scan lock, no per-read
+   * haptic. For animated multi-part codes (~5 reads/s): the lock would cap
+   * assembly below 1 part/1.5 s, and per-read haptics would buzz constantly.
+   * The caller owns dedupe and completion.
+   */
+  continuous?: boolean
+  /**
    * Optional render callback for extra content in the bottom overlay area,
    * rendered below the hint text. Useful for progress dots, error banners, etc.
    */
@@ -45,7 +52,14 @@ const SCAN_LOCK_DELAY_MS = 1500
 /*                                 Component                                  */
 /* -------------------------------------------------------------------------- */
 
-export default function QRScanner({ onScan, onClose, hintText, multiScan = false, renderBottom }: QRScannerProps) {
+export default function QRScanner({
+  onScan,
+  onClose,
+  hintText,
+  multiScan = false,
+  continuous = false,
+  renderBottom
+}: QRScannerProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const [permission, requestPermission] = useCameraPermissions()
@@ -56,6 +70,12 @@ export default function QRScanner({ onScan, onClose, hintText, multiScan = false
 
   const handleBarCodeScanned = useCallback(
     ({ data }: { data: string }) => {
+      if (continuous) {
+        if (stoppedRef.current) return
+        onScan(data)
+        return
+      }
+
       if (scanLockRef.current || stoppedRef.current) return
       scanLockRef.current = true
 
@@ -74,7 +94,7 @@ export default function QRScanner({ onScan, onClose, hintText, multiScan = false
         }, SCAN_LOCK_DELAY_MS)
       }
     },
-    [onScan, multiScan]
+    [onScan, multiScan, continuous]
   )
 
   /* ── Permission not yet determined ─────────────────────────────────────── */

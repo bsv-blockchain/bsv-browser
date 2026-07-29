@@ -122,10 +122,13 @@ import { updateOfflineAction } from '@/storage/methods/offlineActions'
 import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
 import { getOnline } from '@/utils/net/online'
 import {
+  FOUNTAIN_QR_PREFIX,
+  FountainDecoder,
   MAX_FRAME_QR_CHARS,
   MAX_MESSAGE_BYTES,
   awdlTransport,
   buildPaymentFrame,
+  decodeFrame,
   decodeSession,
   encodeFrame,
   encodeSession,
@@ -405,6 +408,10 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   const settlingRef = useRef(false)
   /** Ignores the repeat reads multiScan produces while a scan is being handled. */
   const scanLatchRef = useRef(false)
+  /** Assembles animated fountain parts across the continuous scanner's reads. */
+  const fountainDecoderRef = useRef<FountainDecoder | null>(null)
+  /** Live part-count for the fountain progress line under the camera. */
+  const [scanProgress, setScanProgress] = useState<{ have: number; total: number } | null>(null)
 
   /**
    * The built payment behind the QR currently on screen. Done routes it
@@ -460,6 +467,8 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   const openScanner = useCallback((next: 'send_scan' | 'receive_scan') => {
     scanLatchRef.current = false
+    fountainDecoderRef.current = null
+    setScanProgress(null)
     setPhase(next)
   }, [])
 
@@ -490,6 +499,8 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     abortAll()
     settlingRef.current = false
     scanLatchRef.current = false
+    fountainDecoderRef.current = null
+    setScanProgress(null)
     builtRef.current = null
     setPhase(initialRole === 'payee' ? 'receive_amount' : 'entry')
     setRole(initialRole)
@@ -858,6 +869,35 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   const onFrameScanned = useCallback(
     (data: string) => {
+      // Animated-code parts arrive continuously and are handled statefully;
+      // everything else keeps the one-shot latch semantics below.
+      if (typeof data === 'string' && data.startsWith(FOUNTAIN_QR_PREFIX)) {
+        // A settling payment must ignore late parts — the frame it already
+        // solved is already on its way through settleReceived.
+        if (scanLatchRef.current || settlingRef.current) return
+        const session = hostedSession
+        if (!session) return
+        if (!fountainDecoderRef.current) fountainDecoderRef.current = new FountainDecoder()
+        const s = fountainDecoderRef.current.accept(data)
+        if (!s.ok) return
+        setScanProgress({ have: s.have, total: s.total })
+        if (!s.done) return
+        const message = fountainDecoderRef.current.message()
+        if (!message) return // crc mismatch: decoder reset itself, keep scanning
+        fountainDecoderRef.current = null
+        setScanProgress(null)
+        scanLatchRef.current = true
+        let frame: PaymentFrame
+        try {
+          frame = decodeFrame(message)
+        } catch {
+          fail('generic', t('invalid_qr_code'))
+          return
+        }
+        void settleRef.current(frame, session)
+        return
+      }
+
       if (scanLatchRef.current) return
       scanLatchRef.current = true
       const session = hostedSession
@@ -1781,9 +1821,19 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         <StatusBar style="light" />
         <QRScanner
           multiScan
+          continuous={phase === 'receive_scan'}
           onScan={phase === 'send_scan' ? onSessionScanned : onFrameScanned}
           onClose={closeScanner}
           hintText={phase === 'send_scan' ? t('local_pay_scan_qr') : t('local_pay_scan_payer_qr')}
+          renderBottom={
+            phase === 'receive_scan' && scanProgress
+              ? () => (
+                  <Text style={{ color: 'rgba(255,255,255,0.8)', marginTop: 8 }}>
+                    {t('local_pay_scan_progress', { have: scanProgress.have, total: scanProgress.total })}
+                  </Text>
+                )
+              : undefined
+          }
         />
       </Modal>
 

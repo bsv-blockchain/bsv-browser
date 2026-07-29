@@ -379,6 +379,7 @@ const resources = {
       local_pay_show_qr: 'Show this code to the payer',
       local_pay_scan_qr: 'Scan the payee’s code',
       local_pay_scan_payer_qr: 'Scan the payer’s code',
+      local_pay_scan_progress: '{{have}} of {{total}} pieces',
       local_pay_show_payment_qr: 'Show this code to the payee',
       local_pay_animated_hint: 'Hold the screens together — the code animates until the other device has it all.',
       local_pay_show_qr_instead: 'Show a QR code instead',
@@ -697,6 +698,7 @@ const resources = {
       local_pay_show_qr: '请向付款方出示此二维码',
       local_pay_scan_qr: '扫描收款方的二维码',
       local_pay_scan_payer_qr: '扫描付款方的二维码',
+      local_pay_scan_progress: '已接收 {{have}}/{{total}} 片段',
       local_pay_show_payment_qr: '请向收款方出示此二维码',
       local_pay_animated_hint: '请将两台设备屏幕对准——二维码会持续变化，直到对方接收完成。',
       local_pay_show_qr_instead: '改用二维码',
@@ -1017,6 +1019,7 @@ const resources = {
       local_pay_show_qr: 'यह कोड भुगतानकर्ता को दिखाएं',
       local_pay_scan_qr: 'प्राप्तकर्ता का कोड स्कैन करें',
       local_pay_scan_payer_qr: 'भुगतानकर्ता का कोड स्कैन करें',
+      local_pay_scan_progress: '{{total}} में से {{have}} हिस्से',
       local_pay_show_payment_qr: 'यह कोड प्राप्तकर्ता को दिखाएं',
       local_pay_animated_hint:
         'स्क्रीन आमने-सामने रखें — कोड तब तक बदलता रहेगा जब तक दूसरा डिवाइस पूरा प्राप्त न कर ले।',
@@ -1341,6 +1344,7 @@ const resources = {
       local_pay_show_qr: 'Muestra este código a quien paga',
       local_pay_scan_qr: 'Escanea el código de quien cobra',
       local_pay_scan_payer_qr: 'Escanea el código de quien paga',
+      local_pay_scan_progress: '{{have}} de {{total}} fragmentos',
       local_pay_show_payment_qr: 'Muestra este código a quien cobra',
       local_pay_animated_hint:
         'Mantén las pantallas enfrentadas: el código se anima hasta que el otro dispositivo lo reciba todo.',
@@ -1659,6 +1663,7 @@ const resources = {
       local_pay_show_qr: 'Montrez ce code au payeur',
       local_pay_scan_qr: 'Scannez le code du bénéficiaire',
       local_pay_scan_payer_qr: 'Scannez le code du payeur',
+      local_pay_scan_progress: '{{have}} sur {{total}} fragments',
       local_pay_show_payment_qr: 'Montrez ce code au bénéficiaire',
       local_pay_animated_hint: "Gardez les écrans face à face — le code s'anime jusqu'à réception complète.",
       local_pay_show_qr_instead: 'Afficher un code QR à la place',
@@ -1973,6 +1978,7 @@ const resources = {
       local_pay_show_qr: 'اعرض هذا الرمز على الدافع',
       local_pay_scan_qr: 'امسح رمز المستلم',
       local_pay_scan_payer_qr: 'امسح رمز الدافع',
+      local_pay_scan_progress: '{{have}} من {{total}} أجزاء',
       local_pay_show_payment_qr: 'اعرض هذا الرمز على المستلم',
       local_pay_animated_hint: 'أبقِ الشاشتين متقابلتين — يتحرك الرمز حتى يستلم الجهاز الآخر كل البيانات.',
       local_pay_show_qr_instead: 'اعرض رمز QR بدلاً من ذلك',
@@ -2289,6 +2295,7 @@ const resources = {
       local_pay_show_qr: 'Mostre este código a quem vai pagar',
       local_pay_scan_qr: 'Escaneie o código de quem vai receber',
       local_pay_scan_payer_qr: 'Escaneie o código de quem vai pagar',
+      local_pay_scan_progress: '{{have}} de {{total}} fragmentos',
       local_pay_show_payment_qr: 'Mostre este código a quem vai receber',
       local_pay_animated_hint:
         'Mantenha as telas próximas uma da outra — o código se anima até que o outro dispositivo receba tudo.',
@@ -2605,6 +2612,7 @@ const resources = {
       local_pay_show_qr: 'এই কোডটি প্রদানকারীকে দেখান',
       local_pay_scan_qr: 'গ্রহীতার কোড স্ক্যান করুন',
       local_pay_scan_payer_qr: 'প্রদানকারীর কোড স্ক্যান করুন',
+      local_pay_scan_progress: '{{total}}-এর মধ্যে {{have}}টি অংশ',
       local_pay_show_payment_qr: 'এই কোডটি গ্রহীতাকে দেখান',
       local_pay_animated_hint:
         'স্ক্রিন দুটি একসাথে ধরে রাখুন — কোডটি অ্যানিমেট হতে থাকবে যতক্ষণ না অন্য ডিভাইসটি সবকিছু পায়।',
@@ -2923,6 +2931,7 @@ const resources = {
       local_pay_show_qr: 'Покажите этот код плательщику',
       local_pay_scan_qr: 'Отсканируйте код получателя',
       local_pay_scan_payer_qr: 'Отсканируйте код плательщика',
+      local_pay_scan_progress: 'Получено {{have}} из {{total}} частей',
       local_pay_show_payment_qr: 'Покажите этот код получателю',
       local_pay_animated_hint:
         'Держите экраны рядом — код будет анимироваться, пока другое устройство не получит все данные.',
@@ -3240,6 +3249,7 @@ const resources = {
       local_pay_show_qr: 'Tunjukkan kode ini kepada pembayar',
       local_pay_scan_qr: 'Pindai kode penerima',
       local_pay_scan_payer_qr: 'Pindai kode pembayar',
+      local_pay_scan_progress: '{{have}} dari {{total}} bagian',
       local_pay_show_payment_qr: 'Tunjukkan kode ini kepada penerima',
       local_pay_animated_hint:
         'Dekatkan kedua layar — kode akan terus beranimasi hingga perangkat lain menerima semuanya.',
@@ -3574,6 +3584,7 @@ const resources = {
       local_pay_show_qr: 'このコードを支払う側に見せてください',
       local_pay_scan_qr: '受け取る側のコードをスキャン',
       local_pay_scan_payer_qr: '支払う側のコードをスキャン',
+      local_pay_scan_progress: '{{have}}/{{total}} 個受信済み',
       local_pay_show_payment_qr: 'このコードを受け取る側に見せてください',
       local_pay_animated_hint:
         '画面同士を近づけたままにしてください — 相手の端末がすべて受信するまでコードは変化し続けます。',
@@ -3907,6 +3918,7 @@ const resources = {
       local_pay_show_qr: 'Pokaż ten kod osobie płacącej',
       local_pay_scan_qr: 'Zeskanuj kod odbiorcy',
       local_pay_scan_payer_qr: 'Zeskanuj kod osoby płacącej',
+      local_pay_scan_progress: '{{have}} z {{total}} części',
       local_pay_show_payment_qr: 'Pokaż ten kod odbiorcy',
       local_pay_animated_hint:
         'Trzymaj oba ekrany blisko siebie — kod będzie się animować, aż drugie urządzenie odbierze wszystko.',
