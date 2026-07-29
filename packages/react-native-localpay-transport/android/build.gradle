@@ -1,0 +1,64 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+// Same shape as react-native-nitro-modules/android/build.gradle: the plugin is
+// what wires up the `com.facebook.react:react-native:+` -> react-android
+// substitution and the ReactAndroid/fbjni prefab packages that our
+// CMakeLists.txt's find_package() calls need.
+def isNewArchitectureEnabled() {
+  return rootProject.hasProperty("newArchEnabled") && rootProject.getProperty("newArchEnabled") == "true"
+}
+
+if (isNewArchitectureEnabled()) {
+  apply plugin: "com.facebook.react"
+}
+
+def reactNativeArchitectures() {
+  def value = rootProject.getProperties().get("reactNativeArchitectures")
+  return value ? value.split(",") : ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
+}
+
+android {
+  namespace 'com.margelo.nitro.localpaytransport'
+  ndkVersion rootProject.hasProperty('ndkVersion') ? rootProject.ndkVersion : "27.1.12297006"
+  compileSdkVersion rootProject.hasProperty('compileSdkVersion') ? rootProject.compileSdkVersion : 35
+  defaultConfig {
+    minSdkVersion rootProject.hasProperty('minSdkVersion') ? rootProject.minSdkVersion : 24
+
+    externalNativeBuild {
+      cmake {
+        cppFlags "-frtti -fexceptions -Wall -Wextra -fstack-protector-all"
+        arguments "-DANDROID_STL=c++_shared"
+        abiFilters (*reactNativeArchitectures())
+      }
+    }
+  }
+  externalNativeBuild {
+    cmake {
+      path "CMakeLists.txt"
+    }
+  }
+  buildFeatures {
+    prefab true
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+  kotlinOptions { jvmTarget = '17' }
+}
+
+dependencies {
+  implementation 'com.google.android.gms:play-services-nearby:19.3.0'
+  implementation project(':react-native-nitro-modules')
+  // For < 0.71, this will be from the local maven repo; for > 0.71 this is
+  // replaced by `com.facebook.react:react-android:$version` by the react
+  // gradle plugin. Needed both for the Kotlin bridge classes (HybridData,
+  // DoNotStrip, ReactPackage, ...) and for the ReactAndroid/fbjni prefab
+  // packages CMake links against.
+  //noinspection GradleDynamicVersion
+  implementation "com.facebook.react:react-native:+"
+}
+
+// Nitro's generated sources, CMake wiring, and package registration.
+apply from: '../nitrogen/generated/android/LocalPayTransport+autolinking.gradle'
