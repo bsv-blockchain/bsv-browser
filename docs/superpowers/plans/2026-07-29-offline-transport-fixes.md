@@ -3105,6 +3105,13 @@ git commit -m "feat(pay): lazy Nearby permission flow gating the CAP_NEARBY adve
 7. **Flaky-signal drain** — reconnect with weak signal so the first drain fails → backoff retries succeed unattended; "Send now" forces an immediate attempt; transactions screen badges move `Offline · queued` → gone without manual refresh.
 8. **Stall visibility** — queue a row, delete its req in a debug build (or replay the known stall) → offline notice shows the stall detail instead of a silent forever-pending.
 
+Additions from the execution reviews (2026-07-29, see the SDD ledger's per-task notes):
+
+9. **First-run iOS payer, Local Network permission not yet granted** — the system prompt races the 4 s connect budget, so the first-ever nearby payment is expected to degrade to the QR even when the radio would work. Distinct row from radios-off; grant the permission and re-run to confirm AWDL then engages.
+10. **Nearby bystander connect-and-idle** — a third Android device requests a connection to an advertising payee and goes silent: expect a silent disconnect at ~30 s, the listener SURVIVES, and no error surfaces. Then a HELLO-verified peer that stalls before its FRAME: expect the listener error path at ~30 s.
+11. **Nearby mid-negotiation death premise** — the payer's connect budget expiring mid-negotiation assumes Nearby fires no `onConnectionResult`/`onDisconnected` for a never-established connection; watch the payee's logs during row 9/10 runs to confirm no reaper leaks or double-fires.
+12. **Android payer with Nearby permissions denied** — expect a fast, automatic QR fallback with the "wireless link unavailable" notice, not a hang: the ladder consults GMS only, so the deny is discovered at dial time by design.
+
 - [ ] **Step 3: Close out** — set the spec's Status to "Implemented (device-validated)" with the date; note deviations discovered on device in the spec's own sections (the 2026-07-28 spec's correction style — say what changed and why); update project memory (`project_local_payments_awdl` / new entry) with what shipped.
 
 ---
