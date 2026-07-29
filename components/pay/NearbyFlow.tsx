@@ -1,23 +1,26 @@
 /**
  * Local Payments — pay a nearby device.
  *
- * Two transports behind one user-facing flow, both bootstrapped by the same
- * pairing QR minted by the payee:
+ * Three transports behind one user-facing flow, all bootstrapped by the same
+ * pairing QR minted by the payee. selectTransport() picks the highest rung
+ * both sides share:
  *
- *   AWDL  iOS↔iOS peer-to-peer Wi-Fi, TLS-PSK. Fast path.
- *   QR    any platform pair. The payer renders the signed frame; the payee scans it.
+ *   AWDL    iOS↔iOS peer-to-peer Wi-Fi, TLS-PSK. Fast path.
+ *   Nearby  Android↔Android over Google Nearby Connections, same Nitro surface.
+ *   QR      any platform pair. The payer renders the signed frame; the payee scans it.
  *
  * Phase machine
  *
  *   entry
  *    ├─ receive_amount → receive_minting → receive_wait
- *    │      receive_wait always renders the pairing QR, and additionally runs an
- *    │      AWDL listener when this device supports it. Either arrival lands in:
- *    │        · AWDL listener resolves ─┐
+ *    │      receive_wait always renders the pairing QR, and additionally runs a
+ *    │      radio listener (AWDL or Nearby) when this device supports one. Either
+ *    │      arrival lands in:
+ *    │        · radio listener resolves ─┐
  *    │        · receive_scan (payer QR) ─┴→ receive_settling → done | already_paid
  *    └─ send_scan → send_confirm → send_working
- *           ├─ selectTransport() === 'awdl' → awdlTransport.send → done
- *           └─ selectTransport() === 'qr'   → send_qr → done
+ *           ├─ selectTransport() === 'awdl' | 'nearby' → radio.send → done
+ *           └─ selectTransport() === 'qr'              → send_qr → done
  *
  *   already_paid is a SUCCESS terminal, not an error: the session was settled by
  *   an earlier delivery, so that money is already queued. It is the expected end
@@ -130,8 +133,10 @@ import {
   isDeclineReason,
   isSessionSpent,
   localSupportsAwdl,
+  localSupportsNearby,
   markSessionSpent,
   mintSession,
+  nearbyTransport,
   processPending,
   savePending,
   selectTransport,
@@ -415,6 +420,12 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
    * screen is mounted, so every read goes through this.
    */
   const supportsAwdl = useMemo(() => localSupportsAwdl(), [])
+  const supportsNearby = useMemo(() => localSupportsNearby(), [])
+  /** The radio this device listens on as payee, if any. */
+  const radioTransport = useMemo(
+    () => (supportsAwdl ? awdlTransport : supportsNearby ? nearbyTransport : null),
+    [supportsAwdl, supportsNearby]
+  )
 
   const abortAll = useCallback(() => {
     for (const controller of abortsRef.current) {
@@ -640,11 +651,14 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // (2) Persist before anything else. Once this resolves the money cannot
         //     be lost to a crash, a dead network or a closed app.
         //
-        //     `confirm` is only ever supplied by the AWDL receive path (see
-        //     awdlTransport.receive's callers above and the QR/retry callers
+        //     `confirm` is only ever supplied by a radio receive path (see
+        //     radioTransport.receive's callers above and the QR/retry callers
         //     below, which omit it) — the same signal `Unsettled` already keys
         //     off of, reused here to attribute the queue row to a transport.
-        await savePending(storage, frame, confirm ? 'awdl' : 'qr')
+        //     `radioTransport?.kind` names which radio, falling back to 'awdl'
+        //     only for the (unreachable in practice) case confirm exists but
+        //     the listener that produced it has since gone.
+        await savePending(storage, frame, confirm ? (radioTransport?.kind ?? 'awdl') : 'qr')
 
         // (3) Only now is it safe to burn the session. Doing this first would
         //     mean a crash in between marks the session handled while nothing
@@ -738,7 +752,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         setNotice({ text: t('local_pay_queued'), tone: 'info' })
       }
     },
-    [storage, wallet, adminOriginator, fail, t]
+    [storage, wallet, adminOriginator, radioTransport, fail, t]
   )
 
   // Read through refs so the listener effect below depends only on the session
@@ -755,7 +769,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   useEffect(() => {
     if (!hostedSession || !focused) return
-    if (!supportsAwdl) return
+    if (!radioTransport) return
 
     // The Set identity is stable for the component's lifetime, but capture it so
     // the cleanup never reaches through a ref that may have been reassigned.
@@ -764,7 +778,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     registry.add(controller)
     setNearbyError(null)
 
-    awdlTransport
+    radioTransport
       .receive(hostedSession, controller.signal)
       .then(({ frame, confirm }) => {
         if (controller.signal.aborted) {
@@ -789,7 +803,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       controller.abort()
       registry.delete(controller)
     }
-  }, [hostedSession, focused, supportsAwdl, listenerEpoch])
+  }, [hostedSession, focused, radioTransport, listenerEpoch])
 
   // ── Receive: mint the request ──
 
@@ -823,9 +837,11 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         amount: sats,
         derivationPrefix,
         derivationSuffix,
-        // An Android payee advertises no AWDL capability, so the payer's
-        // selectTransport() takes the QR path without a negotiation round trip.
-        supportsAwdl
+        // Caps advertise what this payee can DO; the payer's ladder picks the
+        // highest rung both sides share, QR being the floor.
+        supportsAwdl,
+        supportsNearby,
+        os: Platform.OS === 'ios' ? 'ios' : 'android'
       })
       setRole('payee')
       setHostedSession(session)
@@ -833,7 +849,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     } catch (e) {
       fail('generic', messageOf(e))
     }
-  }, [requestAmount, wallet, storage, adminOriginator, supportsAwdl, fail, t])
+  }, [requestAmount, wallet, storage, adminOriginator, supportsAwdl, supportsNearby, fail, t])
 
   // ── Receive: scan the payer's frame ──
 
@@ -1016,9 +1032,13 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         return
       }
 
+      // sendKind is neither 'qr' (returned above) nor null (guarded at the top
+      // of this callback), so it names one of the two radios here.
+      const radio = sendKind === 'awdl' ? awdlTransport : nearbyTransport
+
       let ack: Ack
       try {
-        ack = await awdlTransport.send(session, built.frame, controller.signal)
+        ack = await radio.send(session, built.frame, controller.signal)
       } catch (e) {
         if (controller.signal.aborted) return
         // Deliberately NOT aborted, and deliberately NOT broadcast. A throw
