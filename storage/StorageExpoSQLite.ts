@@ -50,9 +50,15 @@ import type {
   TableTxLabelMap,
   TableUser
 } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/tables'
-import type { ListActionsResult, ListOutputsResult, Validation } from '@bsv/sdk'
+import type { ListActionsResult, ListOutputsResult, Validation, WalletLoggerInterface } from '@bsv/sdk'
+import { Beef } from '@bsv/sdk'
+import type { EntityProvenTxReq } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/entities'
+import type { PostReqsToNetworkResult } from '@bsv/wallet-toolbox-mobile/out/src/storage/methods/attemptToPostReqsToNetwork'
 import { listActionsSql } from './methods/listActionsSql'
 import { listOutputsSql } from './methods/listOutputsSql'
+import { insertOfflineAction, type OfflineActionRole } from './methods/offlineActions'
+import { buildOfflineHoldResult } from '../utils/offline/hold'
+import { getOnline } from '../utils/net/online'
 
 export interface StorageExpoSQLiteOptions extends StorageProviderOptions {
   databaseName?: string
@@ -1372,6 +1378,127 @@ export class StorageExpoSQLite extends StorageProvider {
       console.error('[StorageExpoSQLite] internalizeAction ERROR:', e.message, e.stack?.slice(0, 500))
       throw e
     }
+  }
+
+  /**
+   * Park requests for later delivery instead of broadcasting them now.
+   *
+   * Each request goes to 'nosend': held, ignored by every monitor task
+   * (`TaskSendWaiting` selects 'unsent'/'sending', `TaskCheckNoSends` is barred
+   * from counting attempts against nosend rows, `TaskFailAbandoned` sweeps
+   * *transactions* in 'unprocessed'/'unsigned'), yet still releasable later via
+   * `options.sendWith` because `readyToSendStatuses` includes it
+   * (`storage/storageProviderHelpers.js:14`). A row in `offline_actions` then
+   * records that it still needs sending.
+   *
+   * The transaction row is deliberately left untouched. `internalizeAction` has
+   * already set it to 'unproven' (`storage/methods/internalizeAction.js:352`),
+   * and that status is exactly what keeps the received outputs spendable while
+   * the broadcast waits — the whole point of holding rather than failing.
+   *
+   * Both writes are idempotent (a repeat 'nosend' is a no-op, and the queue
+   * insert is `INSERT OR IGNORE` on a UNIQUE txid, so it neither duplicates a
+   * row nor disturbs an existing `seq`), so a partial failure is safe to retry.
+   *
+   * Public and upstream-shaped: this is the method that becomes
+   * `StorageProvider.holdReqsOffline` in wallet-toolbox.
+   */
+  async holdReqsOffline(reqs: { txid: string }[], userId: number, role: OfflineActionRole = 'received'): Promise<void> {
+    const db = this.getDB()
+    for (const req of reqs) {
+      const row = (await this.findProvenTxReqs({ partial: { txid: req.txid } }))[0]
+      if (row) await this.updateProvenTxReq(row.provenTxReqId, { status: 'nosend' })
+      await insertOfflineAction(db, { userId, txid: req.txid, role })
+    }
+  }
+
+  /**
+   * Offline, hold the requests. Online, behave exactly as before.
+   *
+   * This override is reached only from `shareReqsWithWorld`
+   * (`storage/methods/processAction.js:146`, a method call on storage), which
+   * covers the forced broadcast inside `internalizeAction` and the non-delayed
+   * create/`sendWith` path. `TaskSendWaiting` invokes the module function
+   * directly (`monitor/tasks/TaskSendWaiting.js:180`), so the monitor's
+   * ordinary broadcast retries are deliberately NOT intercepted.
+   *
+   * The returned 'success' means "accepted for delivery", not "the network has
+   * it"; see `utils/offline/hold.ts` for why nothing persisted claims otherwise.
+   */
+  async attemptToPostReqsToNetwork(
+    reqs: EntityProvenTxReq[],
+    trx?: TrxToken,
+    logger?: WalletLoggerInterface
+  ): Promise<PostReqsToNetworkResult> {
+    if (reqs.length === 0) return await super.attemptToPostReqsToNetwork(reqs, trx, logger)
+
+    let online = true
+    try {
+      online = await getOnline()
+    } catch (e) {
+      // A failed connectivity probe must never change posting behaviour: assume
+      // online so the real post runs exactly as it did before this override.
+      devLog('[StorageExpoSQLite] connectivity probe failed, assuming online:', e)
+    }
+    if (online) return await super.attemptToPostReqsToNetwork(reqs, trx, logger)
+
+    const holds = await this.resolveOfflineHolds(reqs)
+    if (!holds) {
+      // We could not attribute every request to a user, so we cannot record
+      // that it still needs sending. Refuse to hold rather than accept money we
+      // could never broadcast: fall through to the real post, whose offline
+      // failure takes `internalizeAction`'s existing rollback path unchanged.
+      return await super.attemptToPostReqsToNetwork(reqs, trx, logger)
+    }
+
+    devLog(`[StorageExpoSQLite] offline: holding ${reqs.length} req(s) for later delivery`)
+    for (const hold of holds.values()) {
+      await this.holdReqsOffline(hold.reqs, hold.userId, hold.role)
+    }
+    return { ...buildOfflineHoldResult(reqs), beef: new Beef(), log: '' }
+  }
+
+  /**
+   * Group requests by the (userId, role) their `offline_actions` row needs,
+   * both read off the transaction rows a request notifies
+   * (`EntityProvenTxReq.addNotifyTransactionId`, populated by
+   * `storage/methods/internalizeAction.js:523` and
+   * `storage/methods/processAction.js:241`).
+   *
+   * Resolved per request rather than from `reqs[0]`, because one non-delayed
+   * call can carry a whole `options.sendWith` batch. Such a batch can mix the
+   * user's own outgoing transaction (`isOutgoing` true, set by
+   * `storage/methods/createAction.js:377`) with a released incoming one
+   * (`isOutgoing` false, `internalizeAction.js:364`), so the role genuinely
+   * varies within a call even though the acting user does not.
+   *
+   * Returns undefined if any request cannot be attributed to a transaction
+   * row. `offline_actions.userId` is a foreign key to `users(userId)`, so there
+   * is no placeholder to fall back on: a fabricated id would either violate the
+   * constraint or, worse, park a payment under a user nobody ever queries and
+   * silently lose the record that it still needs broadcasting.
+   */
+  private async resolveOfflineHolds(
+    reqs: EntityProvenTxReq[]
+  ): Promise<Map<string, { userId: number; role: OfflineActionRole; reqs: { txid: string }[] }> | undefined> {
+    const groups = new Map<string, { userId: number; role: OfflineActionRole; reqs: { txid: string }[] }>()
+    for (const req of reqs) {
+      let tx: TableTransaction | undefined
+      for (const transactionId of req.notify?.transactionIds ?? []) {
+        tx = (await this.findTransactions({ partial: { transactionId }, noRawTx: true }))[0]
+        if (tx) break
+      }
+      if (!tx) {
+        console.warn(`[StorageExpoSQLite] offline: cannot attribute req ${req.txid} to a user, not holding it`)
+        return undefined
+      }
+      const role: OfflineActionRole = tx.isOutgoing ? 'sent' : 'received'
+      const key = `${tx.userId} ${role}`
+      const group = groups.get(key) ?? { userId: tx.userId, role, reqs: [] }
+      group.reqs.push({ txid: req.txid })
+      groups.set(key, group)
+    }
+    return groups
   }
 
   // processSyncChunk — delegate to inherited implementation if available, stub otherwise
