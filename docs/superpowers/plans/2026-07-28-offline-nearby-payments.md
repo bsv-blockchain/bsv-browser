@@ -1514,26 +1514,28 @@ export interface NewOfflineAction {
   receivedVia?: string
 }
 
-/** Idempotent: a re-delivered frame must not create a second queue row. */
+/**
+ * Idempotent: a re-delivered frame must not create a second queue row.
+ *
+ * `seq` is allocated by a subquery inside the INSERT rather than by a separate
+ * SELECT, so allocation and insertion are one statement under SQLite's
+ * single-writer lock. Reading the max first would let two bursty frames — which
+ * a nearby transport produces routinely — read the same value and both write it.
+ * `seq` is not UNIQUE, so the schema would happily keep both.
+ *
+ * A duplicate `seq` is not a money-safety bug: release order comes from BEEF
+ * topology (`utils/offline/order.ts`), and `seq` only breaks ties between
+ * transactions with no dependency relationship, where relative order is
+ * irrelevant by definition. Fix it because the column's stated purpose should
+ * be true, not because funds are at risk.
+ */
 export async function insertOfflineAction(db: OfflineDb, entry: NewOfflineAction): Promise<void> {
   const now = new Date().toISOString()
-  const seqRow = (await db.getFirstAsync('SELECT COALESCE(MAX(seq), 0) + 1 AS nextSeq FROM offline_actions')) as {
-    nextSeq: number
-  } | null
   await db.runAsync(
     `INSERT OR IGNORE INTO offline_actions
        (created_at, updated_at, userId, txid, seq, role, senderIdentityKey, receivedVia, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued')`,
-    [
-      now,
-      now,
-      entry.userId,
-      entry.txid,
-      seqRow?.nextSeq ?? 1,
-      entry.role,
-      entry.senderIdentityKey ?? null,
-      entry.receivedVia ?? null
-    ]
+     VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM offline_actions), ?, ?, ?, 'queued')`,
+    [now, now, entry.userId, entry.txid, entry.role, entry.senderIdentityKey ?? null, entry.receivedVia ?? null]
   )
 }
 
