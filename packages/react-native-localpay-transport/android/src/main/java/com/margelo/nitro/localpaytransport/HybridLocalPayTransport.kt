@@ -123,24 +123,54 @@ class HybridLocalPayTransport : HybridLocalPayTransportSpec() {
   }
 
   /**
-   * Ceiling on how long an accepted-but-not-yet-FRAMEd connection is
+   * Ceiling on how long an established-but-not-yet-FRAMEd connection is
    * retained: a peer that connects (with or without a valid HELLO) and then
    * stalls would otherwise be held forever — a resource-exhaustion vector
    * against payment code on an open local network, and P2P_POINT_TO_POINT
    * means one staller occupies the only connection slot. Mirrors Swift's
    * `acceptedConnectionReadTimeout`.
+   *
+   * Armed only from `onConnectionResult`'s SUCCESS branch, not from
+   * `onConnectionInitiated`: a connection that never actually establishes
+   * (the payer's own connect budget aborts it mid-negotiation, or any
+   * bystander requests a connection and the negotiation simply never
+   * resolves) delivers neither a further `onConnectionResult` nor an
+   * `onDisconnected` on this side, so a reaper armed any earlier would have
+   * nothing left to cancel it — it would fire 30s later regardless, and
+   * (before this fix) synthesize a `listenOnError` that tears the whole
+   * listening session down, letting a stranger kill a live request simply by
+   * connecting and going silent. Arming here means the reaper only ever
+   * exists for a connection that genuinely reached the transport layer.
+   *
+   * Cancelling re-arms defensively (`cancelIdleReaper` first, and the fired
+   * Runnable checks its own identity against the map before acting) so a
+   * connection that somehow re-initiates for the same endpointId can never
+   * leave a stale, uncancellable timer racing the real one — see the
+   * class's fix history for the incident this guards against: an orphaned
+   * first reaper firing during the pendingAck hold and disconnecting the
+   * very connection the ack has to travel back over.
    */
   private fun armIdleReaper(endpointId: String) {
-    val reaper = Runnable {
+    cancelIdleReaper(endpointId)
+    lateinit var reaper: Runnable
+    reaper = Runnable {
+      // Only ever act if we're still the reaper on file for this endpoint —
+      // a superseded instance (see above) must be a no-op if it somehow
+      // still fires.
+      if (idleReapers[endpointId] !== reaper) return@Runnable
       idleReapers.remove(endpointId)
       client()?.disconnectFromEndpoint(endpointId)
-      // Unlike Swift's silent per-connection accept timeout (a stray probe
-      // against the advertisement is not a failed payment attempt there),
-      // this surfaces through listenOnError: it is JS's only signal that a
-      // peer connected and then stalled, and a short, clearly-worded native
-      // error is what lets it degrade toward the QR the same way any other
-      // native failure does.
-      listenOnError?.invoke("peer connected but never completed the handshake")
+      // Silent for an unverified probe, mirroring Swift's own per-connection
+      // accept timeout: a stray/probing connection — accepted freely, since
+      // trust here comes from the HELLO HMAC, not from Nearby's own connect
+      // accept — is not a failed payment attempt, and a stranger must never
+      // be able to kill a live request just by connecting and going quiet.
+      // Only a peer whose HELLO already verified (boundEndpoint) is the one
+      // real candidate for this session, so only that case is worth
+      // surfacing to JS.
+      if (endpointId == boundEndpoint) {
+        listenOnError?.invoke("peer connected but never completed the handshake")
+      }
     }
     idleReapers[endpointId] = reaper
     main.postDelayed(reaper, IDLE_CONNECTION_TIMEOUT_MS)
@@ -242,11 +272,18 @@ class HybridLocalPayTransport : HybridLocalPayTransportSpec() {
     override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
       // Accept transport-level connections freely; trust is established by the
       // HELLO HMAC, not by Nearby's own auth digits (nobody is reading those
-      // off a screen mid-payment).
+      // off a screen mid-payment). Deliberately does NOT arm the idle reaper:
+      // see armIdleReaper's doc comment for why that has to wait for a
+      // successful onConnectionResult.
       client()?.acceptConnection(endpointId, payeePayloads)
-      armIdleReaper(endpointId)
     }
-    override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {}
+    override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+      if (result.status.isSuccess) {
+        armIdleReaper(endpointId)
+      } else {
+        cancelIdleReaper(endpointId)
+      }
+    }
     override fun onDisconnected(endpointId: String) {
       cancelIdleReaper(endpointId)
       if (endpointId == boundEndpoint && pendingAckEndpoint == null && !hasAccepted) {
@@ -346,6 +383,14 @@ class HybridLocalPayTransport : HybridLocalPayTransportSpec() {
         return@post
       }
       pendingAckEndpoint = null
+      // Full session teardown here, not just the ack slot (mirrors Swift's
+      // confirmFrame, which also clears its whole session's bookkeeping):
+      // otherwise a startListening() self-reset racing this in-flight ack
+      // send would find `endpoint` still sitting in boundEndpoint, treat it
+      // as stale, and disconnect it out from under the ack — killing the
+      // very acknowledgement this two-step design exists to deliver, on a
+      // payment the payee already credited.
+      boundEndpoint = null
       val json = if (accepted) "{\"ok\":true}"
       else "{\"ok\":false,\"error\":${jsonString(reason)}}"
       val payload = byteArrayOf(TYPE_ACK) + json.toByteArray(Charsets.UTF_8)
