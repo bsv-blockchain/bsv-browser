@@ -74,6 +74,8 @@ class QuietEventSource extends (RNEventSource as any) {
 }
 import { getOnline, subscribeOnline } from '@/utils/net/online'
 import { processPending } from '@/utils/localpay/pending'
+import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
+import { processOfflineActions } from '@/storage/methods/processOfflineActions'
 import { wocConfigFor } from '@/utils/pay/rails/address'
 import { SWEEP_INTERVAL_MS, runSweep, shouldSweepNow, sweptTotal } from '@/utils/pay/sweeper'
 import { formatAmount } from '@/utils/amountFormatHelpers'
@@ -892,6 +894,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           const monitor = new Monitor(monitorOptions)
           monitor.addDefaultTasks()
 
+          // Release held offline transactions when signal returns. Registered
+          // after the defaults so it sits last in the run order — the header
+          // window is topped up by then.
+          if (phoneStorage) {
+            monitor.addTask(new TaskSendOffline(monitor, () => processOfflineActions({ storage: phoneStorage! })))
+          }
+
           const newHeaderTask = monitor._tasks.find((t: any) => t.name === 'NewHeader') as any
           if (newHeaderTask) {
             configureNewHeaderPolling(newHeaderTask, {
@@ -1500,6 +1509,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       })()
     })
   }, [walletBuilt, selectedNetwork, runHeaderSync])
+
+  // One reconnect, one release pass.
+  useEffect(() => {
+    if (!walletBuilt) return
+    return subscribeOnline(online => {
+      if (online) TaskSendOffline.checkNow = true
+    })
+  }, [walletBuilt])
 
   // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
