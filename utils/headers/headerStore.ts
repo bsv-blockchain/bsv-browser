@@ -115,13 +115,13 @@ export class HeaderStore {
       meta.anchorHash !== anchor.hash ||
       meta.count <= 0
     ) {
-      await empty.writeMeta()
+      await empty.reset()
       return empty
     }
 
     const bin = await fs.readBytes(`${chain}.bin`)
     if (!bin || bin.length < meta.count * HEADER_BYTES) {
-      await empty.writeMeta()
+      await empty.reset()
       return empty
     }
 
@@ -225,6 +225,34 @@ export class HeaderStore {
     this.extra = merged
     await this.fs.writeText(this.extraPath, JSON.stringify(this.extra))
     return added
+  }
+
+  /**
+   * Throws away the stored window and records an empty one.
+   *
+   * The `.bin` is DELETED, not merely forgotten. `HeaderFs.appendBytes` appends,
+   * so leaving the old bytes on disk puts them in front of whatever the next sync
+   * writes: `meta.count` then counts only the new headers while `open()` rebuilds
+   * the root index from the FIRST `count * 80` bytes — the discarded anchor's —
+   * and every height in the window is served the wrong merkle root. The
+   * `bin.length < count * HEADER_BYTES` guard cannot catch that, because the file
+   * is too long rather than too short, and nothing else notices. After a single
+   * checkpoint bump every upgrading install would refuse every offline payment,
+   * for good. Safe in direction — a root that does not match returns false, it
+   * never accepts a forgery — but silent and permanent, which is why the delete
+   * has to happen here rather than being left to a future rotation.
+   *
+   * A delete that genuinely fails is left to throw. `open()`'s caller treats an
+   * unavailable header store as "no offline verification this launch" and tries
+   * again on the next one, which self-heals; serving wrong roots would not.
+   *
+   * `<chain>-extra.json` is deliberately kept: those entries are height ->
+   * merkle root facts, true whichever checkpoint the window happens to be
+   * anchored to, and re-earning them costs a full prewarm over `proven_txs`.
+   */
+  private async reset(): Promise<void> {
+    await this.fs.deleteFile(this.binPath)
+    await this.writeMeta()
   }
 
   private async writeMeta(): Promise<void> {

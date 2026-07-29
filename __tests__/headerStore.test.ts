@@ -84,6 +84,77 @@ describe('HeaderStore', () => {
     expect(moved.tipHeight).toBe(10)
   })
 
+  // A checkpoint bump (app update) is the only thing that resets the window, and
+  // until the reset deleted the .bin it was the one event that could serve wrong
+  // merkle roots forever: appendBytes APPENDS, so the old anchor's headers stayed
+  // in front of the new window, meta.count counted only the new ones, and open()
+  // rebuilt the root index from the FIRST count*80 bytes — the old anchor's.
+  // Nothing self-healed: the bin.length < count*80 guard cannot see a file that
+  // is too LONG. None of the tests above catch it because none of them append
+  // after a reset.
+  describe('after a reset', () => {
+    // Same hash, moved height. `open` resets on either field, and the real
+    // fixture still validates under the moved anchor because a header names its
+    // predecessor's HASH, not its height — so these are two genuinely different
+    // windows over the same bytes, which is all this needs.
+    const MOVED = { height: 100, hash: TTN_ANCHOR.hash }
+    const ROOT_1 = '2e650ee9705b54c8d94ea92fd03469afb77dbab072529b7f3496f8f9d1a724f8'
+    const ROOT_2 = '6817de212e62baeeafc40dc91bddc468188ece17628dea8a96eb83c2c11c8ffc'
+
+    it('deletes the stored headers rather than leaving them on disk', async () => {
+      const fs = memoryHeaderFs()
+      const first = await HeaderStore.open(fs, 'ttn', TTN_ANCHOR)
+      await first.append(bytes(), 1)
+      expect(await fs.readBytes('ttn.bin')).toBeDefined()
+
+      await HeaderStore.open(fs, 'ttn', MOVED)
+      expect(await fs.readBytes('ttn.bin')).toBeUndefined()
+    })
+
+    it('serves the right roots for a window appended after the bump', async () => {
+      const fs = memoryHeaderFs()
+      const first = await HeaderStore.open(fs, 'ttn', TTN_ANCHOR)
+      // ONE header under the old anchor, two under the new, so a stale leading
+      // header shifts the index rather than coinciding with it.
+      await first.append(bytes().subarray(0, 80), 1)
+      expect(first.count).toBe(1)
+
+      const moved = await HeaderStore.open(fs, 'ttn', MOVED)
+      expect(moved.count).toBe(0)
+      expect(await moved.append(bytes(), 101)).toBe(2)
+
+      const reopened = await HeaderStore.open(fs, 'ttn', MOVED)
+      expect(reopened.count).toBe(2)
+      expect(reopened.rootForHeight(101)).toBe(ROOT_1)
+      // The one a stale leading header corrupts: index 1 would land on the old
+      // anchor's only header instead of the new window's second.
+      expect(reopened.rootForHeight(102)).toBe(ROOT_2)
+    })
+
+    it('keeps the extra roots, which are anchor-independent facts', async () => {
+      const fs = memoryHeaderFs()
+      const first = await HeaderStore.open(fs, 'ttn', TTN_ANCHOR)
+      await first.putExtraRoot(7, 'aa'.repeat(32))
+      const moved = await HeaderStore.open(fs, 'ttn', MOVED)
+      expect(moved.rootForHeight(7)).toBe('aa'.repeat(32))
+    })
+  })
+
+  describe('memoryHeaderFs.deleteFile', () => {
+    it('treats an absent path as already deleted', async () => {
+      await expect(memoryHeaderFs().deleteFile('nothing-here.bin')).resolves.toBeUndefined()
+    })
+
+    it('removes bytes and text written under the same path', async () => {
+      const fs = memoryHeaderFs()
+      await fs.appendBytes('x.bin', new Uint8Array([1, 2, 3]))
+      await fs.writeText('x.bin', 'text')
+      await fs.deleteFile('x.bin')
+      expect(await fs.readBytes('x.bin')).toBeUndefined()
+      expect(await fs.readText('x.bin')).toBeUndefined()
+    })
+  })
+
   it('serves and persists extra roots below the window', async () => {
     const fs = memoryHeaderFs()
     const store = await HeaderStore.open(fs, 'ttn', TTN_ANCHOR)

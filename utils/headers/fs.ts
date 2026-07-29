@@ -1,9 +1,9 @@
 /**
- * The four filesystem operations the header store needs, behind an interface.
+ * The five filesystem operations the header store needs, behind an interface.
  *
  * expo-file-system's binary API is native-only, so the store would be
  * untestable in jest without this seam. It is deliberately tiny: no seeking, no
- * deletes, no directory walking.
+ * directory walking, no partial writes.
  *
  * `expo-file-system` is required lazily inside `expoHeaderFs()` rather than
  * imported at module scope: the package ships untranspiled TS as its main
@@ -17,6 +17,16 @@ export interface HeaderFs {
   appendBytes(path: string, bytes: Uint8Array): Promise<void>
   readText(path: string): Promise<string | undefined>
   writeText(path: string, text: string): Promise<void>
+  /**
+   * Removes a path, if it is there. An absent path is the desired end state,
+   * not an error, so it resolves; anything else genuinely failing throws.
+   *
+   * Exists because `appendBytes` appends and nothing else can undo that. The
+   * header window is discarded whenever the shipped checkpoint moves, and
+   * without a delete the old anchor's bytes stay on disk in front of everything
+   * the next sync writes — see `HeaderStore.reset`.
+   */
+  deleteFile(path: string): Promise<void>
 }
 
 const HEADERS_DIR = 'headers'
@@ -49,6 +59,12 @@ export function expoHeaderFs(): HeaderFs {
       const f = file(path)
       if (!f.exists) f.create()
       f.write(text)
+    },
+    async deleteFile(path) {
+      const f = file(path)
+      // `File.delete()` throws when the file is absent, which is the one outcome
+      // this operation is content with.
+      if (f.exists) f.delete()
     }
   }
 }
@@ -77,6 +93,12 @@ export function memoryHeaderFs(): HeaderFs {
     },
     async writeText(path, value) {
       text.set(path, value)
+    },
+    async deleteFile(path) {
+      // Both maps: this fake splits bytes from text, but a real filesystem has
+      // one namespace and callers are entitled to that behaviour.
+      files.delete(path)
+      text.delete(path)
     }
   }
 }
