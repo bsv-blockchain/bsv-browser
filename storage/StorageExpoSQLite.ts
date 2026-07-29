@@ -1342,8 +1342,10 @@ export class StorageExpoSQLite extends StorageProvider {
   }
 
   /**
-   * The raw database, for the offline-actions modules only. A narrow accessor
-   * rather than a public `db`, so the surface stays deliberate.
+   * The raw database, for the offline-actions modules only. `db` above is
+   * already public (no access modifier) — this isn't a narrower type, just a
+   * named, deliberate access point for that use so call sites read as
+   * intentional rather than reaching into an implementation-shaped field.
    */
   get sqliteDb(): SQLiteDatabase | undefined {
     return this.db

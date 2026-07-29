@@ -33,4 +33,17 @@ describe('prewarmOwnRoots', () => {
     expect(added).toBe(1)
     expect(store.rootForHeight(8)).toBe('cc'.repeat(32))
   })
+
+  it('keeps the first row when the same height appears twice in one batch', async () => {
+    const store = await HeaderStore.open(memoryHeaderFs(), 'ttn', ANCHOR)
+    const added = await prewarmOwnRoots({
+      rows: [
+        { height: 7, merkleRoot: 'aa'.repeat(32) },
+        { height: 7, merkleRoot: 'bb'.repeat(32) } // same height, different root — should be ignored
+      ],
+      store
+    })
+    expect(added).toBe(1)
+    expect(store.rootForHeight(7)).toBe('aa'.repeat(32))
+  })
 })

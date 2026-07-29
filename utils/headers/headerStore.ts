@@ -217,7 +217,7 @@ export class HeaderStore {
     let added = 0
     for (const { height, root } of entries) {
       const key = String(height)
-      if (this.extra[key] === root) continue
+      if (merged[key] === root) continue
       merged[key] = root
       added++
     }

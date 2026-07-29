@@ -130,6 +130,16 @@ describe('HeaderStore', () => {
       expect(store.rootForHeight(8)).toBe('cc'.repeat(32))
     })
 
+    it('does not double-count an exact duplicate height+root within one batch', async () => {
+      const store = await HeaderStore.open(memoryHeaderFs(), 'ttn', TTN_ANCHOR)
+      const added = await store.putExtraRoots([
+        { height: 7, root: 'aa'.repeat(32) },
+        { height: 7, root: 'aa'.repeat(32) } // same height, same root, repeated
+      ])
+      expect(added).toBe(1)
+      expect(store.rootForHeight(7)).toBe('aa'.repeat(32))
+    })
+
     it('writes the extra-roots file exactly once, not once per entry', async () => {
       const base = memoryHeaderFs()
       let writeCount = 0

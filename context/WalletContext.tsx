@@ -43,7 +43,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { UserContext } from './UserContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { usePermissionQueue } from '@/hooks/usePermissionQueue'
-import { createServices } from '@/services/walletServiceConfig'
+import { createServices, chaintracksUrlFor, installOfflineChainTracker } from '@/services/walletServiceConfig'
 import { configureNewHeaderPolling } from '@/utils/walletMonitor'
 import {
   createArcadeBroadcastService,
@@ -84,6 +84,7 @@ import { HeaderStore } from '@/utils/headers/headerStore'
 import { OfflineFirstChaintracks } from '@/utils/headers/OfflineFirstChaintracks'
 import { prewarmOwnRoots } from '@/utils/headers/prewarm'
 import { syncHeaders } from '@/utils/headers/syncHeaders'
+import type { HeaderSource } from '@/utils/headers/syncHeaders'
 
 // Global, origin-agnostic rate limit for auto-approved spending.
 // In-memory only — resets on app restart (intentional: more secure).
@@ -328,9 +329,19 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // The offline-first chain tracker and the header store it wraps. Populated
   // in buildWallet (tracker synchronously, store once the background open
   // finishes); the reconnect top-up effect below reuses both rather than
-  // reopening the store from disk on every reconnect.
+  // reopening the store from disk on every reconnect. Cleared together in
+  // rebuildWallet, switchNetwork, and the unmount cleanup (alongside
+  // monitorRef, which already follows this convention) so the two can never
+  // independently point at different chains — a stale pairing would let the
+  // reconnect effect sync one chain's store against another chain's tracker.
   const offlineChaintracksRef = useRef<OfflineFirstChaintracks | undefined>(undefined)
   const headerStoreRef = useRef<HeaderStore | undefined>(undefined)
+  // Serializes syncHeaders calls against a single store. The init sync and
+  // the reconnect top-up both target the same instance; HeaderStore.append
+  // checks `firstHeight === tipHeight + 1` synchronously but only advances
+  // tipHeight after the async fs write, so two overlapping runs can both pass
+  // the check and double-append the same range, corrupting the window.
+  const headerSyncInFlightRef = useRef(false)
   const adminOriginator = ADMIN_ORIGINATOR
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
   const walletBuildingRef = useRef<boolean>(false)
@@ -630,6 +641,25 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })()
   }, [configStatus]) // Re-run whenever configStatus resets to 'initial' (e.g. after logout)
 
+  // Shared by buildWallet's background init and the reconnect top-up effect,
+  // both of which sync the same store — see headerSyncInFlightRef above.
+  const runHeaderSync = useCallback(
+    async (
+      store: HeaderStore,
+      client: HeaderSource,
+      shouldStop?: () => boolean
+    ): Promise<{ added: number; tipHeight: number; presentHeight: number } | undefined> => {
+      if (headerSyncInFlightRef.current) return undefined
+      headerSyncInFlightRef.current = true
+      try {
+        return await syncHeaders({ store, client, shouldStop })
+      } finally {
+        headerSyncInFlightRef.current = false
+      }
+    },
+    []
+  )
+
   // Build wallet function
   const buildWallet = useCallback(
     async (primaryKey: number[], privilegedKeyManager: PrivilegedKeyManager): Promise<any> => {
@@ -653,16 +683,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         // The remote client the wrapper delegates to. Built here rather than
         // inside createServiceOptions so the same instance is both the fallback
-        // for root misses and the source for header sync.
-        const chaintracksUrl =
-          selectedNetwork === 'main'
-            ? (process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://arcade-v2-us-1.bsvblockchain.tech/chaintracks/v1')
-            : selectedNetwork === 'test'
-              ? (process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ??
-                'https://arcade-v2-testnet-us-1.bsvblockchain.tech/chaintracks/v1')
-              : (process.env?.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL ??
-                'https://arcade-v2-ttn-us-1.bsvblockchain.tech/chaintracks/v1')
-        const remoteChaintracks = new ChaintracksServiceClient(walletChain, chaintracksUrl)
+        // for root misses and the source for header sync. chaintracksUrlFor is
+        // the single source of truth for these URLs — createServiceOptions
+        // calls the same function, so there is exactly one table to edit.
+        const remoteChaintracks = new ChaintracksServiceClient(walletChain, chaintracksUrlFor(selectedNetwork))
         const offlineChaintracks = new OfflineFirstChaintracks(remoteChaintracks, getOnline)
         offlineChaintracksRef.current = offlineChaintracks
 
@@ -674,6 +698,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           arcApiTokenOverride || undefined,
           offlineChaintracks
         )
+        // Services.getChainTracker() would otherwise wrap options.chaintracks
+        // in ChaintracksChainTracker, whose isValidRootForHeight calls
+        // findHeaderForHeight directly rather than the client's own
+        // isValidRootForHeight — bypassing the store-first lookup entirely.
+        // This is the actual seam that makes offline verification live; see
+        // installOfflineChainTracker's doc comment for the full story.
+        installOfflineChainTracker(services, offlineChaintracks)
 
         // Replace all default broadcast providers with EF/rawtx-only services.
         // Order: Arcade → Taal → GorillaPool → WoC → Bitails. UntilSuccess stops at first success.
@@ -1006,6 +1037,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         // sync finishes.
         InteractionManager.runAfterInteractions(() => {
           void (async () => {
+            // InteractionManager can delay this past a subsequent
+            // rebuildWallet/switchNetwork, which replaces offlineChaintracksRef
+            // with a different build's (possibly different chain's) tracker.
+            // Guard every mutation of the shared refs behind identity so a
+            // stale init never attaches this build's store onto a tracker (or
+            // a store) that belongs to a different build.
+            const stillCurrent = () => offlineChaintracksRef.current === offlineChaintracks
             try {
               const anchor = HEADER_CHECKPOINTS[walletChain as 'main' | 'test' | 'ttn']
               if (!anchor) return
@@ -1013,6 +1051,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
               const openStart = Date.now()
               const store = await HeaderStore.open(expoHeaderFs(), walletChain, anchor)
               logWithTimestamp(F, `HeaderStore.open took ${Date.now() - openStart}ms (${store.count} headers)`)
+              if (!stillCurrent()) return
               headerStoreRef.current = store
               offlineChaintracksRef.current?.setStore(store)
 
@@ -1029,13 +1068,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
                 )
               }
 
+              if (!stillCurrent()) return
               if (await getOnline()) {
-                const r = await syncHeaders({
-                  store,
-                  client: remoteChaintracks,
-                  shouldStop: () => !offlineChaintracksRef.current
-                })
-                logWithTimestamp(F, `Header sync: +${r.added} to ${r.tipHeight}/${r.presentHeight}`)
+                const r = await runHeaderSync(store, remoteChaintracks, () => !stillCurrent())
+                if (r) logWithTimestamp(F, `Header sync: +${r.added} to ${r.tipHeight}/${r.presentHeight}`)
               }
             } catch (e: any) {
               console.warn('[WalletContext] header store unavailable:', e?.message)
@@ -1062,7 +1098,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       basketAccessCallback,
       spendingAuthorizationCallback,
       certificateAccessCallback,
-      btmsPromptHandler
+      btmsPromptHandler,
+      runHeaderSync
     ]
   )
 
@@ -1204,6 +1241,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     } catch (e) {
       console.warn('[WalletContext] Failed to stop monitor during rebuild:', e)
     }
+    // Same convention as monitorRef above: clear so a stale deferred header
+    // init or reconnect handler from the old build can't pair a leftover
+    // store/tracker across the rebuild.
+    offlineChaintracksRef.current = undefined
+    headerStoreRef.current = undefined
 
     // Close the current storage connection so the new build can open
     // whichever DB file the registry selects.
@@ -1242,6 +1284,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       } catch (e) {
         console.warn('[WalletContext] Failed to stop monitor during network switch:', e)
       }
+      // Same convention as monitorRef above: clear so the old chain's
+      // tracker/store can't linger and get paired against the new chain.
+      offlineChaintracksRef.current = undefined
+      headerStoreRef.current = undefined
 
       // Close the current storage connection
       if (storage?.db) {
@@ -1429,6 +1475,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // handoffs) without ever having gone offline. If the background init hasn't
   // populated the ref yet, this pass is skipped — the init's own online check
   // covers that case, and the next reconnect retries.
+  //
+  // The chain check is defense in depth: offlineChaintracksRef/headerStoreRef
+  // are cleared together in rebuildWallet, switchNetwork, and the unmount
+  // cleanup, and the background init only pairs them under an identity guard,
+  // so the two should never point at different chains — but this effect reads
+  // both refs fresh on every reconnect, independent of that init's own
+  // guarding, so it re-validates the pairing itself before syncing rather than
+  // trusting it was never broken.
   useEffect(() => {
     if (!walletBuilt) return
     return subscribeOnline(online => {
@@ -1436,15 +1490,16 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       const ct = offlineChaintracksRef.current
       const store = headerStoreRef.current
       if (!ct || !store) return
+      if (store.chain !== toWalletChain(selectedNetwork)) return
       void (async () => {
         try {
-          await syncHeaders({ store, client: ct })
+          await runHeaderSync(store, ct)
         } catch {
           // Best-effort. The next reconnect retries.
         }
       })()
     })
-  }, [walletBuilt])
+  }, [walletBuilt, selectedNetwork, runHeaderSync])
 
   // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
@@ -1472,6 +1527,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     return () => {
       try { monitorRef.current?.stopTasks() } catch {}
       monitorRef.current = null
+      offlineChaintracksRef.current = undefined
+      headerStoreRef.current = undefined
     }
   }, [])
 
