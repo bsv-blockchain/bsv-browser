@@ -1,5 +1,5 @@
 import {
-  mintSession, encodeSession, decodeSession, instanceName, CAP_AWDL, SESSION_VERSION,
+  mintSession, encodeSession, decodeSession, instanceName, CAP_AWDL, CAP_NEARBY, SESSION_VERSION,
 } from '@/utils/localpay/session'
 import { CodecError } from '@/utils/localpay/codec'
 
@@ -19,6 +19,14 @@ function encodeCustomQR(payload: Record<string, unknown>): string {
   for (const byte of encoded) s += String.fromCharCode(byte)
   const b64url = globalThis.btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
   return 'bsvpay1:' + b64url
+}
+
+// Reverse of encodeCustomQR: unwrap a QR string back to its JSON envelope so a
+// test can tamper with one field and re-encode.
+function decodeQR(qr: string): Record<string, unknown> {
+  const b64 = qr.slice('bsvpay1:'.length).replace(/-/g, '+').replace(/_/g, '/')
+  const bin = globalThis.atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4))
+  return JSON.parse(bin)
 }
 
 describe('localpay session', () => {
@@ -210,5 +218,36 @@ describe('localpay session', () => {
       x: 'c3VmZml4',
     })
     expect(() => decodeSession(qr)).toThrow(CodecError)
+  })
+
+  // ── CAP_NEARBY and the advisory OS field ──
+
+  it('mints CAP_NEARBY and the OS field, and round-trips them', () => {
+    const s = mintSession({ ...args, supportsAwdl: false, supportsNearby: true, os: 'android' })
+    expect(s.caps & CAP_NEARBY).toBe(CAP_NEARBY)
+    expect(s.caps & CAP_AWDL).toBe(0)
+    const decoded = decodeSession(encodeSession(s))
+    expect(decoded.caps).toBe(s.caps)
+    expect(decoded.os).toBe('android')
+  })
+
+  it('omits the OS field when unknown and tolerates junk in it', () => {
+    const s = mintSession(args)
+    expect(encodeSession(s)).not.toContain('"o"')
+    // A future build may send values this one does not know: they read as absent.
+    const body = decodeQR(encodeSession({ ...s, os: 'ios' }))
+    body.o = 'z'
+    const tampered = encodeCustomQR(body)
+    expect(decodeSession(tampered).os).toBeUndefined()
+  })
+
+  it('a payload with unknown extra keys and unknown cap bits still decodes', () => {
+    const s = mintSession(args)
+    const body = decodeQR(encodeSession(s))
+    body.c = 0xff // future caps
+    body.future = 'ignored'
+    const wire = encodeCustomQR(body)
+    const decoded = decodeSession(wire)
+    expect(decoded.caps & CAP_AWDL).toBe(CAP_AWDL)
   })
 })
