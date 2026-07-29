@@ -247,7 +247,14 @@ describe('finalizeDelivery', () => {
   // These tests are pinning the ONLINE path, so connectivity is injected rather
   // than left to the real default (`@/utils/net/online`'s `getOnline`, which
   // calls the native NetInfo module and has nothing to answer with under Jest).
-  const online = { online: async () => true }
+  // `hold` is required by the signature and doubles as a guard here: nothing on
+  // the online path, and nothing before the probe, may queue anything.
+  const online = {
+    online: async () => true,
+    hold: async () => {
+      throw new Error('the online path must not queue anything')
+    }
+  }
 
   it('broadcasts on a positive ack', async () => {
     const w = payerStub()
@@ -262,7 +269,7 @@ describe('finalizeDelivery', () => {
 
   it('does NOT broadcast on a negative ack, and releases the inputs instead', async () => {
     const w = payerStub()
-    const outcome = await finalizeDelivery(w as never, built, { ok: false, error: 'save_failed' }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, built, { ok: false, error: 'save_failed' }, 'admin.com', online)
 
     expect(outcome).toEqual({ kind: 'declined', reason: 'save_failed' })
     expect(w.createAction).not.toHaveBeenCalled()
@@ -271,7 +278,13 @@ describe('finalizeDelivery', () => {
 
   it('still declines cleanly when there is no reference to abort', async () => {
     const w = payerStub()
-    const outcome = await finalizeDelivery(w as never, { ...built, reference: undefined }, { ok: false }, 'admin.com')
+    const outcome = await finalizeDelivery(
+      w as never,
+      { ...built, reference: undefined },
+      { ok: false },
+      'admin.com',
+      online
+    )
 
     expect(outcome).toEqual({ kind: 'declined', reason: undefined })
     expect(w.createAction).not.toHaveBeenCalled()
@@ -302,7 +315,7 @@ describe('finalizeDelivery', () => {
 
   it('reports sent-but-pending when there is no txid to broadcast', async () => {
     const w = payerStub()
-    const outcome = await finalizeDelivery(w as never, { ...built, txid: undefined }, { ok: true }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, { ...built, txid: undefined }, { ok: true }, 'admin.com', online)
 
     expect(outcome).toMatchObject({ kind: 'sent', broadcast: 'pending' })
     expect(w.createAction).not.toHaveBeenCalled()
@@ -314,8 +327,9 @@ describe('finalizeDelivery', () => {
     w.abortAction.mockRejectedValue(new Error('storage down'))
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
 
-    await expect(finalizeDelivery(w as never, built, { ok: false, error: 'already_paid' }, 'admin.com'))
-      .resolves.toEqual({ kind: 'declined', reason: 'already_paid' })
+    await expect(
+      finalizeDelivery(w as never, built, { ok: false, error: 'already_paid' }, 'admin.com', online)
+    ).resolves.toEqual({ kind: 'declined', reason: 'already_paid' })
     warn.mockRestore()
   })
 })
@@ -411,5 +425,33 @@ describe('finalizeDelivery when offline', () => {
     expect(hold).not.toHaveBeenCalled()
     expect(wallet.createAction).toHaveBeenCalledTimes(1)
     warn.mockRestore()
+  })
+
+  // `hold` is required by the signature, so this is what a JS caller or a cast
+  // gets. With no hold there is no queue row and no promotion: the transaction
+  // stays at `nosend`, its change unspendable (allocateChangeInput excludes
+  // `nosend`), invisible to the drain — which reads only `offline_actions` — and
+  // to every monitor task (TaskSendWaiting selects ['unsent','sending'];
+  // TaskCheckNoSends never calls sendWith). Telling the user it is queued would
+  // be the Task 11 Critical again, reached through a missing argument instead of
+  // a throw.
+  it('never reports a queue it had no way to make', async () => {
+    const wallet = {
+      createAction: jest.fn(),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => false
+    } as never)
+
+    // Still a sent payment — the payee holds a copy — but pending, never queued.
+    expect(r).toMatchObject({ kind: 'sent', broadcast: 'pending' })
+    expect((r as { detail?: string }).detail).not.toMatch(/queued/i)
+    expect((r as { detail?: string }).detail).toMatch(/hold/i)
+    // And it must not quietly broadcast either: offline is offline, and a
+    // delayed send would come back 'sending' and be reported as broadcast: 'ok'.
+    expect(wallet.createAction).not.toHaveBeenCalled()
   })
 })

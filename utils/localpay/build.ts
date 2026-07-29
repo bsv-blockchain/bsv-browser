@@ -265,10 +265,18 @@ export async function finalizeDelivery(
   built: BuiltPayment,
   ack: Ack,
   originator: string,
-  deps?: {
+  /**
+   * Required, and so is `hold` inside it, because the offline branch cannot
+   * honestly report a queue it has no way to make. A call site that omitted it
+   * would leave the transaction at `nosend` — change unspendable, no queue row,
+   * no monitor task that sweeps it — while telling the user it was waiting to be
+   * broadcast. `online` stays optional: its default is the real probe, and
+   * getting that wrong costs a retry rather than a stranded payment.
+   */
+  deps: {
     online?: () => Promise<boolean>
     /** Promotes the transaction to `unproven` and queues the txid for release. */
-    hold?: (txid: string) => Promise<void>
+    hold: (txid: string) => Promise<void>
   }
 ): Promise<DeliveryOutcome> {
   if (!ack.ok) {
@@ -303,7 +311,15 @@ export async function finalizeDelivery(
   }
   if (!isOnline) {
     try {
-      await deps?.hold?.(built.txid)
+      // The signature requires `hold`; this catches a JS caller or a cast that
+      // got past it. Reported rather than ignored, and deliberately NOT fallen
+      // through to the broadcast: offline, a delayed `sendWith` comes back
+      // 'sending', which this function reports as `broadcast: 'ok'` — green on
+      // the payer's screen for a transaction nothing has.
+      if (typeof deps?.hold !== 'function') {
+        throw new Error('offline, and no hold was supplied to queue this payment with')
+      }
+      await deps.hold(built.txid)
       return { kind: 'sent', broadcast: 'pending', detail: 'offline — queued until this device reconnects' }
     } catch (e) {
       // The payee holds a copy and will internalize it, so this is still a sent
