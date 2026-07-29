@@ -919,7 +919,20 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
                 // The drain writes transaction statuses directly, below the
                 // monitor's onTransactionStatusChanged callback — bump the
                 // version ourselves so the transactions screen re-fetches.
-                if (r.sent > 0 || r.rejected > 0) setTxStatusVersion(v => v + 1)
+                //
+                // Also bump when the stall itself changes. TaskSendOffline.runTask
+                // (utils/monitor/TaskSendOffline.ts) only assigns
+                // `TaskSendOffline.lastStall = r.stalledOn` AFTER this lambda
+                // returns, so right here `TaskSendOffline.lastStall` still holds the
+                // PREVIOUS run's value — comparing against it is what lets this
+                // fire on a stall appearing, changing, or clearing. Without it, a
+                // pure stall (sent: 0, rejected: 0, stalledOn set — a queued row
+                // whose request vanished) never bumps the version, so /pay's queue
+                // effect never re-runs and the stall line never appears, even after
+                // the user taps "Send now" into it.
+                if (r.sent > 0 || r.rejected > 0 || r.stalledOn !== TaskSendOffline.lastStall) {
+                  setTxStatusVersion(v => v + 1)
+                }
                 return r
               })
             )

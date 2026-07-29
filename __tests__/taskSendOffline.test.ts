@@ -135,3 +135,56 @@ describe('TaskSendOffline backoff', () => {
     expect(TaskSendOffline.lastStall).toBeUndefined()
   })
 })
+
+/**
+ * context/WalletContext.tsx wraps `processOfflineActions` in a release lambda
+ * that also decides whether to bump `txStatusVersion` (its one line, reading
+ * `if (r.sent > 0 || r.rejected > 0 || r.stalledOn !== TaskSendOffline.lastStall)`).
+ * A prior version compared only `r.sent`/`r.rejected`, so a PURE stall — a
+ * queued row whose request vanished, `sent: 0, rejected: 0, stalledOn: '…'` —
+ * bumped nothing, and /pay's queue effect (which depends on that version)
+ * never re-read `TaskSendOffline.lastStall`. A user tapping "Send now" into a
+ * pure stall never saw the stall line at all — exactly the "retrying alone
+ * will not help" case the banner exists to surface.
+ *
+ * WalletContext itself has no test harness (see __tests__/walletMonitor.test.ts's
+ * registration-order suite for the same constraint), so this pins the identical
+ * conditional through a real TaskSendOffline instead of the module that
+ * contains it. What makes the comparison correct — and what this exercises
+ * for real, not by assumption — is the ordering `runTask` already guarantees:
+ * `TaskSendOffline.lastStall` is only assigned AFTER the release lambda
+ * returns, so while the lambda runs it still holds the PREVIOUS run's value.
+ */
+describe('the release wrapper bump condition (context/WalletContext.tsx) — pure stall detection', () => {
+  beforeEach(() => TaskSendOffline.resetForTests())
+
+  it('bumps once when a pure stall appears, stays quiet on an identical repeat, and bumps again when it clears', async () => {
+    const nowRef = { t: 0 }
+    const bump = jest.fn()
+    const results: ProcessOfflineActionsResult[] = [
+      { sent: 0, rejected: 0, stopped: true, stalledOn: 'txA has no request' },
+      { sent: 0, rejected: 0, stopped: true, stalledOn: 'txA has no request' },
+      { sent: 0, rejected: 0, stopped: false }
+    ]
+    TaskSendOffline.noteConnectivity(true)
+    const t = new TaskSendOffline(
+      monitor,
+      async () => {
+        const r = results.shift()!
+        // Same shape as context/WalletContext.tsx's TaskSendOffline registration.
+        if (r.sent > 0 || r.rejected > 0 || r.stalledOn !== TaskSendOffline.lastStall) bump()
+        return r
+      },
+      () => nowRef.t
+    )
+
+    await t.runTask() // stall appears
+    expect(bump).toHaveBeenCalledTimes(1)
+
+    await t.runTask() // identical stall repeats
+    expect(bump).toHaveBeenCalledTimes(1)
+
+    await t.runTask() // stall clears
+    expect(bump).toHaveBeenCalledTimes(2)
+  })
+})
