@@ -399,6 +399,13 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   const scanLatchRef = useRef(false)
 
   /**
+   * The built payment behind the QR currently on screen. Done routes it
+   * through finalizeDelivery; without it Done can only guess. Cleared by
+   * reset() and consumed (nulled) by completeQrDelivery.
+   */
+  const builtRef = useRef<Awaited<ReturnType<typeof buildPaymentFrame>> | null>(null)
+
+  /**
    * Whether this device can be an AWDL peer. Resolved ONCE per mount.
    *
    * `localSupportsAwdl()` is not a cheap predicate: each call constructs a
@@ -469,6 +476,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     abortAll()
     settlingRef.current = false
     scanLatchRef.current = false
+    builtRef.current = null
     setPhase(initialRole === 'payee' ? 'receive_amount' : 'entry')
     setRole(initialRole)
     setHostedSession(null)
@@ -1002,6 +1010,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
           fail('generic', t('local_pay_too_large'))
           return
         }
+        builtRef.current = built
         setPaymentQr(qr)
         setPhase('send_qr')
         return
@@ -1019,6 +1028,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // the network. The frame is signed but noSend, so offering it as a QR
         // lets the payment still complete. `qr` is null when it would not fit,
         // hiding that offer.
+        builtRef.current = qr ? built : null
         setPaymentQr(qr)
         const message = messageOf(e)
         // The heuristic is scoped to the transport call: only here can a message
@@ -1078,6 +1088,42 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       registry.delete(controller)
     }
   }, [scannedSession, sendKind, payAmount, wallet, adminOriginator, storage, abortBuild, declineMessage, fail, t])
+
+  // ── Send: the payer asserts QR delivery ──
+  //
+  // The QR path has no ack channel, so "the payee has it" is the user's claim,
+  // made by tapping Done. Acting on that claim mirrors a positive AWDL ack:
+  // broadcast when online, hold + queue when offline. This replaces the old
+  // do-nothing Done, which stranded the transaction at nosend with no queue
+  // row — nothing in the system would ever broadcast it. The risk of a wrong
+  // claim is bounded: the frame is persisted on the queue row, the code can be
+  // re-shown from /pay, and a payee scanning after the broadcast internalizes
+  // the already-mempooled transaction as a merge.
+  const completeQrDelivery = useCallback(async () => {
+    const built = builtRef.current
+    if (!built || !wallet) {
+      // No handle (e.g. re-entry after reset): nothing to decide, just close.
+      setSettledAmount(payAmount)
+      setRole('payer')
+      setPhase('done')
+      return
+    }
+    builtRef.current = null
+    setPhase('send_working')
+    const outcome = await finalizeDelivery(wallet as unknown as PayingWalletArg, built, { ok: true }, adminOriginator, {
+      hold: async txid => {
+        if (!storage) throw new Error('no local storage to queue this payment in')
+        await holdSentPaymentOffline({ storage, txid, framePayload: frameToQr(built.frame) })
+      }
+    })
+    if (outcome.kind === 'sent' && outcome.broadcast === 'pending') {
+      console.warn('[localpay] QR delivery queued or broadcast pending:', outcome.detail ?? '')
+      setNotice({ text: t('local_pay_broadcast_pending'), tone: 'warning' })
+    }
+    setSettledAmount(payAmount)
+    setRole('payer')
+    setPhase('done')
+  }, [wallet, storage, adminOriginator, payAmount, t])
 
   // ── The success moment ──
   //
@@ -1584,24 +1630,15 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
             <View style={styles.gapLg} />
             {presenceBlock}
             <View style={styles.gapXl} />
-            {/* Deliberately does NOT abort the build.
-                The QR path has no ack by design, so this screen cannot know
-                whether the payee scanned. "Done" is modelled as the SUCCESS
-                terminal for this path — it goes straight to "Payment sent" —
-                so the overwhelmingly likely reading is "the payee has it".
-                Aborting would free inputs the payee is about to broadcast and
-                let this wallet respend them into a conflicting transaction,
-                turning a stuck UTXO into a failed payment. The abandoned-build
-                lock is the strictly safer of the two failure modes here. */}
+            {/* Done asserts delivery: broadcast when online, hold + queue when
+                offline (see completeQrDelivery). Never an abort — the payee may
+                be about to broadcast this frame, and freeing its inputs would
+                let this wallet respend them into a conflict. */}
             <PrimaryButton
               styles={styles}
               colors={colors}
               label={t('done')}
-              onPress={() => {
-                setSettledAmount(payAmount)
-                setRole('payer')
-                setPhase('done')
-              }}
+              onPress={() => void completeQrDelivery()}
             />
           </Animated.View>
         )}
