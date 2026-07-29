@@ -229,12 +229,33 @@ upstream PR lands with the app release.
 
 `services/walletServiceConfig.ts:46,65,84` — replace `new ChaintracksServiceClient(...)`
 with `new OfflineFirstChaintracks(remote, store)`, implementing the same
-`ChaintracksClientApi`. `Services.getChainTracker()` wraps whatever is in
-`options.chaintracks` (`services/Services.js:149-154`), so this one substitution
-reaches both verification call sites. Every method except
-`isValidRootForHeight` and `currentHeight` delegates to the remote client —
-including `findHeaderForHeight`, whose only caller is the app's WoC-BUMP service
-at `WalletContext:700`, which needs the network regardless.
+`ChaintracksClientApi`. Every method except `isValidRootForHeight` and
+`currentHeight` delegates to the remote client — including
+`findHeaderForHeight`, whose only caller is the app's WoC-BUMP service at
+`WalletContext:700`, which needs the network regardless.
+
+**Injecting at `options.chaintracks` is necessary but NOT sufficient** — corrected
+2026-07-28 after the Task 5 review caught it. `Services.getChainTracker()` does
+not hand the wallet our object; it returns
+`new ChaintracksChainTracker(chain, options.chaintracks)`
+(`services/Services.js:149-154`), and that wrapper's own
+`isValidRootForHeight` (`ChaintracksChainTracker.js:21-56`) **never calls the
+injected client's `isValidRootForHeight`**. It calls
+`findHeaderForHeight(height)`, retries six times at 250 ms, and throws on
+persistent failure. Since `findHeaderForHeight` is pure remote delegation, the
+local window would never be consulted and the entire root cache and pre-warm
+would be dead code.
+
+So the app must also override `services.getChainTracker` to return the wrapper
+directly — at the same place it already replaces `postBeefServices` and
+`getMerklePathServices` during wallet build. `OfflineFirstChaintracks` satisfies
+`ChainTracker` (`isValidRootForHeight` + `currentHeight`), which is all
+`Beef.verify` consumes.
+
+`findHeaderForHeight` must stay pure remote delegation and must NOT become
+store-backed: `WalletContext:728-729` consumes a real header object from it
+(`r.header = { ...header, height }`), so returning a root-only synthetic header
+would corrupt the merkle-path service.
 
 ### Source
 
