@@ -894,14 +894,28 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
             monitorOptions.saveLastSSEEventId = (id: string) => phoneStorage!.setKeyValue(SSE_KEY, id)
           }
           const monitor = new Monitor(monitorOptions)
-          monitor.addDefaultTasks()
 
-          // Release held offline transactions when signal returns. Registered
-          // after the defaults so it sits last in the run order — the header
-          // window is topped up by then.
+          // Release held offline transactions when signal returns — registered
+          // BEFORE the defaults, and the order matters. Monitor.runOnce collects
+          // and runs due tasks in registration order (Monitor.js:188-215, a plain
+          // sequential for loop over _tasks, awaiting each), so with this
+          // registered last TaskSendWaiting could post a child of a queued
+          // transaction in the same pass, before the drain had posted its parent.
+          // A child broadcast without its parent is refused as an orphan, which is
+          // exactly what this feature's release ordering exists to prevent.
+          //
+          // (The old comment here claimed the last slot was wanted so the header
+          // window would be topped up first. It is not needed: posting Extended
+          // Format uses no headers at all.)
+          //
+          // This is the cheap half of the ordering fix. It does not cover a
+          // TaskSendWaiting pass that picks up an undecided request of its own
+          // whose ancestor is still sitting in the queue; that is tracked
+          // separately.
           if (phoneStorage) {
             monitor.addTask(new TaskSendOffline(monitor, () => processOfflineActions({ storage: phoneStorage! })))
           }
+          monitor.addDefaultTasks()
 
           const newHeaderTask = monitor._tasks.find((t: any) => t.name === 'NewHeader') as any
           if (newHeaderTask) {
