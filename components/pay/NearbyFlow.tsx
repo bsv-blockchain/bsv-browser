@@ -1136,8 +1136,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   useEffect(() => {
     if (phase !== 'done') return
-    // The overlay owns this moment when it is up: it draws its own mark, which
-    // fires the success haptic, and plays its own tone. Two of each reads as an error.
+    // The payee's celebration belongs to ReceivedOverlay alone, outright — not
+    // just while it happens to be up. A credited receipt celebrates once, there,
+    // when it is raised; re-firing here after the payee dismisses it (overlay
+    // flips to null while phase is still 'done', re-running this effect) read as
+    // a second payment landing. A merely-queued receipt gets no overlay and,
+    // deliberately, no fanfare either — queued money is safe but not credited,
+    // and green (see the file header's tone doctrine) is reserved for funds
+    // actually in the wallet.
+    if (role === 'payee') return
+    // Belt-and-braces for the instant the overlay is actually up.
     if (receivedOverlay) return
     const mark = setTimeout(() => setCelebrating(true), CELEBRATION_DELAY_MS)
     const tone = setTimeout(() => sounds.confirmation(), CELEBRATION_DELAY_MS + TONE_DELAY_MS)
@@ -1145,7 +1153,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       clearTimeout(mark)
       clearTimeout(tone)
     }
-  }, [phase, receivedOverlay])
+  }, [phase, receivedOverlay, role])
 
   // ── Receive: retry a settle that never reached storage ──
 
