@@ -913,7 +913,19 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           // whose ancestor is still sitting in the queue; that is tracked
           // separately.
           if (phoneStorage) {
-            monitor.addTask(new TaskSendOffline(monitor, () => processOfflineActions({ storage: phoneStorage! })))
+            monitor.addTask(
+              new TaskSendOffline(monitor, async () => {
+                const r = await processOfflineActions({ storage: phoneStorage! })
+                // The drain writes transaction statuses directly, below the
+                // monitor's onTransactionStatusChanged callback — bump the
+                // version ourselves so the transactions screen re-fetches.
+                if (r.sent > 0 || r.rejected > 0) setTxStatusVersion(v => v + 1)
+                return r
+              })
+            )
+            // Rows may be sitting in offline_actions from a previous session.
+            // Pessimistic: one idle drain clears it the first time we are online.
+            TaskSendOffline.noteEnqueued()
           }
           monitor.addDefaultTasks()
 
@@ -1526,12 +1538,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })
   }, [walletBuilt, selectedNetwork, runHeaderSync])
 
-  // One reconnect, one release pass.
+  // Feed the drain's online gate and arm an immediate pass on reconnect.
   useEffect(() => {
     if (!walletBuilt) return
-    return subscribeOnline(online => {
-      if (online) TaskSendOffline.checkNow = true
-    })
+    return subscribeOnline(online => TaskSendOffline.noteConnectivity(online))
   }, [walletBuilt])
 
   // Fetch Arcade status events when app returns to foreground
@@ -1547,6 +1557,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
             if (count > 0) setTxStatusVersion(v => v + 1)
           })
         }
+
+        // Reconnects that happened while backgrounded may not replay as a
+        // NetInfo event on resume; if work is pending, ask for a pass and let
+        // the trigger's online gate decide.
+        if (TaskSendOffline.hasPending) TaskSendOffline.requestNow()
       }
 
       appStateRef.current = nextAppState
