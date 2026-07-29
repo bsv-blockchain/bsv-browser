@@ -1341,6 +1341,14 @@ export class StorageExpoSQLite extends StorageProvider {
     throw new Error('Method intentionally not implemented for personal storage.')
   }
 
+  /**
+   * The raw database, for the offline-actions modules only. A narrow accessor
+   * rather than a public `db`, so the surface stays deliberate.
+   */
+  get sqliteDb(): SQLiteDatabase | undefined {
+    return this.db
+  }
+
   // Override internalizeAction for debugging
   async internalizeAction(auth: AuthId, args: any): Promise<any> {
     devLog('[StorageExpoSQLite] internalizeAction called, userId:', auth.userId)

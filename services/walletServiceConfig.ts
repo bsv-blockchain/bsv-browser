@@ -8,6 +8,7 @@ import type {
   BsvExchangeRate,
   WalletServicesOptions
 } from '@bsv/wallet-toolbox-mobile/out/src/sdk'
+import type { ChaintracksClientApi } from '@bsv/wallet-toolbox-mobile/out/src/services/chaintracker/chaintracks/Api/ChaintracksClientApi'
 
 /**
  * Build the WalletServicesOptions for a given network.
@@ -18,7 +19,13 @@ export function createServiceOptions(
   callbackToken: string,
   bsvExchangeRate: BsvExchangeRate,
   arcUrlOverride?: string,
-  arcApiKeyOverride?: string
+  arcApiKeyOverride?: string,
+  /**
+   * Substitute for the plain remote chaintracks client. WalletContext passes an
+   * OfflineFirstChaintracks wrapping the default, which is what makes BEEF
+   * verification work with no network.
+   */
+  chaintracksOverride?: ChaintracksClientApi
 ): WalletServicesOptions {
   const walletChain = toWalletChain(network)
   const base = {
@@ -43,10 +50,12 @@ export function createServiceOptions(
       fiatUpdateMsecs: 60 * 60 * 1000,
       whatsOnChainApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
       taalApiKey: process.env?.EXPO_PUBLIC_WOC_API_KEY ?? '',
-      chaintracks: new ChaintracksServiceClient(
-        walletChain,
-        process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://arcade-v2-us-1.bsvblockchain.tech/chaintracks/v1'
-      )
+      chaintracks:
+        chaintracksOverride ??
+        new ChaintracksServiceClient(
+          walletChain,
+          process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://arcade-v2-us-1.bsvblockchain.tech/chaintracks/v1'
+        )
     }
   }
 
@@ -62,10 +71,13 @@ export function createServiceOptions(
       fiatUpdateMsecs: 60 * 60 * 1000000,
       whatsOnChainApiKey: process.env?.EXPO_PUBLIC_TEST_WOC_API_KEY ?? '',
       taalApiKey: process.env?.EXPO_PUBLIC_TEST_TAAL_API_KEY ?? '',
-      chaintracks: new ChaintracksServiceClient(
-        walletChain,
-        process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ?? 'https://arcade-v2-testnet-us-1.bsvblockchain.tech/chaintracks/v1'
-      )
+      chaintracks:
+        chaintracksOverride ??
+        new ChaintracksServiceClient(
+          walletChain,
+          process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ??
+            'https://arcade-v2-testnet-us-1.bsvblockchain.tech/chaintracks/v1'
+        )
     }
   }
 
@@ -81,10 +93,13 @@ export function createServiceOptions(
     fiatUpdateMsecs: 60 * 60 * 1000000,
     whatsOnChainApiKey: process.env?.EXPO_PUBLIC_TERATEST_WOC_API_KEY ?? '',
     taalApiKey: process.env?.EXPO_PUBLIC_TERATEST_WOC_API_KEY ?? '',
-    chaintracks: new ChaintracksServiceClient(
-      walletChain,
-      process.env?.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL ?? 'https://arcade-v2-ttn-us-1.bsvblockchain.tech/chaintracks/v1'
-    )
+    chaintracks:
+      chaintracksOverride ??
+      new ChaintracksServiceClient(
+        walletChain,
+        process.env?.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL ??
+          'https://arcade-v2-ttn-us-1.bsvblockchain.tech/chaintracks/v1'
+      )
   }
 }
 
@@ -96,9 +111,17 @@ export function createServices(
   callbackToken: string,
   bsvExchangeRate: BsvExchangeRate,
   arcUrlOverride?: string,
-  arcApiKeyOverride?: string
+  arcApiKeyOverride?: string,
+  chaintracksOverride?: ChaintracksClientApi
 ): { services: Services; serviceOptions: WalletServicesOptions } {
-  const serviceOptions = createServiceOptions(network, callbackToken, bsvExchangeRate, arcUrlOverride, arcApiKeyOverride)
+  const serviceOptions = createServiceOptions(
+    network,
+    callbackToken,
+    bsvExchangeRate,
+    arcUrlOverride,
+    arcApiKeyOverride,
+    chaintracksOverride
+  )
   const services = new Services(serviceOptions)
   return { services, serviceOptions }
 }

@@ -52,9 +52,10 @@ export class OfflineFirstChaintracks implements ChaintracksClientApi {
       const remoteRoot = String(header.merkleRoot)
       await this.store?.putExtraRoot(height, remoteRoot)
       return remoteRoot === root
-    } catch {
+    } catch (e: any) {
       // A verification path must never throw a network error at the caller:
       // `Beef.verify` treats false as "not proven", which is the truth here.
+      console.warn('[OfflineFirstChaintracks] isValidRootForHeight lookup failed:', e?.message)
       this.lastMissHeight = height
       return false
     }

@@ -55,7 +55,7 @@ import { getExchangeRate } from '@/services/exchangeRate'
 import { router } from 'expo-router'
 import { logWithTimestamp } from '@/utils/logging'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
-import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
+import { StorageProvider, ChaintracksServiceClient } from '@bsv/wallet-toolbox-mobile'
 import { StorageExpoSQLite } from '@/storage'
 import * as SQLite from 'expo-sqlite'
 import { getRegisteredDbs, registerDb, selectLatestDb } from '@/utils/walletDbRegistry'
@@ -78,7 +78,12 @@ import { wocConfigFor } from '@/utils/pay/rails/address'
 import { SWEEP_INTERVAL_MS, runSweep, shouldSweepNow, sweptTotal } from '@/utils/pay/sweeper'
 import { formatAmount } from '@/utils/amountFormatHelpers'
 import { useTranslation } from 'react-i18next'
-
+import { HEADER_CHECKPOINTS } from '@/utils/headers/checkpoints'
+import { expoHeaderFs } from '@/utils/headers/fs'
+import { HeaderStore } from '@/utils/headers/headerStore'
+import { OfflineFirstChaintracks } from '@/utils/headers/OfflineFirstChaintracks'
+import { prewarmOwnRoots } from '@/utils/headers/prewarm'
+import { syncHeaders } from '@/utils/headers/syncHeaders'
 
 // Global, origin-agnostic rate limit for auto-approved spending.
 // In-memory only — resets on app restart (intentional: more secure).
@@ -320,6 +325,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [txStatusVersion, setTxStatusVersion] = useState(0)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState)
   const monitorRef = useRef<Monitor | null>(null)
+  // The offline-first chain tracker and the header store it wraps. Populated
+  // in buildWallet (tracker synchronously, store once the background open
+  // finishes); the reconnect top-up effect below reuses both rather than
+  // reopening the store from disk on every reconnect.
+  const offlineChaintracksRef = useRef<OfflineFirstChaintracks | undefined>(undefined)
+  const headerStoreRef = useRef<HeaderStore | undefined>(undefined)
   const adminOriginator = ADMIN_ORIGINATOR
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
   const walletBuildingRef = useRef<boolean>(false)
@@ -639,12 +650,29 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           AsyncStorage.getItem(`arc_custom_url_${chain}`),
           AsyncStorage.getItem(`arc_custom_api_token_${chain}`)
         ])
+
+        // The remote client the wrapper delegates to. Built here rather than
+        // inside createServiceOptions so the same instance is both the fallback
+        // for root misses and the source for header sync.
+        const chaintracksUrl =
+          selectedNetwork === 'main'
+            ? (process.env?.EXPO_PUBLIC_CHAINTRACKS_URL ?? 'https://arcade-v2-us-1.bsvblockchain.tech/chaintracks/v1')
+            : selectedNetwork === 'test'
+              ? (process.env?.EXPO_PUBLIC_TEST_CHAINTRACKS_URL ??
+                'https://arcade-v2-testnet-us-1.bsvblockchain.tech/chaintracks/v1')
+              : (process.env?.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL ??
+                'https://arcade-v2-ttn-us-1.bsvblockchain.tech/chaintracks/v1')
+        const remoteChaintracks = new ChaintracksServiceClient(walletChain, chaintracksUrl)
+        const offlineChaintracks = new OfflineFirstChaintracks(remoteChaintracks, getOnline)
+        offlineChaintracksRef.current = offlineChaintracks
+
         const { services, serviceOptions } = createServices(
           selectedNetwork,
           callbackToken,
           bsvExchangeRate,
           arcUrlOverride || undefined,
-          arcApiTokenOverride || undefined
+          arcApiTokenOverride || undefined,
+          offlineChaintracks
         )
 
         // Replace all default broadcast providers with EF/rawtx-only services.
@@ -971,6 +999,49 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         } catch (error: any) {
           console.warn('[WalletContext] Failed to start monitor:', error.message)
         }
+
+        // Header window: open, seed from our own validated proofs, then extend
+        // to tip. All three steps are off the critical path — the wallet is
+        // usable immediately, it just cannot verify offline until the first
+        // sync finishes.
+        InteractionManager.runAfterInteractions(() => {
+          void (async () => {
+            try {
+              const anchor = HEADER_CHECKPOINTS[walletChain as 'main' | 'test' | 'ttn']
+              if (!anchor) return
+
+              const openStart = Date.now()
+              const store = await HeaderStore.open(expoHeaderFs(), walletChain, anchor)
+              logWithTimestamp(F, `HeaderStore.open took ${Date.now() - openStart}ms (${store.count} headers)`)
+              headerStoreRef.current = store
+              offlineChaintracksRef.current?.setStore(store)
+
+              const db = phoneStorage?.sqliteDb
+              if (db) {
+                const rows = (await db.getAllAsync(
+                  'SELECT DISTINCT height, merkleRoot FROM proven_txs WHERE height > 0'
+                )) as { height: number; merkleRoot: string }[]
+                const prewarmStart = Date.now()
+                const warmed = await prewarmOwnRoots({ rows, store })
+                logWithTimestamp(
+                  F,
+                  `prewarmOwnRoots took ${Date.now() - prewarmStart}ms, ${warmed} roots from proven_txs`
+                )
+              }
+
+              if (await getOnline()) {
+                const r = await syncHeaders({
+                  store,
+                  client: remoteChaintracks,
+                  shouldStop: () => !offlineChaintracksRef.current
+                })
+                logWithTimestamp(F, `Header sync: +${r.added} to ${r.tipHeight}/${r.presentHeight}`)
+              }
+            } catch (e: any) {
+              console.warn('[WalletContext] header store unavailable:', e?.message)
+            }
+          })()
+        })
 
         setManagers(m => ({ ...m, ...newManagers }))
         logWithTimestamp(F, 'Wallet build completed successfully')
@@ -1345,6 +1416,35 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       appSubscription.remove()
     }
   }, [walletBuilt, managers.permissionsManager, storage, adminOriginator, selectedNetwork, t])
+
+  // Top the header window up whenever signal returns, so the next time we go
+  // underground the window already reaches the tip.
+  //
+  // Reuses the HeaderStore instance already opened by buildWallet's background
+  // init (held in headerStoreRef) instead of calling HeaderStore.open again.
+  // Re-opening on every reconnect would re-scan the whole .bin file and rebuild
+  // the in-memory roots array from scratch on the JS thread each time — for a
+  // year of mainnet headers that's the same ~52,000-iteration cost the initial
+  // open pays, and NetInfo can fire "online" repeatedly (wifi↔cellular
+  // handoffs) without ever having gone offline. If the background init hasn't
+  // populated the ref yet, this pass is skipped — the init's own online check
+  // covers that case, and the next reconnect retries.
+  useEffect(() => {
+    if (!walletBuilt) return
+    return subscribeOnline(online => {
+      if (!online) return
+      const ct = offlineChaintracksRef.current
+      const store = headerStoreRef.current
+      if (!ct || !store) return
+      void (async () => {
+        try {
+          await syncHeaders({ store, client: ct })
+        } catch {
+          // Best-effort. The next reconnect retries.
+        }
+      })()
+    })
+  }, [walletBuilt])
 
   // Fetch Arcade status events when app returns to foreground
   useEffect(() => {
