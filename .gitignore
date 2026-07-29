@@ -29,12 +29,17 @@ dist-ssr
 # Expo development build files
 *.apk
 *.ipa
-/android
+android
+# Workspace packages ship their own tracked Android native module sources
+# (Nitro modules autolinked on Android) under packages/*/android — keep those
+# out of the bare `android` rule above, which exists to ignore the top-level
+# Expo-generated /android app dir and any incidental `android` directories
+# elsewhere (e.g. credentials/android, which must stay ignored).
+!/packages/*/android
+!/packages/*/android/**
 
-# Gradle/CMake build output for in-package Android native modules
-# (the top-level /android app dir is covered above; these are the same kind
-# of generated cruft, just nested under packages/*/android for a workspace
-# library that ships its own Android sources).
+# ...but still ignore Gradle/CMake build output nested inside those tracked
+# package android/ dirs.
 packages/*/android/build
 packages/*/android/.cxx
 
