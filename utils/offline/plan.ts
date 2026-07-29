@@ -16,12 +16,22 @@ export type PostOutcome = 'success' | 'serviceError' | 'invalidTx' | 'doubleSpen
 /**
  * Dependency-ordered release list.
  *
- * `owned` distinguishes a transaction this wallet has a request for — post it
- * through `attemptToPostReqsToNetwork` so the toolbox does its own status
- * bookkeeping — from a foreign ancestor that arrived inside somebody's BEEF and
- * has no request here, which must be posted directly. Getting this wrong is how
- * a child becomes an orphan: EF carries input scripts but not parent
- * transactions, so an unbroadcast ancestor has to go out on its own first.
+ * `owned` marks a transaction the QUEUE still has a row for — it is computed from
+ * `rows`, not from whether a request exists. Those are posted through
+ * `attemptToPostReqsToNetwork` so the toolbox does its own status bookkeeping;
+ * everything else in the graph is treated as a foreign ancestor that arrived
+ * inside somebody's BEEF and is posted directly through `postBeef`. Whether an
+ * owned txid actually has a request is the driver's business, and it stops the run
+ * rather than posting if one is missing (`processOfflineActions`'s
+ * `step.owned && !action` branch).
+ *
+ * The `status !== 'sent'` filter is belt-and-braces: the driver only ever reads
+ * 'queued' and 'posting' rows, so a 'sent' one does not reach here today, and a
+ * caller that passed one would be saying the transaction is already out.
+ *
+ * Getting the distinction wrong is how a child becomes an orphan: EF carries
+ * input scripts but not parent transactions, so an unbroadcast ancestor has to go
+ * out on its own first.
  */
 export function planRelease(args: {
   rows: OfflineActionRow[]

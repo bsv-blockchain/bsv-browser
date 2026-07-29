@@ -34,9 +34,29 @@ describe('releaseOrder', () => {
     expect(order).toEqual(['B'])
   })
 
-  it('keeps a stable order for independent transactions', () => {
+  it('keeps the input order when nothing is blocked', () => {
     const order = releaseOrder([tx('X'), tx('Y'), tx('Z')])
     expect(order).toEqual(['X', 'Y', 'Z'])
+  })
+
+  // Documents the limit of the line above rather than a bug to fix. A pass emits
+  // as it scans, so C1 — checked while P was still unemitted — waits for the next
+  // pass and loses its arrival position to C2, which the same pass reaches after P
+  // has gone out. Pinned because the doc comment on `dependencyOrder` states this
+  // explicitly, and because the diamond test above cannot reach it (it puts the
+  // shared parent LAST, so both dependents are blocked in the first pass).
+  //
+  // Deliberately not fixed: a parent can never end up after its child, so the
+  // tie-break between two unrelated siblings costs nothing.
+  it('does not preserve arrival order between siblings when one was checked before their parent', () => {
+    expect(releaseOrder([tx('C1', ['P']), tx('P'), tx('C2', ['P'])])).toEqual(['P', 'C2', 'C1'])
+    // The guarantee that does hold, in both orderings.
+    expect(releaseOrder([tx('P'), tx('C1', ['P']), tx('C2', ['P'])])).toEqual(['P', 'C1', 'C2'])
+  })
+
+  it('is deterministic for a given input array', () => {
+    const txs = () => [tx('C1', ['P']), tx('P'), tx('C2', ['P'])]
+    expect(releaseOrder(txs())).toEqual(releaseOrder(txs()))
   })
 
   it('handles a diamond', () => {

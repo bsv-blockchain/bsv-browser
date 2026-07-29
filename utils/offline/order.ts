@@ -41,8 +41,23 @@ export function dependencyOrder(txs: OrderableTx[]): string[] {
   const emitted = new Set<string>()
   const order: string[] = []
 
-  // Insertion-ordered passes rather than recursion: the input order is the
-  // arrival order, so independent transactions keep it and the result is stable.
+  // Repeated insertion-ordered passes rather than recursion. Exactly two things
+  // are guaranteed, and they are the two that matter: nothing is emitted before
+  // an input it takes from inside the set, and the result is deterministic for a
+  // given input array.
+  //
+  // Independent transactions do NOT keep their arrival order. A pass emits as it
+  // scans, so an entry checked while its parent is still unemitted waits for the
+  // next pass and loses its place to a sibling checked later in the same one:
+  //
+  //   releaseOrder([C1(spends P), P, C2(spends P)]) -> ['P', 'C2', 'C1']
+  //
+  // C1 is examined first and blocked, P is emitted next, and C2 — reached later
+  // in that same pass — is by then unblocked. Left as it is on purpose: a parent
+  // can never end up after its child, so the tie-break between two unrelated
+  // siblings has no consequence for money, while making it stable means replacing
+  // the scan with a Kahn FIFO ready-queue and re-establishing the order every
+  // existing caller and test depends on.
   let progressed = true
   while (progressed && remaining.size > 0) {
     progressed = false
