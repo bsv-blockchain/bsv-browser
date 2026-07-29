@@ -203,4 +203,20 @@ describe('PayScreen', () => {
     const { findByText } = draw()
     await findByText('pay_offline_queued')
   })
+
+  it('keeps the grid working when the queue read itself fails', async () => {
+    // The banner is advisory, never load-bearing (see app/pay.tsx's queue
+    // effect). A broken read must not take the rest of the screen down with it.
+    mockStorage = {
+      sqliteDb: {
+        getAllAsync: async () => {
+          throw new Error('database is locked')
+        },
+        runAsync: async () => undefined,
+        getFirstAsync: async () => undefined
+      }
+    }
+    const { findByText } = draw()
+    await findByText('pay_cell_nearby_pay')
+  })
 })
