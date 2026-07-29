@@ -1150,6 +1150,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       // No handle (e.g. re-entry after reset): nothing to decide, just close.
       setSettledAmount(payAmount)
       setRole('payer')
+      setNotice(null)
       setPhase('done')
       return
     }
