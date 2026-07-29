@@ -39,6 +39,11 @@ jest.mock('@/context/WalletContext', () => ({
   useWallet: () => ({ walletBuilding: false, walletBuilt: true })
 }))
 
+// Without this, the real hook pulls in NetInfo, which has no native module
+// under Jest and crashes the process with an unhandled rejection.
+let mockOnline = true
+jest.mock('@/hooks/useOnline', () => ({ useOnline: () => mockOnline }))
+
 const mockParams: Record<string, string> = {}
 jest.mock('expo-router', () => ({
   router: { back: jest.fn(), replace: jest.fn(), canGoBack: () => true },
@@ -71,6 +76,7 @@ const draw = () =>
 describe('PayScreen', () => {
   beforeEach(() => {
     for (const k of Object.keys(mockParams)) delete mockParams[k]
+    mockOnline = true
   })
 
   it('renders the three counterparty rows for the Pay direction', () => {
@@ -113,5 +119,26 @@ describe('PayScreen', () => {
     mockParams.cell = 'nonsense'
     const { getByText } = draw()
     expect(getByText('pay_cell_nearby_pay')).toBeTruthy()
+  })
+
+  it('disables the handle and address cells while offline, leaving nearby alone', () => {
+    mockOnline = false
+    const { getByLabelText } = draw()
+    // `t` returns the key, and PayCellRow's label is `${title}. ${subtitle}`.
+    expect(getByLabelText('pay_cell_nearby_pay. pay_cell_nearby_pay_sub').props.accessibilityState.disabled).toBe(false)
+    expect(getByLabelText('pay_cell_handle_pay. pay_offline_needs_internet').props.accessibilityState.disabled).toBe(
+      true
+    )
+    expect(getByLabelText('pay_cell_address_pay. pay_offline_needs_internet').props.accessibilityState.disabled).toBe(
+      true
+    )
+  })
+
+  it('leaves every cell enabled while online', () => {
+    const { getByLabelText } = draw()
+    expect(getByLabelText('pay_cell_handle_pay. pay_cell_handle_pay_sub').props.accessibilityState.disabled).toBe(false)
+    expect(getByLabelText('pay_cell_address_pay. pay_cell_address_pay_sub').props.accessibilityState.disabled).toBe(
+      false
+    )
   })
 })

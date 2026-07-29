@@ -24,11 +24,14 @@ import HandleSend from '@/components/pay/HandleSend'
 import HandleReceive from '@/components/pay/HandleReceive'
 import AddressSend from '@/components/pay/AddressSend'
 import AddressReceive from '@/components/pay/AddressReceive'
+import OfflineNotice from '@/components/pay/OfflineNotice'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
+import { useOnline } from '@/hooks/useOnline'
 import { validatePeerPayURI } from '@/utils/parsePeerPayURI'
 import { isPayCell, type PayCell } from '@/utils/pay/rails'
+import { findOfflineActions, type OfflineActionRow } from '@/storage/methods/offlineActions'
 
 type Direction = 'pay' | 'get'
 
@@ -97,7 +100,34 @@ export default function PayScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { walletBuilding, walletBuilt } = useWallet()
+  const online = useOnline()
+  const { walletBuilding, walletBuilt, storage } = useWallet()
+  const [queued, setQueued] = useState(0)
+  const [rejected, setRejected] = useState<OfflineActionRow[]>([])
+
+  // Refreshed whenever the wallet finishes building or connectivity changes:
+  // the queue only moves when the network state does, so there is no need to
+  // poll it on every render.
+  useEffect(() => {
+    if (!walletBuilt) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const db = storage?.sqliteDb
+        if (!db) return
+        const rows = await findOfflineActions(db, { status: ['queued', 'posting', 'rejected'] })
+        if (cancelled) return
+        setQueued(rows.filter(r => r.status !== 'rejected').length)
+        setRejected(rows.filter(r => r.status === 'rejected'))
+      } catch {
+        // This banner is advisory, never load-bearing. A read failure here must
+        // not break the rest of the screen — the grid still has to render.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [walletBuilt, storage, online])
 
   const params = useLocalSearchParams<{
     cell?: string | string[]
@@ -145,6 +175,7 @@ export default function PayScreen() {
 
   const grid = () => (
     <View style={styles.grid}>
+      <OfflineNotice online={online} queued={queued} rejected={rejected} />
       {/* Direction first: it is what the user already knows. */}
       <View style={[styles.segment, { backgroundColor: colors.fillTertiary }]}>
         {(['pay', 'get'] as const).map(d => {
@@ -169,15 +200,23 @@ export default function PayScreen() {
       </View>
 
       <View style={styles.rows}>
-        {CELLS[direction].map(spec => (
-          <PayCellRow
-            key={spec.cell}
-            title={t(spec.titleKey)}
-            subtitle={t(spec.subtitleKey)}
-            icon={spec.icon}
-            onPress={() => setCell(spec.cell)}
-          />
-        ))}
+        {CELLS[direction].map(spec => {
+          // Handle needs a message box round-trip and address needs an overlay
+          // lookup; neither works underground. Nearby is the whole point of
+          // being offline — it is the one rail this whole feature was built for.
+          const needsInternet = !spec.cell.endsWith('nearby')
+          const disabled = !online && needsInternet
+          return (
+            <PayCellRow
+              key={spec.cell}
+              title={t(spec.titleKey)}
+              subtitle={disabled ? t('pay_offline_needs_internet') : t(spec.subtitleKey)}
+              icon={spec.icon}
+              disabled={disabled}
+              onPress={() => setCell(spec.cell)}
+            />
+          )
+        })}
       </View>
     </View>
   )

@@ -115,6 +115,7 @@ import { durations, springs } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
+import { getOnline } from '@/utils/net/online'
 import {
   MAX_FRAME_QR_CHARS,
   awdlTransport,
@@ -343,8 +344,15 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
    * The payee's full-screen receipt, held until they acknowledge it. Set only
    * once funds are provably in the wallet — see settleReceived, where a merely
    * queued payment deliberately does NOT raise it.
+   *
+   * `broadcast` is whether this device was online at the moment the frame was
+   * durably queued (see the `broadcastCheck` probe below) — NOT a claim that
+   * anyone has actually broadcast it yet. It only tells the payee whether
+   * their own device could see the network; the payer's device still has to
+   * reconnect and post the transaction before this money is safe from a
+   * double-spend, and no read of this device's own state can promise that.
    */
-  const [receivedOverlay, setReceivedOverlay] = useState<{ amount: number } | null>(null)
+  const [receivedOverlay, setReceivedOverlay] = useState<{ amount: number; broadcast: boolean } | null>(null)
 
   /**
    * A frame that was delivered but could not be persisted. Held so the payee can
@@ -591,6 +599,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         return
       }
 
+      // Started here, alongside the durable write, and not awaited until the
+      // receipt is raised below: whatever `processPending` costs (1) overlaps
+      // with this probe, so it adds no latency to the settle path, and (2)
+      // never touches the durable-write section's own try/catch — a probe
+      // failure must not be mistaken for the frame being unpersisted. Caught
+      // inline for the same reason: this is advisory copy, not a money path,
+      // so a failed check reads as "not yet broadcast" rather than crashing
+      // the settle.
+      const broadcastCheck = getOnline().catch(() => false)
+
       // ── Durable-write section ──
       // Everything that can legitimately be reported as a payment failure lives
       // in here, and only in here. Past the closing brace the money is safe.
@@ -687,7 +705,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // spendable, and a receipt claiming otherwise is the one thing the tone
         // rule above exists to prevent. A queued settle keeps the neutral notice
         // on the done screen instead.
-        if (credited) setReceivedOverlay({ amount: frame.amount })
+        if (credited) setReceivedOverlay({ amount: frame.amount, broadcast: await broadcastCheck })
       } catch (e) {
         console.warn('[localpay] processPending failed:', messageOf(e))
         setNotice({ text: t('local_pay_queued'), tone: 'info' })
@@ -1700,7 +1718,11 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       {/* The payee's receipt. Full screen, and it stays until acknowledged —
           being paid in person is the one moment both people are watching for. */}
       {receivedOverlay && (
-        <ReceivedOverlay amount={receivedOverlay.amount} onDismiss={() => setReceivedOverlay(null)} />
+        <ReceivedOverlay
+          amount={receivedOverlay.amount}
+          broadcast={receivedOverlay.broadcast}
+          onDismiss={() => setReceivedOverlay(null)}
+        />
       )}
     </View>
   )

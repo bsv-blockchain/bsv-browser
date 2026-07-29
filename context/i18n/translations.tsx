@@ -407,7 +407,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'Waiting for a nearby device',
       local_pay_presence_waiting_payer: 'Finding the recipient’s device…',
       local_pay_presence_linked: 'Encrypted link open',
-      local_pay_presence_paid: 'Payment confirmed'
+      local_pay_presence_paid: 'Payment confirmed',
+      pay_offline_title: 'You’re offline',
+      pay_offline_body: 'Only nearby payments work right now. They will broadcast once you reconnect.',
+      pay_offline_queued: '{{count}} payment(s) waiting to be broadcast when you reconnect.',
+      pay_offline_needs_internet: 'Needs internet',
+      pay_offline_rejected_title: 'A payment was rejected',
+      pay_offline_rejected_body: 'The network refused a payment handed over by {{sender}} via {{via}} on {{when}}.',
+      pay_offline_unknown_sender: 'an unknown sender',
+      pay_received_not_broadcast: 'Received offline · not yet broadcast'
     }
   },
   zh: {
@@ -704,7 +712,15 @@ const resources = {
       local_pay_presence_waiting_payee: '正在等待附近的设备',
       local_pay_presence_waiting_payer: '正在查找收款人的设备…',
       local_pay_presence_linked: '加密连接已建立',
-      local_pay_presence_paid: '付款已确认'
+      local_pay_presence_paid: '付款已确认',
+      pay_offline_title: '已离线',
+      pay_offline_body: '目前仅附近支付可用，重新联网后会自动广播。',
+      pay_offline_queued: '{{count}} 笔付款正等待您重新联网后广播。',
+      pay_offline_needs_internet: '需要联网',
+      pay_offline_rejected_title: '一笔付款被拒绝',
+      pay_offline_rejected_body: '网络拒绝了由 {{sender}} 于 {{when}} 通过 {{via}} 转来的付款。',
+      pay_offline_unknown_sender: '未知发送者',
+      pay_received_not_broadcast: '离线收到 · 尚未广播'
     }
   },
   hi: {
@@ -1004,7 +1020,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'पास के डिवाइस की प्रतीक्षा हो रही है',
       local_pay_presence_waiting_payer: 'प्राप्तकर्ता का डिवाइस खोजा जा रहा है…',
       local_pay_presence_linked: 'एन्क्रिप्टेड कनेक्शन चालू है',
-      local_pay_presence_paid: 'भुगतान की पुष्टि हो गई'
+      local_pay_presence_paid: 'भुगतान की पुष्टि हो गई',
+      pay_offline_title: 'आप ऑफ़लाइन हैं',
+      pay_offline_body: 'अभी केवल नज़दीकी भुगतान काम करते हैं। दोबारा नेटवर्क मिलते ही ये प्रसारित हो जाएँगे।',
+      pay_offline_queued: '{{count}} भुगतान नेटवर्क मिलने पर प्रसारित होने की प्रतीक्षा में हैं।',
+      pay_offline_needs_internet: 'इंटरनेट ज़रूरी है',
+      pay_offline_rejected_title: 'एक भुगतान अस्वीकार कर दिया गया',
+      pay_offline_rejected_body: 'नेटवर्क ने {{sender}} द्वारा {{via}} के ज़रिए {{when}} को भेजा गया भुगतान अस्वीकार कर दिया।',
+      pay_offline_unknown_sender: 'एक अज्ञात भेजने वाला',
+      pay_received_not_broadcast: 'ऑफ़लाइन प्राप्त हुआ · अभी प्रसारित नहीं हुआ'
     }
   },
   es: {
@@ -1305,7 +1329,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'Esperando un dispositivo cercano',
       local_pay_presence_waiting_payer: 'Buscando el dispositivo del destinatario…',
       local_pay_presence_linked: 'Enlace cifrado abierto',
-      local_pay_presence_paid: 'Pago confirmado'
+      local_pay_presence_paid: 'Pago confirmado',
+      pay_offline_title: 'Estás sin conexión',
+      pay_offline_body: 'Solo los pagos cercanos funcionan ahora mismo. Se transmitirán en cuanto vuelvas a tener conexión.',
+      pay_offline_queued: '{{count}} pago(s) esperando para transmitirse en cuanto vuelvas a tener conexión.',
+      pay_offline_needs_internet: 'Necesita conexión',
+      pay_offline_rejected_title: 'Se rechazó un pago',
+      pay_offline_rejected_body: 'La red rechazó un pago entregado por {{sender}} a través de {{via}} el {{when}}.',
+      pay_offline_unknown_sender: 'un remitente desconocido',
+      pay_received_not_broadcast: 'Recibido sin conexión · aún no transmitido'
     }
   },
   fr: {
@@ -1600,7 +1632,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'En attente d’un appareil à proximité',
       local_pay_presence_waiting_payer: 'Recherche de l’appareil du destinataire…',
       local_pay_presence_linked: 'Liaison chiffrée ouverte',
-      local_pay_presence_paid: 'Paiement confirmé'
+      local_pay_presence_paid: 'Paiement confirmé',
+      pay_offline_title: 'Vous êtes hors ligne',
+      pay_offline_body: 'Seuls les paiements à proximité fonctionnent pour l’instant. Ils seront diffusés dès que vous serez reconnecté.',
+      pay_offline_queued: '{{count}} paiement(s) en attente de diffusion dès que vous serez reconnecté.',
+      pay_offline_needs_internet: 'Connexion requise',
+      pay_offline_rejected_title: 'Un paiement a été refusé',
+      pay_offline_rejected_body: 'Le réseau a refusé un paiement remis par {{sender}} via {{via}} le {{when}}.',
+      pay_offline_unknown_sender: 'un expéditeur inconnu',
+      pay_received_not_broadcast: 'Reçu hors ligne · pas encore diffusé'
     }
   },
   ar: {
@@ -1892,7 +1932,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'في انتظار جهاز قريب',
       local_pay_presence_waiting_payer: 'جارٍ البحث عن جهاز المستلم…',
       local_pay_presence_linked: 'الاتصال المشفّر مفتوح',
-      local_pay_presence_paid: 'تم تأكيد الدفع'
+      local_pay_presence_paid: 'تم تأكيد الدفع',
+      pay_offline_title: 'أنت غير متصل بالإنترنت',
+      pay_offline_body: 'تعمل الآن المدفوعات القريبة فقط. سيتم نشرها بمجرد اتصالك مجددًا.',
+      pay_offline_queued: 'هناك {{count}} من المدفوعات في انتظار النشر بمجرد اتصالك مجددًا.',
+      pay_offline_needs_internet: 'يتطلب اتصالًا بالإنترنت',
+      pay_offline_rejected_title: 'تم رفض دفعة',
+      pay_offline_rejected_body: 'رفضت الشبكة دفعة سلّمها {{sender}} عبر {{via}} في {{when}}.',
+      pay_offline_unknown_sender: 'مرسل غير معروف',
+      pay_received_not_broadcast: 'تم الاستلام دون اتصال · لم تُنشر بعد'
     }
   },
   pt: {
@@ -2187,7 +2235,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'Aguardando um aparelho por perto',
       local_pay_presence_waiting_payer: 'Procurando o aparelho do destinatário…',
       local_pay_presence_linked: 'Conexão criptografada aberta',
-      local_pay_presence_paid: 'Pagamento confirmado'
+      local_pay_presence_paid: 'Pagamento confirmado',
+      pay_offline_title: 'Você está offline',
+      pay_offline_body: 'Só os pagamentos por perto funcionam agora. Eles serão publicados assim que você reconectar.',
+      pay_offline_queued: '{{count}} pagamento(s) aguardando publicação assim que você reconectar.',
+      pay_offline_needs_internet: 'Precisa de internet',
+      pay_offline_rejected_title: 'Um pagamento foi rejeitado',
+      pay_offline_rejected_body: 'A rede rejeitou um pagamento entregue por {{sender}} via {{via}} em {{when}}.',
+      pay_offline_unknown_sender: 'um remetente desconhecido',
+      pay_received_not_broadcast: 'Recebido offline · ainda não publicado'
     }
   },
   bn: {
@@ -2481,7 +2537,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'কাছের ডিভাইসের জন্য অপেক্ষা করা হচ্ছে',
       local_pay_presence_waiting_payer: 'প্রাপকের ডিভাইস খোঁজা হচ্ছে…',
       local_pay_presence_linked: 'এনক্রিপ্ট করা সংযোগ চালু আছে',
-      local_pay_presence_paid: 'পেমেন্ট নিশ্চিত হয়েছে'
+      local_pay_presence_paid: 'পেমেন্ট নিশ্চিত হয়েছে',
+      pay_offline_title: 'আপনি অফলাইনে আছেন',
+      pay_offline_body: 'এখন শুধু কাছাকাছি পেমেন্ট কাজ করছে। আপনি আবার সংযুক্ত হলেই সেগুলো প্রকাশ করা হবে।',
+      pay_offline_queued: '{{count}}টি পেমেন্ট আপনার আবার সংযুক্ত হওয়ার অপেক্ষায় আছে, তখনই সেগুলো প্রকাশ করা হবে।',
+      pay_offline_needs_internet: 'ইন্টারনেট প্রয়োজন',
+      pay_offline_rejected_title: 'একটি পেমেন্ট প্রত্যাখ্যান করা হয়েছে',
+      pay_offline_rejected_body: 'নেটওয়ার্ক {{sender}}-এর কাছ থেকে {{via}}-এর মাধ্যমে {{when}}-এ পাওয়া একটি পেমেন্ট প্রত্যাখ্যান করেছে।',
+      pay_offline_unknown_sender: 'একজন অজানা প্রেরক',
+      pay_received_not_broadcast: 'অফলাইনে গৃহীত · এখনও প্রকাশ করা হয়নি'
     }
   },
   ru: {
@@ -2776,7 +2840,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'Ожидание устройства поблизости',
       local_pay_presence_waiting_payer: 'Поиск устройства получателя…',
       local_pay_presence_linked: 'Шифрованное соединение открыто',
-      local_pay_presence_paid: 'Платёж подтверждён'
+      local_pay_presence_paid: 'Платёж подтверждён',
+      pay_offline_title: 'Вы не в сети',
+      pay_offline_body: 'Сейчас работают только платежи поблизости. Они будут опубликованы, как только вы снова окажетесь в сети.',
+      pay_offline_queued: '{{count}} платеж(ей) ожидают публикации, как только вы снова окажетесь в сети.',
+      pay_offline_needs_internet: 'Нужен интернет',
+      pay_offline_rejected_title: 'Платёж был отклонён',
+      pay_offline_rejected_body: 'Сеть отклонила платёж, переданный {{sender}} через {{via}} {{when}}.',
+      pay_offline_unknown_sender: 'неизвестный отправитель',
+      pay_received_not_broadcast: 'Получено без сети · ещё не опубликовано'
     }
   },
   id: {
@@ -3070,7 +3142,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'Menunggu perangkat di dekat Anda',
       local_pay_presence_waiting_payer: 'Mencari perangkat penerima…',
       local_pay_presence_linked: 'Koneksi terenkripsi terbuka',
-      local_pay_presence_paid: 'Pembayaran dikonfirmasi'
+      local_pay_presence_paid: 'Pembayaran dikonfirmasi',
+      pay_offline_title: 'Anda sedang offline',
+      pay_offline_body: 'Saat ini hanya pembayaran di dekat Anda yang berfungsi. Pembayaran akan dipublikasikan begitu Anda tersambung kembali.',
+      pay_offline_queued: '{{count}} pembayaran menunggu untuk dipublikasikan begitu Anda tersambung kembali.',
+      pay_offline_needs_internet: 'Perlu internet',
+      pay_offline_rejected_title: 'Sebuah pembayaran ditolak',
+      pay_offline_rejected_body: 'Jaringan menolak pembayaran yang diserahkan oleh {{sender}} melalui {{via}} pada {{when}}.',
+      pay_offline_unknown_sender: 'pengirim tidak dikenal',
+      pay_received_not_broadcast: 'Diterima secara offline · belum dipublikasikan'
     }
   },
   ja: {
@@ -3380,7 +3460,15 @@ const resources = {
       local_pay_presence_waiting_payee: '近くの端末を待っています',
       local_pay_presence_waiting_payer: '受取人の端末を探しています…',
       local_pay_presence_linked: '暗号化リンクが確立しました',
-      local_pay_presence_paid: '支払いを確認しました'
+      local_pay_presence_paid: '支払いを確認しました',
+      pay_offline_title: 'オフラインです',
+      pay_offline_body: '現在は近くへの支払いのみ利用できます。再接続すると自動的に公開されます。',
+      pay_offline_queued: '{{count}}件の支払いが、再接続後に公開されるのを待っています。',
+      pay_offline_needs_internet: 'インターネットが必要です',
+      pay_offline_rejected_title: '支払いが拒否されました',
+      pay_offline_rejected_body: 'ネットワークは、{{when}}に{{via}}経由で{{sender}}から渡された支払いを拒否しました。',
+      pay_offline_unknown_sender: '不明な送信者',
+      pay_received_not_broadcast: 'オフラインで受け取り済み · まだ公開されていません'
     }
   },
   pl: {
@@ -3691,7 +3779,15 @@ const resources = {
       local_pay_presence_waiting_payee: 'Czekam na urządzenie w pobliżu',
       local_pay_presence_waiting_payer: 'Szukam urządzenia odbiorcy…',
       local_pay_presence_linked: 'Szyfrowane połączenie otwarte',
-      local_pay_presence_paid: 'Płatność potwierdzona'
+      local_pay_presence_paid: 'Płatność potwierdzona',
+      pay_offline_title: 'Jesteś offline',
+      pay_offline_body: 'Teraz działają tylko płatności w pobliżu. Zostaną opublikowane, gdy tylko połączysz się ponownie.',
+      pay_offline_queued: '{{count}} płatności czeka na opublikowanie, gdy tylko połączysz się ponownie.',
+      pay_offline_needs_internet: 'Wymaga internetu',
+      pay_offline_rejected_title: 'Płatność została odrzucona',
+      pay_offline_rejected_body: 'Sieć odrzuciła płatność przekazaną przez {{sender}} za pośrednictwem {{via}} w dniu {{when}}.',
+      pay_offline_unknown_sender: 'nieznany nadawca',
+      pay_received_not_broadcast: 'Odebrano offline · jeszcze nie opublikowano'
     }
   }
 }
