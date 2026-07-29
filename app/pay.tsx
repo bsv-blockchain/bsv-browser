@@ -104,7 +104,7 @@ export default function PayScreen() {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   const online = useOnline()
-  const { walletBuilding, walletBuilt, storage, txStatusVersion } = useWallet()
+  const { walletBuilding, walletBuilt, storage, txStatusVersion, walletUserId } = useWallet()
   const [queued, setQueued] = useState(0)
   const [rejected, setRejected] = useState<OfflineActionRow[]>([])
   const [sentRejected, setSentRejected] = useState<OfflineActionRow[]>([])
@@ -122,7 +122,10 @@ export default function PayScreen() {
       try {
         const db = storage?.sqliteDb
         if (!db) return
-        const rows = await findOfflineActions(db, { status: ['queued', 'posting', 'rejected'] })
+        const rows = await findOfflineActions(db, {
+          status: ['queued', 'posting', 'rejected'],
+          ...(walletUserId === null ? {} : { userId: walletUserId })
+        })
         if (cancelled) return
         setQueued(rows.filter(r => r.status !== 'rejected').length)
         // 'sent'-role rows can be rejected too (a payer's own held payment can be
@@ -145,7 +148,7 @@ export default function PayScreen() {
     return () => {
       cancelled = true
     }
-  }, [walletBuilt, storage, online, txStatusVersion])
+  }, [walletBuilt, storage, online, txStatusVersion, walletUserId])
 
   const params = useLocalSearchParams<{
     cell?: string | string[]

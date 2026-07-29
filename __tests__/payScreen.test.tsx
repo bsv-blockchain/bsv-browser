@@ -46,7 +46,13 @@ jest.mock('react-i18next', () => ({
 // only the ones that explicitly set mockStorage exercise it.
 let mockStorage: { sqliteDb: unknown } | undefined
 jest.mock('@/context/WalletContext', () => ({
-  useWallet: () => ({ walletBuilding: false, walletBuilt: true, storage: mockStorage })
+  useWallet: () => ({
+    walletBuilding: false,
+    walletBuilt: true,
+    storage: mockStorage,
+    txStatusVersion: 0,
+    walletUserId: null
+  })
 }))
 
 // Without this, the real hook pulls in NetInfo, which has no native module

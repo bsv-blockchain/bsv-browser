@@ -141,6 +141,8 @@ export interface WalletContextValue {
   refreshProof: (txid: string) => Promise<void>
   /** Incremented when a transaction status changes via SSE, triggers UI refresh */
   txStatusVersion: number
+  /** The active user's storage id, for scoping `offline_actions` reads. null if unknown. */
+  walletUserId: number | null
   /** True while the wallet is being built (biometric auth pending, async build in progress) */
   walletBuilding: boolean
   /** True once the wallet has been successfully built (mnemonic/key provisioned) */
@@ -192,6 +194,7 @@ export const WalletContext = createContext<WalletContextValue>({
   storage: null,
   refreshProof: async () => {},
   txStatusVersion: 0,
+  walletUserId: null,
   walletBuilding: false,
   walletBuilt: false,
   localPayNotification: null,
@@ -326,6 +329,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [storage, setStorage] = useState<StorageExpoSQLite | null>(null)
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [txStatusVersion, setTxStatusVersion] = useState(0)
+  // The active user's storage id, for scoping `offline_actions` reads (see
+  // buildWallet's getAuth() call below). null until a wallet is built, or if
+  // getAuth() fails — callers treat null as "unscoped" rather than a gate.
+  const [walletUserId, setWalletUserId] = useState<number | null>(null)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState)
   const monitorRef = useRef<Monitor | null>(null)
   // The offline-first chain tracker and the header store it wraps. Populated
@@ -833,6 +840,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
             console.log('[WalletContext] Local storage provider added to wallet')
           } catch (error) {
             console.error('[WalletContext] Failed to add local storage provider:', error)
+          }
+
+          try {
+            const auth = await storageManager.getAuth()
+            setWalletUserId(auth.userId ?? null)
+          } catch {
+            // Scoping is a filter, not a gate: with no id the queue reads fall
+            // back to unscoped, which is today's behaviour.
+            setWalletUserId(null)
           }
         }
         // TODO: Re-add remote storage support in future version
@@ -1602,6 +1618,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setWalletBuilt(false)
       walletBuildingRef.current = false
       setWalletBuilding(false)
+      setWalletUserId(null)
       deleteMnemonic()
       deleteRecoveredKey()
 
@@ -1846,6 +1863,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       storage,
       refreshProof,
       txStatusVersion,
+      walletUserId,
       walletBuilding,
       walletBuilt,
       localPayNotification,
@@ -1885,6 +1903,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       storage,
       refreshProof,
       txStatusVersion,
+      walletUserId,
       walletBuilding,
       walletBuilt,
       localPayNotification,
