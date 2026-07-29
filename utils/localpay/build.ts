@@ -307,8 +307,16 @@ export async function finalizeDelivery(
       return { kind: 'sent', broadcast: 'pending', detail: 'offline — queued until this device reconnects' }
     } catch (e) {
       // The payee holds a copy and will internalize it, so this is still a sent
-      // payment. What failed is our own record of needing to broadcast it, and
-      // the monitor's nosend sweep will still find the transaction.
+      // payment — never a failure. But be honest about what a failed hold
+      // actually costs: nothing re-drives it. No monitor task sweeps a plain
+      // `nosend` transaction to broadcast it (`TaskSendWaiting` selects only
+      // `['unsent','sending']`; `TaskCheckNoSends`, the only task that even
+      // reads `nosend` rows, only checks whether one got mined by some OTHER
+      // means — it never calls `sendWith`), and `processOfflineActions`'s
+      // drain only ever looks at `offline_actions` rows, so a hold that threw
+      // before its own writes landed is invisible to it too. See
+      // `holdSentPaymentOffline` for why its queue-row insert runs before its
+      // status promotion, which is what keeps a partial failure recoverable.
       return { kind: 'sent', broadcast: 'pending', detail: messageOf(e) }
     }
   }

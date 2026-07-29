@@ -1,6 +1,7 @@
 /**
- * The payer's side of the offline queue: promote the withheld transaction so
- * its change is spendable, then record that it still needs broadcasting.
+ * The payer's side of the offline queue: record that this payment still needs
+ * broadcasting, then promote the withheld transaction so its change is
+ * spendable.
  *
  * `buildPaymentFrame` creates the payment with `noSend: true`, which
  * `determineReqTxStatus` (`storage/methods/processAction.js:150-159`) leaves
@@ -17,6 +18,29 @@
  * payment out of the first one's change. `nosend -> unproven` is a pure status
  * write with no output side-effects — only `failed` has any
  * (`StorageProvider.js:397-436`).
+ *
+ * ORDER MATTERS. The queue-row insert runs FIRST, deliberately, because it is
+ * durable and the status promotion is not: nothing in this app re-drives a
+ * hold that failed partway (see `finalizeDelivery`'s catch — a thrown hold is
+ * reported as `broadcast: 'pending'`, not retried). If the insert lands and
+ * the promotion then throws, `processOfflineActions`'s drain still finds this
+ * txid's row and will post it — `postOwned` reads whatever transaction status
+ * a request's outputs are ALREADY at before posting and only restores that
+ * same status on a service error (`processOfflineActions.ts` — "holdSafeTxStatuses
+ * admits 'nosend' as well as 'unproven'"), and `attemptToPostReqsToNetwork`
+ * promotes the transaction forward on any successful post regardless of what
+ * it started at (`attemptToPostReqsToNetwork.js:189-197,268`). So a failed
+ * promotion only costs this device the ability to spend this change while
+ * still offline; it resolves itself the moment the drain successfully posts
+ * the transaction, with no data lost. The reverse order would risk the
+ * opposite failure: a promoted-but-unqueued transaction that nothing will
+ * ever broadcast, because `processOfflineActions` only ever looks at
+ * `offline_actions` rows, and no monitor task sweeps a plain `nosend`
+ * transaction to send it — `TaskSendWaiting` selects only
+ * `['unsent','sending']`, and `TaskCheckNoSends` (the only task that reads
+ * `nosend` rows at all) only requests merkle proofs for transactions that may
+ * have been broadcast BY SOME OTHER MEANS; it never calls `sendWith` and never
+ * advances status.
  *
  * Deliberately NOT built on `holdReqsOffline` (Task 8): that method's contract
  * is the opposite of this one's job. It takes the transaction status as a
@@ -50,6 +74,7 @@ export async function holdSentPaymentOffline(args: { storage: StorageExpoSQLite;
   const tx = (await storage.findTransactions({ partial: { txid }, noRawTx: true }))[0]
   if (!tx) throw new Error(`no transaction record for ${txid}, cannot queue it for release`)
 
-  await storage.updateTransactionStatus('unproven', tx.transactionId)
+  // Insert before promote — see the ORDER MATTERS note above.
   await insertOfflineAction(db, { userId: tx.userId, txid, role: 'sent' })
+  await storage.updateTransactionStatus('unproven', tx.transactionId)
 }
