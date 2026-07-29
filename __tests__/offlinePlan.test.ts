@@ -1,9 +1,13 @@
 import {
+  allReqStatuses,
+  alreadySentStatuses,
   applyOutcome,
   outcomeFromReqStatus,
   outcomeOfForeignPost,
   outcomeOfOwnedPost,
   planRelease,
+  refusedReqStatuses,
+  undecidedReqStatuses,
   type PostedResult
 } from '@/utils/offline/plan'
 import type { OrderableTx } from '@/utils/offline/order'
@@ -110,6 +114,57 @@ describe('applyOutcome', () => {
     const txs = [tx('A'), tx('C', ['A', 'B']), tx('B', ['A'])]
     const r = applyOutcome({ txid: 'A', outcome: 'invalidTx', txs, rows: [] })
     expect(r.rejected.map(x => x.txid)).toEqual(['C', 'B', 'A'])
+  })
+
+  it('rejects a descendant releaseOrder declines to order before its parent, not after', () => {
+    // releaseOrder excludes a mined descendant, so it never reaches the sorted
+    // part. Appended after its parent, its own failure would be the last write and
+    // would release the parent's outputs back to spendable.
+    const txs = [tx('A'), tx('B', ['A'], { hasProof: true })]
+    const r = applyOutcome({ txid: 'A', outcome: 'invalidTx', txs, rows: [] })
+    expect(r.rejected.map(x => x.txid)).toEqual(['B', 'A'])
+  })
+
+  it('keeps an unorderable descendant ahead of a whole ordered chain', () => {
+    // C is txid-only, so only A and B get ordered. C spends B, so it has to come
+    // before both of them, not after.
+    const txs = [tx('A'), tx('B', ['A']), tx('C', ['B'], { isTxidOnly: true })]
+    const r = applyOutcome({ txid: 'A', outcome: 'invalidTx', txs, rows: [] })
+    expect(r.rejected.map(x => x.txid)).toEqual(['C', 'B', 'A'])
+  })
+})
+
+describe('request status classification', () => {
+  it('partitions every request status exactly once', () => {
+    // A status in none of the three lists is a poisoned descendant that
+    // `withLocalSpenders` would never look at, so it would keep its outputs
+    // spendable. The Record makes an upstream addition a compile error; this makes
+    // a reclassification a test failure.
+    const classified = [...alreadySentStatuses, ...refusedReqStatuses, ...undecidedReqStatuses]
+    expect(new Set(classified).size).toBe(classified.length)
+    expect([...classified].sort()).toEqual([...allReqStatuses].sort())
+  })
+
+  it('reads only the already-sent statuses as delivered', () => {
+    expect([...alreadySentStatuses].sort()).toEqual(['callback', 'completed', 'unconfirmed', 'unmined'])
+  })
+
+  it('counts every non-terminal status as still poisonable, including unfail', () => {
+    expect([...undecidedReqStatuses].sort()).toEqual([
+      'nonfinal',
+      'nosend',
+      'sending',
+      'unfail',
+      'unknown',
+      'unprocessed',
+      'unsent'
+    ])
+  })
+
+  it('agrees with outcomeFromReqStatus on every status', () => {
+    for (const status of alreadySentStatuses) expect(outcomeFromReqStatus(status)).toBe('success')
+    for (const status of undecidedReqStatuses) expect(outcomeFromReqStatus(status)).toBeUndefined()
+    for (const status of refusedReqStatuses) expect(outcomeFromReqStatus(status)).not.toBeUndefined()
   })
 })
 

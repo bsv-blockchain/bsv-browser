@@ -9,6 +9,7 @@
  */
 import { descendantsOf, releaseOrder, type OrderableTx } from './order'
 import type { OfflineActionRow } from '@/storage/methods/offlineActions'
+import type { ProvenTxReqStatus } from '@bsv/wallet-toolbox-mobile/out/src/sdk/types'
 
 export type PostOutcome = 'success' | 'serviceError' | 'invalidTx' | 'doubleSpend'
 
@@ -79,8 +80,13 @@ export function applyOutcome(args: {
   // its own siblings — so the order is taken from `releaseOrder` and reversed.
   const sorted = releaseOrder(txs.filter(t => cascade.has(t.txid))).reverse()
   // A poisoned transaction `releaseOrder` declines to order is mined or txid-only,
-  // neither of which a held transaction can be. Rejected anyway, just last.
-  const ordered = [...sorted, ...poisoned.filter(t => !sorted.includes(t))]
+  // neither of which a held transaction can be. Rejected anyway, and rejected
+  // FIRST: an excluded entry can only ever be a descendant, because the refused
+  // transaction itself came out of `planRelease` and is therefore sendable. Placed
+  // last it would release its parent's outputs back to spendable with nothing left
+  // to run — undoing children-first on the one branch that has no ordering of its
+  // own. First is unconditionally the safe end.
+  const ordered = [...poisoned.filter(t => !sorted.includes(t)), ...sorted]
   const rejected = ordered.map(t => ({
     txid: t,
     reason: t === txid ? reason : `an ancestor was rejected: ${reason}`,
@@ -90,12 +96,66 @@ export function applyOutcome(args: {
 }
 
 /**
- * Request statuses that mean the transaction has already been handed to the
- * network (`storage/storageProviderHelpers.js:13`, `alreadySentStatuses`). This
- * is the wallet's own record of delivery and the only witness this module
- * trusts for it.
+ * Every `ProvenTxReqStatus` (`sdk/types.d.ts:51`), classified by the verdict it
+ * records.
+ *
+ *  · 'success'     — `alreadySentStatuses` (`storageProviderHelpers.js:12`): the
+ *                    wallet's own record that the transaction reached the network,
+ *                    and the only witness this module trusts for delivery.
+ *  · 'doubleSpend' /
+ *    'invalidTx'   — a refusal already recorded against it.
+ *  · 'undecided'   — no verdict yet, so the transaction behind it could still turn
+ *                    out to be spending poisoned money and a cascade has to be
+ *                    able to see it.
+ *
+ * One `Record` keyed by the union rather than several hand-kept lists, because a
+ * status this file does not know about is a poisoned descendant that keeps its
+ * outputs spendable. Keyed that way, a status added or removed upstream is a
+ * compile error here; the partition below is pinned by tests as well, so a
+ * reclassification is caught too. Note `unfail`: `ProvenTxReqTerminalStatus` is
+ * only `['completed','invalid','doubleSpend']` (`sdk/types.js:7`), so a request
+ * being resurrected is undecided and must not be overlooked.
  */
-const alreadySentStatuses: readonly string[] = ['unmined', 'callback', 'unconfirmed', 'completed']
+const reqStatusVerdicts: Record<ProvenTxReqStatus, 'success' | 'doubleSpend' | 'invalidTx' | 'undecided'> = {
+  unmined: 'success',
+  callback: 'success',
+  unconfirmed: 'success',
+  completed: 'success',
+  doubleSpend: 'doubleSpend',
+  invalid: 'invalidTx',
+  sending: 'undecided',
+  unsent: 'undecided',
+  nosend: 'undecided',
+  unknown: 'undecided',
+  nonfinal: 'undecided',
+  unprocessed: 'undecided',
+  unfail: 'undecided'
+}
+
+function statusesVerdicted(...verdicts: (typeof reqStatusVerdicts)[ProvenTxReqStatus][]): ProvenTxReqStatus[] {
+  const keys = Object.keys(reqStatusVerdicts) as ProvenTxReqStatus[]
+  return keys.filter(s => verdicts.includes(reqStatusVerdicts[s]))
+}
+
+/** Every request status there is, so a test can prove the partition is complete. */
+export const allReqStatuses: readonly ProvenTxReqStatus[] = Object.keys(reqStatusVerdicts) as ProvenTxReqStatus[]
+
+/** Statuses that mean the transaction has already been handed to the network. */
+export const alreadySentStatuses: readonly ProvenTxReqStatus[] = statusesVerdicted('success')
+
+/** Statuses that already carry a recorded refusal. */
+export const refusedReqStatuses: readonly ProvenTxReqStatus[] = statusesVerdicted('doubleSpend', 'invalidTx')
+
+/**
+ * Statuses carrying no verdict yet.
+ *
+ * This is the set a cascade must widen its graph over: the wallet re-spent money
+ * it received underground, and Task 8 leaves such an outgoing request to
+ * `TaskSendWaiting` rather than parking it, so nothing put that transaction in the
+ * queue or in any held beef. A status wrongly missing from here is a poisoned
+ * descendant that keeps its outputs spendable.
+ */
+export const undecidedReqStatuses: ProvenTxReqStatus[] = statusesVerdicted('undecided')
 
 /**
  * The verdict already recorded against a request in storage, or undefined if the
@@ -103,14 +163,13 @@ const alreadySentStatuses: readonly string[] = ['unmined', 'callback', 'unconfir
  *
  * Used twice: before a post, to skip a request a previous interrupted run had
  * already got out (or already had refused); and after one, as the authority on
- * whether the post landed.
+ * whether the post landed. An unrecognised status reads as undecided, which
+ * neither claims delivery nor rejects anything.
  */
 export function outcomeFromReqStatus(status: string | undefined): PostOutcome | undefined {
   if (status === undefined) return undefined
-  if (alreadySentStatuses.includes(status)) return 'success'
-  if (status === 'doubleSpend') return 'doubleSpend'
-  if (status === 'invalid') return 'invalidTx'
-  return undefined
+  const verdict = reqStatusVerdicts[status as ProvenTxReqStatus]
+  return verdict === undefined || verdict === 'undecided' ? undefined : verdict
 }
 
 /**

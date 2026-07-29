@@ -20,8 +20,7 @@
 import { Beef } from '@bsv/sdk'
 import { attemptToPostReqsToNetwork } from '@bsv/wallet-toolbox-mobile/out/src/storage/methods/attemptToPostReqsToNetwork'
 import { EntityProvenTxReq } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/entities'
-import type { TableProvenTxReq } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/tables'
-import type { ProvenTxReqStatus } from '@bsv/wallet-toolbox-mobile/out/src/sdk/types'
+import type { TableProvenTxReq, TableTransaction } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/tables'
 import type { StorageExpoSQLite } from '../StorageExpoSQLite'
 import { findOfflineActions, updateOfflineAction, type OfflineActionRow, type OfflineDb } from './offlineActions'
 import {
@@ -30,6 +29,7 @@ import {
   outcomeOfForeignPost,
   outcomeOfOwnedPost,
   planRelease,
+  undecidedReqStatuses,
   type PostOutcome
 } from '../../utils/offline/plan'
 import type { OrderableTx } from '../../utils/offline/order'
@@ -43,6 +43,18 @@ export interface ProcessOfflineActionsResult {
   rejected: number
   /** True if the run did not reach the end of its plan, so there is more to do. */
   stopped: boolean
+  /**
+   * Why the queue cannot make progress by simply being retried.
+   *
+   * Distinct from `stopped`, which is also true for the ordinary "signal went away
+   * again" case that the next run resolves by itself. This is set only where
+   * retrying changes nothing: a queued transaction whose request has gone, one
+   * whose beef will not parse, or an ancestor from someone else's beef that no
+   * service will accept. Left conservative, all three leave their rows at 'queued'
+   * with the received outputs still spendable and tell the user nothing — nothing
+   * else in the system records them, so a caller must surface this.
+   */
+  stalledOn?: string
 }
 
 /** A queued transaction paired with the request that carries its bytes. */
@@ -56,7 +68,7 @@ export async function processOfflineActions(args: {
 }): Promise<ProcessOfflineActionsResult> {
   const { storage } = args
   const db = storage.sqliteDb
-  if (!db) return { sent: 0, rejected: 0, stopped: true }
+  if (!db) return { sent: 0, rejected: 0, stopped: true, stalledOn: 'the database is not open' }
 
   // 'posting' is included so a run interrupted mid-flight resumes rather than
   // stranding its rows. Re-posting is safe: a transaction the network already has
@@ -70,13 +82,17 @@ export async function processOfflineActions(args: {
     return { sent: 0, rejected: 0, stopped: true }
   }
 
-  // Merge every held request's BEEF into one graph.
+  // Merge every held request's BEEF into one graph. Anything that cannot be read
+  // is collected rather than thrown: a row missing from the graph is simply never
+  // planned, which is safe but permanent, so it has to be reportable.
   const merged = new Beef()
   const held = new Map<string, HeldAction>()
+  const blocked: string[] = []
   for (const row of rows) {
-    const api = (await storage.findProvenTxReqs({ partial: { txid: row.txid } }))[0]
+    const api = await findReq(storage, row.txid)
     if (!api) {
       devLog(`[processOfflineActions] queued txid has no request, cannot release it: ${row.txid}`)
+      blocked.push(`${row.txid} has no request to release it with`)
       continue
     }
     held.set(row.txid, { row, api })
@@ -87,8 +103,10 @@ export async function processOfflineActions(args: {
       // Without its beef this transaction has no place in the graph, so it is
       // simply not planned and stays queued. Never guess at an order.
       devLog(`[processOfflineActions] could not merge the beef of ${row.txid}:`, e)
+      blocked.push(`the beef of ${row.txid} could not be read`)
     }
   }
+  const stalledOn = blocked.length > 0 ? blocked.join('; ') : undefined
 
   const txs: OrderableTx[] = merged.txs
   const plan = planRelease({ rows, txs })
@@ -105,7 +123,7 @@ export async function processOfflineActions(args: {
       // not reversible.
       devLog(`[processOfflineActions] stopping: no request to release ${step.txid} with`)
       await requeue(db, plan, resolved)
-      return { sent, rejected, stopped: true }
+      return { sent, rejected, stopped: true, stalledOn: stalledOn ?? `${step.txid} has no request to release it with` }
     }
     if (action) await updateOfflineAction(db, step.txid, { status: 'posting' })
 
@@ -128,14 +146,29 @@ export async function processOfflineActions(args: {
     }
     for (const r of result.rejected) {
       resolved.add(r.txid)
-      if (await rejectOne(storage, db, held.get(r.txid)?.row, r)) rejected++
+      try {
+        if (await rejectOne(storage, db, held.get(r.txid)?.row, r)) rejected++
+      } catch (e) {
+        // The walk must reach the parent. A child's failure has already released
+        // the parent's outputs back to spendable, so abandoning the cascade here
+        // would leave refused money spendable — the exact outcome children-first
+        // ordering exists to prevent.
+        devLog(`[processOfflineActions] could not record the rejection of ${r.txid}:`, e)
+      }
     }
     if (result.stop) {
       await requeue(db, plan, resolved)
-      return { sent, rejected, stopped: true }
+      // A foreign ancestor no service would take blocks everything behind it and
+      // retrying will not change that, whereas our own failed post is the ordinary
+      // "signal went away" case the next run picks up.
+      const foreign = !action && outcome === 'serviceError'
+      const why = foreign
+        ? `${step.txid} is an ancestor from another wallet's beef that no service would accept`
+        : undefined
+      return { sent, rejected, stopped: true, stalledOn: stalledOn ?? why }
     }
   }
-  return { sent, rejected, stopped: false }
+  return { sent, rejected, stopped: false, stalledOn }
 }
 
 /**
@@ -153,14 +186,6 @@ async function probeOnline(): Promise<boolean> {
 }
 
 /**
- * Request statuses that carry no verdict yet, so the transaction behind them
- * could still turn out to be spending poisoned money. The complement of
- * `alreadySentStatuses` and the terminal failures, over `ProvenTxReqStatus`
- * (`sdk/types.d.ts:51`).
- */
-const undecidedReqStatuses: ProvenTxReqStatus[] = ['unsent', 'sending', 'nosend', 'unprocessed', 'nonfinal', 'unknown']
-
-/**
  * The release graph plus every locally-known transaction that has not been
  * decided yet, so a cascade can find the spenders of a refused transaction.
  *
@@ -169,12 +194,23 @@ const undecidedReqStatuses: ProvenTxReqStatus[] = ['unsent', 'sending', 'nosend'
  * request to `TaskSendWaiting` rather than parking it, so nothing put it in the
  * queue. They are added for the cascade only and never for release — this engine
  * has no request bookkeeping to offer them, and the monitor already owns sending
- * them.
+ * them. Which statuses count as undecided is a money decision and lives with the
+ * others in `utils/offline/plan.ts`.
+ *
+ * A failure to read them widens nothing rather than throwing, so a cascade still
+ * runs over the queue's own graph. Every error here costs rejections we should
+ * have made, never rejections we should not have.
  */
 async function withLocalSpenders(storage: StorageExpoSQLite, txs: OrderableTx[]): Promise<OrderableTx[]> {
   const known = new Set(txs.map(t => t.txid))
   const spenders = new Beef()
-  const pending = await storage.findProvenTxReqs({ partial: {}, status: undecidedReqStatuses })
+  let pending: TableProvenTxReq[] = []
+  try {
+    pending = await storage.findProvenTxReqs({ partial: {}, status: undecidedReqStatuses })
+  } catch (e) {
+    devLog('[processOfflineActions] could not read undecided requests, cascading over the queue alone:', e)
+    return txs
+  }
   for (const api of pending) {
     if (known.has(api.txid)) continue
     try {
@@ -184,6 +220,22 @@ async function withLocalSpenders(storage: StorageExpoSQLite, txs: OrderableTx[])
     }
   }
   return [...txs, ...spenders.txs.filter(t => !known.has(t.txid))]
+}
+
+/**
+ * The request for a txid, or undefined if there is none or it could not be read.
+ *
+ * Guarded because every caller has something safer to do with a failed read than
+ * abandon the run: the merge loop leaves the row unplanned, `postOwned` falls back
+ * to 'serviceError' and re-holds, and `rejectOne` still records what it can.
+ */
+async function findReq(storage: StorageExpoSQLite, txid: string): Promise<TableProvenTxReq | undefined> {
+  try {
+    return (await storage.findProvenTxReqs({ partial: { txid } }))[0]
+  } catch (e) {
+    devLog(`[processOfflineActions] could not read the request for ${txid}:`, e)
+    return undefined
+  }
 }
 
 /** Return every unresolved row we may have moved to 'posting' to 'queued'. */
@@ -218,6 +270,15 @@ async function requeue(db: OfflineDb, plan: { txid: string; owned: boolean }[], 
  * marks 'invalid' (`EntityProvenTxReq.js:426-433`). Leaving it there would hand
  * back the very failure the hold exists to prevent, and out of dependency order at
  * that.
+ *
+ * That makes the post itself throwing the dangerous case, because the toolbox
+ * persists the request's new status and only afterwards touches the transaction
+ * rows and — on a failure — runs `markStaleInputsAsSpent`, which does live chain
+ * queries. A throw past that first write would otherwise leave 'sending' behind
+ * with no re-hold. So the post is guarded and a throw simply leaves `detailStatus`
+ * undefined, letting the persisted status decide, which is what decides anyway.
+ * The drain recovers from a stalled run; it cannot recover from an out-of-order
+ * broadcast.
  */
 async function postOwned(storage: StorageExpoSQLite, api: TableProvenTxReq): Promise<PostOutcome> {
   const recorded = outcomeFromReqStatus(api.status)
@@ -228,27 +289,44 @@ async function postOwned(storage: StorageExpoSQLite, api: TableProvenTxReq): Pro
 
   const attemptsBefore = api.attempts
   const req = new EntityProvenTxReq(api)
-  const posted = await attemptToPostReqsToNetwork(storage, [req])
-  const detailStatus = posted.details.find(d => d.txid === api.txid)?.status
-  // An independent read: whatever the post claimed, storage is the witness that
-  // the transaction actually left.
-  const persisted = (await storage.findProvenTxReqs({ partial: { txid: api.txid } }))[0]
-  const outcome = outcomeOfOwnedPost({ detailStatus, reqStatus: persisted?.status })
-  devLog(
-    `[processOfflineActions] posted ${api.txid}: reported '${detailStatus}', stored '${persisted?.status}' => ${outcome}`
-  )
-  if (outcome !== 'serviceError') return outcome
-
-  // Re-hold, and put the transaction back to 'unproven' so the received outputs
-  // stay spendable and nothing sweeps it while we wait for signal. `attempts` is
-  // restored too, so repeated releases while signal comes and goes cannot age a
-  // held request toward 'invalid'.
-  await storage.updateProvenTxReq(api.provenTxReqId, { status: 'nosend', attempts: attemptsBefore })
+  // What to restore each transaction to, read before the post overwrites it.
+  // `holdSafeTxStatuses` admits 'nosend' as well as 'unproven', and a deliberately
+  // withheld transaction must not come back claiming it had been broadcast.
+  const txStatusBefore = new Map<number, TableTransaction['status']>()
   for (const transactionId of req.notify.transactionIds ?? []) {
     try {
-      await storage.updateTransactionStatus('unproven', transactionId)
+      const tx = (await storage.findTransactions({ partial: { transactionId }, noRawTx: true }))[0]
+      if (tx) txStatusBefore.set(transactionId, tx.status)
     } catch (e) {
-      devLog(`[processOfflineActions] could not restore transaction ${transactionId} to 'unproven':`, e)
+      devLog(`[processOfflineActions] could not read the status of transaction ${transactionId}:`, e)
+    }
+  }
+
+  let detailStatus: string | undefined
+  try {
+    const posted = await attemptToPostReqsToNetwork(storage, [req])
+    detailStatus = posted.details.find(d => d.txid === api.txid)?.status
+  } catch (e) {
+    devLog(`[processOfflineActions] posting ${api.txid} threw:`, e)
+  }
+  // An independent read: whatever the post claimed, or failed to claim, storage is
+  // the witness that the transaction actually left.
+  const reqStatus = (await findReq(storage, api.txid))?.status
+  const outcome = outcomeOfOwnedPost({ detailStatus, reqStatus })
+  devLog(`[processOfflineActions] posted ${api.txid}: reported '${detailStatus}', stored '${reqStatus}' => ${outcome}`)
+  if (outcome !== 'serviceError') return outcome
+
+  // Re-hold, and put each transaction back to the hold-safe status it actually
+  // had, so its outputs stay spendable and nothing sweeps it while we wait for
+  // signal. `attempts` is restored too, so repeated releases while signal comes and
+  // goes cannot age a held request toward 'invalid'. The request first, because it
+  // is the write that keeps the monitor out and the transaction writes can throw.
+  await storage.updateProvenTxReq(api.provenTxReqId, { status: 'nosend', attempts: attemptsBefore })
+  for (const [transactionId, status] of txStatusBefore) {
+    try {
+      await storage.updateTransactionStatus(status, transactionId)
+    } catch (e) {
+      devLog(`[processOfflineActions] could not restore transaction ${transactionId} to '${status}':`, e)
     }
   }
   return 'serviceError'
@@ -281,10 +359,13 @@ async function postForeign(storage: StorageExpoSQLite, merged: Beef, txid: strin
 /**
  * Record one rejection, and report whether anything local actually changed.
  *
- * Every write is attempted independently. A cascade must not abandon the
- * descendants still to be failed because one transaction refused its status
- * change — `updateTransactionStatus` throws for an already-completed or proven
- * transaction (`StorageProvider.js:414-420`).
+ * Every read and every write is attempted independently, so one refusal costs only
+ * the record it was for rather than the records after it —
+ * `updateTransactionStatus` throws for an already-completed or proven transaction
+ * (`StorageProvider.js:414-420`). What guarantees the cascade reaches the parent is
+ * the caller's per-entry guard, not this function: unpacking the request entity can
+ * still throw on corrupt stored JSON, and by then the child's failure has already
+ * released the parent's outputs back to spendable.
  */
 async function rejectOne(
   storage: StorageExpoSQLite,
@@ -293,7 +374,7 @@ async function rejectOne(
   r: { txid: string; reason: string; poisonedByTxid: string }
 ): Promise<boolean> {
   let recorded = false
-  const api = (await storage.findProvenTxReqs({ partial: { txid: r.txid } }))[0]
+  const api = await findReq(storage, r.txid)
   if (api) {
     const req = new EntityProvenTxReq(api)
     // The attribution record: who handed us the poisoned transaction, over what
@@ -326,12 +407,16 @@ async function rejectOne(
     }
   }
   if (row) {
-    await updateOfflineAction(db, r.txid, {
-      status: 'rejected',
-      rejectedReason: r.reason,
-      poisonedByTxid: r.poisonedByTxid
-    })
-    recorded = true
+    try {
+      await updateOfflineAction(db, r.txid, {
+        status: 'rejected',
+        rejectedReason: r.reason,
+        poisonedByTxid: r.poisonedByTxid
+      })
+      recorded = true
+    } catch (e) {
+      devLog(`[processOfflineActions] could not mark the queue row of ${r.txid} rejected:`, e)
+    }
   }
   devLog(`[processOfflineActions] rejected ${r.txid} (poisoned by ${r.poisonedByTxid}): ${r.reason}`)
   return recorded
