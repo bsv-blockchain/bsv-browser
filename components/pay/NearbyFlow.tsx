@@ -144,6 +144,7 @@ import {
   mintSession,
   nearbyTransport,
   processPending,
+  requestNearbyPermissions,
   savePending,
   selectTransport,
   type Ack,
@@ -412,11 +413,29 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
    * screen is mounted, so every read goes through this.
    */
   const supportsAwdl = useMemo(() => localSupportsAwdl(), [])
-  const supportsNearby = useMemo(() => localSupportsNearby(), [])
+
+  /**
+   * Nearby is usable only once BOTH hold: GMS is present (localSupportsNearby)
+   * and the runtime grants landed. Resolved async on mount, Android only; a
+   * denial leaves this false and the flow QR-only, silently — same posture as
+   * a GMS-less device.
+   */
+  const [nearbyReady, setNearbyReady] = useState(false)
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !localSupportsNearby()) return
+    let live = true
+    void requestNearbyPermissions().then(granted => {
+      if (live) setNearbyReady(granted)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
   /** The radio this device listens on as payee, if any. */
   const radioTransport = useMemo(
-    () => (supportsAwdl ? awdlTransport : supportsNearby ? nearbyTransport : null),
-    [supportsAwdl, supportsNearby]
+    () => (supportsAwdl ? awdlTransport : nearbyReady ? nearbyTransport : null),
+    [supportsAwdl, nearbyReady]
   )
 
   const abortAll = useCallback(() => {
@@ -836,7 +855,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // Caps advertise what this payee can DO; the payer's ladder picks the
         // highest rung both sides share, QR being the floor.
         supportsAwdl,
-        supportsNearby,
+        supportsNearby: nearbyReady,
         os: Platform.OS === 'ios' ? 'ios' : 'android'
       })
       setRole('payee')
@@ -845,7 +864,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     } catch (e) {
       fail('generic', messageOf(e))
     }
-  }, [requestAmount, wallet, storage, adminOriginator, supportsAwdl, supportsNearby, fail, t])
+  }, [requestAmount, wallet, storage, adminOriginator, supportsAwdl, nearbyReady, fail, t])
 
   // ── Receive: scan the payer's frame ──
 

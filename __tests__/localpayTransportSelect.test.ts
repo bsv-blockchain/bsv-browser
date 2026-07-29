@@ -1,6 +1,8 @@
-import { Platform } from 'react-native'
+import { PermissionsAndroid, Platform } from 'react-native'
+import type { Permission, PermissionStatus } from 'react-native'
 import { selectTransport } from '@/utils/localpay/transport/select'
 import { mintSession, CAP_AWDL, CAP_NEARBY, type Session } from '@/utils/localpay/session'
+import { requestNearbyPermissions } from '@/utils/localpay/transport/nearbyPermissions'
 
 let mockIsSupported = true
 
@@ -59,5 +61,50 @@ describe('transport selection', () => {
     mockIsSupported = native
     const session: Session = { ...mintSession({ ...base, supportsAwdl: false }), caps }
     expect(selectTransport(session)).toBe(expected)
+  })
+})
+
+describe('requestNearbyPermissions', () => {
+  const NEARBY_31: Permission[] = [
+    PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+    PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+    PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+    PermissionsAndroid.PERMISSIONS.NEARBY_WIFI_DEVICES
+  ]
+
+  const grantedResult = (permissions: Permission[]): Partial<Record<Permission, PermissionStatus>> =>
+    Object.fromEntries(permissions.map(p => [p, PermissionsAndroid.RESULTS.GRANTED]))
+
+  afterEach(() => {
+    Platform.OS = 'ios'
+    jest.restoreAllMocks()
+  })
+
+  it('resolves true when every requested permission lands granted', async () => {
+    Platform.OS = 'android'
+    jest.spyOn(Platform, 'Version', 'get').mockReturnValue(33)
+    const spy = jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValue(grantedResult(NEARBY_31) as never)
+
+    await expect(requestNearbyPermissions()).resolves.toBe(true)
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolves false when one requested permission is denied', async () => {
+    Platform.OS = 'android'
+    jest.spyOn(Platform, 'Version', 'get').mockReturnValue(33)
+    jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValue({
+      ...grantedResult(NEARBY_31),
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]: PermissionsAndroid.RESULTS.DENIED
+    } as never)
+
+    await expect(requestNearbyPermissions()).resolves.toBe(false)
+  })
+
+  it('resolves false on non-android platforms without requesting anything', async () => {
+    Platform.OS = 'ios'
+    const spy = jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValue({} as never)
+
+    await expect(requestNearbyPermissions()).resolves.toBe(false)
+    expect(spy).not.toHaveBeenCalled()
   })
 })

@@ -44,5 +44,6 @@ export {
   selectTransport,
   type TransportKind
 } from '@/utils/localpay/transport/select'
+export { requestNearbyPermissions } from '@/utils/localpay/transport/nearbyPermissions'
 export { isDeclineReason, type Ack, type ConfirmDelivery, type DeclineReason } from '@/utils/localpay/transport/types'
 export { CAP_NEARBY } from '@/utils/localpay/session'
