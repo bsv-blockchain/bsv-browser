@@ -356,5 +356,6 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_offline_actions_status ON offline_actions(status);
     CREATE INDEX IF NOT EXISTS idx_offline_actions_userId ON offline_actions(userId);
     CREATE INDEX IF NOT EXISTS idx_offline_actions_seq ON offline_actions(seq);
+    CREATE INDEX IF NOT EXISTS idx_offline_actions_txid ON offline_actions(txid);
   `)
 }

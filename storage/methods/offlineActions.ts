@@ -23,7 +23,7 @@ export interface OfflineActionRow {
 }
 
 /** The subset of bind values this mapper ever passes (no blobs). */
-type BindValue = string | number | null
+export type BindValue = string | number | null
 
 /**
  * Structurally satisfied by expo-sqlite's SQLiteDatabase. `params` is
@@ -50,26 +50,20 @@ export interface NewOfflineAction {
   receivedVia?: string
 }
 
-/** Idempotent: a re-delivered frame must not create a second queue row. */
+/**
+ * Idempotent: a re-delivered frame must not create a second queue row.
+ * `seq` is allocated in the same statement as the insert (a scalar subquery
+ * in the VALUES clause) rather than as a separate SELECT-then-INSERT, so
+ * SQLite's single-writer lock covers both — two interleaved inserts cannot
+ * read the same max and land the same seq.
+ */
 export async function insertOfflineAction(db: OfflineDb, entry: NewOfflineAction): Promise<void> {
   const now = new Date().toISOString()
-  const seqRow = (await db.getFirstAsync('SELECT COALESCE(MAX(seq), 0) + 1 AS nextSeq FROM offline_actions', [])) as {
-    nextSeq: number
-  } | null
   await db.runAsync(
     `INSERT OR IGNORE INTO offline_actions
        (created_at, updated_at, userId, txid, seq, role, senderIdentityKey, receivedVia, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued')`,
-    [
-      now,
-      now,
-      entry.userId,
-      entry.txid,
-      seqRow?.nextSeq ?? 1,
-      entry.role,
-      entry.senderIdentityKey ?? null,
-      entry.receivedVia ?? null
-    ]
+     VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM offline_actions), ?, ?, ?, 'queued')`,
+    [now, now, entry.userId, entry.txid, entry.role, entry.senderIdentityKey ?? null, entry.receivedVia ?? null]
   )
 }
 
