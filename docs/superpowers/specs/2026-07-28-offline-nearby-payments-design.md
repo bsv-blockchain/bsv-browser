@@ -202,6 +202,24 @@ That note is the who-to-pursue record: it names the identity key that handed us
 the transaction, over which transport, and when. It surfaces as a persistent
 failure row in `/pay` naming the sender.
 
+**Where the attribution actually comes from** — corrected 2026-07-29 after the
+Task 12 review found that nothing populated it. The payment frame carries
+`senderIdentityKey`, but the frame lives at the app layer while the queue row is
+written deep inside the storage layer's `attemptToPostReqsToNetwork` override,
+which cannot see it. So the row is attributed **after** the fact, from the layer
+that knows: `processPending` (`utils/localpay/pending.ts`) has both the entry's
+frame and the txid the toolbox returns from `internalizeAction`, and updates the
+row once the internalize succeeds. Attribution is best-effort — a failure there
+must never turn a successfully internalized payment into a failed one, nor abort
+the loop over the remaining entries.
+
+A **payer's own** rejected transaction gets a separate notice with no sender
+attribution, because there is no counterparty to attribute — it was the user's
+own transaction. Scoping the sender-naming row to `role: 'received'` is
+necessary (otherwise the payer's own failure reads as fraud committed against
+them) but not sufficient on its own: without the second notice the failure
+vanishes silently.
+
 `markStaleInputsAsSpent` in the existing broadcast path already resolves the
 "input is genuinely gone on chain" case, so a cascade does not resurrect UTXOs
 the chain says are spent.
