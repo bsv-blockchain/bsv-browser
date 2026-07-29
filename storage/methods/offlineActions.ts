@@ -89,7 +89,20 @@ export async function findOfflineActions(
 export async function updateOfflineAction(
   db: OfflineDb,
   txid: string,
-  patch: { status?: OfflineActionStatus; rejectedReason?: string | null; poisonedByTxid?: string | null }
+  patch: {
+    status?: OfflineActionStatus
+    rejectedReason?: string | null
+    poisonedByTxid?: string | null
+    /**
+     * Backfilled after the fact: the row is inserted (with both attribution
+     * columns null) from deep inside the storage layer's offline-hold path,
+     * which never sees the payment frame. `utils/localpay/pending.ts`'s
+     * `processPending` is the one place that has both the txid and the frame,
+     * once `internalizeAction` resolves — see its `attribute` callback.
+     */
+    senderIdentityKey?: string | null
+    receivedVia?: string | null
+  }
 ): Promise<void> {
   const sets: string[] = ['updated_at = ?']
   const params: BindValue[] = [new Date().toISOString()]
@@ -104,6 +117,14 @@ export async function updateOfflineAction(
   if (patch.poisonedByTxid !== undefined) {
     sets.push('poisonedByTxid = ?')
     params.push(patch.poisonedByTxid)
+  }
+  if (patch.senderIdentityKey !== undefined) {
+    sets.push('senderIdentityKey = ?')
+    params.push(patch.senderIdentityKey)
+  }
+  if (patch.receivedVia !== undefined) {
+    sets.push('receivedVia = ?')
+    params.push(patch.receivedVia)
   }
   params.push(txid)
   await db.runAsync(`UPDATE offline_actions SET ${sets.join(', ')} WHERE txid = ?`, params)

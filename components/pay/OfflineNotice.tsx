@@ -6,9 +6,18 @@
  * handed it over — that identity key is the only recourse the user has, so the
  * row persists rather than toasting away.
  *
+ * A rejection can also be the user's OWN outbound payment — a held send can be
+ * poisoned same as a held receive (see app/pay.tsx's role split). That gets a
+ * separate, unattributed notice: there is no counterparty to name for a
+ * transaction the user sent themselves, and folding it into the "who handed
+ * you this" copy would misreport the user's own failure as someone else's
+ * fraud against them.
+ *
  * It never claims settlement. A payment nobody has broadcast can still be
  * double-spent by the payer once they reconnect; no header check closes that,
- * so the copy says "not yet broadcast", never "received".
+ * so the copy says "not yet broadcast", never "received". Nor does it ever
+ * claim delivery for a payment the user sent — only that the network refused
+ * it.
  */
 import React from 'react'
 import { StyleSheet, Text, View } from 'react-native'
@@ -22,12 +31,20 @@ export interface OfflineNoticeProps {
   online: boolean
   queued: number
   rejected: OfflineActionRow[]
+  /**
+   * A payer's own held payment can be rejected too (the same release plan
+   * poisons rows regardless of role — see app/pay.tsx's queue effect), but it
+   * carries no sender to name: there is no counterparty to blame for a
+   * transaction the user sent themselves. Rendered as its own, unattributed
+   * notice rather than folded into `rejected`'s "who handed you this" copy.
+   */
+  sentRejected?: OfflineActionRow[]
 }
 
-export default function OfflineNotice({ online, queued, rejected }: OfflineNoticeProps) {
+export default function OfflineNotice({ online, queued, rejected, sentRejected = [] }: OfflineNoticeProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  if (online && rejected.length === 0) return null
+  if (online && rejected.length === 0 && sentRejected.length === 0) return null
 
   return (
     <View style={styles.wrap}>
@@ -53,14 +70,23 @@ export default function OfflineNotice({ online, queued, rejected }: OfflineNotic
             <Text style={[styles.body, { color: colors.textSecondary }]}>
               {t('pay_offline_rejected_body', {
                 sender: r.senderIdentityKey ? `${r.senderIdentityKey.slice(0, 8)}…` : t('pay_offline_unknown_sender'),
-                // Unlike the sender, a missing transport isn't worth a translated
-                // phrase of its own — 'awdl'/'qr' are left untranslated elsewhere
-                // in this file (see local_pay_nearby_unavailable's "Wi-Fi"), and
-                // this mirrors the same plain-'unknown' fallback processOfflineActions.ts
-                // already uses for this exact field.
-                via: r.receivedVia ?? 'unknown',
+                via: r.receivedVia ?? t('pay_offline_unknown_via'),
                 when: r.created_at.slice(0, 10)
               })}
+            </Text>
+          </View>
+        </View>
+      ))}
+      {sentRejected.map(r => (
+        <View
+          key={r.txid}
+          style={[styles.card, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}
+        >
+          <Ionicons name="alert-circle-outline" size={18} color={colors.textSecondary} />
+          <View style={styles.text}>
+            <Text style={[styles.title, { color: colors.textPrimary }]}>{t('pay_offline_sent_rejected_title')}</Text>
+            <Text style={[styles.body, { color: colors.textSecondary }]}>
+              {t('pay_offline_sent_rejected_body', { when: r.created_at.slice(0, 10) })}
             </Text>
           </View>
         </View>

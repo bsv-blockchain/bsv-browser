@@ -165,14 +165,15 @@ describe('PayScreen', () => {
     )
   })
 
-  it('shows a rejected row only for a payment the user received, not one they sent', async () => {
+  it('shows a rejected received payment through the attributed notice, not the sent one', async () => {
     // A held transaction can be rejected regardless of which side of it this
     // device was on (processOfflineActions.ts:rejectOne runs for any held
     // row). A 'sent' row has no senderIdentityKey/receivedVia — those are only
     // ever populated on the receiving side (storage/StorageExpoSQLite.ts
-    // holdReqsOffline) — so rendering it through the "who handed you this"
-    // copy would misreport the payer's own failed payment as a fraud someone
-    // else committed against them.
+    // holdReqsOffline, and utils/localpay/pending.ts's processPending, which
+    // backfills them after the fact) — so rendering it through the "who
+    // handed you this" copy would misreport the payer's own failed payment as
+    // a fraud someone else committed against them.
     const rows = [
       offlineRow({
         txid: 'aa'.repeat(32),
@@ -189,6 +190,17 @@ describe('PayScreen', () => {
     const { findByText, queryAllByText } = draw()
     await findByText('pay_offline_rejected_title')
     expect(queryAllByText('pay_offline_rejected_title')).toHaveLength(1)
+  })
+
+  it('shows the payer their own rejected payment through a distinct, unattributed notice', async () => {
+    const rows = [offlineRow({ txid: 'bb'.repeat(32), role: 'sent', status: 'rejected' })]
+    mockStorage = {
+      sqliteDb: { getAllAsync: async () => rows, runAsync: async () => undefined, getFirstAsync: async () => undefined }
+    }
+    const { findByText, queryByText } = draw()
+    await findByText('pay_offline_sent_rejected_title')
+    // Never the received-side "who handed you this" copy for the user's own send.
+    expect(queryByText('pay_offline_rejected_title')).toBeNull()
   })
 
   it('counts a queued payment toward the banner regardless of which side sent it', async () => {

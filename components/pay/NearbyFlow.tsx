@@ -114,6 +114,7 @@ import { radii, spacing, typography } from '@/context/theme/tokens'
 import { durations, springs } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
 import { sounds } from '@/hooks/useConfirmationSound'
+import { updateOfflineAction } from '@/storage/methods/offlineActions'
 import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
 import { getOnline } from '@/utils/net/online'
 import {
@@ -630,7 +631,12 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
         // (2) Persist before anything else. Once this resolves the money cannot
         //     be lost to a crash, a dead network or a closed app.
-        await savePending(storage, frame)
+        //
+        //     `confirm` is only ever supplied by the AWDL receive path (see
+        //     awdlTransport.receive's callers above and the QR/retry callers
+        //     below, which omit it) — the same signal `Unsettled` already keys
+        //     off of, reused here to attribute the queue row to a transport.
+        await savePending(storage, frame, confirm ? 'awdl' : 'qr')
 
         // (3) Only now is it safe to burn the session. Doing this first would
         //     mean a crash in between marks the session handled while nothing
@@ -695,7 +701,20 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         return
       }
       try {
-        const results = await processPending(wallet, storage, adminOriginator)
+        // Backfills who handed over a payment (and how) onto the offline_actions
+        // row internalizeAction may just have created while this device was
+        // offline — that row is written deep in the storage layer's hold path,
+        // which never sees the frame. Captured once here rather than inside
+        // `storage?.sqliteDb`, because `settleReceived` re-checks `storage`
+        // is non-null on every call and this closure must not re-derive that.
+        const db = storage.sqliteDb
+        const results = await processPending(wallet, storage, adminOriginator, async (txid, info) => {
+          if (!db) return
+          await updateOfflineAction(db, txid, {
+            senderIdentityKey: info.senderIdentityKey,
+            receivedVia: info.receivedVia
+          })
+        })
         const credited = results.some(r => r.success)
         setNotice(
           credited ? { text: t('local_pay_added'), tone: 'success' } : { text: t('local_pay_queued'), tone: 'info' }

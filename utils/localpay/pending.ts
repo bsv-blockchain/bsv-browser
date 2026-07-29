@@ -1,3 +1,4 @@
+import { Beef } from '@bsv/sdk'
 import type { PaymentFrame } from './codec'
 
 export const PENDING_KEY = 'localpay_pending'
@@ -14,6 +15,12 @@ export interface PendingPayment {
   status: PendingStatus
   failureReason?: string
   lastAttemptAt?: string
+  /**
+   * Which transport this frame arrived over ('awdl' | 'qr'), when the caller
+   * knows it. Threaded through so `processPending` can back-attribute the
+   * `offline_actions` row this internalize may create — see `attribute`.
+   */
+  receivedVia?: string
 }
 
 export interface KVStorage {
@@ -61,13 +68,18 @@ async function writeAll(storage: KVStorage, list: PendingPayment[]): Promise<voi
   await storage.setKeyValue(PENDING_KEY, JSON.stringify(list.map(toWire)))
 }
 
-export async function savePending(storage: KVStorage, frame: PaymentFrame): Promise<PendingPayment> {
+export async function savePending(
+  storage: KVStorage,
+  frame: PaymentFrame,
+  receivedVia?: string
+): Promise<PendingPayment> {
   return withQueueLock(async () => {
     const entry: PendingPayment = {
       id: `${Date.now()}_${frame.senderIdentityKey.slice(0, 8)}`,
       receivedAt: new Date().toISOString(),
       frame,
       status: 'pending',
+      receivedVia
     }
     await writeAll(storage, [...(await readAll(storage)), entry])
     return entry
@@ -102,10 +114,22 @@ interface InternalizingWallet {
   internalizeAction(args: unknown, originator?: string): Promise<unknown>
 }
 
+/**
+ * Backfills the identity of whoever handed over a payment, and how, onto the
+ * `offline_actions` row `internalizeAction` may have just created for it (only
+ * when this device was offline at the time — see `holdReqsOffline`, the sole
+ * writer of that row, which never sees the frame and so writes both columns
+ * null). Supplied by the caller rather than called directly from here: this
+ * module knows nothing about SQLite or the `offline_actions` table, only about
+ * the KV-backed queue in `PENDING_KEY`, and should stay that way.
+ */
+type AttributePayment = (txid: string, info: { senderIdentityKey: string; receivedVia?: string }) => Promise<void>
+
 export async function processPending(
   wallet: InternalizingWallet,
   storage: KVStorage,
-  originator: string
+  originator: string,
+  attribute?: AttributePayment
 ): Promise<{ id: string; success: boolean; error?: string }[]> {
   const results: { id: string; success: boolean; error?: string }[] = []
   for (const p of await getUnprocessed(storage)) {
@@ -132,6 +156,33 @@ export async function processPending(
       )
       await updateStatus(storage, p.id, 'completed')
       results.push({ id: p.id, success: true })
+
+      // Best-effort, and deliberately isolated from the try/catch above: by
+      // this point the payment has already completed successfully, so a
+      // failure here — a bad frame, a locked db — must not retroactively turn
+      // it into a 'failed' entry, and must not stop the loop from reaching
+      // whatever else is queued behind it.
+      if (attribute) {
+        try {
+          // internalizeAction's own resolved value carries no txid (the SDK's
+          // InternalizeActionResult is just `{ accepted: true }`), so it has to
+          // be derived from the frame itself. `frame.transaction` is an
+          // AtomicBEEF (see codec.ts), and `atomicTxid` is exactly the subject
+          // txid `internalizeAction` used internally to build the request that
+          // `holdReqsOffline` may have queued — see Beef.d.ts / the toolbox's
+          // own `validateAtomicBeef`.
+          const txid = Beef.fromBinary(p.frame.transaction).atomicTxid
+          if (txid) {
+            await attribute(txid, {
+              senderIdentityKey: p.frame.senderIdentityKey,
+              receivedVia: p.receivedVia
+            })
+          }
+        } catch {
+          // Not a readable BEEF, or the attribution write itself failed.
+          // Either way this is silent: the payment already succeeded above.
+        }
+      }
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e)
       await updateStatus(storage, p.id, 'failed', error)

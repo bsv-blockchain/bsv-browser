@@ -31,6 +31,17 @@ const row = (txid: string) => ({
   poisonedByTxid: txid
 })
 
+// A payer's own held payment can be rejected too, but it carries no attribution
+// — there is no counterparty to blame for a transaction the user sent themselves.
+const sentRow = (txid: string) => ({
+  ...row(txid),
+  offlineActionId: 2,
+  seq: 2,
+  role: 'sent' as const,
+  senderIdentityKey: null,
+  receivedVia: null
+})
+
 describe('OfflineNotice', () => {
   it('renders nothing when online with an empty queue', () => {
     const { toJSON } = render(<OfflineNotice online queued={0} rejected={[]} />)
@@ -51,5 +62,20 @@ describe('OfflineNotice', () => {
     const { getByText } = render(<OfflineNotice online queued={0} rejected={[row('aa'.repeat(32))]} />)
     expect(getByText(/02cccc/i)).toBeTruthy()
     expect(getByText(/rejected/i)).toBeTruthy()
+  })
+
+  it('renders nothing online with an empty queue and no rejections of either kind', () => {
+    const { toJSON } = render(<OfflineNotice online queued={0} rejected={[]} sentRejected={[]} />)
+    expect(toJSON()).toBeNull()
+  })
+
+  it('shows a distinct notice for a payment the user sent that could not be delivered, unattributed', () => {
+    const { getByText, queryByText } = render(
+      <OfflineNotice online queued={0} rejected={[]} sentRejected={[sentRow('bb'.repeat(32))]} />
+    )
+    expect(getByText(/could not be delivered/i)).toBeTruthy()
+    // There is no counterparty to name for the user's own failed send — this
+    // must never borrow the received-side "who handed it over" copy.
+    expect(queryByText(/handed over/i)).toBeNull()
   })
 })

@@ -104,6 +104,7 @@ export default function PayScreen() {
   const { walletBuilding, walletBuilt, storage } = useWallet()
   const [queued, setQueued] = useState(0)
   const [rejected, setRejected] = useState<OfflineActionRow[]>([])
+  const [sentRejected, setSentRejected] = useState<OfflineActionRow[]>([])
 
   // Refreshed whenever the wallet finishes building or connectivity changes:
   // the queue only moves when the network state does, so there is no need to
@@ -121,10 +122,13 @@ export default function PayScreen() {
         // 'sent'-role rows can be rejected too (a payer's own held payment can be
         // poisoned), but they carry no senderIdentityKey or receivedVia — those
         // are only ever recorded on the receiving side (see
-        // storage/StorageExpoSQLite.ts's holdReqsOffline). Showing one through
-        // OfflineNotice's "who handed you this" copy would misreport the user's
-        // own failed payment as someone else's fraud against them.
+        // storage/StorageExpoSQLite.ts's holdReqsOffline, and
+        // utils/localpay/pending.ts's processPending, which backfills them
+        // after the fact). Showing one through OfflineNotice's "who handed you
+        // this" copy would misreport the user's own failed payment as someone
+        // else's fraud against them, so it gets its own unattributed notice.
         setRejected(rows.filter(r => r.status === 'rejected' && r.role === 'received'))
+        setSentRejected(rows.filter(r => r.status === 'rejected' && r.role === 'sent'))
       } catch {
         // This banner is advisory, never load-bearing. A read failure here must
         // not break the rest of the screen — the grid still has to render.
@@ -181,7 +185,7 @@ export default function PayScreen() {
 
   const grid = () => (
     <View style={styles.grid}>
-      <OfflineNotice online={online} queued={queued} rejected={rejected} />
+      <OfflineNotice online={online} queued={queued} rejected={rejected} sentRejected={sentRejected} />
       {/* Direction first: it is what the user already knows. */}
       <View style={[styles.segment, { backgroundColor: colors.fillTertiary }]}>
         {(['pay', 'get'] as const).map(d => {

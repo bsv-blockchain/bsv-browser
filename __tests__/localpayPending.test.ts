@@ -3,6 +3,7 @@ import {
   markSessionSpent, isSessionSpent, PENDING_KEY, SPENT_KEY,
 } from '@/utils/localpay/pending'
 import { FRAME_VERSION, type PaymentFrame } from '@/utils/localpay/codec'
+import { Transaction, Beef, LockingScript } from '@bsv/sdk'
 
 function fakeStorage() {
   const map = new Map<string, string>()
@@ -22,6 +23,22 @@ const frame = (): PaymentFrame => ({
   derivationSuffix: 'c3VmZml4',
   transaction: new Uint8Array([9, 9, 9]),
 })
+
+// A real AtomicBEEF, distinct from `frame()`'s placeholder bytes: attribution
+// derives the txid by actually parsing the frame's transaction (internalizeAction's
+// own resolved value carries no txid — see utils/localpay/pending.ts's processPending),
+// so exercising that path needs bytes Beef.fromBinary can actually read.
+function atomicBeefFixture(): { txid: string; transaction: Uint8Array } {
+  const tx = new Transaction()
+  tx.addOutput({
+    satoshis: 1000,
+    lockingScript: LockingScript.fromHex('76a914000000000000000000000000000000000000000088ac')
+  })
+  const txid = tx.id('hex')
+  const beef = new Beef()
+  beef.mergeTransaction(tx)
+  return { txid, transaction: new Uint8Array(beef.toBinaryAtomic(txid)) }
+}
 
 describe('localpay pending queue', () => {
   it('persists under the localpay key', async () => {
@@ -113,6 +130,67 @@ describe('localpay pending queue', () => {
     expect(wallet.internalizeAction).toHaveBeenCalledTimes(1)
     expect(results).toEqual([expect.objectContaining({ success: true })])
     expect((await getPending(s))[0].status).toBe('completed')
+  })
+
+  it('records the transport a payment arrived over, when the caller knows it', async () => {
+    const s = fakeStorage()
+    await savePending(s, frame(), 'awdl')
+    expect((await getPending(s))[0].receivedVia).toBe('awdl')
+  })
+
+  it('leaves the transport unset when the caller does not pass one', async () => {
+    const s = fakeStorage()
+    await savePending(s, frame())
+    expect((await getPending(s))[0].receivedVia).toBeUndefined()
+  })
+
+  it('attributes the queue row with the sender identity and transport after a successful internalize', async () => {
+    const s = fakeStorage()
+    const { txid, transaction } = atomicBeefFixture()
+    await savePending(s, { ...frame(), transaction }, 'awdl')
+    const wallet = { internalizeAction: jest.fn().mockResolvedValue({ accepted: true }) }
+    const attribute = jest.fn().mockResolvedValue(undefined)
+    await processPending(wallet as never, s, 'admin.com', attribute)
+    expect(attribute).toHaveBeenCalledWith(txid, {
+      senderIdentityKey: '02'.padEnd(66, 'c'),
+      receivedVia: 'awdl'
+    })
+  })
+
+  it('does not fail the payment or stop the queue when attribution throws', async () => {
+    const s = fakeStorage()
+    const { transaction } = atomicBeefFixture()
+    await savePending(s, { ...frame(), transaction }, 'awdl')
+    const wallet = { internalizeAction: jest.fn().mockResolvedValue({ accepted: true }) }
+    const attribute = jest.fn().mockRejectedValue(new Error('database is locked'))
+    const results = await processPending(wallet as never, s, 'admin.com', attribute)
+    expect(results).toEqual([expect.objectContaining({ success: true })])
+    expect((await getPending(s))[0].status).toBe('completed')
+  })
+
+  it("does not stop the loop when one entry's attribution throws and another follows", async () => {
+    const s = fakeStorage()
+    const { transaction } = atomicBeefFixture()
+    await savePending(s, { ...frame(), transaction }, 'awdl')
+    await savePending(s, { ...frame(), transaction }, 'qr')
+    const wallet = { internalizeAction: jest.fn().mockResolvedValue({ accepted: true }) }
+    const attribute = jest.fn().mockRejectedValueOnce(new Error('database is locked')).mockResolvedValueOnce(undefined)
+    const results = await processPending(wallet as never, s, 'admin.com', attribute)
+    expect(results).toEqual([expect.objectContaining({ success: true }), expect.objectContaining({ success: true })])
+    expect(attribute).toHaveBeenCalledTimes(2)
+  })
+
+  it('skips attribution rather than throwing when the frame is not a readable BEEF', async () => {
+    // frame()'s placeholder transaction bytes ([9, 9, 9]) are not a real BEEF —
+    // Beef.fromBinary rejects them. A legacy or malformed frame must not crash
+    // an otherwise-successful internalize.
+    const s = fakeStorage()
+    await savePending(s, frame(), 'awdl')
+    const wallet = { internalizeAction: jest.fn().mockResolvedValue({ accepted: true }) }
+    const attribute = jest.fn()
+    const results = await processPending(wallet as never, s, 'admin.com', attribute)
+    expect(results).toEqual([expect.objectContaining({ success: true })])
+    expect(attribute).not.toHaveBeenCalled()
   })
 
   it('concurrent saves both persist via serialization', async () => {
