@@ -179,8 +179,22 @@ On `invalidTx` or `doubleSpend` for transaction X:
 - X's req → `invalid` / `doubleSpend`; X's transaction → `failed`, which
   releases allocated inputs and marks its outputs not spendable
   (`StorageProvider.js:421`);
-- every queued **descendant** of X gets the same treatment, with
-  `poisonedByTxid = X`;
+- every **descendant** of X gets the same treatment, with `poisonedByTxid = X`
+  — and **children first, parents last**. Corrected 2026-07-28 after the Task 9
+  review. `updateTransactionStatus('failed')` releases a transaction's *own*
+  inputs and then marks its *own* outputs unspendable
+  (`StorageProvider.js:421-424`), so failing a parent before its child lets the
+  child's failure hand the parent's outputs back as `spendable: true`, with
+  nothing running afterwards to re-mark them — network-refused money spendable
+  again. `EntityTransaction.getInputs` re-finds the parent output by
+  `txid`+`vout` regardless of `spentBy` being cleared, so parent-first is
+  unsalvageable rather than merely order-sensitive. The cascade order is
+  `releaseOrder` **reversed**; reversing `descendantsOf`'s breadth-first output
+  is *not* a topological order and gets this wrong.
+- descendants are found across a graph widened with the wallet's own local
+  spenders, not just the merged BEEF. BEEFs reach backwards, so a transaction
+  we created by re-spending offline is absent from its parent's BEEF and would
+  otherwise escape the cascade entirely.
 - each affected req gains a history note
   `{ what: 'offlineRejected', poisonedBy, senderIdentityKey, receivedVia, receivedAt, arcStatus }`.
 
