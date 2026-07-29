@@ -1,10 +1,19 @@
 /**
- * Two things the user must be told, in one place.
+ * Three things the user must be told, in one place.
  *
  * While offline: which rails still work and how many payments are waiting to be
- * broadcast. After a rejection: which payment the network refused and who
- * handed it over — that identity key is the only recourse the user has, so the
- * row persists rather than toasting away.
+ * broadcast. While ONLINE with a queue that has not drained: that those payments
+ * still have not reached the network. After a rejection: which payment the
+ * network refused and who handed it over — that identity key is the only
+ * recourse the user has, so the row persists rather than toasting away.
+ *
+ * The online-with-a-queue case is not cosmetic. `processOfflineActions` can stall
+ * permanently — behind a foreign ancestor no service will accept, or on a row
+ * whose request has gone — and it reports that only as `stalledOn`, whose one
+ * consumer writes it into the monitor's log string
+ * (`utils/monitor/TaskSendOffline.ts`). Nothing else in the system records it. If
+ * this component went blank the moment signal returned, a user would watch a
+ * stuck payment behave exactly like a settled one.
  *
  * A rejection can also be the user's OWN outbound payment — a held send can be
  * poisoned same as a held receive (see app/pay.tsx's role split). That gets a
@@ -44,7 +53,7 @@ export interface OfflineNoticeProps {
 export default function OfflineNotice({ online, queued, rejected, sentRejected = [] }: OfflineNoticeProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  if (online && rejected.length === 0 && sentRejected.length === 0) return null
+  if (online && queued === 0 && rejected.length === 0 && sentRejected.length === 0) return null
 
   return (
     <View style={styles.wrap}>
@@ -55,6 +64,22 @@ export default function OfflineNotice({ online, queued, rejected, sentRejected =
             <Text style={[styles.title, { color: colors.textPrimary }]}>{t('pay_offline_title')}</Text>
             <Text style={[styles.body, { color: colors.textSecondary }]}>
               {queued > 0 ? t('pay_offline_queued', { count: queued }) : t('pay_offline_body')}
+            </Text>
+          </View>
+        </View>
+      )}
+      {/* Online and still queued. The offline card above already carries the
+          count, so this is the case it cannot cover: signal is back and the
+          queue has not drained, which is either a run that has not happened yet
+          or one that never will. Same honesty rule as everywhere else in this
+          feature — waiting to be broadcast, never settled. */}
+      {online && queued > 0 && (
+        <View style={[styles.card, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}>
+          <Ionicons name="time-outline" size={18} color={colors.textSecondary} />
+          <View style={styles.text}>
+            <Text style={[styles.title, { color: colors.textPrimary }]}>{t('pay_offline_pending_title')}</Text>
+            <Text style={[styles.body, { color: colors.textSecondary }]}>
+              {t('pay_offline_pending_body', { count: queued })}
             </Text>
           </View>
         </View>

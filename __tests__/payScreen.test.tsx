@@ -216,6 +216,21 @@ describe('PayScreen', () => {
     await findByText('pay_offline_queued')
   })
 
+  it('surfaces a still-queued payment while online, not only while offline', async () => {
+    // A queue that will never drain (a foreign ancestor no service accepts, a
+    // row whose request has gone) is recorded only in the monitor's log string,
+    // so /pay is the one place the user can learn about it.
+    const rows = [offlineRow({ txid: 'ee'.repeat(32), role: 'received', status: 'queued' })]
+    mockOnline = true
+    mockStorage = {
+      sqliteDb: { getAllAsync: async () => rows, runAsync: async () => undefined, getFirstAsync: async () => undefined }
+    }
+    const { findByText, queryByText } = draw()
+    await findByText('pay_offline_pending_title')
+    // Not the offline card: the device has signal.
+    expect(queryByText('pay_offline_title')).toBeNull()
+  })
+
   it('keeps the grid working when the queue read itself fails', async () => {
     // The banner is advisory, never load-bearing (see app/pay.tsx's queue
     // effect). A broken read must not take the rest of the screen down with it.

@@ -58,6 +58,30 @@ describe('OfflineNotice', () => {
     expect(getByText(/2/)).toBeTruthy()
   })
 
+  // The drain can stall permanently (a foreign ancestor no service accepts, a
+  // row whose request has vanished) and records that nowhere the user can see.
+  // Going blank the moment signal returns would make a stuck payment look
+  // exactly like a settled one.
+  it('still reports a non-empty queue once back online', () => {
+    const { getByText } = render(<OfflineNotice online queued={3} rejected={[]} />)
+    expect(getByText(/3/)).toBeTruthy()
+  })
+
+  it('never says a queued payment has settled, online or off', () => {
+    const { getByText } = render(<OfflineNotice online queued={1} rejected={[]} />)
+    // The negation is the load-bearing part of the copy: "not reached the
+    // network yet", never "received" or "settled".
+    expect(getByText(/not reached the network yet/i)).toBeTruthy()
+    expect(getByText(/nothing is settled until/i)).toBeTruthy()
+  })
+
+  it('does not double up the queue count on the offline card', () => {
+    // Offline, the offline card already carries the count; a second card saying
+    // the same thing is noise.
+    const { queryByText } = render(<OfflineNotice online={false} queued={2} rejected={[]} />)
+    expect(queryByText(/not reached the network yet/i)).toBeNull()
+  })
+
   it('shows a rejection with its sender even when back online', () => {
     const { getByText } = render(<OfflineNotice online queued={0} rejected={[row('aa'.repeat(32))]} />)
     expect(getByText(/02cccc/i)).toBeTruthy()

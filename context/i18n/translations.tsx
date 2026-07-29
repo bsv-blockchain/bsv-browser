@@ -411,6 +411,9 @@ const resources = {
       pay_offline_title: 'You’re offline',
       pay_offline_body: 'Only nearby payments work right now. They will broadcast once you reconnect.',
       pay_offline_queued: '{{count}} payment(s) waiting to be broadcast when you reconnect.',
+      pay_offline_pending_title: 'Waiting to be broadcast',
+      pay_offline_pending_body:
+        '{{count}} payment(s) have not reached the network yet. Nothing is settled until they do — this keeps retrying.',
       pay_offline_needs_internet: 'Needs internet',
       pay_offline_rejected_title: 'A payment was rejected',
       pay_offline_rejected_body: 'The network refused a payment handed over by {{sender}} via {{via}} on {{when}}.',
@@ -719,6 +722,8 @@ const resources = {
       pay_offline_title: '已离线',
       pay_offline_body: '目前仅附近支付可用，重新联网后会自动广播。',
       pay_offline_queued: '{{count}} 笔付款正等待您重新联网后广播。',
+      pay_offline_pending_title: '等待广播',
+      pay_offline_pending_body: '{{count}} 笔付款尚未到达网络。在到达之前一切都未完成，系统会持续重试。',
       pay_offline_needs_internet: '需要联网',
       pay_offline_rejected_title: '一笔付款被拒绝',
       pay_offline_rejected_body: '网络拒绝了由 {{sender}} 于 {{when}} 通过 {{via}} 转来的付款。',
@@ -1030,6 +1035,9 @@ const resources = {
       pay_offline_title: 'आप ऑफ़लाइन हैं',
       pay_offline_body: 'अभी केवल नज़दीकी भुगतान काम करते हैं। दोबारा नेटवर्क मिलते ही ये प्रसारित हो जाएँगे।',
       pay_offline_queued: '{{count}} भुगतान नेटवर्क मिलने पर प्रसारित होने की प्रतीक्षा में हैं।',
+      pay_offline_pending_title: 'प्रसारित होने की प्रतीक्षा में',
+      pay_offline_pending_body:
+        '{{count}} भुगतान अभी नेटवर्क तक नहीं पहुँचे हैं। पहुँचने तक कुछ भी पूरा नहीं हुआ — कोशिश जारी रहेगी।',
       pay_offline_needs_internet: 'इंटरनेट ज़रूरी है',
       pay_offline_rejected_title: 'एक भुगतान अस्वीकार कर दिया गया',
       pay_offline_rejected_body:
@@ -1344,6 +1352,9 @@ const resources = {
       pay_offline_body:
         'Solo los pagos cercanos funcionan ahora mismo. Se transmitirán en cuanto vuelvas a tener conexión.',
       pay_offline_queued: '{{count}} pago(s) esperando para transmitirse en cuanto vuelvas a tener conexión.',
+      pay_offline_pending_title: 'Esperando para transmitirse',
+      pay_offline_pending_body:
+        '{{count}} pago(s) aún no han llegado a la red. Nada queda liquidado hasta que lleguen; se seguirá intentando.',
       pay_offline_needs_internet: 'Necesita conexión',
       pay_offline_rejected_title: 'Se rechazó un pago',
       pay_offline_rejected_body: 'La red rechazó un pago entregado por {{sender}} a través de {{via}} el {{when}}.',
@@ -1651,6 +1662,9 @@ const resources = {
       pay_offline_body:
         'Seuls les paiements à proximité fonctionnent pour l’instant. Ils seront diffusés dès que vous serez reconnecté.',
       pay_offline_queued: '{{count}} paiement(s) en attente de diffusion dès que vous serez reconnecté.',
+      pay_offline_pending_title: 'En attente de diffusion',
+      pay_offline_pending_body:
+        '{{count}} paiement(s) n’ont pas encore atteint le réseau. Rien n’est réglé avant qu’ils y parviennent ; les tentatives continuent.',
       pay_offline_needs_internet: 'Connexion requise',
       pay_offline_rejected_title: 'Un paiement a été refusé',
       pay_offline_rejected_body: 'Le réseau a refusé un paiement remis par {{sender}} via {{via}} le {{when}}.',
@@ -1954,6 +1968,9 @@ const resources = {
       pay_offline_title: 'أنت غير متصل بالإنترنت',
       pay_offline_body: 'تعمل الآن المدفوعات القريبة فقط. سيتم نشرها بمجرد اتصالك مجددًا.',
       pay_offline_queued: 'هناك {{count}} من المدفوعات في انتظار النشر بمجرد اتصالك مجددًا.',
+      pay_offline_pending_title: 'في انتظار النشر',
+      pay_offline_pending_body:
+        'لم تصل {{count}} من المدفوعات إلى الشبكة بعد. لا شيء مكتمل حتى تصل، وستتم إعادة المحاولة.',
       pay_offline_needs_internet: 'يتطلب اتصالًا بالإنترنت',
       pay_offline_rejected_title: 'تم رفض دفعة',
       pay_offline_rejected_body: 'رفضت الشبكة دفعة سلّمها {{sender}} عبر {{via}} في {{when}}.',
@@ -2260,6 +2277,9 @@ const resources = {
       pay_offline_title: 'Você está offline',
       pay_offline_body: 'Só os pagamentos por perto funcionam agora. Eles serão publicados assim que você reconectar.',
       pay_offline_queued: '{{count}} pagamento(s) aguardando publicação assim que você reconectar.',
+      pay_offline_pending_title: 'Aguardando publicação',
+      pay_offline_pending_body:
+        '{{count}} pagamento(s) ainda não chegaram à rede. Nada está concluído até chegarem; as tentativas continuam.',
       pay_offline_needs_internet: 'Precisa de internet',
       pay_offline_rejected_title: 'Um pagamento foi rejeitado',
       pay_offline_rejected_body: 'A rede rejeitou um pagamento entregue por {{sender}} via {{via}} em {{when}}.',
@@ -2565,6 +2585,9 @@ const resources = {
       pay_offline_title: 'আপনি অফলাইনে আছেন',
       pay_offline_body: 'এখন শুধু কাছাকাছি পেমেন্ট কাজ করছে। আপনি আবার সংযুক্ত হলেই সেগুলো প্রকাশ করা হবে।',
       pay_offline_queued: '{{count}}টি পেমেন্ট আপনার আবার সংযুক্ত হওয়ার অপেক্ষায় আছে, তখনই সেগুলো প্রকাশ করা হবে।',
+      pay_offline_pending_title: 'প্রকাশের অপেক্ষায়',
+      pay_offline_pending_body:
+        '{{count}}টি পেমেন্ট এখনও নেটওয়ার্কে পৌঁছায়নি। পৌঁছানো পর্যন্ত কিছুই সম্পন্ন হয়নি — চেষ্টা চলতে থাকবে।',
       pay_offline_needs_internet: 'ইন্টারনেট প্রয়োজন',
       pay_offline_rejected_title: 'একটি পেমেন্ট প্রত্যাখ্যান করা হয়েছে',
       pay_offline_rejected_body:
@@ -2873,6 +2896,9 @@ const resources = {
       pay_offline_body:
         'Сейчас работают только платежи поблизости. Они будут опубликованы, как только вы снова окажетесь в сети.',
       pay_offline_queued: '{{count}} платеж(ей) ожидают публикации, как только вы снова окажетесь в сети.',
+      pay_offline_pending_title: 'Ожидают публикации',
+      pay_offline_pending_body:
+        '{{count}} платеж(ей) ещё не дошли до сети. Пока не дойдут, ничего не завершено; попытки продолжаются.',
       pay_offline_needs_internet: 'Нужен интернет',
       pay_offline_rejected_title: 'Платёж был отклонён',
       pay_offline_rejected_body: 'Сеть отклонила платёж, переданный {{sender}} через {{via}} {{when}}.',
@@ -3179,6 +3205,9 @@ const resources = {
       pay_offline_body:
         'Saat ini hanya pembayaran di dekat Anda yang berfungsi. Pembayaran akan dipublikasikan begitu Anda tersambung kembali.',
       pay_offline_queued: '{{count}} pembayaran menunggu untuk dipublikasikan begitu Anda tersambung kembali.',
+      pay_offline_pending_title: 'Menunggu dipublikasikan',
+      pay_offline_pending_body:
+        '{{count}} pembayaran belum sampai ke jaringan. Belum ada yang selesai sebelum sampai; percobaan akan terus dilakukan.',
       pay_offline_needs_internet: 'Perlu internet',
       pay_offline_rejected_title: 'Sebuah pembayaran ditolak',
       pay_offline_rejected_body:
@@ -3501,6 +3530,9 @@ const resources = {
       pay_offline_title: 'オフラインです',
       pay_offline_body: '現在は近くへの支払いのみ利用できます。再接続すると自動的に公開されます。',
       pay_offline_queued: '{{count}}件の支払いが、再接続後に公開されるのを待っています。',
+      pay_offline_pending_title: '公開待ち',
+      pay_offline_pending_body:
+        '{{count}}件の支払いがまだネットワークに届いていません。届くまでは完了ではなく、再試行を続けます。',
       pay_offline_needs_internet: 'インターネットが必要です',
       pay_offline_rejected_title: '支払いが拒否されました',
       pay_offline_rejected_body: 'ネットワークは、{{when}}に{{via}}経由で{{sender}}から渡された支払いを拒否しました。',
@@ -3824,6 +3856,9 @@ const resources = {
       pay_offline_body:
         'Teraz działają tylko płatności w pobliżu. Zostaną opublikowane, gdy tylko połączysz się ponownie.',
       pay_offline_queued: '{{count}} płatności czeka na opublikowanie, gdy tylko połączysz się ponownie.',
+      pay_offline_pending_title: 'Oczekuje na opublikowanie',
+      pay_offline_pending_body:
+        '{{count}} płatności jeszcze nie dotarły do sieci. Nic nie jest rozliczone, dopóki nie dotrą; próby będą ponawiane.',
       pay_offline_needs_internet: 'Wymaga internetu',
       pay_offline_rejected_title: 'Płatność została odrzucona',
       pay_offline_rejected_body:
