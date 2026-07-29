@@ -2244,10 +2244,24 @@ export async function processOfflineActions(args: {
   return { sent, rejected, stopped: false }
 }
 
-/** Post a transaction this wallet owns, reusing the toolbox's bookkeeping. */
+/**
+ * Post a transaction this wallet owns, reusing the toolbox's bookkeeping.
+ *
+ * The request has to leave 'nosend' for the post — `attemptToPostReqsToNetwork`
+ * only acts on a sendable status — and it has to go BACK to 'nosend' if the post
+ * did not succeed. On a service error the toolbox leaves it at 'sending' with
+ * `attempts` incremented, which is exactly the state `TaskSendWaiting` picks up
+ * every five minutes and `applyProofTimeout` eventually marks 'invalid'
+ * (`EntityProvenTxReq.js:426-433`). Leaving it there would hand blocker 4 back
+ * to us on the first failed release attempt, and out of dependency order at
+ * that. Restoring the hold keeps release ordered and keeps `attempts` still.
+ *
+ * The module function is imported directly rather than called as
+ * `storage.attemptToPostReqsToNetwork`, so Task 8's offline override does not
+ * intercept it — by the time this runs we are online by definition.
+ */
 async function postOwned(storage: StorageExpoSQLite, req: EntityProvenTxReq | undefined): Promise<PostOutcome> {
   if (!req) return 'invalidTx'
-  // 'nosend' is a held state; attemptToPostReqsToNetwork expects a sendable one.
   await storage.updateProvenTxReq(req.id, { status: 'unsent' })
   req.status = 'unsent'
   const r = await storage.runAsStorageProvider(async (sp: any) => await attemptToPostReqsToNetwork(sp, [req]))
@@ -2255,6 +2269,13 @@ async function postOwned(storage: StorageExpoSQLite, req: EntityProvenTxReq | un
   if (status === 'success') return 'success'
   if (status === 'doubleSpend') return 'doubleSpend'
   if (status === 'invalidTx' || status === 'invalid') return 'invalidTx'
+
+  // Service error: re-hold, and put the transaction back to 'unproven' so the
+  // outputs stay spendable and nothing sweeps it while we wait for signal.
+  await storage.updateProvenTxReq(req.id, { status: 'nosend' })
+  for (const transactionId of req.notify.transactionIds ?? []) {
+    await storage.updateTransactionStatus('unproven', transactionId)
+  }
   return 'serviceError'
 }
 
