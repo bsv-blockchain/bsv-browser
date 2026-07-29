@@ -69,20 +69,29 @@ describe('planRelease', () => {
 describe('applyOutcome', () => {
   it('marks a success sent and keeps going', () => {
     const r = applyOutcome({ txid: 'A', outcome: 'success', txs: [tx('A')], rows: [row('A')] })
-    expect(r).toEqual({ stop: false, sent: ['A'], rejected: [] })
+    expect(r).toEqual({ sent: ['A'], rejected: [], blocked: [] })
   })
 
-  it('stops the run on a service error without rejecting anything', () => {
+  it('blocks the failed transaction on a service error without rejecting anything', () => {
     const r = applyOutcome({ txid: 'A', outcome: 'serviceError', txs: [tx('A')], rows: [row('A')] })
-    expect(r.stop).toBe(true)
+    expect(r.blocked).toEqual(['A'])
     expect(r.sent).toEqual([])
     expect(r.rejected).toEqual([])
+  })
+
+  it('a serviceError blocks the failed transaction and every descendant, nothing else', () => {
+    // A ← B ← C, plus independent D
+    const txs = [tx('A'), tx('B', ['A']), tx('C', ['B']), tx('D')]
+    const r = applyOutcome({ txid: 'A', outcome: 'serviceError', txs, rows: [row('A'), row('D')] })
+    expect(r.sent).toEqual([])
+    expect(r.rejected).toEqual([])
+    expect([...r.blocked].sort()).toEqual(['A', 'B', 'C'])
   })
 
   it('rejects the transaction and every descendant on invalidTx', () => {
     const txs = [tx('A'), tx('B', ['A']), tx('C', ['B'])]
     const r = applyOutcome({ txid: 'A', outcome: 'invalidTx', txs, rows: [row('A'), row('B'), row('C')] })
-    expect(r.stop).toBe(true)
+    expect(r.blocked).toEqual([])
     expect(r.rejected.map(x => x.txid).sort()).toEqual(['A', 'B', 'C'])
     expect(r.rejected.every(x => x.poisonedByTxid === 'A')).toBe(true)
   })

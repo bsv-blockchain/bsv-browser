@@ -191,4 +191,45 @@ describe('processOfflineActions', () => {
     expect(r).toMatchObject({ sent: 1, rejected: 0, stopped: false })
     expect(r.stalledOn).toBeUndefined()
   })
+
+  it('a failed root does not block an independent root in the same run', async () => {
+    // Two unrelated queued transactions A and D, neither spending the other and
+    // neither sharing an ancestor. Posting A fails with a service error; D must
+    // still be posted and marked sent in the SAME run rather than requeued
+    // behind A the way a run-global stop used to do.
+    const a = txSpending('11'.repeat(32))
+    const d = txSpending('22'.repeat(32))
+    const aId = a.id('hex')
+    const dId = d.id('hex')
+
+    const aReq = req({ provenTxReqId: 1, txid: aId, rawTx: a.toBinary() })
+    const dReq = req({ provenTxReqId: 2, txid: dId, rawTx: d.toBinary() })
+    mockPostReqs.mockImplementation(async (_storage: unknown, reqs: { txid: string }[]) => {
+      const target = reqs[0]
+      if (target.txid === dId) {
+        dReq.status = 'unmined'
+        return { details: [{ txid: dId, status: 'success' }] }
+      }
+      // aReq is left at 'nosend' (postOwned's re-hold on serviceError), so a
+      // repeated release of this same run's plan does not confuse the picture.
+      return { details: [{ txid: aId, status: 'serviceError' }] }
+    })
+
+    const db = fakeDb([row({ txid: aId, seq: 1 }), row({ offlineActionId: 2, txid: dId, seq: 2 })])
+    const storage = fakeStorage({ db, reqs: [aReq, dReq] })
+
+    const r = await processOfflineActions({ storage: storage as never })
+
+    expect(r.sent).toBe(1)
+    expect(r.stopped).toBe(true)
+    expect(lastStatusWritten(db, aId)).toBe('queued')
+    expect(lastStatusWritten(db, dId)).toBe('sent')
+  })
 })
+
+/** The last status a driver write set for a txid, read back out of the raw SQL log. */
+function lastStatusWritten(db: ReturnType<typeof fakeDb>, txid: string): string | undefined {
+  const writes = db.writes.filter(w => w.sql.includes('status = ?') && w.params[w.params.length - 1] === txid)
+  const last = writes[writes.length - 1]
+  return last ? (last.params[1] as string) : undefined
+}

@@ -45,12 +45,14 @@ export function planRelease(args: {
  * Turn one broadcast result into state changes.
  *
  *  · success      — this transaction is out; continue down the list.
- *  · serviceError — no evidence of invalidity, only of no network. Stop the run
- *                   and leave everything queued. Never reject on this.
+ *  · serviceError — no evidence of invalidity, only of no network. Block the
+ *                   failed transaction and everything that spends it, leaving
+ *                   them queued, but let every other, independent root in the
+ *                   plan keep going. Never reject on this.
  *  · invalidTx /
  *    doubleSpend  — the network refuses it, so no descendant of it can ever be
- *                   valid. Reject it and every descendant, and stop, because
- *                   anything later in the order may depend on it.
+ *                   valid. Reject it and every descendant; nothing is left to
+ *                   skip, because a rejection is final rather than deferred.
  *
  * `rows` is accepted so a caller hands the same pair of arguments to this and to
  * `planRelease`, but the cascade deliberately never consults it. Descendants are
@@ -74,13 +76,23 @@ export function applyOutcome(args: {
   txs: OrderableTx[]
   rows: OfflineActionRow[]
 }): {
-  stop: boolean
   sent: string[]
   rejected: { txid: string; reason: string; poisonedByTxid: string }[]
+  /**
+   * Txids that must be skipped for the rest of this run and left queued: the
+   * failed transaction plus everything that spends it. A serviceError carries
+   * no verdict, so nothing is rejected — but no descendant may post before its
+   * parent, and every OTHER root in the plan is unaffected and keeps going.
+   * The old run-global `stop` made one unreachable service poison a whole
+   * queue of independent payments per pass.
+   */
+  blocked: string[]
 } {
   const { txid, outcome, txs } = args
-  if (outcome === 'success') return { stop: false, sent: [txid], rejected: [] }
-  if (outcome === 'serviceError') return { stop: true, sent: [], rejected: [] }
+  if (outcome === 'success') return { sent: [txid], rejected: [], blocked: [] }
+  if (outcome === 'serviceError') {
+    return { sent: [], rejected: [], blocked: [txid, ...descendantsOf(txid, txs)] }
+  }
 
   const reason =
     outcome === 'doubleSpend'
@@ -103,7 +115,7 @@ export function applyOutcome(args: {
     reason: t === txid ? reason : `an ancestor was rejected: ${reason}`,
     poisonedByTxid: txid
   }))
-  return { stop: true, sent: [], rejected }
+  return { sent: [], rejected, blocked: [] }
 }
 
 /**

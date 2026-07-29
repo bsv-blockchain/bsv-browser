@@ -32,7 +32,7 @@ import {
   undecidedReqStatuses,
   type PostOutcome
 } from '../../utils/offline/plan'
-import type { OrderableTx } from '../../utils/offline/order'
+import { descendantsOf, type OrderableTx } from '../../utils/offline/order'
 import { devLog } from '../../utils/logging'
 import { getOnline } from '../../utils/net/online'
 
@@ -41,7 +41,12 @@ export interface ProcessOfflineActionsResult {
   sent: number
   /** Transactions whose local records were changed to record a rejection. */
   rejected: number
-  /** True if the run did not reach the end of its plan, so there is more to do. */
+  /**
+   * True if at least one subtree of the plan could not finish and was left
+   * queued. The run itself always walks the whole plan — a blocked subtree no
+   * longer aborts release of the rest — so this reports partial, not total,
+   * failure; there may still be more to do next pass.
+   */
   stopped: boolean
   /**
    * Why the queue cannot make progress by simply being retried.
@@ -132,24 +137,27 @@ export async function processOfflineActions(args: {
       blocked.push(`the beef of ${row.txid} could not be read`)
     }
   }
-  const stalledOn = blocked.length > 0 ? blocked.join('; ') : undefined
-
   const txs: OrderableTx[] = merged.txs
   const plan = planRelease({ rows, txs })
 
   let sent = 0
   let rejected = 0
   const resolved = new Set<string>()
+  const skip = new Set<string>()
+  const stallNotes: string[] = blocked.length > 0 ? [...blocked] : []
+
   for (const step of plan) {
+    if (skip.has(step.txid)) continue
     const action = step.owned ? held.get(step.txid) : undefined
     if (step.owned && !action) {
       // Its request is gone, so it can never be posted — and nothing downstream
-      // of it may go out either, or it becomes an orphan. Stop rather than reject:
-      // this is a local anomaly, not a verdict from the network, and 'failed' is
-      // not reversible.
-      devLog(`[processOfflineActions] stopping: no request to release ${step.txid} with`)
-      await requeue(db, plan, resolved)
-      return { sent, rejected, stopped: true, stalledOn: stalledOn ?? `${step.txid} has no request to release it with` }
+      // of it may go out either, or it becomes an orphan. Skip the subtree and
+      // keep releasing independent roots: this is a local anomaly, not a
+      // network verdict, and 'failed' is not reversible.
+      skip.add(step.txid)
+      for (const d of descendantsOf(step.txid, txs)) skip.add(d)
+      stallNotes.push(`${step.txid} has no request to release it with`)
+      continue
     }
     if (action) await updateOfflineAction(db, step.txid, { status: 'posting' })
 
@@ -182,19 +190,22 @@ export async function processOfflineActions(args: {
         devLog(`[processOfflineActions] could not record the rejection of ${r.txid}:`, e)
       }
     }
-    if (result.stop) {
-      await requeue(db, plan, resolved)
+    for (const b of result.blocked) skip.add(b)
+    if (result.blocked.length > 0 && !action) {
       // A foreign ancestor no service would take blocks everything behind it and
-      // retrying will not change that, whereas our own failed post is the ordinary
-      // "signal went away" case the next run picks up.
-      const foreign = !action && outcome === 'serviceError'
-      const why = foreign
-        ? `${step.txid} is an ancestor from another wallet's beef that no service would accept`
-        : undefined
-      return { sent, rejected, stopped: true, stalledOn: stalledOn ?? why }
+      // retrying will not change that, whereas our own failed post is the
+      // ordinary "signal went away" case the next run picks up.
+      stallNotes.push(`${step.txid} is an ancestor from another wallet's beef that no service would accept`)
     }
   }
-  return { sent, rejected, stopped: false, stalledOn }
+
+  await requeue(db, plan, resolved)
+  return {
+    sent,
+    rejected,
+    stopped: skip.size > 0,
+    stalledOn: stallNotes.length > 0 ? stallNotes.join('; ') : undefined
+  }
 }
 
 /**
