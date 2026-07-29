@@ -111,9 +111,39 @@ export default function PayScreen() {
   const [stalled, setStalled] = useState<string | undefined>(undefined)
   const [showCode, setShowCode] = useState<OfflineActionRow | null>(null)
 
-  // Refreshed whenever the wallet finishes building or connectivity changes:
-  // the queue only moves when the network state does, so there is no need to
-  // poll it on every render.
+  const params = useLocalSearchParams<{
+    cell?: string | string[]
+    identityKey?: string | string[]
+    sats?: string | string[]
+    peerpay?: string | string[]
+  }>()
+
+  const peerpay = firstParam(params.peerpay)
+  const peerPayValidation = useMemo(() => (peerpay ? validatePeerPayURI(peerpay) : null), [peerpay])
+  const peerPayNotice = useMemo(() => {
+    if (!peerPayValidation) return null
+    const messages = [peerPayValidation.errors.identityKey, peerPayValidation.errors.sats].filter(Boolean)
+    return messages.length ? messages.join('. ') : null
+  }, [peerPayValidation])
+
+  const initialIdentityKey = peerPayValidation?.identityKey ?? firstParam(params.identityKey)
+  const satsParam = peerPayValidation?.sats ?? Number(firstParam(params.sats))
+  const initialSats = Number.isFinite(satsParam) && satsParam > 0 ? Number(satsParam) : undefined
+
+  const paramCell = firstParam(params.cell)
+  // A peerpay link is a request to pay a handle, whatever cell was named.
+  const openingCell: PayCell | null = peerpay ? 'pay-handle' : isPayCell(paramCell) ? paramCell : null
+
+  const [direction, setDirection] = useState<Direction>(openingCell?.startsWith('get') ? 'get' : 'pay')
+  const [cell, setCell] = useState<PayCell | null>(openingCell)
+
+  // Refreshed whenever the wallet finishes building, connectivity changes, or
+  // the user enters/leaves a pay cell: the queue only moves when the network
+  // state does or when a cell just queued a row (e.g. an in-session offline
+  // QR Done), so there is no need to poll it on every render. `cell` is a
+  // cheap local SQLite read, not a network round-trip, so re-running it on
+  // every cell transition is fine — returning from a pay cell must pick up
+  // rows the cell just queued.
   useEffect(() => {
     if (!walletBuilt) return
     let cancelled = false
@@ -147,33 +177,7 @@ export default function PayScreen() {
     return () => {
       cancelled = true
     }
-  }, [walletBuilt, storage, online, txStatusVersion, walletUserId])
-
-  const params = useLocalSearchParams<{
-    cell?: string | string[]
-    identityKey?: string | string[]
-    sats?: string | string[]
-    peerpay?: string | string[]
-  }>()
-
-  const peerpay = firstParam(params.peerpay)
-  const peerPayValidation = useMemo(() => (peerpay ? validatePeerPayURI(peerpay) : null), [peerpay])
-  const peerPayNotice = useMemo(() => {
-    if (!peerPayValidation) return null
-    const messages = [peerPayValidation.errors.identityKey, peerPayValidation.errors.sats].filter(Boolean)
-    return messages.length ? messages.join('. ') : null
-  }, [peerPayValidation])
-
-  const initialIdentityKey = peerPayValidation?.identityKey ?? firstParam(params.identityKey)
-  const satsParam = peerPayValidation?.sats ?? Number(firstParam(params.sats))
-  const initialSats = Number.isFinite(satsParam) && satsParam > 0 ? Number(satsParam) : undefined
-
-  const paramCell = firstParam(params.cell)
-  // A peerpay link is a request to pay a handle, whatever cell was named.
-  const openingCell: PayCell | null = peerpay ? 'pay-handle' : isPayCell(paramCell) ? paramCell : null
-
-  const [direction, setDirection] = useState<Direction>(openingCell?.startsWith('get') ? 'get' : 'pay')
-  const [cell, setCell] = useState<PayCell | null>(openingCell)
+  }, [walletBuilt, storage, online, txStatusVersion, walletUserId, cell])
 
   // Auth failed while this screen was open (the wallet finished building and
   // there is no wallet) — same guard the old payments screen carried.

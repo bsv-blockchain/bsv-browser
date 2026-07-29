@@ -1262,8 +1262,8 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     }
   }, [hostedSession])
 
-  /** Listening over AWDL right now. Goes false once the fast path gives up. */
-  const awdlActive = hostedSession !== null && supportsAwdl && nearbyError === null
+  /** Listening over a radio link right now. Goes false once the fast path gives up. */
+  const radioActive = hostedSession !== null && radioTransport !== null && nearbyError === null
   const canSend = payAmount > 0
   const scannerOpen = phase === 'send_scan' || phase === 'receive_scan'
 
@@ -1290,28 +1290,31 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     if (role === 'payee') {
       if (phase === 'receive_settling') return at('linked', 'local_pay_presence_linked')
       if (phase === 'receive_wait') {
-        // No AWDL listener means no live link at all, whatever the reason —
-        // an Android device, a denied permission, or a fast path that gave up.
-        return awdlActive ? at('waiting', 'local_pay_presence_waiting_payee') : qr()
+        // No radio listener means no live link at all, whatever the reason —
+        // an unsupported device, a denied permission, or a fast path that gave up.
+        return radioActive ? at('waiting', 'local_pay_presence_waiting_payee') : qr()
       }
       return null
     }
 
     if (role === 'payer') {
       // Every payer branch degrades to `qr` when the QR transport was selected,
-      // because on that path the two devices genuinely never speak.
+      // because on that path the two devices genuinely never speak. `awdl` and
+      // `nearby` are both live radio links (iOS and Android respectively), so
+      // either counts here.
+      const onRadio = sendKind === 'awdl' || sendKind === 'nearby'
       if (phase === 'send_working') {
-        return sendKind === 'awdl' ? at('waiting', 'local_pay_presence_waiting_payer') : qr()
+        return onRadio ? at('waiting', 'local_pay_presence_waiting_payer') : qr()
       }
       if (phase === 'send_qr') return qr()
       if (phase === 'send_confirm') {
-        return sendKind === 'awdl' ? at('ready', 'local_pay_presence_ready') : qr()
+        return onRadio ? at('ready', 'local_pay_presence_ready') : qr()
       }
       return null
     }
 
     return null
-  }, [phase, role, linked, awdlActive, sendKind, t])
+  }, [phase, role, linked, radioActive, sendKind, t])
 
   // Dismissing the camera returns to whatever raised it. A payee's request must
   // survive this: closing the scanner is not cancelling the payment.
