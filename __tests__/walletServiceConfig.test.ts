@@ -1,4 +1,9 @@
-import { createServiceOptions, installOfflineChainTracker, chaintracksUrlFor } from '@/services/walletServiceConfig'
+import {
+  createServiceOptions,
+  createServices,
+  installOfflineChainTracker,
+  chaintracksUrlFor
+} from '@/services/walletServiceConfig'
 import { Services } from '@bsv/wallet-toolbox-mobile'
 
 const exchangeRate = () => ({ timestamp: new Date(), base: 'USD' as const, rate: 1 })
@@ -40,6 +45,54 @@ describe('installOfflineChainTracker', () => {
     // other object (ChaintracksChainTracker) wrapping options.chaintracks, not
     // options.chaintracks itself and not anything with the shape we inject.
     expect(tracker).not.toBe(options.chaintracks)
+  })
+})
+
+// The seam above is only live if something calls it. Until createServices did it
+// itself, the single call in context/WalletContext.tsx was the whole guarantee —
+// delete that one line and the Critical comes back with no test failing, because
+// the wrapper is still injected at options.chaintracks and still never consulted.
+// These pin the two halves together: hand createServices an override and the
+// Services it returns must already treat it as the chain tracker.
+describe('createServices', () => {
+  const fakeTracker = () => ({
+    isValidRootForHeight: jest.fn().mockResolvedValue(true),
+    currentHeight: jest.fn().mockResolvedValue(0)
+  })
+
+  it('installs a chaintracks override as the chain tracker, not merely as the client behind it', async () => {
+    const override = fakeTracker()
+    const { services } = createServices(
+      'test',
+      'callback-token',
+      exchangeRate(),
+      undefined,
+      undefined,
+      override as never
+    )
+
+    await expect(services.getChainTracker()).resolves.toBe(override)
+  })
+
+  it('still passes the override to the service options, which header sync and misses read', async () => {
+    const override = fakeTracker()
+    const { serviceOptions } = createServices(
+      'test',
+      'callback-token',
+      exchangeRate(),
+      undefined,
+      undefined,
+      override as never
+    )
+
+    expect(serviceOptions.chaintracks).toBe(override)
+  })
+
+  it('leaves the toolbox default in place when there is no override', async () => {
+    const { services, serviceOptions } = createServices('test', 'callback-token', exchangeRate())
+
+    const tracker = await services.getChainTracker()
+    expect(tracker).not.toBe(serviceOptions.chaintracks)
   })
 })
 

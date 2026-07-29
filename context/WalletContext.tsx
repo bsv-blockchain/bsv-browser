@@ -43,7 +43,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { UserContext } from './UserContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { usePermissionQueue } from '@/hooks/usePermissionQueue'
-import { createServices, chaintracksUrlFor, installOfflineChainTracker } from '@/services/walletServiceConfig'
+import { createServices, chaintracksUrlFor } from '@/services/walletServiceConfig'
 import { configureNewHeaderPolling } from '@/utils/walletMonitor'
 import {
   createArcadeBroadcastService,
@@ -692,6 +692,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const offlineChaintracks = new OfflineFirstChaintracks(remoteChaintracks, getOnline)
         offlineChaintracksRef.current = offlineChaintracks
 
+        // Passing offlineChaintracks here does two things, and createServices
+        // does both so they cannot come apart: it becomes options.chaintracks
+        // (header sync and root misses read it), and it is installed as the
+        // chain tracker. Without the second, Services.getChainTracker() wraps
+        // options.chaintracks in ChaintracksChainTracker, whose
+        // isValidRootForHeight calls findHeaderForHeight rather than the
+        // client's own — bypassing the store-first lookup entirely and leaving
+        // offline verification dead with nothing to say so. See
+        // installOfflineChainTracker's doc comment for the full story.
         const { services, serviceOptions } = createServices(
           selectedNetwork,
           callbackToken,
@@ -700,13 +709,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           arcApiTokenOverride || undefined,
           offlineChaintracks
         )
-        // Services.getChainTracker() would otherwise wrap options.chaintracks
-        // in ChaintracksChainTracker, whose isValidRootForHeight calls
-        // findHeaderForHeight directly rather than the client's own
-        // isValidRootForHeight — bypassing the store-first lookup entirely.
-        // This is the actual seam that makes offline verification live; see
-        // installOfflineChainTracker's doc comment for the full story.
-        installOfflineChainTracker(services, offlineChaintracks)
 
         // Replace all default broadcast providers with EF/rawtx-only services.
         // Order: Arcade → Taal → GorillaPool → WoC → Bitails. UntilSuccess stops at first success.

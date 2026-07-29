@@ -135,6 +135,15 @@ export function createServiceOptions(
 
 /**
  * Create a configured Services instance for the given network.
+ *
+ * A `chaintracksOverride` is installed as the chain tracker here, not left to
+ * the caller. The two halves — putting the offline-first client at
+ * `options.chaintracks` and making `getChainTracker()` return it — are useless
+ * apart: the injection alone leaves the store-first lookup unreachable behind
+ * `ChaintracksChainTracker`, which is the single most dangerous defect this
+ * feature has had, and it is invisible (verification simply refuses everything
+ * while offline). Doing both at the one place they are both known means no
+ * caller can supply one without the other.
  */
 export function createServices(
   network: AppChain,
@@ -153,5 +162,9 @@ export function createServices(
     chaintracksOverride
   )
   const services = new Services(serviceOptions)
+  // `ChaintracksClientApi` declares `isValidRootForHeight` and `currentHeight`
+  // (ChaintracksClientApi.d.ts:137-138), which is the whole of `ChainTracker`, so
+  // an override is always usable as one directly.
+  if (chaintracksOverride) installOfflineChainTracker(services, chaintracksOverride)
   return { services, serviceOptions }
 }
