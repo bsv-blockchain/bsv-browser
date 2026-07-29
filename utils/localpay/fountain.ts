@@ -175,6 +175,20 @@ export class FountainDecoder {
   private total = 0
   private msgLen = 0
   private crc = 0
+  /**
+   * The payload length pinned by the first part accepted into the current
+   * session (0 = unpinned). The session key (`total:msgLen:crc`) does not
+   * include block size, so two honest encoders configured with different
+   * blockBytes — or one corrupt part whose payload was padded or truncated
+   * with its header untouched — can satisfy the ceil(msgLen/len) === total
+   * agreement check while disagreeing with every other part already
+   * accepted. Without this pin, a mismatched part can be solved into
+   * `solved[]` and message() then sizes its output buffer from
+   * `solved[0].length`, so `out.set(...)` on a differently-sized block
+   * overruns and throws — in a camera callback, permanently wedging the
+   * decoder. Pinning turns that mismatch into an ordinary rejected read.
+   */
+  private blockBytes = 0
   private seen = new Set<number>()
   private solved: (Uint8Array | null)[] = []
   private solvedCount = 0
@@ -185,6 +199,7 @@ export class FountainDecoder {
     this.total = total
     this.msgLen = msgLen
     this.crc = crc
+    this.blockBytes = 0
     this.seen = new Set()
     this.solved = Array.from({ length: total }, () => null)
     this.solvedCount = 0
@@ -233,6 +248,16 @@ export class FountainDecoder {
     // mismatch, and the still-running sender re-fills this decoder.
     const key = `${total}:${msgLen}:${crc}`
     if (key !== this.key) this.reset(key, total, msgLen, crc)
+
+    // Pin this session's block size to the first part accepted into it, and
+    // reject anything that disagrees. The ceil-agreement check above admits a
+    // RANGE of payload lengths for a given (msgLen, total) — it alone cannot
+    // tell two different block sizes apart.
+    if (this.blockBytes === 0) {
+      this.blockBytes = payload.length
+    } else if (payload.length !== this.blockBytes) {
+      return { ok: false, done: false, have: this.solvedCount, total: this.total }
+    }
 
     if (this.seen.has(seq)) return state()
     this.seen.add(seq)
