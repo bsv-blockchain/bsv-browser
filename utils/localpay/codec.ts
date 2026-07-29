@@ -185,3 +185,13 @@ export function frameFromQr(text: unknown): PaymentFrame {
   if (!text.startsWith(FRAME_QR_PREFIX)) throw new CodecError('not a nearby-payment QR')
   return decodeFrame(fromB64url(text.slice(FRAME_QR_PREFIX.length)))
 }
+
+/**
+ * The raw frame bytes behind a bsvpayf1: payload, without decoding the frame.
+ * The fountain path re-encodes exactly these bytes, and the re-show path needs
+ * them from a persisted framePayload string.
+ */
+export function frameBytesFromQr(text: string): Uint8Array {
+  if (!text.startsWith(FRAME_QR_PREFIX)) throw new CodecError('not a nearby-payment QR')
+  return fromB64url(text.slice(FRAME_QR_PREFIX.length))
+}

@@ -3,6 +3,7 @@ import {
   decodeFrame,
   frameToQr,
   frameFromQr,
+  frameBytesFromQr,
   CodecError,
   FRAME_VERSION,
   FRAME_QR_PREFIX,
@@ -142,5 +143,12 @@ describe('localpay frame QR handoff', () => {
         expect(e).toBeInstanceOf(CodecError)
       }
     }
+  })
+
+  it('frameBytesFromQr returns the exact encodeFrame bytes', () => {
+    const f = sample()
+    const qr = frameToQr(f)
+    expect(Array.from(frameBytesFromQr(qr))).toEqual(Array.from(encodeFrame(f)))
+    expect(() => frameBytesFromQr('bsvpay1:xx')).toThrow()
   })
 })
