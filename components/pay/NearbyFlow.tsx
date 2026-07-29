@@ -1155,6 +1155,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     }
     builtRef.current = null
     setPhase('send_working')
+    setNotice(null)
     const outcome = await finalizeDelivery(wallet as unknown as PayingWalletArg, built, { ok: true }, adminOriginator, {
       hold: async txid => {
         if (!storage) throw new Error('no local storage to queue this payment in')
