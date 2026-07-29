@@ -2691,8 +2691,23 @@ export async function finalizeDelivery(
       return { kind: 'sent', broadcast: 'pending', detail: 'offline — queued until this device reconnects' }
     } catch (e) {
       // The payee holds a copy and will internalize it, so this is still a sent
-      // payment. What failed is our own record of needing to broadcast it, and
-      // the monitor's nosend sweep will still find the transaction.
+      // payment — never a failed one.
+      //
+      // But be honest about what is left behind: NOTHING re-drives a hold that
+      // failed before its `offline_actions` row landed. `TaskSendWaiting`
+      // selects only ['unsent','sending']; `TaskCheckNoSends` reads nosend rows
+      // but merely requests merkle proofs for transactions that may have been
+      // broadcast externally, never advancing status; and the drain scans the
+      // `offline_actions` table, so a missing row is invisible to it. An earlier
+      // draft of this plan claimed "the monitor's nosend sweep will still find
+      // the transaction" — that was wrong, and contradicted this same file's own
+      // note that TaskFailAbandoned sweeps only ['unprocessed','unsigned'].
+      //
+      // That is why holdSentPaymentOffline writes the durable queue row BEFORE
+      // promoting the status: if the promotion then fails, the drain still finds
+      // the transaction and releases it, and only the change stays temporarily
+      // unspendable. With the writes in the other order, a failure between them
+      // loses the record entirely and strands the payer's change permanently.
       return { kind: 'sent', broadcast: 'pending', detail: messageOf(e) }
     }
   }
