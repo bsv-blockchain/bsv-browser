@@ -72,7 +72,7 @@ class QuietEventSource extends (RNEventSource as any) {
     super(url, { ...options, debug: false })
   }
 }
-import NetInfo from '@react-native-community/netinfo'
+import { getOnline, subscribeOnline } from '@/utils/net/online'
 import { processPending } from '@/utils/localpay/pending'
 import { wocConfigFor } from '@/utils/pay/rails/address'
 import { SWEEP_INTERVAL_MS, runSweep, shouldSweepNow, sweptTotal } from '@/utils/pay/sweeper'
@@ -1241,8 +1241,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       if (localPayProcessingRef.current) return
       localPayProcessingRef.current = true
       try {
-        const netState = await NetInfo.fetch()
-        if (!netState.isConnected || netState.isInternetReachable === false) return
+        if (!(await getOnline())) return
         const results = await processPending(managers.permissionsManager as any, storage, adminOriginator)
         const successes = results.filter(r => r.success)
         if (successes.length > 0) {
@@ -1265,10 +1264,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     tryProcess()
 
     // Also run when connectivity is restored
-    const unsubscribe = NetInfo.addEventListener(state => {
-      if (state.isConnected && state.isInternetReachable !== false) {
-        tryProcess()
-      }
+    const unsubscribe = subscribeOnline(online => {
+      if (online) tryProcess()
     })
 
     return () => unsubscribe()
@@ -1330,8 +1327,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       }
     }
 
-    const netUnsubscribe = NetInfo.addEventListener(state => {
-      online = !!state.isConnected && state.isInternetReachable !== false
+    const netUnsubscribe = subscribeOnline(next => {
+      online = next
       // Coming back online is worth a pass now rather than at the next tick.
       if (online) void tick()
     })
