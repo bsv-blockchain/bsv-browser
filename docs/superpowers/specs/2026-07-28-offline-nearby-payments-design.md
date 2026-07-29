@@ -233,23 +233,56 @@ It never runs while offline, so it costs nothing underground.
 
 ## API surface
 
-Upstream-shaped, so the ts-stack port is the same code on the same base class:
+**Rewritten 2026-07-29 to describe what shipped.** The original proposed
+`StorageProvider.internalizeActionOffline`, a parallel copy of
+`internalizeAction` dispatched from an override of `internalizeAction` itself.
+Implementation found a better seam; below is the built design, not the intent.
 
-- `StorageProvider.internalizeActionOffline(auth, args)` — identical to
-  `internalizeAction` except the new-txid branch enqueues (`req = 'nosend'`,
-  transaction `unproven`, one `offline_actions` row) instead of calling
-  `shareReqsWithWorld(..., isDelayed = false)`.
-- `StorageProvider.listOfflineActions(...)` and
-  `StorageProvider.processOfflineActions(...)` — the ordered-release engine.
-- `TaskSendOffline` in `monitor/tasks/`.
+The seam is `StorageProvider.attemptToPostReqsToNetwork`, overridden in
+`storage/StorageExpoSQLite.ts`. It is the *only* overridable thing the forced
+broadcast inside `internalizeAction` reaches — `processAction.js:146` calls it as
+a method, declared at `StorageProvider.d.ts:111` — so overriding it holds the
+broadcast without duplicating ~400 lines of money-critical logic above it
+(proven-tx insertion, target-transaction merge, `markInputsSpent`, BRC-29
+payment records, labels, baskets). `TaskSendWaiting` calls the module *function*
+directly (`TaskSendWaiting.js:180`), so the monitor's ordinary retries are
+deliberately **not** intercepted.
+
+What shipped, upstream-shaped so the ts-stack port is the same code on the same
+base class:
+
+- `holdReqsOffline(reqs, userId, role)` — parks requests at `'nosend'` and writes
+  the `offline_actions` row. This is the method that becomes
+  `StorageProvider.holdReqsOffline` upstream.
+- the `attemptToPostReqsToNetwork` override — holds only when the device is
+  offline **and** every request's transaction row is already hold-safe
+  (`'unproven'` or `'nosend'`); anything else delegates to `super` untouched.
+  That narrowing is load-bearing: on the non-delayed `createAction` path the
+  transaction row is `'unprocessed'`, and holding it there would let
+  `TaskFailAbandoned` fail it within five minutes while the queue still claimed
+  it was pending. Narrowing also preserves an existing self-healing path, since
+  `'nosend'` is invisible to `TaskSendWaiting`.
+- `processOfflineActions({ storage })` — the ordered-release engine, with every
+  money decision in the pure `utils/offline/plan.ts` and `utils/offline/order.ts`.
+- `TaskSendOffline` in `utils/monitor/`, registered **before**
+  `addDefaultTasks()` so the drain precedes `TaskSendWaiting` in a monitor pass.
 
 **Nothing above storage changes.** The signer's `internalizeAction` already
 performs both required checks — BEEF ancestry `verify(chainTracker, false)` and
 the BRC-29 locking-script match against a freshly derived key
 (`signer/methods/internalizeAction.js:71-74`) — *before* it calls
-`wallet.storage.internalizeAction(args)`. This repo already overrides that method
-at `storage/StorageExpoSQLite.ts:1345`, so the override dispatches to the offline
-variant when the device is offline. No `node_modules` patch is required.
+`wallet.storage.internalizeAction(args)`. No `node_modules` patch is required.
+
+### Not built
+
+Recorded so the next reader does not take these for shipped behaviour: the
+offline banner does not expand into a tappable list of queued actions; the
+received-payment overlay does not flip to a broadcast state after release (it
+reports the state at the moment of receipt); the rejection row is not
+dismiss-gated; and there is **no manual "send now" control** — `checkNow` has
+exactly one setter, the reconnect listener. A stalled queue therefore gets one
+release attempt per wallet build plus one per connectivity change, not
+continuous retry.
 
 Work lands in this repo first and is mirrored into a `bsv-blockchain/ts-stack`
 clone (`packages/wallet/wallet-toolbox`) as each piece stabilizes, so the
@@ -399,6 +432,28 @@ record plus honest UI copy — never a claim of settlement.
 6. restore the other device; confirm idempotency (already-in-mempool is treated
    as success, `arcadeBroadcastProvider.ts` already does this for WoC);
 7. long-offline soak (> 12 h) to confirm no req reaches `invalid`.
+
+Three additions the final whole-branch review identified, each covering a branch
+that unit tests provably cannot reach:
+
+8. **Checkpoint bump over a populated window.** Ship with anchor A, sync a
+   window, bump the checkpoint to anchor B, relaunch, resync, then verify an
+   offline payment still verifies and `rootForHeight` at a mid-window height is
+   correct. This is the branch that shipped broken — the old `.bin` was left in
+   place and appended to, so the root index rebuilt from the *previous* anchor's
+   headers and every upgrading install would have refused all offline
+   verification, permanently and silently. `expoHeaderFs.deleteFile` cannot run
+   under Jest, so this is the only way to exercise the fix.
+9. **Flaky signal, not just airplane mode.** Kill connectivity while leaving the
+   interface up, so the internalize retry takes the merge path. That path credits
+   the outputs but never holds and never creates a queue row, so the payment gets
+   no attribution and no ordered release. Watch the monitor log for an orphan
+   rejection during the reconnect drain.
+10. **Record the numbers.** `HeaderStore.open` and `prewarmOwnRoots` wall-clock
+    timings (both are logged), the `proven_txs` row count behind the pre-warm,
+    and the on-disk size of `headers/<chain>.bin`. The standing goal is no JS
+    block over 100 ms, and the only figure so far is a Node/V8 proxy that
+    excludes native file I/O.
 
 ## Non-goals
 
