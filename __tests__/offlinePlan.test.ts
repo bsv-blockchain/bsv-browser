@@ -132,6 +132,24 @@ describe('applyOutcome', () => {
     const r = applyOutcome({ txid: 'A', outcome: 'invalidTx', txs, rows: [] })
     expect(r.rejected.map(x => x.txid)).toEqual(['C', 'B', 'A'])
   })
+
+  it('orders an excluded entry against its own child, not just against the subject', () => {
+    // B is txid-only and C spends B. Neither end of the ordered list is right for
+    // B: it must sit between C and A. Only ordering the whole cascade set — mined
+    // and txid-only members included — can place it, which is why the cascade
+    // cannot borrow releaseOrder's sendability filter.
+    const txs = [tx('A'), tx('B', ['A'], { isTxidOnly: true }), tx('C', ['B'])]
+    const r = applyOutcome({ txid: 'A', outcome: 'invalidTx', txs, rows: [] })
+    expect(r.rejected.map(x => x.txid)).toEqual(['C', 'B', 'A'])
+  })
+
+  it('interleaves two excluded entries at different depths with the ordered ones', () => {
+    // B is txid-only, D is mined, and the chain is A <- B <- C <- D. The excluded
+    // members are at depths 1 and 3, so no grouping of them can be correct.
+    const txs = [tx('A'), tx('B', ['A'], { isTxidOnly: true }), tx('C', ['B']), tx('D', ['C'], { hasProof: true })]
+    const r = applyOutcome({ txid: 'A', outcome: 'invalidTx', txs, rows: [] })
+    expect(r.rejected.map(x => x.txid)).toEqual(['D', 'C', 'B', 'A'])
+  })
 })
 
 describe('request status classification', () => {

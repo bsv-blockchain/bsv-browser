@@ -1,4 +1,4 @@
-import { descendantsOf, releaseOrder, type OrderableTx } from '@/utils/offline/order'
+import { dependencyOrder, descendantsOf, releaseOrder, type OrderableTx } from '@/utils/offline/order'
 
 const tx = (txid: string, inputTxids: string[] = [], extra: Partial<OrderableTx> = {}): OrderableTx => ({
   txid,
@@ -54,6 +54,25 @@ describe('releaseOrder', () => {
 
   it('returns nothing for an empty set', () => {
     expect(releaseOrder([])).toEqual([])
+  })
+})
+
+describe('dependencyOrder', () => {
+  it('orders mined and txid-only transactions instead of dropping them', () => {
+    // The whole reason this exists apart from releaseOrder. A cascade has to place
+    // every member, because a mined or txid-only transaction can still be both
+    // somebody's child and somebody's parent.
+    const txs = [tx('C', ['B']), tx('B', ['A'], { isTxidOnly: true }), tx('A', [], { hasProof: true })]
+    expect(dependencyOrder(txs)).toEqual(['A', 'B', 'C'])
+    expect(releaseOrder(txs)).toEqual(['C'])
+  })
+
+  it('drops a cycle rather than looping forever, like releaseOrder', () => {
+    expect(dependencyOrder([tx('A', ['B']), tx('B', ['A'])])).toEqual([])
+  })
+
+  it('ignores inputs that are not in the set', () => {
+    expect(dependencyOrder([tx('B', ['A', 'unknown'])])).toEqual(['B'])
   })
 })
 

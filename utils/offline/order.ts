@@ -19,18 +19,25 @@ export interface OrderableTx {
 }
 
 /**
- * Dependency order over the transactions that still need broadcasting.
+ * Dependency order over exactly the transactions given: each is emitted once every
+ * input it takes from inside the set has been emitted.
  *
- * Mined and txid-only entries are excluded: the first needs nothing, the second
- * has nothing to send. Inputs outside the set are ignored — they are either
- * already on chain or someone else's problem, and in both cases they impose no
- * ordering on us. A cycle (impossible in real transactions, possible in
- * corrupt data) is dropped rather than allowed to spin.
+ * Inputs outside the set are ignored — they are either already on chain or someone
+ * else's problem, and in both cases they impose no ordering on us. A cycle
+ * (impossible in real transactions, possible in corrupt data) is dropped rather
+ * than allowed to spin.
+ *
+ * Membership is deliberately the caller's decision, because the two callers
+ * disagree about it. Releasing orders only what needs broadcasting. A cascade must
+ * order **every** member, mined and txid-only included: those need no broadcast,
+ * but their `failed` write still touches their neighbours' spendability, so leaving
+ * them out of the ordering leaves them unplaced — and no end of the list is the
+ * right place for a transaction that is both somebody's child and somebody's
+ * parent.
  */
-export function releaseOrder(txs: OrderableTx[]): string[] {
-  const sendable = txs.filter(t => !t.hasProof && !t.isTxidOnly)
-  const inSet = new Set(sendable.map(t => t.txid))
-  const remaining = new Map(sendable.map(t => [t.txid, t]))
+export function dependencyOrder(txs: OrderableTx[]): string[] {
+  const inSet = new Set(txs.map(t => t.txid))
+  const remaining = new Map(txs.map(t => [t.txid, t]))
   const emitted = new Set<string>()
   const order: string[] = []
 
@@ -49,6 +56,16 @@ export function releaseOrder(txs: OrderableTx[]): string[] {
     }
   }
   return order
+}
+
+/**
+ * Dependency order over the transactions that still need broadcasting.
+ *
+ * Mined and txid-only entries are excluded: the first needs nothing, the second
+ * has nothing to send.
+ */
+export function releaseOrder(txs: OrderableTx[]): string[] {
+  return dependencyOrder(txs.filter(t => !t.hasProof && !t.isTxidOnly))
 }
 
 /**

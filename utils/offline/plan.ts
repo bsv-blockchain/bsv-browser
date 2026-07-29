@@ -7,7 +7,7 @@
  * network" is a decision, not plumbing, and getting it wrong marks a queue row
  * 'sent' for a transaction nobody has.
  */
-import { descendantsOf, releaseOrder, type OrderableTx } from './order'
+import { dependencyOrder, descendantsOf, releaseOrder, type OrderableTx } from './order'
 import type { OfflineActionRow } from '@/storage/methods/offlineActions'
 import type { ProvenTxReqStatus } from '@bsv/wallet-toolbox-mobile/out/src/sdk/types'
 
@@ -48,12 +48,15 @@ export function planRelease(args: {
  * spending the poisoned money has a request and a transaction row but no queue
  * row of its own, and it is exactly the thing that must stop being spendable.
  *
- * `rejected` comes back in the order it must be applied — descendants first, the
- * refused transaction last. Failing a transaction releases its inputs back to
- * spendable (`StorageProvider.releaseInputsAllocatedToFailedTransaction`,
- * `StorageProvider.js:365-373`) before marking its own outputs unspendable, so a
- * child failed after its parent hands the poisoned outputs back as spendable.
- * Applied child-first, the parent's own failure has the last word.
+ * `rejected` comes back in the order it must be applied: a full reverse dependency
+ * order, every child before every transaction it spends, the refused one last.
+ * Failing a transaction releases its inputs back to spendable
+ * (`StorageProvider.releaseInputsAllocatedToFailedTransaction`,
+ * `StorageProvider.js:365-373`) before marking its own outputs unspendable, and
+ * `EntityTransaction.getInputs` re-finds those inputs by txid and vout whether or
+ * not `spentBy` was cleared — so a child failed after its parent does not merely
+ * race it, it reliably undoes it. Applied child-first, each parent's own failure
+ * has the last word.
  */
 export function applyOutcome(args: {
   txid: string
@@ -73,20 +76,18 @@ export function applyOutcome(args: {
     outcome === 'doubleSpend'
       ? 'the network reported a double spend of an input'
       : 'the transaction was rejected as invalid'
-  const poisoned = [txid, ...descendantsOf(txid, txs)]
-  const cascade = new Set(poisoned)
-  // Reverse dependency order. `descendantsOf` reports by discovery, which is not
-  // a topological order — a transaction can spend both the refused one and one of
-  // its own siblings — so the order is taken from `releaseOrder` and reversed.
-  const sorted = releaseOrder(txs.filter(t => cascade.has(t.txid))).reverse()
-  // A poisoned transaction `releaseOrder` declines to order is mined or txid-only,
-  // neither of which a held transaction can be. Rejected anyway, and rejected
-  // FIRST: an excluded entry can only ever be a descendant, because the refused
-  // transaction itself came out of `planRelease` and is therefore sendable. Placed
-  // last it would release its parent's outputs back to spendable with nothing left
-  // to run — undoing children-first on the one branch that has no ordering of its
-  // own. First is unconditionally the safe end.
-  const ordered = [...poisoned.filter(t => !sorted.includes(t)), ...sorted]
+  // Reverse dependency order over the whole cascade, which is why it uses
+  // `dependencyOrder` and not `releaseOrder`: the latter drops mined and txid-only
+  // transactions because they need no broadcast, but a cascade still has to place
+  // them, since one can be both somebody's child and somebody's parent and neither
+  // end of the list is right for it. `descendantsOf` cannot supply the order
+  // either — it reports by discovery, and a transaction can spend both the refused
+  // one and one of its own siblings.
+  const known = new Map(txs.map(t => [t.txid, t]))
+  const members = [txid, ...descendantsOf(txid, txs)].map(
+    t => known.get(t) ?? { txid: t, hasProof: false, isTxidOnly: false, inputTxids: [] }
+  )
+  const ordered = dependencyOrder(members).reverse()
   const rejected = ordered.map(t => ({
     txid: t,
     reason: t === txid ? reason : `an ancestor was rejected: ${reason}`,
