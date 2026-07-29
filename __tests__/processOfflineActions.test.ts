@@ -82,8 +82,14 @@ function fakeDb(rows: OfflineActionRow[]) {
 function fakeStorage(args: { db: ReturnType<typeof fakeDb>; reqs: TableProvenTxReq[]; postBeef?: jest.Mock }) {
   return {
     sqliteDb: args.db,
+    // Cloned, not the live array elements: production `findProvenTxReqs` reads
+    // fresh rows from SQL, so no caller can see another caller's cached
+    // reference mutate out from under it. A shared object here would let a
+    // `rejectOne` mutation on this row silently short-circuit a LATER re-post
+    // of the same txid through `outcomeFromReqStatus(api.status)` in
+    // `postOwned` — hiding exactly the re-entry bug this suite exists to catch.
     findProvenTxReqs: async (a: { partial: { txid?: string } }) =>
-      args.reqs.filter(r => a.partial.txid === undefined || r.txid === a.partial.txid),
+      args.reqs.filter(r => a.partial.txid === undefined || r.txid === a.partial.txid).map(r => ({ ...r })),
     findTransactions: async () => [{ transactionId: 11, status: 'unproven' }],
     updateProvenTxReq: jest.fn(),
     updateTransactionStatus: jest.fn(),
@@ -224,6 +230,36 @@ describe('processOfflineActions', () => {
     expect(r.stopped).toBe(true)
     expect(lastStatusWritten(db, aId)).toBe('queued')
     expect(lastStatusWritten(db, dId)).toBe('sent')
+  })
+
+  it('never re-enters a step the cascade already rejected earlier in the same run', async () => {
+    // A <- B (B spends A), both queued and both owned. A's post comes back
+    // invalid: the cascade rejects B first, then A (children-first), and
+    // `applyOutcome` returns `blocked: []` for that outcome — a rejection is
+    // final, nothing is deferred. Dependency order still places B's own plan
+    // step AFTER A's, so without a `resolved` guard alongside `skip` the loop
+    // walks straight back into the already-rejected B: flips it back to
+    // 'posting' and re-posts a transaction the network already refused.
+    const a = txSpending('11'.repeat(32))
+    const b = txSpending(a.id('hex'))
+    const aId = a.id('hex')
+    const bId = b.id('hex')
+
+    const aReq = req({ provenTxReqId: 1, txid: aId, rawTx: a.toBinary() })
+    const bReq = req({ provenTxReqId: 2, txid: bId, rawTx: b.toBinary() })
+    mockPostReqs.mockImplementation(async () => {
+      aReq.status = 'invalid'
+      return { details: [{ txid: aId, status: 'invalidTx' }] }
+    })
+
+    const db = fakeDb([row({ txid: aId, seq: 1 }), row({ offlineActionId: 2, txid: bId, seq: 2 })])
+    const storage = fakeStorage({ db, reqs: [aReq, bReq] })
+
+    const r = await processOfflineActions({ storage: storage as never })
+
+    expect(mockPostReqs).toHaveBeenCalledTimes(1)
+    expect(r.rejected).toBe(2)
+    expect(lastStatusWritten(db, bId)).toBe('rejected')
   })
 })
 

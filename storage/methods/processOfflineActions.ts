@@ -147,7 +147,14 @@ export async function processOfflineActions(args: {
   const stallNotes: string[] = blocked.length > 0 ? [...blocked] : []
 
   for (const step of plan) {
-    if (skip.has(step.txid)) continue
+    // `resolved` covers a txid the cascade already rejected earlier in this same
+    // pass: dependency order guarantees such a descendant's own `step` is still
+    // ahead in the plan, and `skip` alone never catches it because
+    // invalidTx/doubleSpend return `blocked: []` (a rejection is final, nothing
+    // deferred). Without this, the loop walks straight back into an already-
+    // rejected row, flips it 'posting', and re-posts a network-refused
+    // transaction.
+    if (skip.has(step.txid) || resolved.has(step.txid)) continue
     const action = step.owned ? held.get(step.txid) : undefined
     if (step.owned && !action) {
       // Its request is gone, so it can never be posted — and nothing downstream
