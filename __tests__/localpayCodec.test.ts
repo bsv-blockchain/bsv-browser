@@ -1,13 +1,13 @@
+import { estimatePartCharLength } from '@bsv/air-gap'
 import {
   encodeFrame,
   decodeFrame,
   frameToQr,
-  frameFromQr,
   frameBytesFromQr,
   CodecError,
+  FRAME_BLOCK_BYTES,
   FRAME_VERSION,
   FRAME_QR_PREFIX,
-  MAX_FRAME_QR_CHARS,
   type PaymentFrame
 } from '@/utils/localpay/codec'
 
@@ -78,21 +78,26 @@ describe('localpay codec', () => {
   })
 })
 
-describe('localpay frame QR handoff', () => {
-  it('round-trips a frame through a QR string', () => {
+describe('localpay frame envelope', () => {
+  // `bsvpayf1:` is no longer a QR wire format — every payment code is an
+  // air-gap fountain (see localpayAirGap.test.ts). It survives as the envelope
+  // stored in offline_actions.framePayload and re-read to re-show a code, so
+  // what these pin is that a stored string decodes back to the exact bytes,
+  // and that a corrupt or foreign one fails as a CodecError rather than
+  // crashing the screen that renders it.
+
+  it('round-trips a frame through the stored envelope', () => {
     const f = sample()
-    expect(frameFromQr(frameToQr(f))).toEqual(f)
+    expect(decodeFrame(frameBytesFromQr(frameToQr(f)))).toEqual(f)
   })
 
   it('round-trips a realistic single-input AtomicBEEF frame', () => {
     // 1,200 bytes of pseudo-random payload: base64 of incompressible bytes is
-    // the worst case for length, and this is the size band the QR path targets.
+    // the worst case for length, and this is the size band payments sit in.
     const transaction = new Uint8Array(1200)
     for (let i = 0; i < transaction.length; i++) transaction[i] = (i * 37 + 11) & 0xff
     const f = { ...sample(), transaction }
-    const qr = frameToQr(f)
-    expect(qr.length).toBeLessThanOrEqual(MAX_FRAME_QR_CHARS)
-    expect(frameFromQr(qr)).toEqual(f)
+    expect(decodeFrame(frameBytesFromQr(frameToQr(f)))).toEqual(f)
   })
 
   it('prefixes the payload so it cannot be confused with a session QR', () => {
@@ -106,41 +111,36 @@ describe('localpay frame QR handoff', () => {
     expect(new TextEncoder().encode(qr).length).toBe(qr.length)
   })
 
-  it('stays clear of the version-40 / EC-M capacity', () => {
-    // 2,331 bytes is the hard ceiling; the measured throw was at 2,343.
-    expect(MAX_FRAME_QR_CHARS).toBeLessThan(2331)
-  })
-
-  it('reports a length a caller can gate on before rendering', () => {
-    const oversize = frameToQr({ ...sample(), transaction: new Uint8Array(4000).fill(3) })
-    expect(oversize.length).toBeGreaterThan(MAX_FRAME_QR_CHARS)
+  it('sizes source blocks below the version-40 / EC-M capacity', () => {
+    // 2,331 bytes is the hard ceiling for the symbol the renderer asks for.
+    expect(estimatePartCharLength(FRAME_BLOCK_BYTES)).toBeLessThan(2331)
   })
 
   it('rejects a session QR', () => {
-    expect(() => frameFromQr('bsvpay1:AAAA')).toThrow(CodecError)
+    expect(() => frameBytesFromQr('bsvpay1:AAAA')).toThrow(CodecError)
   })
 
   it('rejects an unprefixed payload', () => {
-    expect(() => frameFromQr('https://example.com')).toThrow(CodecError)
+    expect(() => frameBytesFromQr('https://example.com')).toThrow(CodecError)
   })
 
   it('rejects malformed base64url behind a valid prefix', () => {
-    expect(() => frameFromQr(`${FRAME_QR_PREFIX}!!!!not base64!!!!`)).toThrow(CodecError)
+    expect(() => frameBytesFromQr(`${FRAME_QR_PREFIX}!!!!not base64!!!!`)).toThrow(CodecError)
   })
 
   it('rejects a truncated payload behind a valid prefix', () => {
     const qr = frameToQr(sample())
-    expect(() => frameFromQr(qr.slice(0, qr.length - 8))).toThrow(CodecError)
+    expect(() => decodeFrame(frameBytesFromQr(qr.slice(0, qr.length - 8)))).toThrow(CodecError)
   })
 
   it('rejects an empty payload behind a valid prefix', () => {
-    expect(() => frameFromQr(FRAME_QR_PREFIX)).toThrow(CodecError)
+    expect(() => decodeFrame(frameBytesFromQr(FRAME_QR_PREFIX))).toThrow(CodecError)
   })
 
-  it('rejects non-string input', () => {
-    expect(() => frameFromQr(null)).toThrow(CodecError)
-    expect(() => frameFromQr(undefined)).toThrow(CodecError)
-    expect(() => frameFromQr({ toString: () => `${FRAME_QR_PREFIX}AAAA` })).toThrow(CodecError)
+  it('rejects non-string input, which a corrupt storage row can be', () => {
+    expect(() => frameBytesFromQr(null as never)).toThrow(CodecError)
+    expect(() => frameBytesFromQr(undefined as never)).toThrow(CodecError)
+    expect(() => frameBytesFromQr({ toString: () => `${FRAME_QR_PREFIX}AAAA` } as never)).toThrow(CodecError)
   })
 
   it('never throws a non-CodecError for any single-character corruption', () => {
@@ -148,7 +148,7 @@ describe('localpay frame QR handoff', () => {
     for (let i = FRAME_QR_PREFIX.length; i < qr.length; i += 7) {
       const corrupted = qr.slice(0, i) + (qr[i] === 'A' ? 'B' : 'A') + qr.slice(i + 1)
       try {
-        frameFromQr(corrupted)
+        decodeFrame(frameBytesFromQr(corrupted))
       } catch (e) {
         expect(e).toBeInstanceOf(CodecError)
       }

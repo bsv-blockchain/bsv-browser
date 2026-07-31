@@ -1,14 +1,15 @@
 /**
- * One payment code, whatever its size. A frame that fits a single symbol
- * renders as today's static QR. A larger one animates: air-gap fountain parts
- * at 5/s, endlessly — the receiver needs any ~K distinct parts, so there is
- * no "start", no "end", and nothing to coordinate. The decision is made from
- * the payload alone so every caller (send screen, re-show modal) behaves
- * identically.
+ * One payment code, whatever its size: air-gap fountain parts, always. A frame
+ * that fits one source block — every ordinary single-input payment — is a still
+ * QR, because one part carries the whole message and this renderer holds `seq`
+ * at 0 for it. Anything larger animates: parts at 5/s, endlessly — the receiver
+ * needs any ~K distinct parts, so there is no "start", no "end", and nothing to
+ * coordinate. The decision is made from the payload alone so every caller (send
+ * screen, re-show modal) behaves identically.
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import QRCode from 'react-native-qrcode-svg'
-import { AirGapEncoder, MAX_FRAME_QR_CHARS, frameBytesFromQr } from '@/utils/pay/rails/nearby'
+import { AirGapEncoder, FRAME_BLOCK_BYTES, frameBytesFromQr } from '@/utils/pay/rails/nearby'
 
 /**
  * Sender cadence: five parts a second. Lives here, not in `@bsv/air-gap` —
@@ -31,18 +32,17 @@ export default function PaymentQrDisplay({
   size = 288,
   onError
 }: {
-  /** The full bsvpayf1: payload. */
+  /** The stored bsvpayf1: frame envelope. */
   frameQr: string
   size?: number
-  /** Backstop for the encoder throwing out of render — pass the screen's handler. */
+  /** Backstop for an unrenderable payload — pass the screen's handler. */
   onError?: () => void
 }) {
   const encoder = useMemo(() => {
-    if (frameQr.length <= MAX_FRAME_QR_CHARS) return null
     try {
-      return new AirGapEncoder(frameBytesFromQr(frameQr))
+      return new AirGapEncoder(frameBytesFromQr(frameQr), { blockBytes: FRAME_BLOCK_BYTES })
     } catch {
-      return null // >64 KB or malformed: let the static path hit onError
+      return null // >64 KB, or a malformed envelope out of storage
     }
   }, [frameQr])
 
@@ -53,9 +53,12 @@ export default function PaymentQrDisplay({
       setPart(null)
       return
     }
+    setPart(encoder.partAt(0))
+    // One block IS the whole message, so a second part could add nothing and
+    // there is no timer to run: the code sits still and scans on the first read.
+    if (encoder.blockCount === 1) return
     const wrapAt = encoder.blockCount * SEQ_WRAP_CYCLES
     let seq = 0
-    setPart(encoder.partAt(0))
     const id = setInterval(() => {
       seq = (seq + 1) % wrapAt
       setPart(encoder.partAt(seq))
@@ -63,7 +66,15 @@ export default function PaymentQrDisplay({
     return () => clearInterval(id)
   }, [encoder])
 
-  const value = encoder ? part : frameQr
-  if (!value) return null
-  return <QRCode value={value} size={size} ecl="M" color="#000" backgroundColor="#fff" onError={onError} />
+  // An unrenderable payload used to reach the caller through <QRCode onError>.
+  // It cannot any more — the failure now happens in the encoder, before there is
+  // anything to render — so report it on the same channel, from an effect rather
+  // than inline, since flipping caller state from a child's render is what
+  // React's cross-component update warning is about.
+  useEffect(() => {
+    if (!encoder) onError?.()
+  }, [encoder, onError])
+
+  if (!part) return null
+  return <QRCode value={part} size={size} ecl="M" color="#000" backgroundColor="#fff" onError={onError} />
 }

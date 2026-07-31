@@ -4,20 +4,24 @@
  * transform here would pin someone else's internals.
  *
  * What IS ours, and what these tests pin: that a payment frame survives the
- * round trip through that transport unchanged, that the parts we ask it to
- * produce actually fit the symbol this app renders, and that the two app-side
- * guards either side of it — the size ceiling and the part-routing predicate —
- * agree with the library's own limits.
+ * round trip through that transport unchanged, that the block size we ask for
+ * yields parts that fit the symbol this app renders, that an ordinary
+ * one-block payment needs no animation at all, and that the two app-side
+ * guards either side of the library — the 64 KB ceiling and the part-routing
+ * predicate — agree with its own limits.
  */
 import { AirGapDecoder, AirGapEncoder, MAX_MESSAGE_BYTES, estimatePartCharLength, isAirGapPart } from '@bsv/air-gap'
 import {
-  MAX_FRAME_QR_CHARS,
+  FRAME_BLOCK_BYTES,
   decodeFrame,
   encodeFrame,
   frameBytesFromQr,
   frameToQr,
   type PaymentFrame
 } from '@/utils/localpay/codec'
+
+/** Version-40 QR, error-correction level M, byte mode. */
+const SYMBOL_CAPACITY_M = 2331
 
 /** A frame whose AtomicBEEF is far too large for one symbol. */
 function bigFrame(transactionBytes: number): PaymentFrame {
@@ -45,9 +49,10 @@ describe('payment frames over @bsv/air-gap', () => {
   it('round-trips a multi-symbol frame back to the identical frame', () => {
     const frame = bigFrame(6000)
     const wire = frameToQr(frame)
-    expect(wire.length).toBeGreaterThan(MAX_FRAME_QR_CHARS) // genuinely needs the fountain
 
-    const message = drain(new AirGapEncoder(frameBytesFromQr(wire)), new AirGapDecoder(), 200)
+    const encoder = new AirGapEncoder(frameBytesFromQr(wire), { blockBytes: FRAME_BLOCK_BYTES })
+    expect(encoder.blockCount).toBeGreaterThan(1) // genuinely needs the fountain
+    const message = drain(encoder, new AirGapDecoder(), 200)
     expect(message).not.toBeNull()
     expect(Array.from(message!)).toEqual(Array.from(encodeFrame(frame)))
 
@@ -61,7 +66,7 @@ describe('payment frames over @bsv/air-gap', () => {
 
   it('recovers when the camera misses parts, which is the whole point of a fountain', () => {
     const frame = bigFrame(6000)
-    const encoder = new AirGapEncoder(frameBytesFromQr(frameToQr(frame)))
+    const encoder = new AirGapEncoder(frameBytesFromQr(frameToQr(frame)), { blockBytes: FRAME_BLOCK_BYTES })
     const decoder = new AirGapDecoder()
     let message: Uint8Array | null = null
     // Drop every third part: there is no back-channel to ask for a resend.
@@ -73,22 +78,42 @@ describe('payment frames over @bsv/air-gap', () => {
     expect(Array.from(message!)).toEqual(Array.from(encodeFrame(frame)))
   })
 
-  it('every part fits the symbol this app renders', () => {
+  it('sizes every part to fit the symbol this app renders', () => {
     // The renderer hands parts to <QRCode ecl="M">, which THROWS OUT OF RENDER
-    // past capacity and takes the app down through the error boundary. The
-    // default block size must therefore stay inside our own ceiling.
-    expect(estimatePartCharLength()).toBeLessThanOrEqual(MAX_FRAME_QR_CHARS)
+    // past capacity and takes the app down through the error boundary. There is
+    // no single-symbol path to fall back to any more, so this block size is the
+    // only thing standing between a payment code and that throw.
+    expect(FRAME_BLOCK_BYTES).toBe(1024)
+    expect(estimatePartCharLength(FRAME_BLOCK_BYTES)).toBeLessThanOrEqual(SYMBOL_CAPACITY_M)
 
-    const encoder = new AirGapEncoder(frameBytesFromQr(frameToQr(bigFrame(40000))))
+    const encoder = new AirGapEncoder(frameBytesFromQr(frameToQr(bigFrame(40000))), {
+      blockBytes: FRAME_BLOCK_BYTES
+    })
     for (const seq of [0, 1, encoder.blockCount, encoder.blockCount + 17]) {
-      expect(encoder.partAt(seq).length).toBeLessThanOrEqual(MAX_FRAME_QR_CHARS)
+      expect(encoder.partAt(seq).length).toBeLessThanOrEqual(SYMBOL_CAPACITY_M)
     }
+  })
+
+  it('completes a one-block payment from a single part', () => {
+    // The ordinary single-input payment. `seq` lives in the part header, so
+    // part strings still differ from one another even with one source block —
+    // what makes the code a STILL QR is that the renderer holds seq at 0 and
+    // runs no timer, which is only safe because that one part is the whole
+    // message. This pins that it is.
+    const small = frameBytesFromQr(frameToQr(bigFrame(200)))
+    expect(small.length).toBeLessThanOrEqual(FRAME_BLOCK_BYTES)
+    const encoder = new AirGapEncoder(small, { blockBytes: FRAME_BLOCK_BYTES })
+    expect(encoder.blockCount).toBe(1)
+
+    const decoder = new AirGapDecoder()
+    expect(decoder.accept(encoder.partAt(0)).done).toBe(true)
+    expect(Array.from(decoder.message()!)).toEqual(Array.from(small))
   })
 
   it('routes parts and non-parts the way the scanner does', () => {
     const part = new AirGapEncoder(new Uint8Array([1, 2, 3])).partAt(0)
     expect(isAirGapPart(part)).toBe(true)
-    // The two other QR kinds this scanner sees must never enter the decoder.
+    // Neither the session QR nor a stored frame envelope may enter the decoder.
     expect(isAirGapPart(frameToQr(bigFrame(10)))).toBe(false)
     expect(isAirGapPart('bsvpay1:c2Vzc2lvbg')).toBe(false)
   })

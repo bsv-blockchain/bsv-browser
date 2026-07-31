@@ -73,8 +73,8 @@ export type DeliveryOutcome =
  *
  * The transaction is AtomicBEEF on both transports. The QR path was originally
  * specified as bare rawtx to shrink the symbol, but the payee needs ancestry to
- * internalize offline, and MAX_FRAME_QR_CHARS already rejects frames too large
- * to render — so one encoding serves both paths.
+ * internalize offline, and the fountain removed the symbol-size ceiling that
+ * made a smaller QR payload worth having — so one encoding serves both paths.
  *
  * `amount` is passed in rather than read off the session because the session's
  * own amount is optional: on an open request the payer chooses. Making it an

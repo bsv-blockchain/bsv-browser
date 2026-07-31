@@ -123,7 +123,7 @@ import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/iden
 import { getOnline } from '@/utils/net/online'
 import {
   AirGapDecoder,
-  MAX_FRAME_QR_CHARS,
+  FRAME_BLOCK_BYTES,
   MAX_MESSAGE_BYTES,
   awdlTransport,
   buildPaymentFrame,
@@ -132,7 +132,7 @@ import {
   encodeFrame,
   encodeSession,
   finalizeDelivery,
-  frameFromQr,
+  frameBytesFromQr,
   frameToQr,
   holdSentPaymentOffline,
   isAirGapPart,
@@ -892,48 +892,33 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   const onFrameScanned = useCallback(
     (data: string) => {
-      // Animated-code parts arrive continuously and are handled statefully;
-      // everything else keeps the one-shot latch semantics below.
-      if (isAirGapPart(data)) {
-        // A settling payment must ignore late parts — the frame it already
-        // solved is already on its way through settleReceived.
-        if (scanLatchRef.current || settlingRef.current) return
-        const session = hostedSession
-        if (!session) return
-        if (!airGapDecoderRef.current) airGapDecoderRef.current = new AirGapDecoder()
-        const s = airGapDecoderRef.current.accept(data)
-        if (!s.ok) return
-        setScanProgress({ have: s.have, total: s.total })
-        if (!s.done) return
-        const message = airGapDecoderRef.current.message()
-        if (!message) return // crc mismatch: decoder reset itself, keep scanning
-        airGapDecoderRef.current = null
-        setScanProgress(null)
-        scanLatchRef.current = true
-        let frame: PaymentFrame
-        try {
-          frame = decodeFrame(message)
-        } catch {
-          fail('generic', t('invalid_qr_code'))
-          return
-        }
-        void settleRef.current(frame, session)
-        return
-      }
-
-      if (scanLatchRef.current) return
-      scanLatchRef.current = true
+      // A payer's code is always an air-gap fountain, so parts are the only
+      // thing this scanner accepts — a bare bsvpayf1: envelope is a stored
+      // value, not something any build renders at a camera. Parts arrive
+      // continuously and are handled statefully; anything else is a QR that
+      // happens to be in frame and changes nothing.
+      if (!isAirGapPart(data)) return
+      // A settling payment must ignore late parts — the frame it already
+      // solved is already on its way through settleReceived.
+      if (scanLatchRef.current || settlingRef.current) return
       const session = hostedSession
-      if (!session) {
-        fail('generic', t('local_pay_failed'))
-        return
-      }
+      if (!session) return
+      if (!airGapDecoderRef.current) airGapDecoderRef.current = new AirGapDecoder()
+      const s = airGapDecoderRef.current.accept(data)
+      if (!s.ok) return
+      setScanProgress({ have: s.have, total: s.total })
+      if (!s.done) return
+      const message = airGapDecoderRef.current.message()
+      if (!message) return // crc mismatch: decoder reset itself, keep scanning
+      airGapDecoderRef.current = null
+      setScanProgress(null)
+      scanLatchRef.current = true
       let frame: PaymentFrame
       try {
-        // Bare catch on purpose: a structurally valid envelope with malformed
-        // base64, or a body that destructures from null, throws something that
-        // is not a CodecError — and must still land here, not crash the screen.
-        frame = frameFromQr(data)
+        // Bare catch on purpose: version skew, truncation or trailing bytes
+        // throw a CodecError, but a body that destructures from null throws
+        // something else — and must still land here, not crash the screen.
+        frame = decodeFrame(message)
       } catch {
         fail('generic', t('invalid_qr_code'))
         return
@@ -1259,8 +1244,10 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   // null; without a handler it rethrows and the app-level ErrorBoundary replaces
   // the whole app. Flipping parent state synchronously from a child's render
   // triggers React's cross-component update warning, so both handlers defer by a
-  // microtask. These are backstops — every frameToQr() call site already gates
-  // on MAX_MESSAGE_BYTES before calling it.
+  // microtask. PaymentQrDisplay reports an unrenderable payload on this same
+  // channel, since its encoder now throws before there is anything to render.
+  // These are backstops — every frameToQr() call site already gates on
+  // MAX_MESSAGE_BYTES before calling it.
 
   const onSessionQrError = useCallback(() => {
     void Promise.resolve().then(() => setSessionQrBroken(true))
@@ -1274,6 +1261,17 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   }, [fail, t])
 
   // ── Derived ──
+
+  // Source blocks in the payment code. One block renders as a still QR, so the
+  // "hold steady while it animates" hint would be wrong copy for it.
+  const paymentQrBlocks = useMemo(() => {
+    if (!paymentQr) return 0
+    try {
+      return Math.ceil(frameBytesFromQr(paymentQr).length / FRAME_BLOCK_BYTES)
+    } catch {
+      return 0
+    }
+  }, [paymentQr])
 
   const sessionQr = useMemo(() => {
     if (!hostedSession) return null
@@ -1712,7 +1710,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
             >
               <AmountDisplay>{payAmount}</AmountDisplay>
             </Text>
-            {paymentQr.length > MAX_FRAME_QR_CHARS && (
+            {paymentQrBlocks > 1 && (
               <Text style={[styles.support, { color: colors.textSecondary }]}>{t('local_pay_animated_hint')}</Text>
             )}
             <View style={styles.gapLg} />

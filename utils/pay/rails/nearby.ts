@@ -12,11 +12,10 @@
  */
 export { decodeSession, encodeSession, mintSession, type Session } from '@/utils/localpay/session'
 export {
-  MAX_FRAME_QR_CHARS,
+  FRAME_BLOCK_BYTES,
   decodeFrame,
   encodeFrame,
   frameBytesFromQr,
-  frameFromQr,
   frameToQr,
   type PaymentFrame
 } from '@/utils/localpay/codec'
@@ -44,6 +43,12 @@ export {
   type PendingPayment
 } from '@/utils/localpay/pending'
 export { buildPaymentFrame, finalizeDelivery } from '@/utils/localpay/build'
+export {
+  FrameVerifyError,
+  verifyFramePayment,
+  type DerivingWallet,
+  type FrameVerifyKind
+} from '@/utils/localpay/verify'
 export { holdSentPaymentOffline } from '@/utils/offline/payerHold'
 export { awdlTransport } from '@/utils/localpay/transport/awdl'
 export { nearbyTransport } from '@/utils/localpay/transport/nearby'
