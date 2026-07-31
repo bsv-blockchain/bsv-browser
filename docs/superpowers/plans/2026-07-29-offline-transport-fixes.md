@@ -3112,6 +3112,15 @@ Additions from the execution reviews (2026-07-29, see the SDD ledger's per-task 
 11. **Nearby mid-negotiation death premise** — the payer's connect budget expiring mid-negotiation assumes Nearby fires no `onConnectionResult`/`onDisconnected` for a never-established connection; watch the payee's logs during row 9/10 runs to confirm no reaper leaks or double-fires.
 12. **Android payer with Nearby permissions denied** — expect a fast, automatic QR fallback with the "wireless link unavailable" notice, not a hang: the ladder consults GMS only, so the deny is discovered at dial time by design.
 
+Additions from the frame-v2 / always-fountain encoding change (2026-07-30, see `docs/superpowers/specs/2026-07-30-nearby-payment-encoding-design.md`):
+
+13. **iOS→Android and Android→iOS, ordinary single-input payment over QR** — the code is now an air-gap part rather than a `bsvpayf1:` symbol, and a one-block frame must render STILL (renderer holds `seq` at 0, no timer): confirm it does not flicker, scans on the first read, settles, and the figure on the receipt equals the amount sent. The receipt figure now comes from the transaction's output, not from a frame field, so a wrong number here is a derivation or output-index bug, not copy.
+14. **Multi-input payment over QR** — fund a wallet with several small UTXOs, then send an amount needing 3+ inputs. This frame was refused before render prior to the change and has therefore NEVER run on a device: expect the code to animate, the progress counter to climb, and the scan to complete inside ~15 s at 1 KiB blocks.
+15. **Old build pays new build (v1 frame)** — a payer on a pre-v2 build: expect the mismatch screen with the request still live and unspent, no double-credit, and no crash on either side. Rows 13–14 already cover the new-to-new path.
+16. **Re-show after the change** — a `framePayload` written by a v2 build re-renders through "Show code again" as parts (still for one block, animated above it). A row written by a PRE-v2 build renders too but will be refused on scan; that is correct, its inputs are stale.
+
+Not device-testable, unit-covered only (`__tests__/localpayVerify.test.ts`): a frame with correct nonces whose output pays a stranger. Nothing in the app builds one, so do not look for a row here.
+
 - [ ] **Step 3: Close out** — set the spec's Status to "Implemented (device-validated)" with the date; note deviations discovered on device in the spec's own sections (the 2026-07-28 spec's correction style — say what changed and why); update project memory (`project_local_payments_awdl` / new entry) with what shipped.
 
 ---
