@@ -1,3 +1,5 @@
+import { SymmetricKey } from '@bsv/sdk'
+
 export const FRAME_VERSION = 2
 
 export class CodecError extends Error {
@@ -125,6 +127,46 @@ export function decodeFrame(b: Uint8Array): PaymentFrame {
   const transaction = getBytes(b, pos)
   if (pos.i !== b.length) throw new CodecError('trailing bytes after frame')
   return { version, senderIdentityKey, outputIndex, derivationPrefix, derivationSuffix, transaction }
+}
+
+// ── Sealed envelope ──
+//
+// Every frame that leaves the device is sealed with the session PSK — radios
+// and QR alike. On the radios this is redundant with TLS-PSK/Nearby link
+// encryption and costs 49 bytes; the point is ONE wire shape, so the QR rung
+// (line-of-sight readable) can never be the unsealed exception. AES-256-GCM
+// via @bsv/sdk SymmetricKey: |32B IV|ciphertext|16B tag|, behind one version
+// byte so an old decoder reads `1`, says `unsupported frame version 1`, and
+// refuses cleanly.
+//
+// Only line of sight is closed: whoever photographed the PAIRING QR holds
+// this PSK. That threat was noted-not-mitigated in the 07-27 design and is
+// unchanged here.
+
+export const SEAL_VERSION = 1
+
+function pskKey(psk: Uint8Array): SymmetricKey {
+  if (psk.length !== 32) throw new CodecError(`psk must be 32 bytes, got ${psk.length}`)
+  return new SymmetricKey(Array.from(psk))
+}
+
+export function sealFrame(f: PaymentFrame, psk: Uint8Array): Uint8Array {
+  const ct = pskKey(psk).encrypt(Array.from(encodeFrame(f))) as number[]
+  return new Uint8Array([SEAL_VERSION, ...ct])
+}
+
+export function unsealFrame(b: Uint8Array, psk: Uint8Array): PaymentFrame {
+  if (b.length < 1 + 32 + 16) throw new CodecError('sealed frame too short')
+  if (b[0] !== SEAL_VERSION) throw new CodecError(`unsupported seal version ${b[0]}`)
+  let plain: number[]
+  try {
+    plain = pskKey(psk).decrypt(Array.from(b.slice(1))) as number[]
+  } catch {
+    // GCM tag mismatch (wrong PSK or tampering) throws a platform error;
+    // callers of this codec catch exactly one failure type.
+    throw new CodecError('sealed frame failed authentication')
+  }
+  return decodeFrame(new Uint8Array(plain))
 }
 
 // ── Frame envelope ──

@@ -4,10 +4,13 @@ import {
   decodeFrame,
   frameToQr,
   frameBytesFromQr,
+  sealFrame,
+  unsealFrame,
   CodecError,
   FRAME_BLOCK_BYTES,
   FRAME_VERSION,
   FRAME_QR_PREFIX,
+  SEAL_VERSION,
   type PaymentFrame
 } from '@/utils/localpay/codec'
 
@@ -160,5 +163,44 @@ describe('localpay frame envelope', () => {
     const qr = frameToQr(f)
     expect(Array.from(frameBytesFromQr(qr))).toEqual(Array.from(encodeFrame(f)))
     expect(() => frameBytesFromQr('bsvpay1:xx')).toThrow()
+  })
+})
+
+describe('sealed envelope', () => {
+  const psk = new Uint8Array(32).fill(7)
+
+  it('round-trips a frame under the session PSK', () => {
+    const f = sample()
+    expect(unsealFrame(sealFrame(f, psk), psk)).toEqual(f)
+  })
+
+  it('starts with SEAL_VERSION and is ciphertext, not a readable frame', () => {
+    const sealed = sealFrame(sample(), psk)
+    expect(sealed[0]).toBe(SEAL_VERSION)
+    // 1 version byte + 32B IV + ciphertext + 16B tag
+    expect(sealed.length).toBe(1 + 32 + encodeFrame(sample()).length + 16)
+    expect(() => decodeFrame(sealed)).toThrow(CodecError) // reads version 1 → unsupported
+  })
+
+  it('refuses the wrong PSK as a CodecError, not a platform error', () => {
+    const other = new Uint8Array(32).fill(8)
+    expect(() => unsealFrame(sealFrame(sample(), psk), other)).toThrow(CodecError)
+  })
+
+  it('refuses a tampered body', () => {
+    const sealed = sealFrame(sample(), psk)
+    sealed[40] ^= 0xff
+    expect(() => unsealFrame(sealed, psk)).toThrow(CodecError)
+  })
+
+  it('refuses an unknown seal version', () => {
+    const sealed = sealFrame(sample(), psk)
+    sealed[0] = 2
+    expect(() => unsealFrame(sealed, psk)).toThrow(/unsupported seal version 2/)
+  })
+
+  it('refuses a PSK that is not 32 bytes', () => {
+    expect(() => sealFrame(sample(), new Uint8Array(16))).toThrow(CodecError)
+    expect(() => unsealFrame(sealFrame(sample(), psk), new Uint8Array(16))).toThrow(CodecError)
   })
 })
