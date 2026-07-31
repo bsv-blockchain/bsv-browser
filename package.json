@@ -33,6 +33,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@bsv/air-gap": "^0.1.1",
     "@bsv/btms": "^1.1.0",
     "@bsv/btms-permission-module": "^1.1.0",
     "@bsv/message-box-client": "^2.2.1",

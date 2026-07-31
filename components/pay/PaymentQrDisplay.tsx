@@ -1,6 +1,6 @@
 /**
  * One payment code, whatever its size. A frame that fits a single symbol
- * renders as today's static QR. A larger one animates: FountainEncoder parts
+ * renders as today's static QR. A larger one animates: air-gap fountain parts
  * at 5/s, endlessly — the receiver needs any ~K distinct parts, so there is
  * no "start", no "end", and nothing to coordinate. The decision is made from
  * the payload alone so every caller (send screen, re-show modal) behaves
@@ -8,7 +8,23 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import QRCode from 'react-native-qrcode-svg'
-import { FOUNTAIN_FRAME_MS, FountainEncoder, MAX_FRAME_QR_CHARS, frameBytesFromQr } from '@/utils/pay/rails/nearby'
+import { AirGapEncoder, MAX_FRAME_QR_CHARS, frameBytesFromQr } from '@/utils/pay/rails/nearby'
+
+/**
+ * Sender cadence: five parts a second. Lives here, not in `@bsv/air-gap` —
+ * the library encodes and stops at the byte array, leaving display rate to
+ * whoever is holding the phone up.
+ */
+const FRAME_MS = 200
+
+/**
+ * Where `seq` wraps. The library's own guidance: keep looping rather than
+ * counting up forever, since recovery is probabilistic and the repeating
+ * systematic prefix is what guarantees every receiver eventually finishes.
+ * Sixty-four passes over the block set is far more than any hand-held scan
+ * needs and keeps `seq` nowhere near its u32 ceiling.
+ */
+const SEQ_WRAP_CYCLES = 64
 
 export default function PaymentQrDisplay({
   frameQr,
@@ -24,7 +40,7 @@ export default function PaymentQrDisplay({
   const encoder = useMemo(() => {
     if (frameQr.length <= MAX_FRAME_QR_CHARS) return null
     try {
-      return new FountainEncoder(frameBytesFromQr(frameQr))
+      return new AirGapEncoder(frameBytesFromQr(frameQr))
     } catch {
       return null // >64 KB or malformed: let the static path hit onError
     }
@@ -37,12 +53,13 @@ export default function PaymentQrDisplay({
       setPart(null)
       return
     }
+    const wrapAt = encoder.blockCount * SEQ_WRAP_CYCLES
     let seq = 0
     setPart(encoder.partAt(0))
     const id = setInterval(() => {
-      seq += 1
+      seq = (seq + 1) % wrapAt
       setPart(encoder.partAt(seq))
-    }, FOUNTAIN_FRAME_MS)
+    }, FRAME_MS)
     return () => clearInterval(id)
   }, [encoder])
 

@@ -20,13 +20,22 @@ export {
   frameToQr,
   type PaymentFrame
 } from '@/utils/localpay/codec'
+/**
+ * The animated-QR transport is `@bsv/air-gap` (BRC-141), not app code. It was
+ * grown here first and upstreamed; the published library adds what a local
+ * copy could not justify carrying — a wire version byte, per-stream session
+ * ids with switch hysteresis so one stray frame cannot erase a scan in
+ * progress, and explicit decoder resource budgets. Display cadence stays with
+ * the renderer, because the library deliberately has no opinion on it.
+ */
 export {
-  FOUNTAIN_FRAME_MS,
-  FOUNTAIN_QR_PREFIX,
-  FountainDecoder,
-  FountainEncoder,
-  MAX_MESSAGE_BYTES
-} from '@/utils/localpay/fountain'
+  AIR_GAP_PREFIX,
+  AirGapDecoder,
+  AirGapEncoder,
+  MAX_MESSAGE_BYTES,
+  estimatePartCharLength,
+  isAirGapPart
+} from '@bsv/air-gap'
 export {
   isSessionSpent,
   markSessionSpent,

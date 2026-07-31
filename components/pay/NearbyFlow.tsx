@@ -122,8 +122,7 @@ import { updateOfflineAction } from '@/storage/methods/offlineActions'
 import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
 import { getOnline } from '@/utils/net/online'
 import {
-  FOUNTAIN_QR_PREFIX,
-  FountainDecoder,
+  AirGapDecoder,
   MAX_FRAME_QR_CHARS,
   MAX_MESSAGE_BYTES,
   awdlTransport,
@@ -136,6 +135,7 @@ import {
   frameFromQr,
   frameToQr,
   holdSentPaymentOffline,
+  isAirGapPart,
   isDeclineReason,
   isSessionSpent,
   localSupportsAwdl,
@@ -392,7 +392,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   /** Ignores the repeat reads multiScan produces while a scan is being handled. */
   const scanLatchRef = useRef(false)
   /** Assembles animated fountain parts across the continuous scanner's reads. */
-  const fountainDecoderRef = useRef<FountainDecoder | null>(null)
+  const airGapDecoderRef = useRef<AirGapDecoder | null>(null)
   /** Live part-count for the fountain progress line under the camera. */
   const [scanProgress, setScanProgress] = useState<{ have: number; total: number } | null>(null)
 
@@ -468,7 +468,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   const openScanner = useCallback((next: 'send_scan' | 'receive_scan') => {
     scanLatchRef.current = false
-    fountainDecoderRef.current = null
+    airGapDecoderRef.current = null
     setScanProgress(null)
     setPhase(next)
   }, [])
@@ -500,7 +500,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     abortAll()
     settlingRef.current = false
     scanLatchRef.current = false
-    fountainDecoderRef.current = null
+    airGapDecoderRef.current = null
     setScanProgress(null)
     builtRef.current = null
     setPhase(initialRole === 'payee' ? 'receive_amount' : 'entry')
@@ -872,20 +872,20 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     (data: string) => {
       // Animated-code parts arrive continuously and are handled statefully;
       // everything else keeps the one-shot latch semantics below.
-      if (typeof data === 'string' && data.startsWith(FOUNTAIN_QR_PREFIX)) {
+      if (isAirGapPart(data)) {
         // A settling payment must ignore late parts — the frame it already
         // solved is already on its way through settleReceived.
         if (scanLatchRef.current || settlingRef.current) return
         const session = hostedSession
         if (!session) return
-        if (!fountainDecoderRef.current) fountainDecoderRef.current = new FountainDecoder()
-        const s = fountainDecoderRef.current.accept(data)
+        if (!airGapDecoderRef.current) airGapDecoderRef.current = new AirGapDecoder()
+        const s = airGapDecoderRef.current.accept(data)
         if (!s.ok) return
         setScanProgress({ have: s.have, total: s.total })
         if (!s.done) return
-        const message = fountainDecoderRef.current.message()
+        const message = airGapDecoderRef.current.message()
         if (!message) return // crc mismatch: decoder reset itself, keep scanning
-        fountainDecoderRef.current = null
+        airGapDecoderRef.current = null
         setScanProgress(null)
         scanLatchRef.current = true
         let frame: PaymentFrame
