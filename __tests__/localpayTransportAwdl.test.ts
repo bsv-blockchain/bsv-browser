@@ -1,7 +1,7 @@
 import { awdlTransport } from '@/utils/localpay/transport/awdl'
 import { AckError } from '@/utils/localpay/transport/types'
 import { mintSession, instanceName } from '@/utils/localpay/session'
-import { CodecError, FRAME_VERSION, encodeFrame, type PaymentFrame } from '@/utils/localpay/codec'
+import { CodecError, FRAME_VERSION, SEAL_VERSION, encodeFrame, sealFrame, unsealFrame, type PaymentFrame } from '@/utils/localpay/codec'
 import type { LocalPayTransport } from 'react-native-localpay-transport'
 
 jest.mock('react-native-localpay-transport', () => ({
@@ -33,6 +33,7 @@ const session = mintSession({
 
 const frame: PaymentFrame = {
   version: FRAME_VERSION,
+  kind: 'bsv' as const,
   senderIdentityKey: '02'.padEnd(66, 'e'),
   outputIndex: 0,
   derivationPrefix: 'cA',
@@ -86,6 +87,17 @@ describe('awdlTransport.send', () => {
     await expect(awdlTransport.send(session, frame, new AbortController().signal))
       .resolves.toEqual({ ok: false, error: 'declined' })
   })
+
+  it('seals outgoing frames: sendFrame carries ciphertext the session PSK opens', async () => {
+    const native = fakeNative({ sendFrame: jest.fn().mockResolvedValue(toAckBase64({ ok: true })) })
+    getLocalPayTransport.mockReturnValue(native)
+
+    await awdlTransport.send(session, frame, new AbortController().signal)
+    const sentBase64 = (native.sendFrame as jest.Mock).mock.calls[0][2] as string
+    const sentBytes = Uint8Array.from(globalThis.atob(sentBase64), c => c.charCodeAt(0))
+    expect(sentBytes[0]).toBe(SEAL_VERSION)
+    expect(unsealFrame(sentBytes, session.psk)).toEqual(frame)
+  })
 })
 
 describe('awdlTransport.receive', () => {
@@ -103,7 +115,7 @@ describe('awdlTransport.receive', () => {
 
   it('resolves the decoded frame with a confirm handle', async () => {
     const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
-      onFrame(toBase64(encodeFrame(frame)))
+      onFrame(toBase64(sealFrame(frame, session.psk)))
       return Promise.resolve()
     })
     const native = fakeNative({ startListening: startListening as never })
@@ -122,7 +134,7 @@ describe('awdlTransport.receive', () => {
   // travel back over — the payer would time out on a payment the payee saved.
   it('does NOT stop the listener on the success path', async () => {
     const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
-      onFrame(toBase64(encodeFrame(frame)))
+      onFrame(toBase64(sealFrame(frame, session.psk)))
       return Promise.resolve()
     })
     const native = fakeNative({ startListening: startListening as never })
@@ -134,7 +146,7 @@ describe('awdlTransport.receive', () => {
 
   it('acks positively through the native confirmFrame, exactly once', async () => {
     const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
-      onFrame(toBase64(encodeFrame(frame)))
+      onFrame(toBase64(sealFrame(frame, session.psk)))
       return Promise.resolve()
     })
     const native = fakeNative({ startListening: startListening as never })
@@ -149,7 +161,7 @@ describe('awdlTransport.receive', () => {
 
   it('forwards a decline reason verbatim so the payer can localize it', async () => {
     const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
-      onFrame(toBase64(encodeFrame(frame)))
+      onFrame(toBase64(sealFrame(frame, session.psk)))
       return Promise.resolve()
     })
     const native = fakeNative({ startListening: startListening as never })
@@ -165,7 +177,7 @@ describe('awdlTransport.receive', () => {
   // could flip a settled screen.
   it('never rejects when the native ack fails', async () => {
     const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
-      onFrame(toBase64(encodeFrame(frame)))
+      onFrame(toBase64(sealFrame(frame, session.psk)))
       return Promise.resolve()
     })
     const native = fakeNative({
@@ -233,5 +245,17 @@ describe('awdlTransport.receive', () => {
     // Same reason as the success path: stopListening would cancel the very
     // connection the decline has to go out on.
     expect(native.stopListening).not.toHaveBeenCalled()
+  })
+
+  it('declines decode_failed on an UNSEALED frame: raw v3 bytes are not accepted on the wire', async () => {
+    const startListening = jest.fn((_name: string, _psk: string, onFrame: (f: string) => void) => {
+      onFrame(toBase64(encodeFrame(frame))) // raw, not sealed
+      return Promise.resolve()
+    })
+    const native = fakeNative({ startListening: startListening as never })
+    getLocalPayTransport.mockReturnValue(native)
+
+    await expect(awdlTransport.receive(session, new AbortController().signal)).rejects.toThrow(CodecError)
+    expect(native.confirmFrame).toHaveBeenCalledWith(false, 'decode_failed')
   })
 })

@@ -16,6 +16,7 @@ function fakeStorage() {
 
 const frame = (): PaymentFrame => ({
   version: FRAME_VERSION,
+  kind: 'bsv' as const,
   senderIdentityKey: '02'.padEnd(66, 'c'),
   outputIndex: 0,
   derivationPrefix: 'cHJlZml4',

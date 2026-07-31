@@ -45,13 +45,15 @@ jest.mock('react-i18next', () => ({
 // and returns early when it's absent, so most tests never touch the queue —
 // only the ones that explicitly set mockStorage exercise it.
 let mockStorage: { sqliteDb: unknown } | undefined
+const mockRunMonitorTask = jest.fn().mockResolvedValue('')
 jest.mock('@/context/WalletContext', () => ({
   useWallet: () => ({
     walletBuilding: false,
     walletBuilt: true,
     storage: mockStorage,
     txStatusVersion: 0,
-    walletUserId: null
+    walletUserId: null,
+    runMonitorTask: mockRunMonitorTask
   })
 }))
 
@@ -77,6 +79,7 @@ import React from 'react'
 import { render } from '@testing-library/react-native'
 import PayScreen from '@/app/pay'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
+import { resetProofNudgeForTests } from '@/utils/pay/proofNudge'
 import type { OfflineActionRow } from '@/storage/methods/offlineActions'
 
 // Lowercase hex: validatePeerPayURI's compressed-key regex is case-sensitive,
@@ -113,6 +116,8 @@ describe('PayScreen', () => {
     for (const k of Object.keys(mockParams)) delete mockParams[k]
     mockOnline = true
     mockStorage = undefined
+    resetProofNudgeForTests()
+    mockRunMonitorTask.mockClear()
   })
 
   it('renders the three counterparty rows for the Pay direction', () => {

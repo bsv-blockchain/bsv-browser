@@ -184,10 +184,16 @@ export function createWocBroadcastService(chain: string, apiKey?: string) {
         if (response.ok) {
           txResult.status = 'success'
         } else if (body.includes('already in the mempool')) {
+          // Idempotent same-txid rebroadcast — a conflicting DIFFERENT tx cannot
+          // produce this message, so it can't mask a double-spend.
           txResult.status = 'success'
-        } else if (body.includes('mempool-conflict') || body.includes('Missing inputs')) {
-          txResult.doubleSpend = true
         } else {
+          // Never classify from WoC body strings. "Missing inputs" is ambiguous
+          // (propagation lag vs mined double-spend) and a wrong terminal verdict
+          // cascades to reject descendants. Terminal verdicts come from Arcade's
+          // structured txStatus only (handleArcResponse); everything here is
+          // retryable, and the release engine's topological order — foreign
+          // ancestors included — is what prevents the orphan case at the source.
           txResult.serviceError = true
         }
         r.txidResults.push(txResult)

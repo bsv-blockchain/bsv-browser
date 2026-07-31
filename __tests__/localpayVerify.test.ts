@@ -7,10 +7,11 @@
  * and in particular the hole the module closes: correct derivation nonces with
  * an output paying somebody else.
  */
-import { Beef, LockingScript, P2PKH, PrivateKey, Transaction } from '@bsv/sdk'
-import { FrameVerifyError, verifyFramePayment } from '@/utils/localpay/verify'
+import { Beef, BigNumber, Curve, Hash, LockingScript, P2PKH, PrivateKey, PublicKey, Transaction, Utils } from '@bsv/sdk'
+import { FrameVerifyError, FT_PROTOCOL_ID, verifyFramePayment, verifyRecipientLinkage } from '@/utils/localpay/verify'
 import { PEERPAY_PROTOCOL_ID } from '@/utils/localpay/pending'
 import type { PaymentFrame } from '@/utils/localpay/codec'
+import { MandalaToken } from '@bsv/templates'
 
 const payeeKey = PrivateKey.fromRandom().toPublicKey()
 const senderIdentityKey = '02' + 'ab'.repeat(32)
@@ -34,6 +35,7 @@ function beefOf(outputs: { satoshis: number; scriptHex: string }[]): Uint8Array 
 function frameFor(transaction: Uint8Array, outputIndex = 0): PaymentFrame {
   return {
     version: 1,
+    kind: 'bsv' as const,
     senderIdentityKey,
     amount: 0, // still on the type at this task; unread by verify
     outputIndex,
@@ -53,7 +55,7 @@ function payeeWallet() {
 describe('verifyFramePayment', () => {
   it('returns the satoshis of the output that locks to this device’s derived key', async () => {
     const frame = frameFor(beefOf([{ satoshis: 4200, scriptHex: minesScript() }]))
-    await expect(verifyFramePayment(payeeWallet(), frame, 'admin.com')).resolves.toEqual({ satoshis: 4200 })
+    await expect(verifyFramePayment(payeeWallet(), frame, 'admin.com')).resolves.toEqual({ kind: 'bsv', satoshis: 4200 })
   })
 
   it('derives with the payee’s own key, keyed by the frame’s nonces and the sender', async () => {
@@ -76,6 +78,7 @@ describe('verifyFramePayment', () => {
       { satoshis: 777, scriptHex: minesScript() }
     ])
     await expect(verifyFramePayment(payeeWallet(), frameFor(transaction, 1), 'admin.com')).resolves.toEqual({
+      kind: 'bsv',
       satoshis: 777
     })
   })
@@ -138,5 +141,153 @@ describe('verifyFramePayment', () => {
   it('is a FrameVerifyError, so callers can switch on kind', async () => {
     const err = await verifyFramePayment(payeeWallet(), frameFor(new Uint8Array([0])), 'admin.com').catch(e => e)
     expect(err).toBeInstanceOf(FrameVerifyError)
+  })
+})
+
+const ASSET_ID = 'ab'.repeat(32) + '.0'
+const payeePkh = () => Hash.hash160(Utils.toArray(payeeKey.toString(), 'hex'))
+
+function tokenScript(amount: number, pkh: number[] = payeePkh()): string {
+  return new MandalaToken().lock(ASSET_ID, amount, pkh).toHex()
+}
+
+const tokenFrame = (overrides: Partial<PaymentFrame> = {}): PaymentFrame => ({
+  version: 3,
+  kind: 'token',
+  senderIdentityKey,
+  outputIndex: 0,
+  derivationPrefix: 'p',
+  derivationSuffix: 'x',
+  token: {
+    assetId: ASSET_ID,
+    overlayUrl: 'https://overlay.issuer.example',
+    overlayIdentityKey: '03'.padEnd(66, 'b'),
+    certificates: [],
+    linkage: [],
+    recipientLinkage: new Uint8Array([1]),
+  },
+  transaction: beefOf([{ satoshis: 1, scriptHex: tokenScript(500) }]),
+  ...overrides,
+})
+
+describe('verifyFramePayment: token kind', () => {
+  it('returns the decoded token amount and assetId for an output locked to this device', async () => {
+    const result = await verifyFramePayment(payeeWallet(), tokenFrame(), 'test')
+    expect(result).toEqual({ kind: 'token', assetId: ASSET_ID, amount: 500 })
+  })
+
+  it('derives with the mandala FT protocol, not PEERPAY', async () => {
+    const wallet = payeeWallet()
+    await verifyFramePayment(wallet, tokenFrame(), 'test')
+    expect(wallet.getPublicKey).toHaveBeenCalledWith(
+      expect.objectContaining({ protocolID: FT_PROTOCOL_ID, forSelf: true }),
+      'test'
+    )
+  })
+
+  it('refuses a token output locked to someone else as not_mine', async () => {
+    const otherPkh = Hash.hash160(Utils.toArray('02'.padEnd(66, 'c'), 'hex'))
+    const frame = tokenFrame({ transaction: beefOf([{ satoshis: 1, scriptHex: tokenScript(500, otherPkh) }]) })
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test'))
+      .rejects.toMatchObject({ kind: 'not_mine' })
+  })
+
+  it('refuses an output whose script assetId disagrees with the frame', async () => {
+    const frame = tokenFrame()
+    frame.token!.assetId = 'cd'.repeat(32) + '.1'
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test'))
+      .rejects.toMatchObject({ kind: 'not_mine' })
+  })
+
+  it('refuses a non-token script under kind token as not_mine', async () => {
+    const frame = tokenFrame({ transaction: beefOf([{ satoshis: 1, scriptHex: minesScript() }]) })
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test'))
+      .rejects.toMatchObject({ kind: 'not_mine' })
+  })
+})
+
+describe('verifyRecipientLinkage', () => {
+  const scalar = new Uint8Array(32).fill(3)
+  const counterpartyKey = PrivateKey.fromRandom().toPublicKey()
+
+  function derivedPkh(): number[] {
+    const curve = new Curve()
+    const sum = counterpartyKey.add(curve.g.mul(new BigNumber(Array.from(scalar))))
+    const derived = new PublicKey(sum.x, sum.y)
+    return Hash.hash160(Utils.toArray(derived.toString(), 'hex'))
+  }
+
+  const linkageBytes = () => new TextEncoder().encode(JSON.stringify({
+    prover: senderIdentityKey,
+    verifier: payeeKey.toString(),
+    counterparty: counterpartyKey.toString(),
+    protocolID: FT_PROTOCOL_ID,
+    keyID: 'p x',
+    encryptedLinkage: [1, 2, 3],
+    encryptedLinkageProof: [0],
+    proofType: 0,
+  }))
+
+  const decryptingWallet = () => ({
+    decrypt: jest.fn().mockResolvedValue({ plaintext: Array.from(scalar) }),
+  })
+
+  it('accepts when the recovered key hashes to the expected pkh', async () => {
+    await expect(verifyRecipientLinkage(decryptingWallet(), linkageBytes(), derivedPkh(), 'test'))
+      .resolves.toBeUndefined()
+  })
+
+  it('decrypts under the mirrored specific-linkage-revelation protocol', async () => {
+    const wallet = decryptingWallet()
+    await verifyRecipientLinkage(wallet, linkageBytes(), derivedPkh(), 'test')
+    expect(wallet.decrypt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocolID: [2, 'specific linkage revelation 2 mandala token'],
+        keyID: 'p x',
+        counterparty: senderIdentityKey,
+      }),
+      'test'
+    )
+  })
+
+  it('refuses a pkh mismatch as not_mine', async () => {
+    await expect(verifyRecipientLinkage(decryptingWallet(), linkageBytes(), payeePkh(), 'test'))
+      .rejects.toMatchObject({ kind: 'not_mine' })
+  })
+
+  it('refuses unparseable linkage bytes', async () => {
+    await expect(verifyRecipientLinkage(decryptingWallet(), new Uint8Array([0xff]), derivedPkh(), 'test'))
+      .rejects.toMatchObject({ kind: 'unparseable' })
+  })
+
+  // `counterparty` feeds PublicKey.fromString + curve math below the shape
+  // check, and hostile JSON can name anything there. The length gate at the
+  // shape-validation stage is what turns "too short to even try" into the
+  // same 'unparseable' every other malformed-shape field produces.
+  it('refuses a counterparty that is not 66 hex chars as unparseable', async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      prover: senderIdentityKey,
+      counterparty: '02ab',
+      protocolID: FT_PROTOCOL_ID,
+      keyID: 'p x',
+      encryptedLinkage: [1, 2, 3],
+    }))
+    await expect(verifyRecipientLinkage(decryptingWallet(), bytes, derivedPkh(), 'test'))
+      .rejects.toMatchObject({ name: 'FrameVerifyError', kind: 'unparseable' })
+  })
+
+  // 66 hex-shaped chars still is not hex: PublicKey.fromString throws a raw
+  // platform Error("Invalid hex string") on this, which must not escape the
+  // module's every-failure-is-FrameVerifyError contract.
+  it('refuses a 66-char counterparty of garbage hex as not_mine, not a raw throw', async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      prover: senderIdentityKey,
+      counterparty: 'zz'.repeat(33),
+      protocolID: FT_PROTOCOL_ID,
+      keyID: 'p x',
+      encryptedLinkage: [1, 2, 3],
+    }))
+    await expect(verifyRecipientLinkage(decryptingWallet(), bytes, derivedPkh(), 'test'))
+      .rejects.toMatchObject({ name: 'FrameVerifyError', kind: 'not_mine' })
   })
 })

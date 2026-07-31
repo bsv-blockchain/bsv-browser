@@ -1,5 +1,5 @@
 import {
-  mintSession, encodeSession, decodeSession, instanceName, CAP_AWDL, CAP_NEARBY, SESSION_VERSION,
+  mintSession, encodeSession, decodeSession, instanceName, CAP_AWDL, CAP_NEARBY, SESSION_VERSION, CAP_BLE, type SessionAsset,
 } from '@/utils/localpay/session'
 import { CodecError } from '@/utils/localpay/codec'
 
@@ -249,5 +249,83 @@ describe('localpay session', () => {
     const wire = encodeCustomQR(body)
     const decoded = decodeSession(wire)
     expect(decoded.caps & CAP_AWDL).toBe(CAP_AWDL)
+  })
+})
+
+// ── Session asset block (token requests) ──
+
+const baseMintArgs = () => ({
+  identityKey: '02'.padEnd(66, 'd'),
+  derivationPrefix: 'cA',
+  derivationSuffix: 'cw',
+  supportsAwdl: true,
+})
+
+const bytesToB64url = (b: Uint8Array) => {
+  let s = ''
+  for (const byte of b) s += String.fromCharCode(byte)
+  return globalThis.btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+const b64urlToBytes = (s: string) => {
+  const pad = s.replace(/-/g, '+').replace(/_/g, '/')
+  return Uint8Array.from(globalThis.atob(pad + '='.repeat((4 - (pad.length % 4)) % 4)), c => c.charCodeAt(0))
+}
+
+const asset = (): SessionAsset => ({
+  id: 'ab'.repeat(32) + '.0',
+  label: 'Example Dollar',
+  ticker: 'EXD',
+  decimals: 2,
+  overlayUrl: 'https://overlay.issuer.example',
+  overlayIdentityKey: '03'.padEnd(66, 'b'),
+})
+
+describe('session asset block', () => {
+  it('round-trips a token request with amount in base units', () => {
+    const s = mintSession({ ...baseMintArgs(), amount: 12345, asset: asset() })
+    const decoded = decodeSession(encodeSession(s))
+    expect(decoded.asset).toEqual(asset())
+    expect(decoded.amount).toBe(12345)
+    expect(decoded.version).toBe(1)
+  })
+
+  it('round-trips an asset without optional display fields', () => {
+    const bare = { id: asset().id, overlayUrl: asset().overlayUrl, overlayIdentityKey: asset().overlayIdentityKey }
+    const s = mintSession({ ...baseMintArgs(), asset: bare })
+    expect(decodeSession(encodeSession(s)).asset).toEqual(bare)
+  })
+
+  it('omits t entirely for a BSV session', () => {
+    const s = mintSession(baseMintArgs())
+    expect(decodeSession(encodeSession(s)).asset).toBeUndefined()
+    expect('t' in decodeQR(encodeSession(s))).toBe(false)
+  })
+
+  it('refuses a malformed asset at decode', () => {
+    const s = mintSession({ ...baseMintArgs(), asset: asset() })
+    const raw = JSON.parse(new TextDecoder().decode(b64urlToBytes(encodeSession(s).slice('bsvpay1:'.length))))
+    raw.t.k = 'short'
+    const forged = 'bsvpay1:' + bytesToB64url(new TextEncoder().encode(JSON.stringify(raw)))
+    expect(() => decodeSession(forged)).toThrow(CodecError)
+  })
+
+  // The old check (`length < 66 && includes('.')`) accepted this: 66 chars,
+  // has a dot, but the 64-char half is not hex — not a real "<txid>.<vout>".
+  it('refuses a 66-char assetId that is not a valid txid.vout shape', () => {
+    const s = mintSession({ ...baseMintArgs(), asset: asset() })
+    const raw = JSON.parse(new TextDecoder().decode(b64urlToBytes(encodeSession(s).slice('bsvpay1:'.length))))
+    raw.t.i = 'z'.repeat(64) + '.0'
+    const forged = 'bsvpay1:' + bytesToB64url(new TextEncoder().encode(JSON.stringify(raw)))
+    expect(() => decodeSession(forged)).toThrow(CodecError)
+  })
+
+  it('CAP_BLE is allocated and unknown-to-us bits survive decode', () => {
+    expect(CAP_BLE).toBe(0x04)
+    const s = mintSession(baseMintArgs())
+    const raw = JSON.parse(new TextDecoder().decode(b64urlToBytes(encodeSession(s).slice('bsvpay1:'.length))))
+    raw.c = (raw.c ?? 0) | CAP_BLE
+    const forged = 'bsvpay1:' + bytesToB64url(new TextEncoder().encode(JSON.stringify(raw)))
+    expect(decodeSession(forged).caps & CAP_BLE).toBe(CAP_BLE)
   })
 })

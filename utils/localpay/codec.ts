@@ -1,4 +1,6 @@
-export const FRAME_VERSION = 2
+import { SymmetricKey } from '@bsv/sdk'
+
+export const FRAME_VERSION = 3
 
 export class CodecError extends Error {
   constructor(message: string) {
@@ -7,8 +9,20 @@ export class CodecError extends Error {
   }
 }
 
+export type FrameKind = 'bsv' | 'token'
+
+export interface TokenPayment {
+  assetId: string                 // "<64-hex txid>.<vout>"
+  overlayUrl: string
+  overlayIdentityKey: string      // 66-hex compressed pubkey
+  certificates: Uint8Array[]      // opaque serialized VerifiableCertificates
+  linkage: Array<{ txid: string; payload: Uint8Array }> // per-txid MandalaLinkagePayload bytes, whole chain
+  recipientLinkage: Uint8Array    // JSON SpecificLinkage bytes, verifier = payee
+}
+
 export interface PaymentFrame {
   version: number
+  kind: FrameKind
   /** 66-char hex, compressed pubkey */
   senderIdentityKey: string
   /**
@@ -23,6 +37,15 @@ export interface PaymentFrame {
   outputIndex: number
   derivationPrefix: string
   derivationSuffix: string
+  /**
+   * Present iff kind === 'token'. Carried opaquely: the codec validates
+   * shapes and lengths, never parses linkage payloads or certificates.
+   * `linkage` maps EVERY unbroadcast token transaction in `transaction`'s
+   * ancestry to the exact offChainValues bytes its issuer overlay consumes —
+   * forwarded verbatim on chained re-spends so whoever reconnects first can
+   * submit the whole chain.
+   */
+  token?: TokenPayment
   /**
    * AtomicBEEF, on both transports. The design originally specified a bare
    * rawtx on the QR path to shrink the symbol, but ancestry is what lets the
@@ -99,32 +122,124 @@ function bytesToHex(b: Uint8Array): string {
 
 // ── frame ──
 
+const KIND_BYTE: Record<FrameKind, number> = { bsv: 0x01, token: 0x02 }
+
 export function encodeFrame(f: PaymentFrame): Uint8Array {
   if (f.senderIdentityKey.length !== 66) {
     throw new CodecError(`senderIdentityKey must be 66 hex chars, got ${f.senderIdentityKey.length}`)
   }
-  const out: number[] = [f.version & 0xff]
+  if ((f.kind === 'token') !== (f.token !== undefined)) {
+    throw new CodecError(`kind ${f.kind} and token block presence disagree`)
+  }
+  const out: number[] = [f.version & 0xff, KIND_BYTE[f.kind] ?? 0]
+  if (out[1] === 0) throw new CodecError(`unsupported frame kind ${String(f.kind)}`)
   for (const byte of hexToBytes(f.senderIdentityKey.toLowerCase())) out.push(byte)
   putVarint(out, f.outputIndex)
   putStr(out, f.derivationPrefix)
   putStr(out, f.derivationSuffix)
+  if (f.token) {
+    const t = f.token
+    if (t.overlayIdentityKey.length !== 66) {
+      throw new CodecError(`overlayIdentityKey must be 66 hex chars, got ${t.overlayIdentityKey.length}`)
+    }
+    putStr(out, t.assetId)
+    putStr(out, t.overlayUrl)
+    for (const byte of hexToBytes(t.overlayIdentityKey.toLowerCase())) out.push(byte)
+    putVarint(out, t.certificates.length)
+    for (const cert of t.certificates) putBytes(out, cert)
+    putVarint(out, t.linkage.length)
+    for (const entry of t.linkage) {
+      if (entry.txid.length !== 64) throw new CodecError(`linkage txid must be 64 hex chars, got ${entry.txid.length}`)
+      for (const byte of hexToBytes(entry.txid.toLowerCase())) out.push(byte)
+      putBytes(out, entry.payload)
+    }
+    putBytes(out, t.recipientLinkage)
+  }
   putBytes(out, f.transaction)
   return new Uint8Array(out)
 }
 
 export function decodeFrame(b: Uint8Array): PaymentFrame {
-  if (b.length < 34) throw new CodecError('frame too short')
+  if (b.length < 35) throw new CodecError('frame too short')
   const version = b[0]
   if (version !== FRAME_VERSION) throw new CodecError(`unsupported frame version ${version}`)
-  const pos = { i: 1 }
+  const kindByte = b[1]
+  const kind: FrameKind | undefined = kindByte === 0x01 ? 'bsv' : kindByte === 0x02 ? 'token' : undefined
+  if (kind === undefined) throw new CodecError(`unsupported frame kind ${kindByte}`)
+  const pos = { i: 2 }
   const senderIdentityKey = bytesToHex(b.slice(pos.i, pos.i + 33))
   pos.i += 33
   const outputIndex = getVarint(b, pos)
   const derivationPrefix = getStr(b, pos)
   const derivationSuffix = getStr(b, pos)
+  let token: TokenPayment | undefined
+  if (kind === 'token') {
+    const assetId = getStr(b, pos)
+    const overlayUrl = getStr(b, pos)
+    if (pos.i + 33 > b.length) throw new CodecError('truncated overlayIdentityKey')
+    const overlayIdentityKey = bytesToHex(b.slice(pos.i, pos.i + 33))
+    pos.i += 33
+    const certificates: Uint8Array[] = []
+    const certCount = getVarint(b, pos)
+    for (let c = 0; c < certCount; c++) certificates.push(getBytes(b, pos))
+    const linkage: Array<{ txid: string; payload: Uint8Array }> = []
+    const linkCount = getVarint(b, pos)
+    for (let l = 0; l < linkCount; l++) {
+      if (pos.i + 32 > b.length) throw new CodecError('truncated linkage txid')
+      const txid = bytesToHex(b.slice(pos.i, pos.i + 32))
+      pos.i += 32
+      linkage.push({ txid, payload: getBytes(b, pos) })
+    }
+    const recipientLinkage = getBytes(b, pos)
+    token = { assetId, overlayUrl, overlayIdentityKey, certificates, linkage, recipientLinkage }
+  }
   const transaction = getBytes(b, pos)
   if (pos.i !== b.length) throw new CodecError('trailing bytes after frame')
-  return { version, senderIdentityKey, outputIndex, derivationPrefix, derivationSuffix, transaction }
+  return {
+    version, kind, senderIdentityKey, outputIndex, derivationPrefix, derivationSuffix,
+    ...(token === undefined ? {} : { token }),
+    transaction,
+  }
+}
+
+// ── Sealed envelope ──
+//
+// Every frame that leaves the device is sealed with the session PSK — radios
+// and QR alike. On the radios this is redundant with TLS-PSK/Nearby link
+// encryption and costs 49 bytes; the point is ONE wire shape, so the QR rung
+// (line-of-sight readable) can never be the unsealed exception. AES-256-GCM
+// via @bsv/sdk SymmetricKey: |32B IV|ciphertext|16B tag|, behind one version
+// byte so an old decoder reads `1`, says `unsupported frame version 1`, and
+// refuses cleanly.
+//
+// Only line of sight is closed: whoever photographed the PAIRING QR holds
+// this PSK. That threat was noted-not-mitigated in the 07-27 design and is
+// unchanged here.
+
+export const SEAL_VERSION = 1
+
+function pskKey(psk: Uint8Array): SymmetricKey {
+  if (psk.length !== 32) throw new CodecError(`psk must be 32 bytes, got ${psk.length}`)
+  return new SymmetricKey(Array.from(psk))
+}
+
+export function sealFrame(f: PaymentFrame, psk: Uint8Array): Uint8Array {
+  const ct = pskKey(psk).encrypt(Array.from(encodeFrame(f))) as number[]
+  return new Uint8Array([SEAL_VERSION, ...ct])
+}
+
+export function unsealFrame(b: Uint8Array, psk: Uint8Array): PaymentFrame {
+  if (b.length < 1 + 32 + 16) throw new CodecError('sealed frame too short')
+  if (b[0] !== SEAL_VERSION) throw new CodecError(`unsupported seal version ${b[0]}`)
+  let plain: number[]
+  try {
+    plain = pskKey(psk).decrypt(Array.from(b.slice(1))) as number[]
+  } catch {
+    // GCM tag mismatch (wrong PSK or tampering) throws a platform error;
+    // callers of this codec catch exactly one failure type.
+    throw new CodecError('sealed frame failed authentication')
+  }
+  return decodeFrame(new Uint8Array(plain))
 }
 
 // ── Frame envelope ──
@@ -138,7 +253,9 @@ export function decodeFrame(b: Uint8Array): PaymentFrame {
 // `offline_actions.framePayload` so a delivered-but-unbroadcast payment can be
 // re-shown later, and the renderer reads the bytes back out of it. base64url so
 // the stored value is plain single-byte ASCII, behind a prefix that
-// distinguishes it from a session QR (`bsvpay1:`).
+// distinguishes it from a session QR (`bsvpay1:`). The envelope's payload is a
+// SEALED frame: re-showing a stored payment yields ciphertext only the live
+// session's PSK opens.
 
 export const FRAME_QR_PREFIX = 'bsvpayf1:'
 
@@ -187,9 +304,20 @@ function fromB64url(text: string): Uint8Array {
   return Uint8Array.from(binary, c => c.charCodeAt(0))
 }
 
-/** Wraps a frame for storage and later re-display. Rendered as air-gap parts, never as one symbol. */
-export function frameToQr(f: PaymentFrame): string {
-  return FRAME_QR_PREFIX + toB64url(encodeFrame(f))
+/** Wraps a SEALED frame for storage and later re-display. Rendered as air-gap parts, never as one symbol. */
+export function frameToQr(f: PaymentFrame, psk: Uint8Array): string {
+  return FRAME_QR_PREFIX + toB64url(sealFrame(f, psk))
+}
+
+/**
+ * Same envelope as `frameToQr`, but takes bytes already run through
+ * `sealFrame`. Callers that must know the sealed length before they can
+ * render it (the QR-size sanity check) would otherwise call `sealFrame`
+ * once to measure and `frameToQr` again to render — sealing the same frame
+ * twice. Seal once, size-check the bytes, then wrap the same bytes here.
+ */
+export function sealedToQr(sealed: Uint8Array): string {
+  return FRAME_QR_PREFIX + toB64url(sealed)
 }
 
 /**

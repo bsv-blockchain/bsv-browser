@@ -13,10 +13,12 @@
 export { decodeSession, encodeSession, mintSession, type Session } from '@/utils/localpay/session'
 export {
   FRAME_BLOCK_BYTES,
-  decodeFrame,
-  encodeFrame,
+  SEAL_VERSION,
   frameBytesFromQr,
   frameToQr,
+  sealedToQr,
+  sealFrame,
+  unsealFrame,
   type PaymentFrame
 } from '@/utils/localpay/codec'
 /**
