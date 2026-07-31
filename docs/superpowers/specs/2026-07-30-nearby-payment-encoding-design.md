@@ -139,12 +139,13 @@ headroom for an off-axis scanner.
   payment still renders as a visually static QR. No special case is needed for
   it, and none is added.
 - `MAX_FRAME_QR_CHARS` is **deleted**. The bound becomes air-gap's own
-  `MAX_MESSAGE_BYTES` (64 KiB), enforced by the encoder constructor. Frames that
-  were previously refused before render — multi-input builds — now transmit as
-  up to 64 parts, about 13 seconds of holding two phones together. The size
-  gates at `NearbyFlow.tsx:1069`, `:1098`, `:1182` and the animation-hint
-  condition at `:1693` all go; the encoder's own throw, surfaced through
-  `PaymentQrDisplay`'s existing `onError`, is the remaining backstop.
+  `MAX_MESSAGE_BYTES` (64 KiB), enforced by the encoder constructor. The send
+  path already gates on that value (`NearbyFlow.tsx:1062`, `:1105`), so those
+  call sites are untouched; the encoder's own throw, surfaced through
+  `PaymentQrDisplay`'s existing `onError`, remains the backstop. The only
+  `MAX_FRAME_QR_CHARS` reader left is the animation-hint condition at `:1693`,
+  which becomes "more than one source block":
+  `frameBytesFromQr(paymentQr).length > FRAME_BLOCK_BYTES`.
 - `onFrameScanned` loses its bare-envelope branch (`NearbyFlow.tsx:902-919`).
   Frames arrive as air-gap parts only.
 - `frameFromQr` is deleted — with the scan branch gone it has no caller, and
