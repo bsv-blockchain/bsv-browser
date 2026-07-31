@@ -153,7 +153,7 @@ import {
   type PaymentFrame,
   type Session
 } from '@/utils/pay/rails/nearby'
-import { FrameVerifyError, verifyFramePayment, type DerivingWallet } from '@/utils/localpay/verify'
+import { FrameVerifyError, verifyFramePayment, type DerivingWallet, type VerifiedPayment } from '@/utils/localpay/verify'
 
 // ── Types ──
 
@@ -578,9 +578,9 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       //      device derives — so it is both the real number and a proof the
       //      payment is ours to spend. Nothing has latched and nothing has been
       //      written, so every failure here is a provable "queued nothing".
-      let satoshis: number
+      let verified: VerifiedPayment
       try {
-        ;({ satoshis } = await verifyFramePayment(wallet as unknown as DerivingWallet, frame, adminOriginator))
+        verified = await verifyFramePayment(wallet as unknown as DerivingWallet, frame, adminOriginator)
       } catch (e) {
         // `not_mine` is a frame that was never for this request; `unparseable`
         // is bytes that are not a transaction. Both leave the request LIVE and
@@ -594,6 +594,13 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         setListenerEpoch(n => n + 1)
         return
       }
+      if (verified.kind !== 'bsv') {
+        // This app's settle path only credits BSV payments today; a token frame
+        // is refused before anything latches, exactly like a session mismatch.
+        void confirm?.(false, 'session_mismatch')
+        return
+      }
+      const satoshis = verified.satoshis
 
       // (0) Bind the frame to THIS session, before the one-shot latch and before
       //     any write. Two distinct holes close here:
