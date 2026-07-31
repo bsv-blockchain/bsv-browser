@@ -41,6 +41,31 @@ dist-ssr
 *.apk
 *.ipa
 android
+# Workspace packages ship their own tracked Android native module sources
+# (Nitro modules autolinked on Android) under packages/*/android — keep those
+# out of the bare `android` rule above, which exists to ignore the top-level
+# Expo-generated /android app dir and any incidental `android` directories
+# elsewhere (e.g. credentials/android, which must stay ignored).
+#
+# This mirrors .gitignore's own negation for the same reason — but it is a
+# SEPARATE file that duplicates the rule, not an inherited one: eas-cli
+# ignores every .gitignore outright once .easignore exists (see the header
+# above), so a negation added to .gitignore later never reaches here on its
+# own. This exact gap silently stripped packages/react-native-localpay-
+# transport/android/ out of every EAS-built archive from the day that Nitro
+# module was scaffolded (2026-07-29) until this fix (2026-07-31) — the
+# module was never merely unregistered on device, it was never IN the build
+# at all. Found only because a from-source `nm` check of the shipped .so
+# would have been the next diagnostic step; check the EAS build log's own
+# file listing (not just "gradle succeeded") whenever a native module that
+# lives under packages/*/android stops showing up in a build's task list.
+!/packages/*/android
+!/packages/*/android/**
+
+# ...but still ignore Gradle/CMake build output nested inside those tracked
+# package android/ dirs.
+packages/*/android/build
+packages/*/android/.cxx
 
 expo-env.d.ts
 .expo
