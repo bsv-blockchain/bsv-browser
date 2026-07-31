@@ -5,17 +5,30 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.uimanager.ViewManager
 
 /**
- * Deliberately empty ReactPackage.
+ * ReactPackage with no modules or view managers — but NOT unused at runtime.
+ * It carries two load-bearing jobs:
  *
- * Nitro HybridObjects register themselves via JNI (see the generated
- * LocalPayTransportOnLoad), not through ReactPackage#createNativeModules — but
- * Android autolinking (both the community CLI's and Expo's) only discovers a
- * dependency, and thus only adds it as a Gradle project of `:app`, when it
- * finds a class implementing ReactPackage under `android/`. Without this file
- * the module is invisible to autolinking and its native library never gets
- * bundled, even though nothing here is actually used at runtime.
+ *  1. Discovery: Android autolinking (community CLI's and Expo's) only adds a
+ *     dependency as a Gradle project of `:app` when it finds a ReactPackage
+ *     under `android/`.
+ *  2. Registration: the companion init below is the ONLY thing that loads the
+ *     native library. Nitro HybridObjects do register themselves via JNI —
+ *     but only when the .so's JNI_OnLoad runs (see cpp-adapter.cpp), and
+ *     nothing runs it until initializeNative() calls System.loadLibrary.
+ *     Autolinking instantiates this class from PackageList at app start,
+ *     which loads the class, which fires the companion init.
+ *
+ * Dropping the init block re-introduces the silent-QR-fallback bug: the .so
+ * ships in the APK but is never loaded, createHybridObject throws, and every
+ * capability probe on Android answers "unsupported" with no visible error.
  */
 class LocalPayTransportPackage : ReactPackage {
+  companion object {
+    init {
+      LocalPayTransportOnLoad.initializeNative()
+    }
+  }
+
   override fun createViewManagers(
     reactContext: ReactApplicationContext
   ): List<ViewManager<in Nothing, in Nothing>> = emptyList()
