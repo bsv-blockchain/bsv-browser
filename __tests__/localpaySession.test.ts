@@ -299,7 +299,7 @@ describe('session asset block', () => {
   it('omits t entirely for a BSV session', () => {
     const s = mintSession(baseMintArgs())
     expect(decodeSession(encodeSession(s)).asset).toBeUndefined()
-    expect(encodeSession(s)).not.toContain('"t"')
+    expect('t' in decodeQR(encodeSession(s))).toBe(false)
   })
 
   it('refuses a malformed asset at decode', () => {
