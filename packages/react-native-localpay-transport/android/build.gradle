@@ -28,7 +28,11 @@ android {
     externalNativeBuild {
       cmake {
         cppFlags "-frtti -fexceptions -Wall -Wextra -fstack-protector-all"
-        arguments "-DANDROID_STL=c++_shared"
+        // NDK r27 links 4 KB-aligned LOAD segments unless this is ON (default
+        // only from r28), and Play rejects 4 KB-only libs on 16 KB-page
+        // devices. Every other .so in the bundle is 0x4000; without this flag
+        // libLocalPayTransport.so was the one 0x1000 holdout.
+        arguments "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
         abiFilters (*reactNativeArchitectures())
       }
     }
