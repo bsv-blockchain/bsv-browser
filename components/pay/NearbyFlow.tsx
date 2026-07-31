@@ -153,6 +153,7 @@ import {
   type PaymentFrame,
   type Session
 } from '@/utils/pay/rails/nearby'
+import { FrameVerifyError, verifyFramePayment, type DerivingWallet } from '@/utils/localpay/verify'
 
 // ── Types ──
 
@@ -571,13 +572,34 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         return
       }
 
+      // (0a) What this frame actually pays this device. The figure below is the
+      //      satoshis of the AtomicBEEF output at `frame.outputIndex`, and it is
+      //      only produced once that output is shown to lock to a key this
+      //      device derives — so it is both the real number and a proof the
+      //      payment is ours to spend. Nothing has latched and nothing has been
+      //      written, so every failure here is a provable "queued nothing".
+      let satoshis: number
+      try {
+        ;({ satoshis } = await verifyFramePayment(wallet as unknown as DerivingWallet, frame, adminOriginator))
+      } catch (e) {
+        // `not_mine` is a frame that was never for this request; `unparseable`
+        // is bytes that are not a transaction. Both leave the request LIVE and
+        // unspent, exactly as a nonce mismatch does, so the genuine payer can
+        // still complete.
+        const kind = e instanceof FrameVerifyError ? e.kind : 'unparseable'
+        void confirm?.(false, kind === 'not_mine' ? 'session_mismatch' : 'decode_failed')
+        scanLatchRef.current = false
+        setSessionMismatch(true)
+        setPhase('receive_wait')
+        setListenerEpoch(n => n + 1)
+        return
+      }
+
       // (0) Bind the frame to THIS session, before the one-shot latch and before
       //     any write. Two distinct holes close here:
       //
-      //     · frame.amount is display-only — internalizeAction credits whatever
-      //       the output actually holds — so a payer could send 1 satoshi against
-      //       a 100,000 request with amount: 100000 in the frame and the payee's
-      //       screen would read "Received 100,000".
+      //     · the amount check compares the payee's requested figure against the
+      //       satoshis verified above, not against anything the frame asserts.
       //     · onFrameScanned hands ANY decoded frame to the live hostedSession, so
       //       scanning a stray payment QR would queue a stranger's payment AND burn
       //       this session. The real payer would then be told already_paid, acked
@@ -599,7 +621,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       //
       //     Deliberately NOT terminal, and deliberately does NOT mark the session
       //     spent: the request stays live so the genuine payer can still complete.
-      const amountDisagrees = session.amount !== undefined && frame.amount !== session.amount
+      const amountDisagrees = session.amount !== undefined && satoshis !== session.amount
       if (
         frame.derivationPrefix !== session.derivationPrefix ||
         frame.derivationSuffix !== session.derivationSuffix ||
@@ -715,7 +737,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       // failure. A payee who is told "failed" taps Retry, mints a fresh session,
       // and the payer builds a second createAction from different UTXOs: both
       // internalize, the payee is credited twice and the payer pays twice.
-      setSettledAmount(frame.amount)
+      setSettledAmount(satoshis)
       setRole('payee')
       setPhase('done')
       setUnsettled(null)
@@ -761,7 +783,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // spendable, and a receipt claiming otherwise is the one thing the tone
         // rule above exists to prevent. A queued settle keeps the neutral notice
         // on the done screen instead.
-        if (credited) setReceivedOverlay({ amount: frame.amount, broadcast: await broadcastCheck })
+        if (credited) setReceivedOverlay({ amount: satoshis, broadcast: await broadcastCheck })
       } catch (e) {
         console.warn('[localpay] processPending failed:', messageOf(e))
         setNotice({ text: t('local_pay_queued'), tone: 'info' })
