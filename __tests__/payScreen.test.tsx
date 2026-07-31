@@ -51,7 +51,8 @@ jest.mock('@/context/WalletContext', () => ({
     walletBuilt: true,
     storage: mockStorage,
     txStatusVersion: 0,
-    walletUserId: null
+    walletUserId: null,
+    runMonitorTask: jest.fn(async () => '')
   })
 }))
 

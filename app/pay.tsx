@@ -11,7 +11,7 @@
  * modal in settings.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { I18nManager, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { I18nManager, InteractionManager, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -32,6 +32,7 @@ import { useWallet } from '@/context/WalletContext'
 import { useOnline } from '@/hooks/useOnline'
 import { validatePeerPayURI } from '@/utils/parsePeerPayURI'
 import { isPayCell, type PayCell } from '@/utils/pay/rails'
+import { takeProofNudge } from '@/utils/pay/proofNudge'
 import { findOfflineActions, type OfflineActionRow } from '@/storage/methods/offlineActions'
 import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
 
@@ -103,7 +104,7 @@ export default function PayScreen() {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   const online = useOnline()
-  const { walletBuilding, walletBuilt, storage, txStatusVersion, walletUserId } = useWallet()
+  const { walletBuilding, walletBuilt, storage, txStatusVersion, walletUserId, runMonitorTask } = useWallet()
   const [queued, setQueued] = useState(0)
   const [rejected, setRejected] = useState<OfflineActionRow[]>([])
   const [sentRejected, setSentRejected] = useState<OfflineActionRow[]>([])
@@ -190,6 +191,19 @@ export default function PayScreen() {
       else router.replace('/')
     }
   }, [walletBuilding, walletBuilt])
+
+  // One deferred proof sweep per visit (10-min gated): see utils/pay/proofNudge.ts.
+  useEffect(() => {
+    if (!online) return
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!takeProofNudge(Date.now())) return
+      runMonitorTask('CheckForProofs').catch(() => {
+        // Best-effort by design: a failed sweep leaves the 2h background
+        // trigger as the backstop, and must never surface on this screen.
+      })
+    })
+    return () => task.cancel()
+  }, [online, runMonitorTask])
 
   const goBack = useCallback(() => {
     if (cell) setCell(null)
