@@ -23,10 +23,9 @@ function walletStub() {
 }
 
 describe('buildPaymentFrame', () => {
-  it('echoes the session derivation nonces and amount', async () => {
+  it('echoes the session derivation nonces', async () => {
     const s = session()
     const { frame } = await buildPaymentFrame(walletStub() as never, s, 'admin.com', 777)
-    expect(frame.amount).toBe(777)
     expect(frame.derivationPrefix).toBe(s.derivationPrefix)
     expect(frame.derivationSuffix).toBe(s.derivationSuffix)
   })
@@ -150,8 +149,9 @@ describe('buildPaymentFrame', () => {
   //
   // On an OPEN request the session carries no figure at all, so the one number
   // that becomes a real output has to come from the payer. These pin that it is
-  // the argument — not `session.amount` — that reaches both `createAction` and
-  // the frame, and that the two can never disagree.
+  // the argument — not `session.amount` — that sizes the output. The frame
+  // carries no figure of its own to disagree with it: the payee reads the
+  // output's satoshis (see utils/localpay/verify.ts).
 
   const openSession = () => mintSession({
     identityKey: '02'.padEnd(66, 'e'),
@@ -161,17 +161,17 @@ describe('buildPaymentFrame', () => {
     supportsAwdl: true,
   })
 
-  it('uses the payer’s amount for the output and the frame on an open session', async () => {
+  it('uses the payer’s amount for the output on an open session', async () => {
     const w = walletStub()
-    const built = await buildPaymentFrame(w as never, openSession(), 'admin.com', 4200)
+    await buildPaymentFrame(w as never, openSession(), 'admin.com', 4200)
     expect(w.createAction.mock.calls[0][0].outputs[0].satoshis).toBe(4200)
-    expect(built.frame.amount).toBe(4200)
   })
 
-  it('puts the same figure in the output and the frame', async () => {
+  it('carries no amount of its own on the frame', async () => {
     const w = walletStub()
     const built = await buildPaymentFrame(w as never, session(), 'admin.com', 777)
-    expect(w.createAction.mock.calls[0][0].outputs[0].satoshis).toBe(built.frame.amount)
+    expect(w.createAction.mock.calls[0][0].outputs[0].satoshis).toBe(777)
+    expect('amount' in (built.frame as unknown as Record<string, unknown>)).toBe(false)
   })
 
   // The payee's settle path refuses a frame whose amount contradicts a figure
@@ -244,10 +244,21 @@ describe('finalizeDelivery', () => {
   }
 
   const built = { frame: {} as never, reference: 'ref-1', txid: 'tx-1' }
+  // These tests are pinning the ONLINE path, so connectivity is injected rather
+  // than left to the real default (`@/utils/net/online`'s `getOnline`, which
+  // calls the native NetInfo module and has nothing to answer with under Jest).
+  // `hold` is required by the signature and doubles as a guard here: nothing on
+  // the online path, and nothing before the probe, may queue anything.
+  const online = {
+    online: async () => true,
+    hold: async () => {
+      throw new Error('the online path must not queue anything')
+    }
+  }
 
   it('broadcasts on a positive ack', async () => {
     const w = payerStub()
-    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com', online)
 
     expect(outcome).toEqual({ kind: 'sent', broadcast: 'ok' })
     expect(w.createAction).toHaveBeenCalledTimes(1)
@@ -258,7 +269,7 @@ describe('finalizeDelivery', () => {
 
   it('does NOT broadcast on a negative ack, and releases the inputs instead', async () => {
     const w = payerStub()
-    const outcome = await finalizeDelivery(w as never, built, { ok: false, error: 'save_failed' }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, built, { ok: false, error: 'save_failed' }, 'admin.com', online)
 
     expect(outcome).toEqual({ kind: 'declined', reason: 'save_failed' })
     expect(w.createAction).not.toHaveBeenCalled()
@@ -267,7 +278,13 @@ describe('finalizeDelivery', () => {
 
   it('still declines cleanly when there is no reference to abort', async () => {
     const w = payerStub()
-    const outcome = await finalizeDelivery(w as never, { ...built, reference: undefined }, { ok: false }, 'admin.com')
+    const outcome = await finalizeDelivery(
+      w as never,
+      { ...built, reference: undefined },
+      { ok: false },
+      'admin.com',
+      online
+    )
 
     expect(outcome).toEqual({ kind: 'declined', reason: undefined })
     expect(w.createAction).not.toHaveBeenCalled()
@@ -280,7 +297,7 @@ describe('finalizeDelivery', () => {
   it('reports a thrown broadcast as sent-but-pending, never as failed', async () => {
     const w = payerStub()
     w.createAction.mockRejectedValue(new Error('no network'))
-    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com', online)
 
     expect(outcome.kind).toBe('sent')
     expect(outcome).toMatchObject({ broadcast: 'pending', detail: 'no network' })
@@ -290,7 +307,7 @@ describe('finalizeDelivery', () => {
   it('reports a toolbox-rejected broadcast as sent-but-pending', async () => {
     const w = payerStub()
     w.createAction.mockResolvedValue({ sendWithResults: [{ txid: 'tx-1', status: 'failed' }] })
-    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, built, { ok: true }, 'admin.com', online)
 
     expect(outcome).toMatchObject({ kind: 'sent', broadcast: 'pending' })
     expect(w.abortAction).not.toHaveBeenCalled()
@@ -298,7 +315,7 @@ describe('finalizeDelivery', () => {
 
   it('reports sent-but-pending when there is no txid to broadcast', async () => {
     const w = payerStub()
-    const outcome = await finalizeDelivery(w as never, { ...built, txid: undefined }, { ok: true }, 'admin.com')
+    const outcome = await finalizeDelivery(w as never, { ...built, txid: undefined }, { ok: true }, 'admin.com', online)
 
     expect(outcome).toMatchObject({ kind: 'sent', broadcast: 'pending' })
     expect(w.createAction).not.toHaveBeenCalled()
@@ -310,8 +327,131 @@ describe('finalizeDelivery', () => {
     w.abortAction.mockRejectedValue(new Error('storage down'))
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
 
-    await expect(finalizeDelivery(w as never, built, { ok: false, error: 'already_paid' }, 'admin.com'))
-      .resolves.toEqual({ kind: 'declined', reason: 'already_paid' })
+    await expect(
+      finalizeDelivery(w as never, built, { ok: false, error: 'already_paid' }, 'admin.com', online)
+    ).resolves.toEqual({ kind: 'declined', reason: 'already_paid' })
     warn.mockRestore()
+  })
+})
+
+describe('finalizeDelivery when offline', () => {
+  const built = { frame: {} as never, reference: 'ref-1', txid: 'aa'.repeat(32) }
+
+  it('enqueues instead of broadcasting and reports pending', async () => {
+    const wallet = {
+      createAction: jest.fn(),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn().mockResolvedValue(undefined)
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => false,
+      hold
+    })
+    expect(r).toEqual({ kind: 'sent', broadcast: 'pending', detail: expect.stringMatching(/offline/i) })
+    expect(hold).toHaveBeenCalledWith('aa'.repeat(32))
+    expect(wallet.createAction).not.toHaveBeenCalled()
+  })
+
+  it('still broadcasts when online', async () => {
+    const wallet = {
+      createAction: jest.fn().mockResolvedValue({ sendWithResults: [{ txid: built.txid, status: 'sending' }] }),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn()
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => true,
+      hold
+    })
+    expect(r).toEqual({ kind: 'sent', broadcast: 'ok' })
+    expect(hold).not.toHaveBeenCalled()
+  })
+
+  it('still aborts on a negative ack while offline', async () => {
+    const wallet = {
+      createAction: jest.fn(),
+      abortAction: jest.fn().mockResolvedValue({ aborted: true }),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn()
+    const r = await finalizeDelivery(wallet as never, built, { ok: false, error: 'declined' }, 'admin.com', {
+      online: async () => false,
+      hold
+    })
+    expect(r).toEqual({ kind: 'declined', reason: 'declined' })
+    expect(wallet.abortAction).toHaveBeenCalledWith({ reference: 'ref-1' }, 'admin.com')
+    expect(hold).not.toHaveBeenCalled()
+  })
+
+  it('reports pending when the enqueue itself fails', async () => {
+    const wallet = {
+      createAction: jest.fn(),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn().mockRejectedValue(new Error('db locked'))
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => false,
+      hold
+    })
+    expect(r.kind).toBe('sent')
+    expect((r as { broadcast: string }).broadcast).toBe('pending')
+  })
+
+  // Matches the guard already around every other call to `getOnline` in this
+  // codebase: a failed probe must not flip a reachable device into the offline
+  // branch, so this falls through to the ordinary broadcast instead.
+  it('assumes online when the connectivity probe itself throws', async () => {
+    const wallet = {
+      createAction: jest.fn().mockResolvedValue({ sendWithResults: [{ txid: built.txid, status: 'sending' }] }),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const hold = jest.fn()
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => {
+        throw new Error('NetInfo native module unavailable')
+      },
+      hold
+    })
+    expect(r).toEqual({ kind: 'sent', broadcast: 'ok' })
+    expect(hold).not.toHaveBeenCalled()
+    expect(wallet.createAction).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  // `hold` is required by the signature, so this is what a JS caller or a cast
+  // gets. With no hold there is no queue row and no promotion: the transaction
+  // stays at `nosend`, its change unspendable (allocateChangeInput excludes
+  // `nosend`), invisible to the drain — which reads only `offline_actions` — and
+  // to every monitor task (TaskSendWaiting selects ['unsent','sending'];
+  // TaskCheckNoSends never calls sendWith). Telling the user it is queued would
+  // be the Task 11 Critical again, reached through a missing argument instead of
+  // a throw.
+  it('never reports a queue it had no way to make', async () => {
+    const wallet = {
+      createAction: jest.fn(),
+      abortAction: jest.fn(),
+      getPublicKey: jest.fn(),
+      signAction: jest.fn()
+    }
+    const r = await finalizeDelivery(wallet as never, built, { ok: true }, 'admin.com', {
+      online: async () => false
+    } as never)
+
+    // Still a sent payment — the payee holds a copy — but pending, never queued.
+    expect(r).toMatchObject({ kind: 'sent', broadcast: 'pending' })
+    expect((r as { detail?: string }).detail).not.toMatch(/queued/i)
+    expect((r as { detail?: string }).detail).toMatch(/hold/i)
+    // And it must not quietly broadcast either: offline is offline, and a
+    // delayed send would come back 'sending' and be reported as broadcast: 'ok'.
+    expect(wallet.createAction).not.toHaveBeenCalled()
   })
 })

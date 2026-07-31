@@ -22,6 +22,7 @@ import AmountDisplay from '@/components/wallet/AmountDisplay'
 import tabStore from '@/stores/TabStore'
 import type { WalletAction } from '@bsv/sdk'
 import { exportTransactionsAsCsv } from '@/utils/exportTransactions'
+import { findOfflineActions, type OfflineActionRow } from '@/storage/methods/offlineActions'
 
 const PAGE_SIZE = 30
 
@@ -29,7 +30,23 @@ type StatusInfo = { label: string; color: string }
 
 const ABORTABLE_STATUSES = new Set(['unsigned', 'nosend', 'nonfinal'])
 
-function getStatusInfo(status: string, colors: any, t: (key: string) => string): StatusInfo {
+function getStatusInfo(
+  status: string,
+  colors: any,
+  t: (key: string) => string,
+  offline?: OfflineActionRow
+): StatusInfo {
+  // The queue row is live held-state and outranks the raw transaction status:
+  // a held tx sits at 'unproven' (green "Accepted" — indistinguishable from a
+  // broadcast one) or, when the payer-side promotion failed, at 'nosend'
+  // (indistinguishable from a deliberate pending-signature noSend).
+  if (offline) {
+    switch (offline.status) {
+      case 'queued': return { label: t('tx_status_offline_queued'), color: colors.info }
+      case 'posting': return { label: t('tx_status_offline_sending'), color: colors.info }
+      case 'rejected': return { label: t('tx_status_offline_rejected'), color: colors.error }
+    }
+  }
   switch (status) {
     case 'completed': return { label: t('tx_status_confirmed'), color: colors.success }
     case 'unproven': return { label: t('tx_status_accepted'), color: colors.success }
@@ -47,7 +64,7 @@ export default function TransactionsScreen() {
   const sheet = useSheet()
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { managers, adminOriginator, selectedNetwork, storage, txStatusVersion, refreshProof } = useWallet()
+  const { managers, adminOriginator, selectedNetwork, storage, txStatusVersion, walletUserId, refreshProof } = useWallet()
 
   const [actions, setActions] = useState<WalletAction[]>([])
   const [totalActions, setTotalActions] = useState(0)
@@ -58,6 +75,7 @@ export default function TransactionsScreen() {
   const [abortingTxid, setAbortingTxid] = useState<string | null>(null)
   const [refreshingTxid, setRefreshingTxid] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [offlineByTxid, setOfflineByTxid] = useState<Map<string, OfflineActionRow>>(new Map())
   const offsetRef = useRef(0)
 
   const fetchActions = useCallback(async (offset: number) => {
@@ -68,6 +86,22 @@ export default function TransactionsScreen() {
     )
     return result
   }, [managers.permissionsManager, adminOriginator])
+
+  const fetchOfflineRows = useCallback(async () => {
+    try {
+      const db = storage?.sqliteDb
+      if (!db) return
+      const rows = await findOfflineActions(db, {
+        status: ['queued', 'posting', 'rejected'],
+        ...(walletUserId === null ? {} : { userId: walletUserId })
+      })
+      // 'sent' rows are excluded by the query: a settled transaction must show
+      // its normal status, and sent rows persist as provenance.
+      setOfflineByTxid(new Map(rows.map(r => [r.txid, r])))
+    } catch {
+      // The overlay is advisory. A read failure must not break the list.
+    }
+  }, [storage, walletUserId])
 
   useEffect(() => {
     let cancelled = false
@@ -80,8 +114,9 @@ export default function TransactionsScreen() {
       offsetRef.current = result.actions.length
       setLoading(false)
     })()
+    void fetchOfflineRows()
     return () => { cancelled = true }
-  }, [fetchActions, txStatusVersion])
+  }, [fetchActions, txStatusVersion, fetchOfflineRows])
 
   const loadMore = useCallback(async () => {
     if (loadingMore || offsetRef.current >= totalActions) return
@@ -103,8 +138,9 @@ export default function TransactionsScreen() {
       setTotalActions(result.totalActions)
       offsetRef.current = result.actions.length
     }
+    void fetchOfflineRows()
     setRefreshing(false)
-  }, [fetchActions])
+  }, [fetchActions, fetchOfflineRows])
 
   const handleExplorerLink = useCallback((txid: string) => {
     const baseUrl = selectedNetwork === 'main' ? 'https://whatsonchain.com'
@@ -196,7 +232,7 @@ export default function TransactionsScreen() {
   }, [refreshProof, refreshingTxid, t])
 
   const renderItem: ListRenderItem<WalletAction> = useCallback(({ item }) => {
-    const status = getStatusInfo(item.status, colors, t)
+    const status = getStatusInfo(item.status, colors, t, item.txid ? offlineByTxid.get(item.txid) : undefined)
     const isOutgoing = item.isOutgoing
     const amount = item.satoshis
     const reference = (item as any).reference as string | undefined
@@ -280,7 +316,7 @@ export default function TransactionsScreen() {
         </View>
       </View>
     )
-  }, [colors, handleExplorerLink, handleCopyRawTx, handleAbort, handleRefreshProof, copyingTxid, abortingTxid, refreshingTxid, t])
+  }, [colors, handleExplorerLink, handleCopyRawTx, handleAbort, handleRefreshProof, copyingTxid, abortingTxid, refreshingTxid, t, offlineByTxid])
 
   let content: React.ReactNode
   if (loading) {

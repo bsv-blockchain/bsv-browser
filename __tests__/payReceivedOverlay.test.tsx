@@ -58,7 +58,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react-native'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
 import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
 
-function draw(props: { amount: number; count?: number; onDismiss: () => void }) {
+function draw(props: { amount: number; count?: number; broadcast?: boolean; onDismiss: () => void }) {
   return render(
     <ThemeProvider>
       <ReceivedOverlay {...props} />
@@ -86,6 +86,19 @@ describe('ReceivedOverlay', () => {
   it('names the count when one event credited several payments', () => {
     draw({ amount: 9000, count: 3, onDismiss: jest.fn() })
     expect(screen.getByText('local_pay_added_multiple:3')).toBeTruthy()
+  })
+
+  it('adds a pending line only when the payment has not reached a broadcaster yet', () => {
+    draw({ amount: 5000, broadcast: false, onDismiss: jest.fn() })
+    expect(screen.getByText('pay_received_not_broadcast')).toBeTruthy()
+  })
+
+  it('says nothing extra once the payment has broadcast', () => {
+    // The default: most receipts are for money the sender's device could reach
+    // the network for. Silence here is the claim that nothing further can be
+    // said one way or the other.
+    draw({ amount: 5000, onDismiss: jest.fn() })
+    expect(screen.queryByText('pay_received_not_broadcast')).toBeNull()
   })
 
   it('never dismisses itself — not on mount, not after the mark lands', () => {

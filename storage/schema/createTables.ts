@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
+import type { BindValue } from '../methods/offlineActions'
 
 /**
  * SQL statements to create all wallet storage tables
@@ -331,4 +332,54 @@ export async function createTables(db: SQLiteDatabase): Promise<void> {
       updated_at TEXT NOT NULL
     );
   `)
+
+  // Offline actions — the broadcast queue and provenance record for
+  // transactions accepted with no network. The money itself lives in the normal
+  // transactions/outputs tables the whole time (that is what keeps it
+  // spendable); this table records what still needs sending, in what order it
+  // arrived, and who handed it to us.
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS offline_actions (
+      offlineActionId INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      userId INTEGER NOT NULL,
+      txid TEXT NOT NULL UNIQUE,
+      seq INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      senderIdentityKey TEXT,
+      receivedVia TEXT,
+      status TEXT NOT NULL,
+      rejectedReason TEXT,
+      poisonedByTxid TEXT,
+      framePayload TEXT,
+      FOREIGN KEY (userId) REFERENCES users(userId)
+    );
+    CREATE INDEX IF NOT EXISTS idx_offline_actions_status ON offline_actions(status);
+    CREATE INDEX IF NOT EXISTS idx_offline_actions_userId ON offline_actions(userId);
+    CREATE INDEX IF NOT EXISTS idx_offline_actions_seq ON offline_actions(seq);
+    CREATE INDEX IF NOT EXISTS idx_offline_actions_txid ON offline_actions(txid);
+  `)
+}
+
+/**
+ * Post-ship column additions to offline_actions. CREATE TABLE IF NOT EXISTS
+ * cannot alter an existing table, so upgrades go through a PRAGMA check + a
+ * guarded ALTER. Add future columns to the COLUMNS list; never remove or
+ * retype one here — SQLite ALTER cannot do either, and this table is live
+ * money bookkeeping on shipped devices.
+ */
+const OFFLINE_ACTIONS_COLUMNS: { name: string; ddl: string }[] = [
+  { name: 'framePayload', ddl: 'ALTER TABLE offline_actions ADD COLUMN framePayload TEXT' }
+]
+
+export async function ensureOfflineActionsColumns(db: {
+  getAllAsync(sql: string, params: BindValue[]): Promise<unknown[]>
+  execAsync(sql: string): Promise<unknown>
+}): Promise<void> {
+  const info = (await db.getAllAsync('PRAGMA table_info(offline_actions)', [])) as { name: string }[]
+  const have = new Set(info.map(c => c.name))
+  for (const col of OFFLINE_ACTIONS_COLUMNS) {
+    if (!have.has(col.name)) await db.execAsync(col.ddl)
+  }
 }

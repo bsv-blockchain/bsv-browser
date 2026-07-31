@@ -1,5 +1,6 @@
 import * as nearby from '@/utils/pay/rails/nearby'
 import * as session from '@/utils/localpay/session'
+import * as verify from '@/utils/localpay/verify'
 import * as codec from '@/utils/localpay/codec'
 import * as pending from '@/utils/localpay/pending'
 import * as build from '@/utils/localpay/build'
@@ -12,8 +13,10 @@ describe('nearby rail adapter', () => {
     expect(nearby.encodeSession).toBe(session.encodeSession)
     expect(nearby.decodeSession).toBe(session.decodeSession)
     expect(nearby.frameToQr).toBe(codec.frameToQr)
-    expect(nearby.frameFromQr).toBe(codec.frameFromQr)
-    expect(nearby.MAX_FRAME_QR_CHARS).toBe(codec.MAX_FRAME_QR_CHARS)
+    expect(nearby.frameBytesFromQr).toBe(codec.frameBytesFromQr)
+    expect(nearby.FRAME_BLOCK_BYTES).toBe(codec.FRAME_BLOCK_BYTES)
+    expect(nearby.verifyFramePayment).toBe(verify.verifyFramePayment)
+    expect(nearby.FrameVerifyError).toBe(verify.FrameVerifyError)
     expect(nearby.savePending).toBe(pending.savePending)
     expect(nearby.processPending).toBe(pending.processPending)
     expect(nearby.isSessionSpent).toBe(pending.isSessionSpent)

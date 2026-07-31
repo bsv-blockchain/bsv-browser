@@ -39,11 +39,18 @@ export interface ReceivedOverlayProps {
   amount: number
   /** How many payments made up that total. Only shown when it is more than one. */
   count?: number
+  /**
+   * False when the payment was accepted with no network and has not reached a
+   * broadcaster yet. The money is credited and spendable either way; what is
+   * unsettled is whether anyone but these two devices has seen it, and the
+   * payee is entitled to know that before treating it as final.
+   */
+  broadcast?: boolean
   /** Acknowledged. The only way this screen closes. */
   onDismiss: () => void
 }
 
-export default function ReceivedOverlay({ amount, count = 1, onDismiss }: ReceivedOverlayProps) {
+export default function ReceivedOverlay({ amount, count = 1, broadcast = true, onDismiss }: ReceivedOverlayProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const reducedMotion = useReducedMotion()
@@ -114,6 +121,10 @@ export default function ReceivedOverlay({ amount, count = 1, onDismiss }: Receiv
           <Text style={[styles.support, { color: colors.success }]} textBreakStrategy="balanced">
             {count > 1 ? t('local_pay_added_multiple', { count }) : t('local_pay_added')}
           </Text>
+
+          {!broadcast && (
+            <Text style={[styles.pending, { color: colors.textSecondary }]}>{t('pay_received_not_broadcast')}</Text>
+          )}
         </View>
 
         {ready && (
@@ -168,6 +179,11 @@ const styles = StyleSheet.create({
   support: {
     ...typography.subhead,
     textAlign: 'center'
+  },
+  pending: {
+    ...typography.footnote,
+    textAlign: 'center',
+    marginTop: spacing.xs
   },
   footer: {
     paddingBottom: spacing.md

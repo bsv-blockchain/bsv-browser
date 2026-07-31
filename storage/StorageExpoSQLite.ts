@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite'
 import type { SQLiteDatabase } from 'expo-sqlite'
-import { createTables } from './schema/createTables'
+import { createTables, ensureOfflineActionsColumns } from './schema/createTables'
 import { devLog } from '../utils/logging'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import type { StorageProviderOptions } from '@bsv/wallet-toolbox-mobile'
@@ -50,9 +50,16 @@ import type {
   TableTxLabelMap,
   TableUser
 } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/tables'
-import type { ListActionsResult, ListOutputsResult, Validation } from '@bsv/sdk'
+import type { ListActionsResult, ListOutputsResult, Validation, WalletLoggerInterface } from '@bsv/sdk'
+import { Beef } from '@bsv/sdk'
+import type { EntityProvenTxReq } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/entities'
+import type { PostReqsToNetworkResult } from '@bsv/wallet-toolbox-mobile/out/src/storage/methods/attemptToPostReqsToNetwork'
 import { listActionsSql } from './methods/listActionsSql'
 import { listOutputsSql } from './methods/listOutputsSql'
+import { insertOfflineAction, type OfflineActionRole } from './methods/offlineActions'
+import { buildOfflineHoldResult, groupOfflineHolds } from '../utils/offline/hold'
+import { getOnline } from '../utils/net/online'
+import { TaskSendOffline } from '../utils/monitor/TaskSendOffline'
 
 export interface StorageExpoSQLiteOptions extends StorageProviderOptions {
   databaseName?: string
@@ -81,6 +88,7 @@ export class StorageExpoSQLite extends StorageProvider {
   async migrate(storageName: string, storageIdentityKey: string): Promise<string> {
     this.db = await SQLite.openDatabaseAsync(this.dbName)
     await createTables(this.db)
+    await ensureOfflineActionsColumns(this.db)
 
     // Check/insert settings
     const existing = (await this.db.getFirstAsync('SELECT * FROM settings WHERE storageIdentityKey = ?', [
@@ -1341,6 +1349,16 @@ export class StorageExpoSQLite extends StorageProvider {
     throw new Error('Method intentionally not implemented for personal storage.')
   }
 
+  /**
+   * The raw database, for the offline-actions modules only. `db` above is
+   * already public (no access modifier) — this isn't a narrower type, just a
+   * named, deliberate access point for that use so call sites read as
+   * intentional rather than reaching into an implementation-shaped field.
+   */
+  get sqliteDb(): SQLiteDatabase | undefined {
+    return this.db
+  }
+
   // Override internalizeAction for debugging
   async internalizeAction(auth: AuthId, args: any): Promise<any> {
     devLog('[StorageExpoSQLite] internalizeAction called, userId:', auth.userId)
@@ -1362,6 +1380,128 @@ export class StorageExpoSQLite extends StorageProvider {
       console.error('[StorageExpoSQLite] internalizeAction ERROR:', e.message, e.stack?.slice(0, 500))
       throw e
     }
+  }
+
+  /**
+   * Park requests for later delivery instead of broadcasting them now.
+   *
+   * Each request goes to 'nosend': held, ignored by every monitor task
+   * (`TaskSendWaiting` selects 'unsent'/'sending', `TaskCheckNoSends` is barred
+   * from counting attempts against nosend rows, `TaskFailAbandoned` sweeps
+   * *transactions* in 'unprocessed'/'unsigned'), yet still releasable later via
+   * `options.sendWith` because `readyToSendStatuses` includes it
+   * (`storage/storageProviderHelpers.js:14`). A row in `offline_actions` then
+   * records that it still needs sending.
+   *
+   * The transaction row is deliberately left untouched, which makes its current
+   * status a **precondition** rather than an afterthought: callers must only
+   * pass requests whose transaction is already in `holdSafeTxStatuses`. For the
+   * internalize path that is 'unproven'
+   * (`storage/methods/internalizeAction.js:352`), the status that keeps the
+   * received outputs spendable while the broadcast waits — the whole point of
+   * holding rather than failing. See `utils/offline/hold.ts` for what the other
+   * statuses would cost.
+   *
+   * Both writes are idempotent (a repeat 'nosend' is a no-op, and the queue
+   * insert is `INSERT OR IGNORE` on a UNIQUE txid, so it neither duplicates a
+   * row nor disturbs an existing `seq`), so a partial failure is safe to retry.
+   *
+   * Public and upstream-shaped: this is the method that becomes
+   * `StorageProvider.holdReqsOffline` in wallet-toolbox.
+   */
+  async holdReqsOffline(reqs: { txid: string }[], userId: number, role: OfflineActionRole = 'received'): Promise<void> {
+    const db = this.getDB()
+    for (const req of reqs) {
+      const row = (await this.findProvenTxReqs({ partial: { txid: req.txid } }))[0]
+      if (row) await this.updateProvenTxReq(row.provenTxReqId, { status: 'nosend' })
+      await insertOfflineAction(db, { userId, txid: req.txid, role })
+    }
+    TaskSendOffline.noteEnqueued()
+  }
+
+  /**
+   * Offline, hold the requests. Online, behave exactly as before.
+   *
+   * This override is reached only from `shareReqsWithWorld`
+   * (`storage/methods/processAction.js:146`, a method call on storage), which
+   * covers the forced broadcast inside `internalizeAction` and the non-delayed
+   * create/`sendWith` path. `TaskSendWaiting` invokes the module function
+   * directly (`monitor/tasks/TaskSendWaiting.js:180`), so the monitor's
+   * ordinary broadcast retries are deliberately NOT intercepted.
+   *
+   * Narrower than "offline means hold": only requests whose transaction is
+   * already in a hold-safe status are parked, so in practice this holds the
+   * internalize path the feature needs and leaves the non-delayed `createAction`
+   * path with the `serviceError` and automatic `TaskSendWaiting` retry it has
+   * today. `groupOfflineHolds` makes that call; see `utils/offline/hold.ts`.
+   *
+   * The returned 'success' means "accepted for delivery", not "the network has
+   * it"; see `utils/offline/hold.ts` for why nothing persisted claims otherwise.
+   */
+  async attemptToPostReqsToNetwork(
+    reqs: EntityProvenTxReq[],
+    trx?: TrxToken,
+    logger?: WalletLoggerInterface
+  ): Promise<PostReqsToNetworkResult> {
+    if (reqs.length === 0) return await super.attemptToPostReqsToNetwork(reqs, trx, logger)
+
+    let online = true
+    try {
+      online = await getOnline()
+    } catch (e) {
+      // A failed connectivity probe must never change posting behaviour: assume
+      // online so the real post runs exactly as it did before this override.
+      devLog('[StorageExpoSQLite] connectivity probe failed, assuming online:', e)
+    }
+    if (online) return await super.attemptToPostReqsToNetwork(reqs, trx, logger)
+
+    const pairs = await this.resolveHoldPairs(reqs)
+    const holds = groupOfflineHolds(pairs)
+    if (!holds) {
+      // Either a request could not be attributed to a user, so we could not
+      // record that it still needs sending, or its transaction is not in a
+      // status that survives being held (see `holdSafeTxStatuses`). Refuse the
+      // whole call and let the ordinary broadcast run: offline its failure takes
+      // the pre-existing paths, either `internalizeAction`'s rollback or a
+      // `serviceError` that leaves the request for `TaskSendWaiting` to retry.
+      devLog(
+        '[StorageExpoSQLite] offline: not holding, delegating to the real post:',
+        pairs.map(p => `${p.req.txid} ${p.tx ? `tx ${p.tx.status}` : 'unattributed'}`).join(', ')
+      )
+      return await super.attemptToPostReqsToNetwork(reqs, trx, logger)
+    }
+
+    devLog(`[StorageExpoSQLite] offline: holding ${reqs.length} req(s) for later delivery`)
+    for (const hold of holds.values()) {
+      await this.holdReqsOffline(hold.reqs, hold.userId, hold.role)
+    }
+    return { ...buildOfflineHoldResult(reqs), beef: new Beef(), log: '' }
+  }
+
+  /**
+   * Pair each request with the transaction row it notifies
+   * (`EntityProvenTxReq.addNotifyTransactionId`, populated by
+   * `storage/methods/internalizeAction.js:523` and
+   * `storage/methods/processAction.js:241`).
+   *
+   * Database reads only: every rule applied to these pairs lives in
+   * `groupOfflineHolds`, which is pure and unit-tested. Read-only on purpose, so
+   * the whole set is resolved before any write and a refusal can never leave a
+   * request half-held.
+   */
+  private async resolveHoldPairs(
+    reqs: EntityProvenTxReq[]
+  ): Promise<{ req: EntityProvenTxReq; tx: TableTransaction | undefined }[]> {
+    const pairs: { req: EntityProvenTxReq; tx: TableTransaction | undefined }[] = []
+    for (const req of reqs) {
+      let tx: TableTransaction | undefined
+      for (const transactionId of req.notify?.transactionIds ?? []) {
+        tx = (await this.findTransactions({ partial: { transactionId }, noRawTx: true }))[0]
+        if (tx) break
+      }
+      pairs.push({ req, tx })
+    }
+    return pairs
   }
 
   // processSyncChunk — delegate to inherited implementation if available, stub otherwise

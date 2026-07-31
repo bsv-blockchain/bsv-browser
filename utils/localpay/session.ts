@@ -3,6 +3,9 @@ import { CodecError } from './codec'
 
 export const SESSION_VERSION = 1
 export const CAP_AWDL = 0x01
+export const CAP_NEARBY = 0x02
+
+export type SessionOs = 'ios' | 'android'
 
 export interface Session {
   version: number
@@ -25,6 +28,12 @@ export interface Session {
   amount?: number
   derivationPrefix: string
   derivationSuffix: string
+  /**
+   * OS of the minting device. METADATA ONLY — copy and diagnostics. Transport
+   * selection reads caps, which say what the device can DO; reading this
+   * instead would break the moment either platform grows a second transport.
+   */
+  os?: SessionOs
 }
 
 export function mintSession(args: {
@@ -34,6 +43,8 @@ export function mintSession(args: {
   derivationPrefix: string
   derivationSuffix: string
   supportsAwdl: boolean
+  supportsNearby?: boolean
+  os?: SessionOs
 }): Session {
   if (args.identityKey.length !== 66) throw new CodecError('identityKey must be 66 hex chars')
   // Validated at the mint too, not only at decode: an invalid figure minted
@@ -44,13 +55,14 @@ export function mintSession(args: {
   }
   return {
     version: SESSION_VERSION,
-    caps: args.supportsAwdl ? CAP_AWDL : 0,
+    caps: (args.supportsAwdl ? CAP_AWDL : 0) | (args.supportsNearby ? CAP_NEARBY : 0),
     sessionId: new Uint8Array(Random(16)),
     psk: new Uint8Array(Random(32)),
     identityKey: args.identityKey,
     ...(args.amount === undefined ? {} : { amount: args.amount }),
     derivationPrefix: args.derivationPrefix,
     derivationSuffix: args.derivationSuffix,
+    ...(args.os === undefined ? {} : { os: args.os }),
   }
 }
 
@@ -88,6 +100,7 @@ export function encodeSession(s: Session): string {
     s: toB64url(s.sessionId),
     k: toB64url(s.psk),
     i: s.identityKey,
+    ...(s.os === undefined ? {} : { o: s.os === 'ios' ? 'i' : 'a' }),
     ...(s.amount === undefined ? {} : { a: s.amount }),
     p: s.derivationPrefix,
     x: s.derivationSuffix,
@@ -104,7 +117,7 @@ export function decodeSession(text: string): Session {
     if (e instanceof CodecError) throw e
     throw new CodecError('malformed session payload')
   }
-  const { v, c, s, k, i, a, p, x } = parsed as Record<string, unknown>
+  const { v, c, s, k, i, a, p, x, o } = parsed as Record<string, unknown>
   if (v !== SESSION_VERSION) throw new CodecError(`unsupported session version ${String(v)}`)
   if (typeof i !== 'string' || i.length !== 66) throw new CodecError('bad identityKey')
   // An ABSENT `a` is an OPEN request: the payer chooses.
@@ -127,6 +140,8 @@ export function decodeSession(text: string): Session {
   const psk = fromB64url(k)
   if (sessionId.length !== 16) throw new CodecError('bad sessionId length')
   if (psk.length !== 32) throw new CodecError('bad psk length')
+  // Tolerant on purpose: 'o' is advisory, from possibly-newer builds.
+  const os: SessionOs | undefined = o === 'i' ? 'ios' : o === 'a' ? 'android' : undefined
   return {
     version: v as number,
     caps: (typeof c === 'number' ? c : 0),
@@ -136,6 +151,7 @@ export function decodeSession(text: string): Session {
     ...(open ? {} : { amount: a }),
     derivationPrefix: p,
     derivationSuffix: x,
+    ...(os === undefined ? {} : { os }),
   }
 }
 

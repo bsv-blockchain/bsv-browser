@@ -1,7 +1,7 @@
 import { awdlTransport } from '@/utils/localpay/transport/awdl'
 import { AckError } from '@/utils/localpay/transport/types'
 import { mintSession, instanceName } from '@/utils/localpay/session'
-import { CodecError, encodeFrame, type PaymentFrame } from '@/utils/localpay/codec'
+import { CodecError, FRAME_VERSION, encodeFrame, type PaymentFrame } from '@/utils/localpay/codec'
 import type { LocalPayTransport } from 'react-native-localpay-transport'
 
 jest.mock('react-native-localpay-transport', () => ({
@@ -32,9 +32,8 @@ const session = mintSession({
 })
 
 const frame: PaymentFrame = {
-  version: 1,
+  version: FRAME_VERSION,
   senderIdentityKey: '02'.padEnd(66, 'e'),
-  amount: 1,
   outputIndex: 0,
   derivationPrefix: 'cA',
   derivationSuffix: 'cw',

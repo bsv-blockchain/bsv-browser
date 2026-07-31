@@ -7,7 +7,8 @@
   },
   "autolinking": {
     "LocalPayTransport": {
-      "ios": { "language": "swift", "implementationClassName": "HybridLocalPayTransport" }
+      "ios": { "language": "swift", "implementationClassName": "HybridLocalPayTransport" },
+      "android": { "language": "kotlin", "implementationClassName": "HybridLocalPayTransport" }
     }
   }
 }

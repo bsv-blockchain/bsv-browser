@@ -1,4 +1,4 @@
-export const FRAME_VERSION = 1
+export const FRAME_VERSION = 2
 
 export class CodecError extends Error {
   constructor(message: string) {
@@ -11,15 +11,23 @@ export interface PaymentFrame {
   version: number
   /** 66-char hex, compressed pubkey */
   senderIdentityKey: string
-  amount: number
+  /**
+   * Which output of `transaction` pays the payee.
+   *
+   * There is deliberately no `amount` beside it. `internalizeAction` credits
+   * the output, so a satoshi count on the frame could only ever agree with the
+   * transaction or lie about it — and `verifyFramePayment` has to parse the
+   * transaction anyway, to prove the output is one the payee can spend. That
+   * proof is what makes the figure it reads back worth showing as a receipt.
+   */
   outputIndex: number
   derivationPrefix: string
   derivationSuffix: string
   /**
    * AtomicBEEF, on both transports. The design originally specified a bare
    * rawtx on the QR path to shrink the symbol, but ancestry is what lets the
-   * payee internalize offline — and MAX_FRAME_QR_CHARS already rejects frames
-   * too large to render, so one encoding serves both.
+   * payee internalize offline, and the fountain removed the symbol ceiling —
+   * so one encoding serves both.
    */
   transaction: Uint8Array
 }
@@ -97,7 +105,6 @@ export function encodeFrame(f: PaymentFrame): Uint8Array {
   }
   const out: number[] = [f.version & 0xff]
   for (const byte of hexToBytes(f.senderIdentityKey.toLowerCase())) out.push(byte)
-  putVarint(out, f.amount)
   putVarint(out, f.outputIndex)
   putStr(out, f.derivationPrefix)
   putStr(out, f.derivationSuffix)
@@ -112,48 +119,53 @@ export function decodeFrame(b: Uint8Array): PaymentFrame {
   const pos = { i: 1 }
   const senderIdentityKey = bytesToHex(b.slice(pos.i, pos.i + 33))
   pos.i += 33
-  const amount = getVarint(b, pos)
   const outputIndex = getVarint(b, pos)
   const derivationPrefix = getStr(b, pos)
   const derivationSuffix = getStr(b, pos)
   const transaction = getBytes(b, pos)
   if (pos.i !== b.length) throw new CodecError('trailing bytes after frame')
-  return { version, senderIdentityKey, amount, outputIndex, derivationPrefix, derivationSuffix, transaction }
+  return { version, senderIdentityKey, outputIndex, derivationPrefix, derivationSuffix, transaction }
 }
 
-// ── QR handoff ──
+// ── Frame envelope ──
 //
-// A QR carries text, not bytes, so a frame is base64url-wrapped behind a prefix
-// that distinguishes it from a session QR (`bsvpay1:`).
+// `bsvpayf1:` is NOT a QR wire format. Every payment code this app renders is a
+// stream of `@bsv/air-gap` parts sized to FRAME_BLOCK_BYTES, and the scanner
+// accepts nothing else — a second accepted shape is exactly what lets two
+// implementations drift apart.
 //
-// base64url is NOT QR "alphanumeric mode": `-`, `_` and the `:` in the prefix
-// all fall outside that alphabet, so the encoder uses byte mode. What base64url
-// buys is that every character is single-byte ASCII, so the byte-mode payload
-// length equals the string length and never doubles under UTF-8.
+// What the envelope is for is storage: the payer persists one in
+// `offline_actions.framePayload` so a delivered-but-unbroadcast payment can be
+// re-shown later, and the renderer reads the bytes back out of it. base64url so
+// the stored value is plain single-byte ASCII, behind a prefix that
+// distinguishes it from a session QR (`bsvpay1:`).
 
 export const FRAME_QR_PREFIX = 'bsvpayf1:'
 
 /**
- * Largest frame QR this app will render, in characters.
+ * Source-block size for the animated payment code, in bytes.
  *
- * A version-40 symbol at error-correction level M holds 2,331 bytes, and every
- * character produced here is single-byte ASCII, so characters and bytes are the
- * same count. `react-native-qrcode-svg` rethrows out of render when the payload
- * does not fit, so exceeding this is not a degraded QR — it takes the app down
- * through the error boundary. Measured against that encoder: 2,276 characters
- * encodes, 2,343 throws.
+ * There is no single-symbol path to fall back to, so this one number decides
+ * symbol density for every payment. `estimatePartCharLength(1024)` is 1,404
+ * characters, and a part is single-byte ASCII throughout, so it occupies 1,404
+ * bytes of a byte-mode QR: inside the 2,331-byte capacity of a version-40
+ * symbol at error-correction level M, with ~40% headroom for a scanner that is
+ * not looking at the screen straight on. `react-native-qrcode-svg` rethrows out
+ * of render past capacity and takes the app down through the error boundary, so
+ * that headroom is not cosmetic.
  *
- * 2,200 sits below the last known-good measurement with ~130 characters of
- * headroom against the hard limit, so no rounding or encoder overhead can reach
- * the throw. It admits ~1,643 frame bytes, which covers the single-input
- * AtomicBEEF range, and rejects the multi-input frames that would be
- * unscannable at a phone-sized symbol anyway.
+ * A frame this size or smaller is a single source block — one part carries the
+ * whole message — so the renderer holds `seq` at 0 and runs no timer, and an
+ * ordinary payment is a still QR. (Part strings are NOT equal across `seq`:
+ * `seq` sits in the part header. What makes it still is holding it, not the
+ * block count on its own.)
  *
  * `PaymentFrame.transaction` is AtomicBEEF — every input's source transaction
- * plus its BUMP — so frame size tracks input count, not output count. Callers
- * MUST check `frameToQr(...).length` against this before rendering.
+ * plus its BUMP — so frame size tracks input count, not output count. The only
+ * remaining ceiling is air-gap's own MAX_MESSAGE_BYTES, which the send path
+ * checks before it builds an encoder.
  */
-export const MAX_FRAME_QR_CHARS = 2200
+export const FRAME_BLOCK_BYTES = 1024
 
 function toB64url(bytes: Uint8Array): string {
   let binary = ''
@@ -175,13 +187,24 @@ function fromB64url(text: string): Uint8Array {
   return Uint8Array.from(binary, c => c.charCodeAt(0))
 }
 
-/** Encodes a frame for display as a QR. May exceed MAX_FRAME_QR_CHARS — check before rendering. */
+/** Wraps a frame for storage and later re-display. Rendered as air-gap parts, never as one symbol. */
 export function frameToQr(f: PaymentFrame): string {
   return FRAME_QR_PREFIX + toB64url(encodeFrame(f))
 }
 
-export function frameFromQr(text: unknown): PaymentFrame {
-  if (typeof text !== 'string') throw new CodecError('expected a QR string')
-  if (!text.startsWith(FRAME_QR_PREFIX)) throw new CodecError('not a nearby-payment QR')
-  return decodeFrame(fromB64url(text.slice(FRAME_QR_PREFIX.length)))
+/**
+ * The raw frame bytes behind a bsvpayf1: envelope.
+ *
+ * The encoder re-encodes exactly these bytes, and the re-show path reads them
+ * from a persisted framePayload — a column, so a row can be truncated, foreign
+ * or null. Every failure is a CodecError, including a non-string, because the
+ * screens that call this catch one type and must not be crashed by a bad row.
+ *
+ * Deliberately does not decode the frame: nothing reads a stored envelope back
+ * as a `PaymentFrame`, and a decoder for it would be a second accepted format.
+ */
+export function frameBytesFromQr(text: string): Uint8Array {
+  if (typeof text !== 'string') throw new CodecError('expected a frame envelope string')
+  if (!text.startsWith(FRAME_QR_PREFIX)) throw new CodecError('not a nearby-payment frame envelope')
+  return fromB64url(text.slice(FRAME_QR_PREFIX.length))
 }

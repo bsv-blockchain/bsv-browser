@@ -54,7 +54,7 @@ namespace margelo::nitro::localpaytransport {
       virtual std::shared_ptr<Promise<void>> startListening(const std::string& instanceName, const std::string& pskBase64, const std::function<void(const std::string& /* frameBase64 */)>& onFrame, const std::function<void(const std::string& /* message */)>& onError) = 0;
       virtual std::shared_ptr<Promise<void>> stopListening() = 0;
       virtual std::shared_ptr<Promise<void>> confirmFrame(bool accepted, const std::string& reason) = 0;
-      virtual std::shared_ptr<Promise<std::string>> sendFrame(const std::string& instanceName, const std::string& pskBase64, const std::string& frameBase64, double timeoutMs) = 0;
+      virtual std::shared_ptr<Promise<std::string>> sendFrame(const std::string& instanceName, const std::string& pskBase64, const std::string& frameBase64, double timeoutMs, double connectTimeoutMs) = 0;
 
     protected:
       // Hybrid Setup

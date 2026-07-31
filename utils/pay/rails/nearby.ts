@@ -11,7 +11,30 @@
  * instead.
  */
 export { decodeSession, encodeSession, mintSession, type Session } from '@/utils/localpay/session'
-export { MAX_FRAME_QR_CHARS, frameFromQr, frameToQr, type PaymentFrame } from '@/utils/localpay/codec'
+export {
+  FRAME_BLOCK_BYTES,
+  decodeFrame,
+  encodeFrame,
+  frameBytesFromQr,
+  frameToQr,
+  type PaymentFrame
+} from '@/utils/localpay/codec'
+/**
+ * The animated-QR transport is `@bsv/air-gap` (BRC-141), not app code. It was
+ * grown here first and upstreamed; the published library adds what a local
+ * copy could not justify carrying — a wire version byte, per-stream session
+ * ids with switch hysteresis so one stray frame cannot erase a scan in
+ * progress, and explicit decoder resource budgets. Display cadence stays with
+ * the renderer, because the library deliberately has no opinion on it.
+ */
+export {
+  AIR_GAP_PREFIX,
+  AirGapDecoder,
+  AirGapEncoder,
+  MAX_MESSAGE_BYTES,
+  estimatePartCharLength,
+  isAirGapPart
+} from '@bsv/air-gap'
 export {
   isSessionSpent,
   markSessionSpent,
@@ -20,6 +43,21 @@ export {
   type PendingPayment
 } from '@/utils/localpay/pending'
 export { buildPaymentFrame, finalizeDelivery } from '@/utils/localpay/build'
+export {
+  FrameVerifyError,
+  verifyFramePayment,
+  type DerivingWallet,
+  type FrameVerifyKind
+} from '@/utils/localpay/verify'
+export { holdSentPaymentOffline } from '@/utils/offline/payerHold'
 export { awdlTransport } from '@/utils/localpay/transport/awdl'
-export { localSupportsAwdl, selectTransport } from '@/utils/localpay/transport/select'
+export { nearbyTransport } from '@/utils/localpay/transport/nearby'
+export {
+  localSupportsAwdl,
+  localSupportsNearby,
+  selectTransport,
+  type TransportKind
+} from '@/utils/localpay/transport/select'
+export { requestNearbyPermissions } from '@/utils/localpay/transport/nearbyPermissions'
 export { isDeclineReason, type Ack, type ConfirmDelivery, type DeclineReason } from '@/utils/localpay/transport/types'
+export { CAP_NEARBY } from '@/utils/localpay/session'

@@ -1,6 +1,6 @@
 import type { HybridObject } from 'react-native-nitro-modules'
 
-export interface LocalPayTransport extends HybridObject<{ ios: 'swift' }> {
+export interface LocalPayTransport extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
   /** True when AWDL peer-to-peer networking is usable on this device. */
   isSupported(): boolean
   startListening(
@@ -37,6 +37,13 @@ export interface LocalPayTransport extends HybridObject<{ ios: 'swift' }> {
     instanceName: string,
     pskBase64: string,
     frameBase64: string,
-    timeoutMs: number
+    /** Whole-exchange budget: connect + transfer + the payee's save + ack. */
+    timeoutMs: number,
+    /**
+     * Connect-phase budget. "Radios off" and "peer not there" both surface as
+     * a connection that never reaches .ready; failing that fast is what lets
+     * the UI fall back to the QR automatically instead of after 20 s.
+     */
+    connectTimeoutMs: number
   ): Promise<string>
 }

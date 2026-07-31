@@ -16,17 +16,25 @@ export interface PayCellRowProps {
   subtitle: string
   icon: keyof typeof Ionicons.glyphMap
   onPress: () => void
+  /** Dimmed and unpressable — used for rails that need internet. */
+  disabled?: boolean
 }
 
-export default function PayCellRow({ title, subtitle, icon, onPress }: PayCellRowProps) {
+export default function PayCellRow({ title, subtitle, icon, onPress, disabled = false }: PayCellRowProps) {
   const { colors } = useTheme()
   return (
     <PressableScale
-      onPress={onPress}
-      haptic="tap"
-      scaleTo={0.98}
-      style={[styles.row, { backgroundColor: colors.backgroundElevated, borderColor: colors.separator }]}
+      onPress={disabled ? () => {} : onPress}
+      haptic={disabled ? undefined : 'tap'}
+      scaleTo={disabled ? 1 : 0.98}
+      disabled={disabled}
+      style={[
+        styles.row,
+        { backgroundColor: colors.backgroundElevated, borderColor: colors.separator },
+        disabled && styles.disabled
+      ]}
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
       accessibilityLabel={`${title}. ${subtitle}`}
     >
       <View style={[styles.iconWrap, { backgroundColor: colors.fillTertiary }]}>
@@ -56,6 +64,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth
   },
   iconWrap: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  disabled: { opacity: 0.4 },
   text: { flex: 1 },
   title: { ...typography.headline, fontWeight: '600' },
   subtitle: { ...typography.footnote }

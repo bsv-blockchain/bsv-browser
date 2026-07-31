@@ -1,23 +1,26 @@
 /**
  * Local Payments — pay a nearby device.
  *
- * Two transports behind one user-facing flow, both bootstrapped by the same
- * pairing QR minted by the payee:
+ * Three transports behind one user-facing flow, all bootstrapped by the same
+ * pairing QR minted by the payee. selectTransport() picks the highest rung
+ * both sides share:
  *
- *   AWDL  iOS↔iOS peer-to-peer Wi-Fi, TLS-PSK. Fast path.
- *   QR    any platform pair. The payer renders the signed frame; the payee scans it.
+ *   AWDL    iOS↔iOS peer-to-peer Wi-Fi, TLS-PSK. Fast path.
+ *   Nearby  Android↔Android over Google Nearby Connections, same Nitro surface.
+ *   QR      any platform pair. The payer renders the signed frame; the payee scans it.
  *
  * Phase machine
  *
  *   entry
  *    ├─ receive_amount → receive_minting → receive_wait
- *    │      receive_wait always renders the pairing QR, and additionally runs an
- *    │      AWDL listener when this device supports it. Either arrival lands in:
- *    │        · AWDL listener resolves ─┐
+ *    │      receive_wait always renders the pairing QR, and additionally runs a
+ *    │      radio listener (AWDL or Nearby) when this device supports one. Either
+ *    │      arrival lands in:
+ *    │        · radio listener resolves ─┐
  *    │        · receive_scan (payer QR) ─┴→ receive_settling → done | already_paid
  *    └─ send_scan → send_confirm → send_working
- *           ├─ selectTransport() === 'awdl' → awdlTransport.send → done
- *           └─ selectTransport() === 'qr'   → send_qr → done
+ *           ├─ selectTransport() === 'awdl' | 'nearby' → radio.send → done
+ *           └─ selectTransport() === 'qr'              → send_qr → done
  *
  *   already_paid is a SUCCESS terminal, not an error: the session was settled by
  *   an earlier delivery, so that money is already queued. It is the expected end
@@ -108,28 +111,40 @@ import { AmountInput } from '@/components/wallet/AmountInput'
 import Celebration from '@/components/ui/Celebration'
 import PressableScale from '@/components/ui/PressableScale'
 import PresenceRow, { type PresenceState } from '@/components/localpay/PresenceRow'
+import PaymentQrDisplay from '@/components/pay/PaymentQrDisplay'
 import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { durations, springs } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
 import { sounds } from '@/hooks/useConfirmationSound'
+import { updateOfflineAction } from '@/storage/methods/offlineActions'
 import { identityLabel, makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
+import { getOnline } from '@/utils/net/online'
 import {
-  MAX_FRAME_QR_CHARS,
+  AirGapDecoder,
+  FRAME_BLOCK_BYTES,
+  MAX_MESSAGE_BYTES,
   awdlTransport,
   buildPaymentFrame,
+  decodeFrame,
   decodeSession,
+  encodeFrame,
   encodeSession,
   finalizeDelivery,
-  frameFromQr,
+  frameBytesFromQr,
   frameToQr,
+  holdSentPaymentOffline,
+  isAirGapPart,
   isDeclineReason,
   isSessionSpent,
   localSupportsAwdl,
+  localSupportsNearby,
   markSessionSpent,
   mintSession,
+  nearbyTransport,
   processPending,
+  requestNearbyPermissions,
   savePending,
   selectTransport,
   type Ack,
@@ -138,6 +153,7 @@ import {
   type PaymentFrame,
   type Session
 } from '@/utils/pay/rails/nearby'
+import { FrameVerifyError, verifyFramePayment, type DerivingWallet } from '@/utils/localpay/verify'
 
 // ── Types ──
 
@@ -228,24 +244,6 @@ const NOTICE_ICONS: Record<NoticeTone, keyof typeof Ionicons.glyphMap> = {
 }
 
 // ── Helpers ──
-
-/**
- * A QR payload for `frame`, or null when it cannot be rendered.
- *
- * `react-native-qrcode-svg` rethrows out of render when a payload does not fit
- * the symbol, and the app-level ErrorBoundary then replaces the whole app — so
- * an oversize frame must be caught here, before it is ever handed to <QRCode>.
- * `PaymentFrame.transaction` is AtomicBEEF, whose size tracks input count, so
- * multi-input payments routinely exceed the ceiling.
- */
-function frameQrOrNull(frame: PaymentFrame): string | null {
-  try {
-    const qr = frameToQr(frame)
-    return qr.length <= MAX_FRAME_QR_CHARS ? qr : null
-  } catch {
-    return null
-  }
-}
 
 function messageOf(e: unknown): string {
   if (e instanceof Error && e.message) return e.message
@@ -342,8 +340,15 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
    * The payee's full-screen receipt, held until they acknowledge it. Set only
    * once funds are provably in the wallet — see settleReceived, where a merely
    * queued payment deliberately does NOT raise it.
+   *
+   * `broadcast` is whether this device was online at the moment the frame was
+   * durably queued (see the `broadcastCheck` probe below) — NOT a claim that
+   * anyone has actually broadcast it yet. It only tells the payee whether
+   * their own device could see the network; the payer's device still has to
+   * reconnect and post the transaction before this money is safe from a
+   * double-spend, and no read of this device's own state can promise that.
    */
-  const [receivedOverlay, setReceivedOverlay] = useState<{ amount: number } | null>(null)
+  const [receivedOverlay, setReceivedOverlay] = useState<{ amount: number; broadcast: boolean } | null>(null)
 
   /**
    * A frame that was delivered but could not be persisted. Held so the payee can
@@ -387,6 +392,17 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   const settlingRef = useRef(false)
   /** Ignores the repeat reads multiScan produces while a scan is being handled. */
   const scanLatchRef = useRef(false)
+  /** Assembles animated fountain parts across the continuous scanner's reads. */
+  const airGapDecoderRef = useRef<AirGapDecoder | null>(null)
+  /** Live part-count for the fountain progress line under the camera. */
+  const [scanProgress, setScanProgress] = useState<{ have: number; total: number } | null>(null)
+
+  /**
+   * The built payment behind the QR currently on screen. Done routes it
+   * through finalizeDelivery; without it Done can only guess. Cleared by
+   * reset() and consumed (nulled) by completeQrDelivery.
+   */
+  const builtRef = useRef<Awaited<ReturnType<typeof buildPaymentFrame>> | null>(null)
 
   /**
    * Whether this device can be an AWDL peer. Resolved ONCE per mount.
@@ -398,6 +414,30 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
    * screen is mounted, so every read goes through this.
    */
   const supportsAwdl = useMemo(() => localSupportsAwdl(), [])
+
+  /**
+   * Nearby is usable only once BOTH hold: GMS is present (localSupportsNearby)
+   * and the runtime grants landed. Resolved async on mount, Android only; a
+   * denial leaves this false and the flow QR-only, silently — same posture as
+   * a GMS-less device.
+   */
+  const [nearbyReady, setNearbyReady] = useState(false)
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !localSupportsNearby()) return
+    let live = true
+    void requestNearbyPermissions().then(granted => {
+      if (live) setNearbyReady(granted)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  /** The radio this device listens on as payee, if any. */
+  const radioTransport = useMemo(
+    () => (supportsAwdl ? awdlTransport : nearbyReady ? nearbyTransport : null),
+    [supportsAwdl, nearbyReady]
+  )
 
   const abortAll = useCallback(() => {
     for (const controller of abortsRef.current) {
@@ -429,6 +469,8 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   const openScanner = useCallback((next: 'send_scan' | 'receive_scan') => {
     scanLatchRef.current = false
+    airGapDecoderRef.current = null
+    setScanProgress(null)
     setPhase(next)
   }, [])
 
@@ -459,6 +501,9 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     abortAll()
     settlingRef.current = false
     scanLatchRef.current = false
+    airGapDecoderRef.current = null
+    setScanProgress(null)
+    builtRef.current = null
     setPhase(initialRole === 'payee' ? 'receive_amount' : 'entry')
     setRole(initialRole)
     setHostedSession(null)
@@ -527,13 +572,34 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         return
       }
 
+      // (0a) What this frame actually pays this device. The figure below is the
+      //      satoshis of the AtomicBEEF output at `frame.outputIndex`, and it is
+      //      only produced once that output is shown to lock to a key this
+      //      device derives — so it is both the real number and a proof the
+      //      payment is ours to spend. Nothing has latched and nothing has been
+      //      written, so every failure here is a provable "queued nothing".
+      let satoshis: number
+      try {
+        ;({ satoshis } = await verifyFramePayment(wallet as unknown as DerivingWallet, frame, adminOriginator))
+      } catch (e) {
+        // `not_mine` is a frame that was never for this request; `unparseable`
+        // is bytes that are not a transaction. Both leave the request LIVE and
+        // unspent, exactly as a nonce mismatch does, so the genuine payer can
+        // still complete.
+        const kind = e instanceof FrameVerifyError ? e.kind : 'unparseable'
+        void confirm?.(false, kind === 'not_mine' ? 'session_mismatch' : 'decode_failed')
+        scanLatchRef.current = false
+        setSessionMismatch(true)
+        setPhase('receive_wait')
+        setListenerEpoch(n => n + 1)
+        return
+      }
+
       // (0) Bind the frame to THIS session, before the one-shot latch and before
       //     any write. Two distinct holes close here:
       //
-      //     · frame.amount is display-only — internalizeAction credits whatever
-      //       the output actually holds — so a payer could send 1 satoshi against
-      //       a 100,000 request with amount: 100000 in the frame and the payee's
-      //       screen would read "Received 100,000".
+      //     · the amount check compares the payee's requested figure against the
+      //       satoshis verified above, not against anything the frame asserts.
       //     · onFrameScanned hands ANY decoded frame to the live hostedSession, so
       //       scanning a stray payment QR would queue a stranger's payment AND burn
       //       this session. The real payer would then be told already_paid, acked
@@ -555,7 +621,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       //
       //     Deliberately NOT terminal, and deliberately does NOT mark the session
       //     spent: the request stays live so the genuine payer can still complete.
-      const amountDisagrees = session.amount !== undefined && frame.amount !== session.amount
+      const amountDisagrees = session.amount !== undefined && satoshis !== session.amount
       if (
         frame.derivationPrefix !== session.derivationPrefix ||
         frame.derivationSuffix !== session.derivationSuffix ||
@@ -590,6 +656,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         return
       }
 
+      // Started here, alongside the durable write, and not awaited until the
+      // receipt is raised below: whatever `processPending` costs (1) overlaps
+      // with this probe, so it adds no latency to the settle path, and (2)
+      // never touches the durable-write section's own try/catch — a probe
+      // failure must not be mistaken for the frame being unpersisted. Caught
+      // inline for the same reason: this is advisory copy, not a money path,
+      // so a failed check reads as "not yet broadcast" rather than crashing
+      // the settle.
+      const broadcastCheck = getOnline().catch(() => false)
+
       // ── Durable-write section ──
       // Everything that can legitimately be reported as a payment failure lives
       // in here, and only in here. Past the closing brace the money is safe.
@@ -611,7 +687,15 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
         // (2) Persist before anything else. Once this resolves the money cannot
         //     be lost to a crash, a dead network or a closed app.
-        await savePending(storage, frame)
+        //
+        //     `confirm` is only ever supplied by a radio receive path (see
+        //     radioTransport.receive's callers above and the QR/retry callers
+        //     below, which omit it) — the same signal `Unsettled` already keys
+        //     off of, reused here to attribute the queue row to a transport.
+        //     `radioTransport?.kind` names which radio, falling back to 'awdl'
+        //     only for the (unreachable in practice) case confirm exists but
+        //     the listener that produced it has since gone.
+        await savePending(storage, frame, confirm ? (radioTransport?.kind ?? 'awdl') : 'qr')
 
         // (3) Only now is it safe to burn the session. Doing this first would
         //     mean a crash in between marks the session handled while nothing
@@ -653,7 +737,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       // failure. A payee who is told "failed" taps Retry, mints a fresh session,
       // and the payer builds a second createAction from different UTXOs: both
       // internalize, the payee is credited twice and the payer pays twice.
-      setSettledAmount(frame.amount)
+      setSettledAmount(satoshis)
       setRole('payee')
       setPhase('done')
       setUnsettled(null)
@@ -676,7 +760,20 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         return
       }
       try {
-        const results = await processPending(wallet, storage, adminOriginator)
+        // Backfills who handed over a payment (and how) onto the offline_actions
+        // row internalizeAction may just have created while this device was
+        // offline — that row is written deep in the storage layer's hold path,
+        // which never sees the frame. Captured once here rather than inside
+        // `storage?.sqliteDb`, because `settleReceived` re-checks `storage`
+        // is non-null on every call and this closure must not re-derive that.
+        const db = storage.sqliteDb
+        const results = await processPending(wallet, storage, adminOriginator, async (txid, info) => {
+          if (!db) return
+          await updateOfflineAction(db, txid, {
+            senderIdentityKey: info.senderIdentityKey,
+            receivedVia: info.receivedVia
+          })
+        })
         const credited = results.some(r => r.success)
         setNotice(
           credited ? { text: t('local_pay_added'), tone: 'success' } : { text: t('local_pay_queued'), tone: 'info' }
@@ -686,13 +783,13 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // spendable, and a receipt claiming otherwise is the one thing the tone
         // rule above exists to prevent. A queued settle keeps the neutral notice
         // on the done screen instead.
-        if (credited) setReceivedOverlay({ amount: frame.amount })
+        if (credited) setReceivedOverlay({ amount: satoshis, broadcast: await broadcastCheck })
       } catch (e) {
         console.warn('[localpay] processPending failed:', messageOf(e))
         setNotice({ text: t('local_pay_queued'), tone: 'info' })
       }
     },
-    [storage, wallet, adminOriginator, fail, t]
+    [storage, wallet, adminOriginator, radioTransport, fail, t]
   )
 
   // Read through refs so the listener effect below depends only on the session
@@ -709,7 +806,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   useEffect(() => {
     if (!hostedSession || !focused) return
-    if (!supportsAwdl) return
+    if (!radioTransport) return
 
     // The Set identity is stable for the component's lifetime, but capture it so
     // the cleanup never reaches through a ref that may have been reassigned.
@@ -718,7 +815,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     registry.add(controller)
     setNearbyError(null)
 
-    awdlTransport
+    radioTransport
       .receive(hostedSession, controller.signal)
       .then(({ frame, confirm }) => {
         if (controller.signal.aborted) {
@@ -743,7 +840,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       controller.abort()
       registry.delete(controller)
     }
-  }, [hostedSession, focused, supportsAwdl, listenerEpoch])
+  }, [hostedSession, focused, radioTransport, listenerEpoch])
 
   // ── Receive: mint the request ──
 
@@ -777,9 +874,11 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         amount: sats,
         derivationPrefix,
         derivationSuffix,
-        // An Android payee advertises no AWDL capability, so the payer's
-        // selectTransport() takes the QR path without a negotiation round trip.
-        supportsAwdl
+        // Caps advertise what this payee can DO; the payer's ladder picks the
+        // highest rung both sides share, QR being the floor.
+        supportsAwdl,
+        supportsNearby: nearbyReady,
+        os: Platform.OS === 'ios' ? 'ios' : 'android'
       })
       setRole('payee')
       setHostedSession(session)
@@ -787,25 +886,39 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     } catch (e) {
       fail('generic', messageOf(e))
     }
-  }, [requestAmount, wallet, storage, adminOriginator, supportsAwdl, fail, t])
+  }, [requestAmount, wallet, storage, adminOriginator, supportsAwdl, nearbyReady, fail, t])
 
   // ── Receive: scan the payer's frame ──
 
   const onFrameScanned = useCallback(
     (data: string) => {
-      if (scanLatchRef.current) return
-      scanLatchRef.current = true
+      // A payer's code is always an air-gap fountain, so parts are the only
+      // thing this scanner accepts — a bare bsvpayf1: envelope is a stored
+      // value, not something any build renders at a camera. Parts arrive
+      // continuously and are handled statefully; anything else is a QR that
+      // happens to be in frame and changes nothing.
+      if (!isAirGapPart(data)) return
+      // A settling payment must ignore late parts — the frame it already
+      // solved is already on its way through settleReceived.
+      if (scanLatchRef.current || settlingRef.current) return
       const session = hostedSession
-      if (!session) {
-        fail('generic', t('local_pay_failed'))
-        return
-      }
+      if (!session) return
+      if (!airGapDecoderRef.current) airGapDecoderRef.current = new AirGapDecoder()
+      const s = airGapDecoderRef.current.accept(data)
+      if (!s.ok) return
+      setScanProgress({ have: s.have, total: s.total })
+      if (!s.done) return
+      const message = airGapDecoderRef.current.message()
+      if (!message) return // crc mismatch: decoder reset itself, keep scanning
+      airGapDecoderRef.current = null
+      setScanProgress(null)
+      scanLatchRef.current = true
       let frame: PaymentFrame
       try {
-        // Bare catch on purpose: a structurally valid envelope with malformed
-        // base64, or a body that destructures from null, throws something that
-        // is not a CodecError — and must still land here, not crash the screen.
-        frame = frameFromQr(data)
+        // Bare catch on purpose: version skew, truncation or trailing bytes
+        // throw a CodecError, but a body that destructures from null throws
+        // something else — and must still land here, not crash the screen.
+        frame = decodeFrame(message)
       } catch {
         fail('generic', t('invalid_qr_code'))
         return
@@ -949,43 +1062,49 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         return
       }
 
-      // Computed once, before anything can render it. Null means the frame is
-      // too large for a symbol — AtomicBEEF grows with input count — and handing
-      // it to <QRCode> would throw during render and take the app down.
-      const qr = frameQrOrNull(built.frame)
-
       if (sendKind === 'qr') {
-        if (!qr) {
-          // The only transport for this pair is a QR the frame cannot fit in,
-          // so it can never be delivered. Release the inputs — and, having
-          // released them, make sure no earlier frame is left on offer.
+        // The fountain removes the symbol-size ceiling; the only refusal left
+        // is the 64 KB sanity cap, past which QR handover is unreasonable and
+        // something upstream is wrong.
+        if (encodeFrame(built.frame).length > MAX_MESSAGE_BYTES) {
           abortBuild(built.reference)
           setPaymentQr(null)
           fail('generic', t('local_pay_too_large'))
           return
         }
-        setPaymentQr(qr)
+        builtRef.current = built
+        setPaymentQr(frameToQr(built.frame))
         setPhase('send_qr')
         return
       }
 
+      // sendKind is neither 'qr' (returned above) nor null (guarded at the top
+      // of this callback), so it names one of the two radios here.
+      const radio = sendKind === 'awdl' ? awdlTransport : nearbyTransport
+
       let ack: Ack
       try {
-        ack = await awdlTransport.send(session, built.frame, controller.signal)
+        ack = await radio.send(session, built.frame, controller.signal)
       } catch (e) {
         if (controller.signal.aborted) return
-        // Deliberately NOT aborted, and deliberately NOT broadcast. A throw
-        // here proves nothing either way — the bytes may have reached the peer
-        // before the ack was lost — so the action must stay intact and
-        // spendable-by-the-payee, and this device must not race the payee onto
-        // the network. The frame is signed but noSend, so offering it as a QR
-        // lets the payment still complete. `qr` is null when it would not fit,
-        // hiding that offer.
-        setPaymentQr(qr)
+        // The radio path failed: connect timeout (radios off, peer gone),
+        // Local Network denial, or a lost ack. The frame is signed and noSend,
+        // so the QR still completes this payment — fall straight through to
+        // the code instead of a failure screen. Deliberately NOT aborted: a
+        // lost ack does not prove non-delivery, and Done's semantics
+        // (broadcast-or-queue, re-showable) keep the already-delivered case
+        // consistent — the payee's copy merges once this transaction is out.
         const message = messageOf(e)
-        // The heuristic is scoped to the transport call: only here can a message
-        // legitimately be about Local Network access.
-        fail(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', message)
+        console.warn('[localpay] radio send failed, falling back to QR:', message)
+        if (encodeFrame(built.frame).length > MAX_MESSAGE_BYTES) {
+          // No radio and no representable code: the one genuinely dead end.
+          fail(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', t('local_pay_too_large'))
+          return
+        }
+        builtRef.current = built
+        setPaymentQr(frameToQr(built.frame))
+        setNotice({ text: t('local_pay_radio_fallback'), tone: 'info' })
+        setPhase('send_qr')
         return
       }
 
@@ -997,12 +1116,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       // since been abandoned — releasing or reclaiming the transaction must not
       // depend on this component still being mounted. Only the UI writes below
       // are gated on the abort.
-      const outcome = await finalizeDelivery(
-        wallet as unknown as PayingWalletArg,
-        built,
-        ack,
-        adminOriginator
-      )
+      const outcome = await finalizeDelivery(wallet as unknown as PayingWalletArg, built, ack, adminOriginator, {
+        hold: async txid => {
+          // `finalizeDelivery` already treats a thrown hold as non-fatal
+          // (`broadcast: 'pending'`), so a clear error here is strictly
+          // better than the null-dereference `storage as never` would throw
+          // instead — same outward outcome, an honest cause.
+          if (!storage) throw new Error('no local storage to queue this payment in')
+          await holdSentPaymentOffline({ storage, txid })
+        }
+      })
       if (controller.signal.aborted) return
 
       if (outcome.kind === 'declined') {
@@ -1035,7 +1158,45 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     } finally {
       registry.delete(controller)
     }
-  }, [scannedSession, sendKind, payAmount, wallet, adminOriginator, abortBuild, declineMessage, fail, t])
+  }, [scannedSession, sendKind, payAmount, wallet, adminOriginator, storage, abortBuild, declineMessage, fail, t])
+
+  // ── Send: the payer asserts QR delivery ──
+  //
+  // The QR path has no ack channel, so "the payee has it" is the user's claim,
+  // made by tapping Done. Acting on that claim mirrors a positive AWDL ack:
+  // broadcast when online, hold + queue when offline. This replaces the old
+  // do-nothing Done, which stranded the transaction at nosend with no queue
+  // row — nothing in the system would ever broadcast it. The risk of a wrong
+  // claim is bounded: the frame is persisted on the queue row, the code can be
+  // re-shown from /pay, and a payee scanning after the broadcast internalizes
+  // the already-mempooled transaction as a merge.
+  const completeQrDelivery = useCallback(async () => {
+    const built = builtRef.current
+    if (!built || !wallet) {
+      // No handle (e.g. re-entry after reset): nothing to decide, just close.
+      setSettledAmount(payAmount)
+      setRole('payer')
+      setNotice(null)
+      setPhase('done')
+      return
+    }
+    builtRef.current = null
+    setPhase('send_working')
+    setNotice(null)
+    const outcome = await finalizeDelivery(wallet as unknown as PayingWalletArg, built, { ok: true }, adminOriginator, {
+      hold: async txid => {
+        if (!storage) throw new Error('no local storage to queue this payment in')
+        await holdSentPaymentOffline({ storage, txid, framePayload: frameToQr(built.frame) })
+      }
+    })
+    if (outcome.kind === 'sent' && outcome.broadcast === 'pending') {
+      console.warn('[localpay] QR delivery queued or broadcast pending:', outcome.detail ?? '')
+      setNotice({ text: t('local_pay_broadcast_pending'), tone: 'warning' })
+    }
+    setSettledAmount(payAmount)
+    setRole('payer')
+    setPhase('done')
+  }, [wallet, storage, adminOriginator, payAmount, t])
 
   // ── The success moment ──
   //
@@ -1048,8 +1209,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   useEffect(() => {
     if (phase !== 'done') return
-    // The overlay owns this moment when it is up: it draws its own mark, which
-    // fires the success haptic, and plays its own tone. Two of each reads as an error.
+    // The payee's celebration belongs to ReceivedOverlay alone, outright — not
+    // just while it happens to be up. A credited receipt celebrates once, there,
+    // when it is raised; re-firing here after the payee dismisses it (overlay
+    // flips to null while phase is still 'done', re-running this effect) read as
+    // a second payment landing. A merely-queued receipt gets no overlay and,
+    // deliberately, no fanfare either — queued money is safe but not credited,
+    // and green (see the file header's tone doctrine) is reserved for funds
+    // actually in the wallet.
+    if (role === 'payee') return
+    // Belt-and-braces for the instant the overlay is actually up.
     if (receivedOverlay) return
     const mark = setTimeout(() => setCelebrating(true), CELEBRATION_DELAY_MS)
     const tone = setTimeout(() => sounds.confirmation(), CELEBRATION_DELAY_MS + TONE_DELAY_MS)
@@ -1057,7 +1226,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       clearTimeout(mark)
       clearTimeout(tone)
     }
-  }, [phase, receivedOverlay])
+  }, [phase, receivedOverlay, role])
 
   // ── Receive: retry a settle that never reached storage ──
 
@@ -1075,7 +1244,10 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   // null; without a handler it rethrows and the app-level ErrorBoundary replaces
   // the whole app. Flipping parent state synchronously from a child's render
   // triggers React's cross-component update warning, so both handlers defer by a
-  // microtask. These are backstops — frameQrOrNull() already gates on length.
+  // microtask. PaymentQrDisplay reports an unrenderable payload on this same
+  // channel, since its encoder now throws before there is anything to render.
+  // These are backstops — every frameToQr() call site already gates on
+  // MAX_MESSAGE_BYTES before calling it.
 
   const onSessionQrError = useCallback(() => {
     void Promise.resolve().then(() => setSessionQrBroken(true))
@@ -1090,6 +1262,17 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
 
   // ── Derived ──
 
+  // Source blocks in the payment code. One block renders as a still QR, so the
+  // "hold steady while it animates" hint would be wrong copy for it.
+  const paymentQrBlocks = useMemo(() => {
+    if (!paymentQr) return 0
+    try {
+      return Math.ceil(frameBytesFromQr(paymentQr).length / FRAME_BLOCK_BYTES)
+    } catch {
+      return 0
+    }
+  }, [paymentQr])
+
   const sessionQr = useMemo(() => {
     if (!hostedSession) return null
     try {
@@ -1099,8 +1282,8 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     }
   }, [hostedSession])
 
-  /** Listening over AWDL right now. Goes false once the fast path gives up. */
-  const awdlActive = hostedSession !== null && supportsAwdl && nearbyError === null
+  /** Listening over a radio link right now. Goes false once the fast path gives up. */
+  const radioActive = hostedSession !== null && radioTransport !== null && nearbyError === null
   const canSend = payAmount > 0
   const scannerOpen = phase === 'send_scan' || phase === 'receive_scan'
 
@@ -1127,28 +1310,31 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     if (role === 'payee') {
       if (phase === 'receive_settling') return at('linked', 'local_pay_presence_linked')
       if (phase === 'receive_wait') {
-        // No AWDL listener means no live link at all, whatever the reason —
-        // an Android device, a denied permission, or a fast path that gave up.
-        return awdlActive ? at('waiting', 'local_pay_presence_waiting_payee') : qr()
+        // No radio listener means no live link at all, whatever the reason —
+        // an unsupported device, a denied permission, or a fast path that gave up.
+        return radioActive ? at('waiting', 'local_pay_presence_waiting_payee') : qr()
       }
       return null
     }
 
     if (role === 'payer') {
       // Every payer branch degrades to `qr` when the QR transport was selected,
-      // because on that path the two devices genuinely never speak.
+      // because on that path the two devices genuinely never speak. `awdl` and
+      // `nearby` are both live radio links (iOS and Android respectively), so
+      // either counts here.
+      const onRadio = sendKind === 'awdl' || sendKind === 'nearby'
       if (phase === 'send_working') {
-        return sendKind === 'awdl' ? at('waiting', 'local_pay_presence_waiting_payer') : qr()
+        return onRadio ? at('waiting', 'local_pay_presence_waiting_payer') : qr()
       }
       if (phase === 'send_qr') return qr()
       if (phase === 'send_confirm') {
-        return sendKind === 'awdl' ? at('ready', 'local_pay_presence_ready') : qr()
+        return onRadio ? at('ready', 'local_pay_presence_ready') : qr()
       }
       return null
     }
 
     return null
-  }, [phase, role, linked, awdlActive, sendKind, t])
+  }, [phase, role, linked, radioActive, sendKind, t])
 
   // Dismissing the camera returns to whatever raised it. A payee's request must
   // survive this: closing the scanner is not cancelling the payment.
@@ -1524,42 +1710,35 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
             >
               <AmountDisplay>{payAmount}</AmountDisplay>
             </Text>
+            {paymentQrBlocks > 1 && (
+              <Text style={[styles.support, { color: colors.textSecondary }]}>{t('local_pay_animated_hint')}</Text>
+            )}
             <View style={styles.gapLg} />
             <View style={[styles.qrCard, { shadowColor: colors.textPrimary }]}>
               <View style={styles.qrPlate}>
                 {/* onError is mandatory: without it an oversize payload rethrows
                     from render and the app-level ErrorBoundary swallows the app. */}
-                <QRCode
-                  value={paymentQr}
-                  size={PAYMENT_QR_SIZE}
-                  ecl="M"
-                  color="#000"
-                  backgroundColor="#fff"
-                  onError={onPaymentQrError}
-                />
+                <PaymentQrDisplay frameQr={paymentQr} size={PAYMENT_QR_SIZE} onError={onPaymentQrError} />
               </View>
             </View>
             <View style={styles.gapLg} />
             {presenceBlock}
+            {!!notice && (
+              <>
+                <View style={styles.gapLg} />
+                {noticeBlock(notice)}
+              </>
+            )}
             <View style={styles.gapXl} />
-            {/* Deliberately does NOT abort the build.
-                The QR path has no ack by design, so this screen cannot know
-                whether the payee scanned. "Done" is modelled as the SUCCESS
-                terminal for this path — it goes straight to "Payment sent" —
-                so the overwhelmingly likely reading is "the payee has it".
-                Aborting would free inputs the payee is about to broadcast and
-                let this wallet respend them into a conflicting transaction,
-                turning a stuck UTXO into a failed payment. The abandoned-build
-                lock is the strictly safer of the two failure modes here. */}
+            {/* Done asserts delivery: broadcast when online, hold + queue when
+                offline (see completeQrDelivery). Never an abort — the payee may
+                be about to broadcast this frame, and freeing its inputs would
+                let this wallet respend them into a conflict. */}
             <PrimaryButton
               styles={styles}
               colors={colors}
               label={t('done')}
-              onPress={() => {
-                setSettledAmount(payAmount)
-                setRole('payer')
-                setPhase('done')
-              }}
+              onPress={() => void completeQrDelivery()}
             />
           </Animated.View>
         )}
@@ -1677,9 +1856,19 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         <StatusBar style="light" />
         <QRScanner
           multiScan
+          continuous={phase === 'receive_scan'}
           onScan={phase === 'send_scan' ? onSessionScanned : onFrameScanned}
           onClose={closeScanner}
           hintText={phase === 'send_scan' ? t('local_pay_scan_qr') : t('local_pay_scan_payer_qr')}
+          renderBottom={
+            phase === 'receive_scan' && scanProgress
+              ? () => (
+                  <Text style={{ color: 'rgba(255,255,255,0.8)', marginTop: 8 }}>
+                    {t('local_pay_scan_progress', { have: scanProgress.have, total: scanProgress.total })}
+                  </Text>
+                )
+              : undefined
+          }
         />
       </Modal>
 
@@ -1695,7 +1884,11 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       {/* The payee's receipt. Full screen, and it stays until acknowledged —
           being paid in person is the one moment both people are watching for. */}
       {receivedOverlay && (
-        <ReceivedOverlay amount={receivedOverlay.amount} onDismiss={() => setReceivedOverlay(null)} />
+        <ReceivedOverlay
+          amount={receivedOverlay.amount}
+          broadcast={receivedOverlay.broadcast}
+          onDismiss={() => setReceivedOverlay(null)}
+        />
       )}
     </View>
   )

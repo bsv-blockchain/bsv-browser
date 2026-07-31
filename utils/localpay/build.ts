@@ -3,6 +3,7 @@ import { FRAME_VERSION, type PaymentFrame } from './codec'
 import { isRequestableAmount, type Session } from './session'
 import { PEERPAY_LABEL, PEERPAY_PROTOCOL_ID } from './pending'
 import type { Ack } from './transport/types'
+import { getOnline } from '@/utils/net/online'
 
 /** The toolbox's per-txid verdict on a `sendWith` release. */
 type SendWithStatus = 'unproven' | 'sending' | 'failed'
@@ -72,8 +73,8 @@ export type DeliveryOutcome =
  *
  * The transaction is AtomicBEEF on both transports. The QR path was originally
  * specified as bare rawtx to shrink the symbol, but the payee needs ancestry to
- * internalize offline, and MAX_FRAME_QR_CHARS already rejects frames too large
- * to render — so one encoding serves both paths.
+ * internalize offline, and the fountain removed the symbol-size ceiling that
+ * made a smaller QR payload worth having — so one encoding serves both paths.
  *
  * `amount` is passed in rather than read off the session because the session's
  * own amount is optional: on an open request the payer chooses. Making it an
@@ -167,7 +168,6 @@ export async function buildPaymentFrame(
     frame: {
       version: FRAME_VERSION,
       senderIdentityKey,
-      amount,
       outputIndex: 0,
       derivationPrefix: session.derivationPrefix,
       derivationSuffix: session.derivationSuffix,
@@ -248,12 +248,35 @@ export async function broadcastPayment(
  * A broadcast failure after a positive ack returns `broadcast: 'pending'`, not
  * a failure. The money is safe at the payee; what is stuck is this device's
  * copy of the transaction, which is a retryable notice, not a failed payment.
+ *
+ * OFFLINE: with no network there is nothing to broadcast to, so a positive ack
+ * enqueues instead. The transaction is promoted from `nosend` to `unproven` by
+ * the hold, which is what lets the payer fund a SECOND offline payment from this
+ * one's change — `allocateChangeInput` excludes `nosend`
+ * (storage/StorageExpoSQLite.ts:1284). The outcome is the existing
+ * `broadcast: 'pending'`, which the UI already renders as "queued", so no new
+ * state reaches the screens. `deps` is injected — not read from `@/utils/net/online`
+ * or a database directly — so this stays unit-testable without either; the real
+ * app supplies both at the NearbyFlow call site.
  */
 export async function finalizeDelivery(
   wallet: PayingWallet,
   built: BuiltPayment,
   ack: Ack,
-  originator: string
+  originator: string,
+  /**
+   * Required, and so is `hold` inside it, because the offline branch cannot
+   * honestly report a queue it has no way to make. A call site that omitted it
+   * would leave the transaction at `nosend` — change unspendable, no queue row,
+   * no monitor task that sweeps it — while telling the user it was waiting to be
+   * broadcast. `online` stays optional: its default is the real probe, and
+   * getting that wrong costs a retry rather than a stranded payment.
+   */
+  deps: {
+    online?: () => Promise<boolean>
+    /** Promotes the transaction to `unproven` and queues the txid for release. */
+    hold: (txid: string) => Promise<void>
+  }
 ): Promise<DeliveryOutcome> {
   if (!ack.ok) {
     if (built.reference) {
@@ -268,6 +291,49 @@ export async function finalizeDelivery(
 
   if (!built.txid) {
     return { kind: 'sent', broadcast: 'pending', detail: 'the wallet returned no txid to broadcast' }
+  }
+
+  const online = deps?.online ?? getOnline
+  // A failed connectivity probe must not change what this function does: assume
+  // online and fall through to the ordinary broadcast, which is exactly what ran
+  // before this branch existed. If the device is genuinely offline, that attempt
+  // fails on its own and lands on the same `broadcast: 'pending'` the hold would
+  // have returned anyway — so a probe failure costs nothing either way. This
+  // mirrors the same guard already used around every other call to `getOnline`
+  // in this codebase (`StorageExpoSQLite.attemptToPostReqsToNetwork`,
+  // `processOfflineActions.probeOnline`).
+  let isOnline = true
+  try {
+    isOnline = await online()
+  } catch (e) {
+    console.warn('[localpay] connectivity probe failed, assuming online:', messageOf(e))
+  }
+  if (!isOnline) {
+    try {
+      // The signature requires `hold`; this catches a JS caller or a cast that
+      // got past it. Reported rather than ignored, and deliberately NOT fallen
+      // through to the broadcast: offline, a delayed `sendWith` comes back
+      // 'sending', which this function reports as `broadcast: 'ok'` — green on
+      // the payer's screen for a transaction nothing has.
+      if (typeof deps?.hold !== 'function') {
+        throw new Error('offline, and no hold was supplied to queue this payment with')
+      }
+      await deps.hold(built.txid)
+      return { kind: 'sent', broadcast: 'pending', detail: 'offline — queued until this device reconnects' }
+    } catch (e) {
+      // The payee holds a copy and will internalize it, so this is still a sent
+      // payment — never a failure. But be honest about what a failed hold
+      // actually costs: nothing re-drives it. No monitor task sweeps a plain
+      // `nosend` transaction to broadcast it (`TaskSendWaiting` selects only
+      // `['unsent','sending']`; `TaskCheckNoSends`, the only task that even
+      // reads `nosend` rows, only checks whether one got mined by some OTHER
+      // means — it never calls `sendWith`), and `processOfflineActions`'s
+      // drain only ever looks at `offline_actions` rows, so a hold that threw
+      // before its own writes landed is invisible to it too. See
+      // `holdSentPaymentOffline` for why its queue-row insert runs before its
+      // status promotion, which is what keeps a partial failure recoverable.
+      return { kind: 'sent', broadcast: 'pending', detail: messageOf(e) }
+    }
   }
 
   try {

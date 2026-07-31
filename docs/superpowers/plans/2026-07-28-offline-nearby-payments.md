@@ -4,7 +4,7 @@
 
 **Goal:** Let two devices with no internet complete a nearby payment, spend the received funds again while still offline, and have the whole accumulated chain of transactions broadcast in dependency order when either device regains signal.
 
-**Architecture:** A local, checkpoint-anchored block-header store answers `chainTracker.isValidRootForHeight` with no network, which is the only thing BEEF verification needs. An override of `StorageProvider.attemptToPostReqsToNetwork` intercepts the one forced broadcast inside `internalizeAction`, parking the request at `nosend` (broadcast held) while the transaction stays `unproven` (outputs spendable), and recording it in a new `offline_actions` table. A monitor task, triggered on reconnect, walks each held request's stored BEEF, topologically orders every ancestor that lacks a merkle path, and posts them parent-first — cascading failure to descendants with an attribution note when the network rejects one.
+**Architecture:** A local, checkpoint-anchored block-header store answers `chainTracker.isValidRootForHeight` with no network, which is the only thing BEEF verification needs. (Correction landed during Task 5: injecting at `serviceOptions.chaintracks` is not enough on its own — `Services.getChainTracker()` wraps the injected client in `ChaintracksChainTracker`, whose own `isValidRootForHeight` resolves roots via `findHeaderForHeight` and never calls the client's. The app must also override `services.getChainTracker` to return the wrapper directly. See the spec's "The header store → Seam" section.) An override of `StorageProvider.attemptToPostReqsToNetwork` intercepts the one forced broadcast inside `internalizeAction`, parking the request at `nosend` (broadcast held) while the transaction stays `unproven` (outputs spendable), and recording it in a new `offline_actions` table. A monitor task, triggered on reconnect, walks each held request's stored BEEF, topologically orders every ancestor that lacks a merkle path, and posts them parent-first — cascading failure to descendants with an attribution note when the network rejects one.
 
 **Tech Stack:** TypeScript, React Native / Expo 55, `@bsv/sdk` 2.1.9, `@bsv/wallet-toolbox-mobile` 2.4.3, `expo-sqlite`, `expo-file-system` 55, `@react-native-community/netinfo` 11.5.2, jest with `jest-expo`.
 
@@ -17,7 +17,9 @@
 - **Nearby rail only.** Do not touch `components/pay/HandleSend.tsx`, `HandleReceive.tsx`, `AddressSend.tsx`, or `AddressReceive.tsx` beyond the offline disabling in Task 12.
 - **SQL modules stay logic-free.** Every decision lives in a pure function unit-tested in `__tests__/`; the SQL layer is a thin mapper validated on device in Task 13. There is no SQLite test harness in this repo (`ls __tests__` — no storage tests exist) and this plan does not add one.
 - **`online` means exactly** `isConnected === true && isInternetReachable !== false`. One implementation, in `utils/net/online.ts`.
-- Tests run with `npx jest <pattern>`. Lint/format with `npm run fix`. Existing suite is 36 files; keep it green.
+- Tests run with `npx jest <pattern>`. Existing suite is 36 files (342 tests) at branch start; keep it green.
+- **Never run `npm run fix` (or `npm run lint:fix`) in this work.** Measured on the branch base: `npx prettier --check .` reports only 4 drifting files, all pre-existing in `utils/webview/`, but `expo lint --fix` rewrites ~175 unrelated files. That buries a task's diff and makes review impossible. Check only the files you touched:
+  `npx prettier --check <your files>` and `npx eslint <your files>`. A repo-wide formatting sweep is its own commit, not part of this feature.
 - Header checkpoint constants are real values fetched 2026-07-28 and are reproduced verbatim in Task 2. Do not substitute placeholders.
 
 ---
@@ -1512,26 +1514,28 @@ export interface NewOfflineAction {
   receivedVia?: string
 }
 
-/** Idempotent: a re-delivered frame must not create a second queue row. */
+/**
+ * Idempotent: a re-delivered frame must not create a second queue row.
+ *
+ * `seq` is allocated by a subquery inside the INSERT rather than by a separate
+ * SELECT, so allocation and insertion are one statement under SQLite's
+ * single-writer lock. Reading the max first would let two bursty frames — which
+ * a nearby transport produces routinely — read the same value and both write it.
+ * `seq` is not UNIQUE, so the schema would happily keep both.
+ *
+ * A duplicate `seq` is not a money-safety bug: release order comes from BEEF
+ * topology (`utils/offline/order.ts`), and `seq` only breaks ties between
+ * transactions with no dependency relationship, where relative order is
+ * irrelevant by definition. Fix it because the column's stated purpose should
+ * be true, not because funds are at risk.
+ */
 export async function insertOfflineAction(db: OfflineDb, entry: NewOfflineAction): Promise<void> {
   const now = new Date().toISOString()
-  const seqRow = (await db.getFirstAsync('SELECT COALESCE(MAX(seq), 0) + 1 AS nextSeq FROM offline_actions')) as {
-    nextSeq: number
-  } | null
   await db.runAsync(
     `INSERT OR IGNORE INTO offline_actions
        (created_at, updated_at, userId, txid, seq, role, senderIdentityKey, receivedVia, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued')`,
-    [
-      now,
-      now,
-      entry.userId,
-      entry.txid,
-      seqRow?.nextSeq ?? 1,
-      entry.role,
-      entry.senderIdentityKey ?? null,
-      entry.receivedVia ?? null
-    ]
+     VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM offline_actions), ?, ?, ?, 'queued')`,
+    [now, now, entry.userId, entry.txid, entry.role, entry.senderIdentityKey ?? null, entry.receivedVia ?? null]
   )
 }
 
@@ -2244,10 +2248,24 @@ export async function processOfflineActions(args: {
   return { sent, rejected, stopped: false }
 }
 
-/** Post a transaction this wallet owns, reusing the toolbox's bookkeeping. */
+/**
+ * Post a transaction this wallet owns, reusing the toolbox's bookkeeping.
+ *
+ * The request has to leave 'nosend' for the post — `attemptToPostReqsToNetwork`
+ * only acts on a sendable status — and it has to go BACK to 'nosend' if the post
+ * did not succeed. On a service error the toolbox leaves it at 'sending' with
+ * `attempts` incremented, which is exactly the state `TaskSendWaiting` picks up
+ * every five minutes and `applyProofTimeout` eventually marks 'invalid'
+ * (`EntityProvenTxReq.js:426-433`). Leaving it there would hand blocker 4 back
+ * to us on the first failed release attempt, and out of dependency order at
+ * that. Restoring the hold keeps release ordered and keeps `attempts` still.
+ *
+ * The module function is imported directly rather than called as
+ * `storage.attemptToPostReqsToNetwork`, so Task 8's offline override does not
+ * intercept it — by the time this runs we are online by definition.
+ */
 async function postOwned(storage: StorageExpoSQLite, req: EntityProvenTxReq | undefined): Promise<PostOutcome> {
   if (!req) return 'invalidTx'
-  // 'nosend' is a held state; attemptToPostReqsToNetwork expects a sendable one.
   await storage.updateProvenTxReq(req.id, { status: 'unsent' })
   req.status = 'unsent'
   const r = await storage.runAsStorageProvider(async (sp: any) => await attemptToPostReqsToNetwork(sp, [req]))
@@ -2255,6 +2273,13 @@ async function postOwned(storage: StorageExpoSQLite, req: EntityProvenTxReq | un
   if (status === 'success') return 'success'
   if (status === 'doubleSpend') return 'doubleSpend'
   if (status === 'invalidTx' || status === 'invalid') return 'invalidTx'
+
+  // Service error: re-hold, and put the transaction back to 'unproven' so the
+  // outputs stay spendable and nothing sweeps it while we wait for signal.
+  await storage.updateProvenTxReq(req.id, { status: 'nosend' })
+  for (const transactionId of req.notify.transactionIds ?? []) {
+    await storage.updateTransactionStatus('unproven', transactionId)
+  }
   return 'serviceError'
 }
 
@@ -2666,8 +2691,23 @@ export async function finalizeDelivery(
       return { kind: 'sent', broadcast: 'pending', detail: 'offline — queued until this device reconnects' }
     } catch (e) {
       // The payee holds a copy and will internalize it, so this is still a sent
-      // payment. What failed is our own record of needing to broadcast it, and
-      // the monitor's nosend sweep will still find the transaction.
+      // payment — never a failed one.
+      //
+      // But be honest about what is left behind: NOTHING re-drives a hold that
+      // failed before its `offline_actions` row landed. `TaskSendWaiting`
+      // selects only ['unsent','sending']; `TaskCheckNoSends` reads nosend rows
+      // but merely requests merkle proofs for transactions that may have been
+      // broadcast externally, never advancing status; and the drain scans the
+      // `offline_actions` table, so a missing row is invisible to it. An earlier
+      // draft of this plan claimed "the monitor's nosend sweep will still find
+      // the transaction" — that was wrong, and contradicted this same file's own
+      // note that TaskFailAbandoned sweeps only ['unprocessed','unsigned'].
+      //
+      // That is why holdSentPaymentOffline writes the durable queue row BEFORE
+      // promoting the status: if the promotion then fails, the drain still finds
+      // the transaction and releases it, and only the change stays temporarily
+      // unspendable. With the writes in the other order, a failure between them
+      // loses the record entirely and strands the payer's change permanently.
       return { kind: 'sent', broadcast: 'pending', detail: messageOf(e) }
     }
   }
