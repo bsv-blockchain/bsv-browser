@@ -1,5 +1,5 @@
 import { getLocalPayTransport, type LocalPayTransport } from 'react-native-localpay-transport'
-import { decodeFrame, encodeFrame, type PaymentFrame } from '../codec'
+import { sealFrame, unsealFrame, type PaymentFrame } from '../codec'
 import { instanceName, type Session } from '../session'
 import {
   AckError,
@@ -149,7 +149,7 @@ export function makeSocketTransport(kind: 'awdl' | 'nearby'): LocalPaymentTransp
               // Any version skew, truncation or trailing bytes reaches this path.
               let frame: PaymentFrame
               try {
-                frame = decodeFrame(fromBase64(frameBase64))
+                frame = unsealFrame(fromBase64(frameBase64), session.psk)
               } catch (e) {
                 // The only decline the caller can never issue itself: receive()
                 // rejects here, so no ReceivedFrame — and therefore no confirm
@@ -193,7 +193,7 @@ export function makeSocketTransport(kind: 'awdl' | 'nearby'): LocalPaymentTransp
           .sendFrame(
             instanceName(session.sessionId),
             toBase64(session.psk),
-            toBase64(encodeFrame(frame)),
+            toBase64(sealFrame(frame, session.psk)),
             SEND_TIMEOUT_MS,
             CONNECT_TIMEOUT_MS
           )

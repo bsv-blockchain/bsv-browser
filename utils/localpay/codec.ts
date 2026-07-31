@@ -253,7 +253,9 @@ export function unsealFrame(b: Uint8Array, psk: Uint8Array): PaymentFrame {
 // `offline_actions.framePayload` so a delivered-but-unbroadcast payment can be
 // re-shown later, and the renderer reads the bytes back out of it. base64url so
 // the stored value is plain single-byte ASCII, behind a prefix that
-// distinguishes it from a session QR (`bsvpay1:`).
+// distinguishes it from a session QR (`bsvpay1:`). The envelope's payload is a
+// SEALED frame: re-showing a stored payment yields ciphertext only the live
+// session's PSK opens.
 
 export const FRAME_QR_PREFIX = 'bsvpayf1:'
 
@@ -302,9 +304,9 @@ function fromB64url(text: string): Uint8Array {
   return Uint8Array.from(binary, c => c.charCodeAt(0))
 }
 
-/** Wraps a frame for storage and later re-display. Rendered as air-gap parts, never as one symbol. */
-export function frameToQr(f: PaymentFrame): string {
-  return FRAME_QR_PREFIX + toB64url(encodeFrame(f))
+/** Wraps a SEALED frame for storage and later re-display. Rendered as air-gap parts, never as one symbol. */
+export function frameToQr(f: PaymentFrame, psk: Uint8Array): string {
+  return FRAME_QR_PREFIX + toB64url(sealFrame(f, psk))
 }
 
 /**

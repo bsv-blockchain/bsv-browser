@@ -127,9 +127,7 @@ import {
   MAX_MESSAGE_BYTES,
   awdlTransport,
   buildPaymentFrame,
-  decodeFrame,
   decodeSession,
-  encodeFrame,
   encodeSession,
   finalizeDelivery,
   frameBytesFromQr,
@@ -146,7 +144,9 @@ import {
   processPending,
   requestNearbyPermissions,
   savePending,
+  sealFrame,
   selectTransport,
+  unsealFrame,
   type Ack,
   type ConfirmDelivery,
   type DeclineReason,
@@ -925,7 +925,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // Bare catch on purpose: version skew, truncation or trailing bytes
         // throw a CodecError, but a body that destructures from null throws
         // something else — and must still land here, not crash the screen.
-        frame = decodeFrame(message)
+        frame = unsealFrame(message, session.psk)
       } catch {
         fail('generic', t('invalid_qr_code'))
         return
@@ -1072,15 +1072,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       if (sendKind === 'qr') {
         // The fountain removes the symbol-size ceiling; the only refusal left
         // is the 64 KB sanity cap, past which QR handover is unreasonable and
-        // something upstream is wrong.
-        if (encodeFrame(built.frame).length > MAX_MESSAGE_BYTES) {
+        // something upstream is wrong. Measured on the SEALED length — that is
+        // what actually renders.
+        if (sealFrame(built.frame, session.psk).length > MAX_MESSAGE_BYTES) {
           abortBuild(built.reference)
           setPaymentQr(null)
           fail('generic', t('local_pay_too_large'))
           return
         }
         builtRef.current = built
-        setPaymentQr(frameToQr(built.frame))
+        setPaymentQr(frameToQr(built.frame, session.psk))
         setPhase('send_qr')
         return
       }
@@ -1103,13 +1104,13 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // consistent — the payee's copy merges once this transaction is out.
         const message = messageOf(e)
         console.warn('[localpay] radio send failed, falling back to QR:', message)
-        if (encodeFrame(built.frame).length > MAX_MESSAGE_BYTES) {
+        if (sealFrame(built.frame, session.psk).length > MAX_MESSAGE_BYTES) {
           // No radio and no representable code: the one genuinely dead end.
           fail(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', t('local_pay_too_large'))
           return
         }
         builtRef.current = built
-        setPaymentQr(frameToQr(built.frame))
+        setPaymentQr(frameToQr(built.frame, session.psk))
         setNotice({ text: t('local_pay_radio_fallback'), tone: 'info' })
         setPhase('send_qr')
         return
@@ -1179,8 +1180,10 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   // the already-mempooled transaction as a merge.
   const completeQrDelivery = useCallback(async () => {
     const built = builtRef.current
-    if (!built || !wallet) {
-      // No handle (e.g. re-entry after reset): nothing to decide, just close.
+    const session = scannedSession
+    if (!built || !wallet || !session) {
+      // No handle (e.g. re-entry after reset, which clears builtRef and
+      // scannedSession together): nothing to decide, just close.
       setSettledAmount(payAmount)
       setRole('payer')
       setNotice(null)
@@ -1193,7 +1196,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     const outcome = await finalizeDelivery(wallet as unknown as PayingWalletArg, built, { ok: true }, adminOriginator, {
       hold: async txid => {
         if (!storage) throw new Error('no local storage to queue this payment in')
-        await holdSentPaymentOffline({ storage, txid, framePayload: frameToQr(built.frame) })
+        await holdSentPaymentOffline({ storage, txid, framePayload: frameToQr(built.frame, session.psk) })
       }
     })
     if (outcome.kind === 'sent' && outcome.broadcast === 'pending') {
@@ -1203,7 +1206,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     setSettledAmount(payAmount)
     setRole('payer')
     setPhase('done')
-  }, [wallet, storage, adminOriginator, payAmount, t])
+  }, [wallet, storage, adminOriginator, payAmount, scannedSession, t])
 
   // ── The success moment ──
   //

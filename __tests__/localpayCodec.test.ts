@@ -25,6 +25,8 @@ const sample = (): PaymentFrame => ({
   transaction: new Uint8Array([1, 2, 3, 4, 5])
 })
 
+const psk = new Uint8Array(32).fill(7)
+
 describe('localpay codec', () => {
   it('round-trips a frame', () => {
     const f = sample()
@@ -93,7 +95,7 @@ describe('localpay frame envelope', () => {
 
   it('round-trips a frame through the stored envelope', () => {
     const f = sample()
-    expect(decodeFrame(frameBytesFromQr(frameToQr(f)))).toEqual(f)
+    expect(unsealFrame(frameBytesFromQr(frameToQr(f, psk)), psk)).toEqual(f)
   })
 
   it('round-trips a realistic single-input AtomicBEEF frame', () => {
@@ -102,16 +104,16 @@ describe('localpay frame envelope', () => {
     const transaction = new Uint8Array(1200)
     for (let i = 0; i < transaction.length; i++) transaction[i] = (i * 37 + 11) & 0xff
     const f = { ...sample(), transaction }
-    expect(decodeFrame(frameBytesFromQr(frameToQr(f)))).toEqual(f)
+    expect(unsealFrame(frameBytesFromQr(frameToQr(f, psk)), psk)).toEqual(f)
   })
 
   it('prefixes the payload so it cannot be confused with a session QR', () => {
-    expect(frameToQr(sample()).startsWith(FRAME_QR_PREFIX)).toBe(true)
+    expect(frameToQr(sample(), psk).startsWith(FRAME_QR_PREFIX)).toBe(true)
     expect(FRAME_QR_PREFIX.startsWith('bsvpay1:')).toBe(false)
   })
 
   it('emits only single-byte ASCII, so characters and QR bytes agree', () => {
-    const qr = frameToQr({ ...sample(), transaction: new Uint8Array(900).fill(0xff) })
+    const qr = frameToQr({ ...sample(), transaction: new Uint8Array(900).fill(0xff) }, psk)
     expect(/^[\x21-\x7e]+$/.test(qr)).toBe(true)
     expect(new TextEncoder().encode(qr).length).toBe(qr.length)
   })
@@ -134,12 +136,12 @@ describe('localpay frame envelope', () => {
   })
 
   it('rejects a truncated payload behind a valid prefix', () => {
-    const qr = frameToQr(sample())
-    expect(() => decodeFrame(frameBytesFromQr(qr.slice(0, qr.length - 8)))).toThrow(CodecError)
+    const qr = frameToQr(sample(), psk)
+    expect(() => unsealFrame(frameBytesFromQr(qr.slice(0, qr.length - 8)), psk)).toThrow(CodecError)
   })
 
   it('rejects an empty payload behind a valid prefix', () => {
-    expect(() => decodeFrame(frameBytesFromQr(FRAME_QR_PREFIX))).toThrow(CodecError)
+    expect(() => unsealFrame(frameBytesFromQr(FRAME_QR_PREFIX), psk)).toThrow(CodecError)
   })
 
   it('rejects non-string input, which a corrupt storage row can be', () => {
@@ -149,21 +151,24 @@ describe('localpay frame envelope', () => {
   })
 
   it('never throws a non-CodecError for any single-character corruption', () => {
-    const qr = frameToQr(sample())
+    const qr = frameToQr(sample(), psk)
     for (let i = FRAME_QR_PREFIX.length; i < qr.length; i += 7) {
       const corrupted = qr.slice(0, i) + (qr[i] === 'A' ? 'B' : 'A') + qr.slice(i + 1)
       try {
-        decodeFrame(frameBytesFromQr(corrupted))
+        unsealFrame(frameBytesFromQr(corrupted), psk)
       } catch (e) {
         expect(e).toBeInstanceOf(CodecError)
       }
     }
   })
 
-  it('frameBytesFromQr returns the exact encodeFrame bytes', () => {
+  it('frameBytesFromQr returns the exact sealed bytes: SEAL_VERSION prefix, unseals to the frame', () => {
     const f = sample()
-    const qr = frameToQr(f)
-    expect(Array.from(frameBytesFromQr(qr))).toEqual(Array.from(encodeFrame(f)))
+    const qr = frameToQr(f, psk)
+    const bytes = frameBytesFromQr(qr)
+    expect(bytes[0]).toBe(SEAL_VERSION)
+    expect(bytes.length).toBe(1 + 32 + encodeFrame(f).length + 16)
+    expect(unsealFrame(bytes, psk)).toEqual(f)
     expect(() => frameBytesFromQr('bsvpay1:xx')).toThrow()
   })
 })
