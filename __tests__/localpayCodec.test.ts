@@ -13,9 +13,11 @@ import {
   SEAL_VERSION,
   type PaymentFrame
 } from '@/utils/localpay/codec'
+import type { TokenPayment } from '@/utils/localpay/codec'
 
 const sample = (): PaymentFrame => ({
   version: FRAME_VERSION,
+  kind: 'bsv' as const,
   senderIdentityKey: '02'.padEnd(66, 'a'),
   outputIndex: 0,
   derivationPrefix: 'cHJlZml4',
@@ -49,9 +51,9 @@ describe('localpay codec', () => {
     expect(() => decodeFrame(v1)).toThrow('unsupported frame version 1')
   })
 
-  it('is version 2', () => {
-    expect(FRAME_VERSION).toBe(2)
-    expect(encodeFrame(sample())[0]).toBe(2)
+  it('is version 3', () => {
+    expect(FRAME_VERSION).toBe(3)
+    expect(encodeFrame(sample())[0]).toBe(3)
   })
 
   it('rejects truncated input', () => {
@@ -202,5 +204,69 @@ describe('sealed envelope', () => {
   it('refuses a PSK that is not 32 bytes', () => {
     expect(() => sealFrame(sample(), new Uint8Array(16))).toThrow(CodecError)
     expect(() => unsealFrame(sealFrame(sample(), psk), new Uint8Array(16))).toThrow(CodecError)
+  })
+})
+
+const tokenSample = (): PaymentFrame => ({
+  ...sample(),
+  kind: 'token',
+  token: {
+    assetId: 'ab'.repeat(32) + '.0',
+    overlayUrl: 'https://overlay.issuer.example',
+    overlayIdentityKey: '03'.padEnd(66, 'b'),
+    certificates: [new Uint8Array([9, 9, 9]), new Uint8Array([])],
+    linkage: [
+      { txid: 'cd'.repeat(32), payload: new Uint8Array([1, 2, 3]) },
+      { txid: 'ef'.repeat(32), payload: new Uint8Array([4]) },
+    ],
+    recipientLinkage: new Uint8Array([5, 6]),
+  } satisfies TokenPayment,
+})
+
+describe('frame v3 kinds', () => {
+  it('round-trips a bsv frame with kind preserved', () => {
+    const decoded = decodeFrame(encodeFrame(sample()))
+    expect(decoded.kind).toBe('bsv')
+    expect(decoded.token).toBeUndefined()
+    expect(decoded).toEqual(sample())
+  })
+
+  it('round-trips a token frame with every token field intact', () => {
+    expect(decodeFrame(encodeFrame(tokenSample()))).toEqual(tokenSample())
+  })
+
+  it('seals and unseals a token frame', () => {
+    const psk = new Uint8Array(32).fill(7)
+    expect(unsealFrame(sealFrame(tokenSample(), psk), psk)).toEqual(tokenSample())
+  })
+
+  it('rejects a v2 frame: fail-closed versioning', () => {
+    const bytes = encodeFrame(sample())
+    bytes[0] = 2
+    expect(() => decodeFrame(bytes)).toThrow(/unsupported frame version 2/)
+  })
+
+  it('rejects an unknown kind byte', () => {
+    const bytes = encodeFrame(sample())
+    bytes[1] = 0x03
+    expect(() => decodeFrame(bytes)).toThrow(/unsupported frame kind 3/)
+  })
+
+  it('refuses to encode kind token without a token block, and kind bsv with one', () => {
+    expect(() => encodeFrame({ ...sample(), kind: 'token' })).toThrow(CodecError)
+    expect(() => encodeFrame({ ...sample(), token: tokenSample().token })).toThrow(CodecError)
+  })
+
+  it('refuses malformed token fields at encode', () => {
+    const bad = (patch: Partial<TokenPayment>) =>
+      encodeFrame({ ...tokenSample(), token: { ...tokenSample().token!, ...patch } })
+    expect(() => bad({ overlayIdentityKey: '03short' })).toThrow(CodecError)
+    expect(() => bad({ linkage: [{ txid: 'zz', payload: new Uint8Array([1]) }] })).toThrow(CodecError)
+  })
+
+  it('still rejects trailing bytes after a token frame', () => {
+    const bytes = encodeFrame(tokenSample())
+    const padded = new Uint8Array([...bytes, 0])
+    expect(() => decodeFrame(padded)).toThrow(/trailing bytes/)
   })
 })

@@ -167,6 +167,7 @@ export async function buildPaymentFrame(
   return {
     frame: {
       version: FRAME_VERSION,
+      kind: 'bsv' as const,
       senderIdentityKey,
       outputIndex: 0,
       derivationPrefix: session.derivationPrefix,

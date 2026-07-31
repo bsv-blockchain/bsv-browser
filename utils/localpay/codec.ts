@@ -1,6 +1,6 @@
 import { SymmetricKey } from '@bsv/sdk'
 
-export const FRAME_VERSION = 2
+export const FRAME_VERSION = 3
 
 export class CodecError extends Error {
   constructor(message: string) {
@@ -9,8 +9,20 @@ export class CodecError extends Error {
   }
 }
 
+export type FrameKind = 'bsv' | 'token'
+
+export interface TokenPayment {
+  assetId: string                 // "<64-hex txid>.<vout>"
+  overlayUrl: string
+  overlayIdentityKey: string      // 66-hex compressed pubkey
+  certificates: Uint8Array[]      // opaque serialized VerifiableCertificates
+  linkage: Array<{ txid: string; payload: Uint8Array }> // per-txid MandalaLinkagePayload bytes, whole chain
+  recipientLinkage: Uint8Array    // JSON SpecificLinkage bytes, verifier = payee
+}
+
 export interface PaymentFrame {
   version: number
+  kind: FrameKind
   /** 66-char hex, compressed pubkey */
   senderIdentityKey: string
   /**
@@ -25,6 +37,15 @@ export interface PaymentFrame {
   outputIndex: number
   derivationPrefix: string
   derivationSuffix: string
+  /**
+   * Present iff kind === 'token'. Carried opaquely: the codec validates
+   * shapes and lengths, never parses linkage payloads or certificates.
+   * `linkage` maps EVERY unbroadcast token transaction in `transaction`'s
+   * ancestry to the exact offChainValues bytes its issuer overlay consumes —
+   * forwarded verbatim on chained re-spends so whoever reconnects first can
+   * submit the whole chain.
+   */
+  token?: TokenPayment
   /**
    * AtomicBEEF, on both transports. The design originally specified a bare
    * rawtx on the QR path to shrink the symbol, but ancestry is what lets the
@@ -101,32 +122,84 @@ function bytesToHex(b: Uint8Array): string {
 
 // ── frame ──
 
+const KIND_BYTE: Record<FrameKind, number> = { bsv: 0x01, token: 0x02 }
+
 export function encodeFrame(f: PaymentFrame): Uint8Array {
   if (f.senderIdentityKey.length !== 66) {
     throw new CodecError(`senderIdentityKey must be 66 hex chars, got ${f.senderIdentityKey.length}`)
   }
-  const out: number[] = [f.version & 0xff]
+  if ((f.kind === 'token') !== (f.token !== undefined)) {
+    throw new CodecError(`kind ${f.kind} and token block presence disagree`)
+  }
+  const out: number[] = [f.version & 0xff, KIND_BYTE[f.kind] ?? 0]
+  if (out[1] === 0) throw new CodecError(`unsupported frame kind ${String(f.kind)}`)
   for (const byte of hexToBytes(f.senderIdentityKey.toLowerCase())) out.push(byte)
   putVarint(out, f.outputIndex)
   putStr(out, f.derivationPrefix)
   putStr(out, f.derivationSuffix)
+  if (f.token) {
+    const t = f.token
+    if (t.overlayIdentityKey.length !== 66) {
+      throw new CodecError(`overlayIdentityKey must be 66 hex chars, got ${t.overlayIdentityKey.length}`)
+    }
+    putStr(out, t.assetId)
+    putStr(out, t.overlayUrl)
+    for (const byte of hexToBytes(t.overlayIdentityKey.toLowerCase())) out.push(byte)
+    putVarint(out, t.certificates.length)
+    for (const cert of t.certificates) putBytes(out, cert)
+    putVarint(out, t.linkage.length)
+    for (const entry of t.linkage) {
+      if (entry.txid.length !== 64) throw new CodecError(`linkage txid must be 64 hex chars, got ${entry.txid.length}`)
+      for (const byte of hexToBytes(entry.txid.toLowerCase())) out.push(byte)
+      putBytes(out, entry.payload)
+    }
+    putBytes(out, t.recipientLinkage)
+  }
   putBytes(out, f.transaction)
   return new Uint8Array(out)
 }
 
 export function decodeFrame(b: Uint8Array): PaymentFrame {
-  if (b.length < 34) throw new CodecError('frame too short')
+  if (b.length < 35) throw new CodecError('frame too short')
   const version = b[0]
   if (version !== FRAME_VERSION) throw new CodecError(`unsupported frame version ${version}`)
-  const pos = { i: 1 }
+  const kindByte = b[1]
+  const kind: FrameKind | undefined = kindByte === 0x01 ? 'bsv' : kindByte === 0x02 ? 'token' : undefined
+  if (kind === undefined) throw new CodecError(`unsupported frame kind ${kindByte}`)
+  const pos = { i: 2 }
   const senderIdentityKey = bytesToHex(b.slice(pos.i, pos.i + 33))
   pos.i += 33
   const outputIndex = getVarint(b, pos)
   const derivationPrefix = getStr(b, pos)
   const derivationSuffix = getStr(b, pos)
+  let token: TokenPayment | undefined
+  if (kind === 'token') {
+    const assetId = getStr(b, pos)
+    const overlayUrl = getStr(b, pos)
+    if (pos.i + 33 > b.length) throw new CodecError('truncated overlayIdentityKey')
+    const overlayIdentityKey = bytesToHex(b.slice(pos.i, pos.i + 33))
+    pos.i += 33
+    const certificates: Uint8Array[] = []
+    const certCount = getVarint(b, pos)
+    for (let c = 0; c < certCount; c++) certificates.push(getBytes(b, pos))
+    const linkage: Array<{ txid: string; payload: Uint8Array }> = []
+    const linkCount = getVarint(b, pos)
+    for (let l = 0; l < linkCount; l++) {
+      if (pos.i + 32 > b.length) throw new CodecError('truncated linkage txid')
+      const txid = bytesToHex(b.slice(pos.i, pos.i + 32))
+      pos.i += 32
+      linkage.push({ txid, payload: getBytes(b, pos) })
+    }
+    const recipientLinkage = getBytes(b, pos)
+    token = { assetId, overlayUrl, overlayIdentityKey, certificates, linkage, recipientLinkage }
+  }
   const transaction = getBytes(b, pos)
   if (pos.i !== b.length) throw new CodecError('trailing bytes after frame')
-  return { version, senderIdentityKey, outputIndex, derivationPrefix, derivationSuffix, transaction }
+  return {
+    version, kind, senderIdentityKey, outputIndex, derivationPrefix, derivationSuffix,
+    ...(token === undefined ? {} : { token }),
+    transaction,
+  }
 }
 
 // ── Sealed envelope ──

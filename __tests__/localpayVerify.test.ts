@@ -34,6 +34,7 @@ function beefOf(outputs: { satoshis: number; scriptHex: string }[]): Uint8Array 
 function frameFor(transaction: Uint8Array, outputIndex = 0): PaymentFrame {
   return {
     version: 1,
+    kind: 'bsv' as const,
     senderIdentityKey,
     amount: 0, // still on the type at this task; unread by verify
     outputIndex,

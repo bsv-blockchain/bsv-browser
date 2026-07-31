@@ -13,6 +13,7 @@
 import { AirGapDecoder, AirGapEncoder, MAX_MESSAGE_BYTES, estimatePartCharLength, isAirGapPart } from '@bsv/air-gap'
 import {
   FRAME_BLOCK_BYTES,
+  FRAME_VERSION,
   decodeFrame,
   encodeFrame,
   frameBytesFromQr,
@@ -28,7 +29,8 @@ function bigFrame(transactionBytes: number): PaymentFrame {
   const transaction = new Uint8Array(transactionBytes)
   for (let i = 0; i < transactionBytes; i++) transaction[i] = (i * 31 + 7) & 0xff
   return {
-    version: 2,
+    version: FRAME_VERSION,
+    kind: 'bsv' as const,
     senderIdentityKey: '02' + 'ab'.repeat(32),
     outputIndex: 1,
     derivationPrefix: 'cHJlZml4',

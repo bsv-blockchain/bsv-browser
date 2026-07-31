@@ -33,6 +33,7 @@ const session = mintSession({
 
 const frame: PaymentFrame = {
   version: FRAME_VERSION,
+  kind: 'bsv' as const,
   senderIdentityKey: '02'.padEnd(66, 'e'),
   outputIndex: 0,
   derivationPrefix: 'cA',
