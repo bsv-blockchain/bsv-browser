@@ -4,8 +4,26 @@ import { CodecError } from './codec'
 export const SESSION_VERSION = 1
 export const CAP_AWDL = 0x01
 export const CAP_NEARBY = 0x02
+export const CAP_BLE = 0x04 // allocated for BLE transports (e.g. Blitz); this app never advertises it
 
 export type SessionOs = 'ios' | 'android'
+
+/**
+ * The asset a token request names. When present on a Session, `amount` is
+ * BASE UNITS of this asset, not satoshis, and remains a binding term.
+ * label/ticker/decimals are payee-supplied display hints; overlayUrl and
+ * overlayIdentityKey are the issuer endpoints a payer needs to mint
+ * linkage blobs and (later) submit the transfer — no per-asset discovery
+ * protocol exists, so the request carries them.
+ */
+export interface SessionAsset {
+  id: string
+  label?: string
+  ticker?: string
+  decimals?: number
+  overlayUrl: string
+  overlayIdentityKey: string
+}
 
 export interface Session {
   version: number
@@ -26,6 +44,7 @@ export interface Session {
    * frame belongs to this request, and they apply either way.
    */
   amount?: number
+  asset?: SessionAsset
   derivationPrefix: string
   derivationSuffix: string
   /**
@@ -40,6 +59,7 @@ export function mintSession(args: {
   identityKey: string
   /** Omit for an open request — the payer enters the amount. */
   amount?: number
+  asset?: SessionAsset
   derivationPrefix: string
   derivationSuffix: string
   supportsAwdl: boolean
@@ -53,6 +73,9 @@ export function mintSession(args: {
   if (args.amount !== undefined && !isRequestableAmount(args.amount)) {
     throw new CodecError('bad amount')
   }
+  if (args.asset !== undefined && args.asset.overlayIdentityKey.length !== 66) {
+    throw new CodecError('bad asset overlayIdentityKey')
+  }
   return {
     version: SESSION_VERSION,
     caps: (args.supportsAwdl ? CAP_AWDL : 0) | (args.supportsNearby ? CAP_NEARBY : 0),
@@ -60,6 +83,7 @@ export function mintSession(args: {
     psk: new Uint8Array(Random(32)),
     identityKey: args.identityKey,
     ...(args.amount === undefined ? {} : { amount: args.amount }),
+    ...(args.asset === undefined ? {} : { asset: args.asset }),
     derivationPrefix: args.derivationPrefix,
     derivationSuffix: args.derivationSuffix,
     ...(args.os === undefined ? {} : { os: args.os }),
@@ -102,6 +126,16 @@ export function encodeSession(s: Session): string {
     i: s.identityKey,
     ...(s.os === undefined ? {} : { o: s.os === 'ios' ? 'i' : 'a' }),
     ...(s.amount === undefined ? {} : { a: s.amount }),
+    ...(s.asset === undefined ? {} : {
+      t: {
+        i: s.asset.id,
+        ...(s.asset.label === undefined ? {} : { n: s.asset.label }),
+        ...(s.asset.ticker === undefined ? {} : { s: s.asset.ticker }),
+        ...(s.asset.decimals === undefined ? {} : { d: s.asset.decimals }),
+        u: s.asset.overlayUrl,
+        k: s.asset.overlayIdentityKey,
+      },
+    }),
     p: s.derivationPrefix,
     x: s.derivationSuffix,
   })
@@ -117,7 +151,7 @@ export function decodeSession(text: string): Session {
     if (e instanceof CodecError) throw e
     throw new CodecError('malformed session payload')
   }
-  const { v, c, s, k, i, a, p, x, o } = parsed as Record<string, unknown>
+  const { v, c, s, k, i, a, p, x, o, t } = parsed as Record<string, unknown>
   if (v !== SESSION_VERSION) throw new CodecError(`unsupported session version ${String(v)}`)
   if (typeof i !== 'string' || i.length !== 66) throw new CodecError('bad identityKey')
   // An ABSENT `a` is an OPEN request: the payer chooses.
@@ -142,6 +176,23 @@ export function decodeSession(text: string): Session {
   if (psk.length !== 32) throw new CodecError('bad psk length')
   // Tolerant on purpose: 'o' is advisory, from possibly-newer builds.
   const os: SessionOs | undefined = o === 'i' ? 'ios' : o === 'a' ? 'android' : undefined
+  let asset: SessionAsset | undefined
+  if (t !== undefined) {
+    if (typeof t !== 'object' || t === null) throw new CodecError('bad asset block')
+    const { i: ai, n, s: tick, d, u, k: ok } = t as Record<string, unknown>
+    if (typeof ai !== 'string' || ai.length < 66 || !ai.includes('.')) throw new CodecError('bad assetId')
+    if (typeof u !== 'string' || u.length === 0) throw new CodecError('bad overlayUrl')
+    if (typeof ok !== 'string' || ok.length !== 66) throw new CodecError('bad overlayIdentityKey')
+    if (n !== undefined && typeof n !== 'string') throw new CodecError('bad asset label')
+    if (tick !== undefined && typeof tick !== 'string') throw new CodecError('bad asset ticker')
+    if (d !== undefined && (typeof d !== 'number' || !Number.isSafeInteger(d) || d < 0)) throw new CodecError('bad asset decimals')
+    asset = {
+      id: ai, overlayUrl: u, overlayIdentityKey: ok,
+      ...(n === undefined ? {} : { label: n }),
+      ...(tick === undefined ? {} : { ticker: tick }),
+      ...(d === undefined ? {} : { decimals: d }),
+    }
+  }
   return {
     version: v as number,
     caps: (typeof c === 'number' ? c : 0),
@@ -149,6 +200,7 @@ export function decodeSession(text: string): Session {
     psk,
     identityKey: i,
     ...(open ? {} : { amount: a }),
+    ...(asset === undefined ? {} : { asset }),
     derivationPrefix: p,
     derivationSuffix: x,
     ...(os === undefined ? {} : { os }),
