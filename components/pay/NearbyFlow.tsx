@@ -131,7 +131,6 @@ import {
   encodeSession,
   finalizeDelivery,
   frameBytesFromQr,
-  frameToQr,
   holdSentPaymentOffline,
   isAirGapPart,
   isDeclineReason,
@@ -144,6 +143,7 @@ import {
   processPending,
   requestNearbyPermissions,
   savePending,
+  sealedToQr,
   sealFrame,
   selectTransport,
   unsealFrame,
@@ -596,8 +596,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
       }
       if (verified.kind !== 'bsv') {
         // This app's settle path only credits BSV payments today; a token frame
-        // is refused before anything latches, exactly like a session mismatch.
+        // is refused before anything latches, exactly like a session mismatch —
+        // and, like that path, the request stays LIVE: re-arm the scan latch,
+        // surface the mismatch, return to the waiting screen, and restart the
+        // listener the rejected frame consumed, so a genuine (BSV) payer can
+        // still complete.
         void confirm?.(false, 'session_mismatch')
+        scanLatchRef.current = false
+        setSessionMismatch(true)
+        setPhase('receive_wait')
+        setListenerEpoch(n => n + 1)
         return
       }
       const satoshis = verified.satoshis
@@ -1073,15 +1081,17 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // The fountain removes the symbol-size ceiling; the only refusal left
         // is the 64 KB sanity cap, past which QR handover is unreasonable and
         // something upstream is wrong. Measured on the SEALED length — that is
-        // what actually renders.
-        if (sealFrame(built.frame, session.psk).length > MAX_MESSAGE_BYTES) {
+        // what actually renders. Sealed once: the size check and the QR string
+        // below share these bytes rather than sealing the frame twice.
+        const sealed = sealFrame(built.frame, session.psk)
+        if (sealed.length > MAX_MESSAGE_BYTES) {
           abortBuild(built.reference)
           setPaymentQr(null)
           fail('generic', t('local_pay_too_large'))
           return
         }
         builtRef.current = built
-        setPaymentQr(frameToQr(built.frame, session.psk))
+        setPaymentQr(sealedToQr(sealed))
         setPhase('send_qr')
         return
       }
@@ -1104,13 +1114,16 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         // consistent — the payee's copy merges once this transaction is out.
         const message = messageOf(e)
         console.warn('[localpay] radio send failed, falling back to QR:', message)
-        if (sealFrame(built.frame, session.psk).length > MAX_MESSAGE_BYTES) {
+        // Sealed once, same as the direct QR path above: the size check and
+        // the QR string below share these bytes.
+        const sealed = sealFrame(built.frame, session.psk)
+        if (sealed.length > MAX_MESSAGE_BYTES) {
           // No radio and no representable code: the one genuinely dead end.
           fail(looksLikeLocalNetworkDenial(message) ? 'network' : 'generic', t('local_pay_too_large'))
           return
         }
         builtRef.current = built
-        setPaymentQr(frameToQr(built.frame, session.psk))
+        setPaymentQr(sealedToQr(sealed))
         setNotice({ text: t('local_pay_radio_fallback'), tone: 'info' })
         setPhase('send_qr')
         return
@@ -1175,13 +1188,20 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   // broadcast when online, hold + queue when offline. This replaces the old
   // do-nothing Done, which stranded the transaction at nosend with no queue
   // row — nothing in the system would ever broadcast it. The risk of a wrong
-  // claim is bounded: the frame is persisted on the queue row, the code can be
-  // re-shown from /pay, and a payee scanning after the broadcast internalizes
-  // the already-mempooled transaction as a merge.
+  // claim is bounded: the frame is persisted on the queue row and the code can
+  // be re-shown from /pay — but, sealed as it is, only for as long as the
+  // payee's session PSK is still live; once that session ends a re-shown code
+  // can no longer be unsealed. While it is live, a payee scanning after the
+  // broadcast internalizes the already-mempooled transaction as a merge.
   const completeQrDelivery = useCallback(async () => {
     const built = builtRef.current
     const session = scannedSession
-    if (!built || !wallet || !session) {
+    // `paymentQr` is this exact frame already sealed for display — the Done
+    // button that calls this only renders while it is set (see the send_qr
+    // stage below) — so it is reused as the queue row's framePayload rather
+    // than sealing the frame a third time.
+    const framePayload = paymentQr
+    if (!built || !wallet || !session || !framePayload) {
       // No handle (e.g. re-entry after reset, which clears builtRef and
       // scannedSession together): nothing to decide, just close.
       setSettledAmount(payAmount)
@@ -1196,7 +1216,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     const outcome = await finalizeDelivery(wallet as unknown as PayingWalletArg, built, { ok: true }, adminOriginator, {
       hold: async txid => {
         if (!storage) throw new Error('no local storage to queue this payment in')
-        await holdSentPaymentOffline({ storage, txid, framePayload: frameToQr(built.frame, session.psk) })
+        await holdSentPaymentOffline({ storage, txid, framePayload })
       }
     })
     if (outcome.kind === 'sent' && outcome.broadcast === 'pending') {
@@ -1206,7 +1226,7 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
     setSettledAmount(payAmount)
     setRole('payer')
     setPhase('done')
-  }, [wallet, storage, adminOriginator, payAmount, scannedSession, t])
+  }, [wallet, storage, adminOriginator, payAmount, scannedSession, paymentQr, t])
 
   // ── The success moment ──
   //
@@ -1256,8 +1276,8 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
   // triggers React's cross-component update warning, so both handlers defer by a
   // microtask. PaymentQrDisplay reports an unrenderable payload on this same
   // channel, since its encoder now throws before there is anything to render.
-  // These are backstops — every frameToQr() call site already gates on
-  // MAX_MESSAGE_BYTES before calling it.
+  // These are backstops — every setPaymentQr(sealedToQr(...)) call site
+  // already gates the sealed frame on MAX_MESSAGE_BYTES before calling it.
 
   const onSessionQrError = useCallback(() => {
     void Promise.resolve().then(() => setSessionQrBroken(true))

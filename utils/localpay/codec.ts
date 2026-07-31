@@ -310,6 +310,17 @@ export function frameToQr(f: PaymentFrame, psk: Uint8Array): string {
 }
 
 /**
+ * Same envelope as `frameToQr`, but takes bytes already run through
+ * `sealFrame`. Callers that must know the sealed length before they can
+ * render it (the QR-size sanity check) would otherwise call `sealFrame`
+ * once to measure and `frameToQr` again to render — sealing the same frame
+ * twice. Seal once, size-check the bytes, then wrap the same bytes here.
+ */
+export function sealedToQr(sealed: Uint8Array): string {
+  return FRAME_QR_PREFIX + toB64url(sealed)
+}
+
+/**
  * The raw frame bytes behind a bsvpayf1: envelope.
  *
  * The encoder re-encodes exactly these bytes, and the re-show path reads them

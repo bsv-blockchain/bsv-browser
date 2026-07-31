@@ -158,7 +158,8 @@ export async function verifyRecipientLinkage(
   try {
     const parsed = JSON.parse(new TextDecoder().decode(recipientLinkage)) as Record<string, unknown>
     if (
-      typeof parsed.prover !== 'string' || typeof parsed.counterparty !== 'string' ||
+      typeof parsed.prover !== 'string' || parsed.prover.length !== 66 ||
+      typeof parsed.counterparty !== 'string' || parsed.counterparty.length !== 66 ||
       !Array.isArray(parsed.protocolID) || typeof parsed.keyID !== 'string' ||
       !Array.isArray(parsed.encryptedLinkage)
     ) throw new Error('missing linkage fields')
@@ -180,9 +181,19 @@ export async function verifyRecipientLinkage(
   } catch (e) {
     throw new FrameVerifyError('not_mine', `recipientLinkage did not decrypt for this device: ${messageOf(e)}`)
   }
-  const curve = new Curve()
-  const sum = PublicKey.fromString(linkage.counterparty).add(curve.g.mul(new BigNumber(plaintext)))
-  const derivedPkh = Hash.hash160(Utils.toArray(new PublicKey(sum.x, sum.y).toString(), 'hex'))
+  let derivedPkh: number[]
+  try {
+    const curve = new Curve()
+    const sum = PublicKey.fromString(linkage.counterparty).add(curve.g.mul(new BigNumber(plaintext)))
+    derivedPkh = Hash.hash160(Utils.toArray(new PublicKey(sum.x, sum.y).toString(), 'hex'))
+  } catch (e) {
+    // `linkage.counterparty` is 66 hex chars by the shape check above, but
+    // hex-shaped is not curve-valid: hostile JSON can still name a point this
+    // library refuses to parse or add. That is a platform Error, not a
+    // FrameVerifyError, so it must be caught here to keep this module's
+    // every-failure-is-FrameVerifyError contract.
+    throw new FrameVerifyError('not_mine', `recipientLinkage counterparty key is unusable: ${messageOf(e)}`)
+  }
   const matches = derivedPkh.length === expectedPubKeyHash.length &&
     derivedPkh.every((b, i) => b === expectedPubKeyHash[i])
   if (!matches) throw new FrameVerifyError('not_mine', 'recipientLinkage does not control the paid output')

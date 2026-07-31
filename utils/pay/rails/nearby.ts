@@ -16,6 +16,7 @@ export {
   SEAL_VERSION,
   frameBytesFromQr,
   frameToQr,
+  sealedToQr,
   sealFrame,
   unsealFrame,
   type PaymentFrame

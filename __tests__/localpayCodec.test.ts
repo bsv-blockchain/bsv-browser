@@ -3,6 +3,7 @@ import {
   encodeFrame,
   decodeFrame,
   frameToQr,
+  sealedToQr,
   frameBytesFromQr,
   sealFrame,
   unsealFrame,
@@ -105,6 +106,20 @@ describe('localpay frame envelope', () => {
     for (let i = 0; i < transaction.length; i++) transaction[i] = (i * 37 + 11) & 0xff
     const f = { ...sample(), transaction }
     expect(unsealFrame(frameBytesFromQr(frameToQr(f, psk)), psk)).toEqual(f)
+  })
+
+  // `sealedToQr` exists so a caller that must seal once to size-check the
+  // bytes (the QR-size sanity check) can wrap those same bytes instead of
+  // calling `sealFrame` a second time. It must produce the same envelope
+  // shape as `frameToQr` — prefix plus base64url of the sealed bytes — and
+  // round-trip through `frameBytesFromQr`/`unsealFrame` back to the frame.
+  it('sealedToQr wraps already-sealed bytes into the same envelope shape as frameToQr', () => {
+    const f = sample()
+    const sealed = sealFrame(f, psk)
+    const qr = sealedToQr(sealed)
+    expect(qr.startsWith(FRAME_QR_PREFIX)).toBe(true)
+    expect(frameBytesFromQr(qr)).toEqual(sealed)
+    expect(unsealFrame(frameBytesFromQr(qr), psk)).toEqual(f)
   })
 
   it('prefixes the payload so it cannot be confused with a session QR', () => {

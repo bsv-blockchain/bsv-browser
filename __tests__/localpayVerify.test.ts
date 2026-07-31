@@ -259,4 +259,35 @@ describe('verifyRecipientLinkage', () => {
     await expect(verifyRecipientLinkage(decryptingWallet(), new Uint8Array([0xff]), derivedPkh(), 'test'))
       .rejects.toMatchObject({ kind: 'unparseable' })
   })
+
+  // `counterparty` feeds PublicKey.fromString + curve math below the shape
+  // check, and hostile JSON can name anything there. The length gate at the
+  // shape-validation stage is what turns "too short to even try" into the
+  // same 'unparseable' every other malformed-shape field produces.
+  it('refuses a counterparty that is not 66 hex chars as unparseable', async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      prover: senderIdentityKey,
+      counterparty: '02ab',
+      protocolID: FT_PROTOCOL_ID,
+      keyID: 'p x',
+      encryptedLinkage: [1, 2, 3],
+    }))
+    await expect(verifyRecipientLinkage(decryptingWallet(), bytes, derivedPkh(), 'test'))
+      .rejects.toMatchObject({ name: 'FrameVerifyError', kind: 'unparseable' })
+  })
+
+  // 66 hex-shaped chars still is not hex: PublicKey.fromString throws a raw
+  // platform Error("Invalid hex string") on this, which must not escape the
+  // module's every-failure-is-FrameVerifyError contract.
+  it('refuses a 66-char counterparty of garbage hex as not_mine, not a raw throw', async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      prover: senderIdentityKey,
+      counterparty: 'zz'.repeat(33),
+      protocolID: FT_PROTOCOL_ID,
+      keyID: 'p x',
+      encryptedLinkage: [1, 2, 3],
+    }))
+    await expect(verifyRecipientLinkage(decryptingWallet(), bytes, derivedPkh(), 'test'))
+      .rejects.toMatchObject({ name: 'FrameVerifyError', kind: 'not_mine' })
+  })
 })

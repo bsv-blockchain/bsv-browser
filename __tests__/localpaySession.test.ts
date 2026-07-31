@@ -310,6 +310,16 @@ describe('session asset block', () => {
     expect(() => decodeSession(forged)).toThrow(CodecError)
   })
 
+  // The old check (`length < 66 && includes('.')`) accepted this: 66 chars,
+  // has a dot, but the 64-char half is not hex — not a real "<txid>.<vout>".
+  it('refuses a 66-char assetId that is not a valid txid.vout shape', () => {
+    const s = mintSession({ ...baseMintArgs(), asset: asset() })
+    const raw = JSON.parse(new TextDecoder().decode(b64urlToBytes(encodeSession(s).slice('bsvpay1:'.length))))
+    raw.t.i = 'z'.repeat(64) + '.0'
+    const forged = 'bsvpay1:' + bytesToB64url(new TextEncoder().encode(JSON.stringify(raw)))
+    expect(() => decodeSession(forged)).toThrow(CodecError)
+  })
+
   it('CAP_BLE is allocated and unknown-to-us bits survive decode', () => {
     expect(CAP_BLE).toBe(0x04)
     const s = mintSession(baseMintArgs())

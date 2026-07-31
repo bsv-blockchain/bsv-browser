@@ -180,7 +180,7 @@ export function decodeSession(text: string): Session {
   if (t !== undefined) {
     if (typeof t !== 'object' || t === null) throw new CodecError('bad asset block')
     const { i: ai, n, s: tick, d, u, k: ok } = t as Record<string, unknown>
-    if (typeof ai !== 'string' || ai.length < 66 || !ai.includes('.')) throw new CodecError('bad assetId')
+    if (typeof ai !== 'string' || !/^[0-9a-f]{64}\.\d+$/.test(ai)) throw new CodecError('bad assetId')
     if (typeof u !== 'string' || u.length === 0) throw new CodecError('bad overlayUrl')
     if (typeof ok !== 'string' || ok.length !== 66) throw new CodecError('bad overlayIdentityKey')
     if (n !== undefined && typeof n !== 'string') throw new CodecError('bad asset label')
