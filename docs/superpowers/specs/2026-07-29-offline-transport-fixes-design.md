@@ -294,6 +294,34 @@ send, `confirmFrame(accepted, reason)` — is identical across platforms, so
 `DeclineReason`, `types.ts:22-41`) runs verbatim over Nearby. The dependency
 is `com.google.android.gms:play-services-nearby`.
 
+**"The module builds all 4 ABIs" was not proof the module worked** —
+corrected 2026-07-31 after the first physical-device run floored every
+Android↔Android payment straight to QR with radios on. Compiling and
+autolinking a Nitro Android module is not the same as loading and
+registering it: nitro's Android template needs a hand-written
+`cpp-adapter.cpp` exporting `JNI_OnLoad` (the generated
+`LocalPayTransportOnLoad.cpp` only defines `registerAllNatives()`, nothing
+calls it) and a `companion object { init { ... } }` in the `ReactPackage`
+that actually loads the library — both absent from Task 14's build. Because
+`getLocalPayTransport()` never throws by contract, the failure was silent
+and indistinguishable from a genuinely GMS-less device at every layer above
+it. Fixed in commit `84cd96e`; see the SDD ledger's 2026-07-31 entry for the
+full root-cause chain. Device confirmation (BT permission prompt, `CAP_NEARBY`
+in the pairing QR, an actual end-to-end Nearby payment) is still outstanding
+— fold into Task 17 as its own row before that task can close.
+
+**A second, independent bug compounded the first** — found running the
+actual `eas build --profile production` archive for the first time
+(2026-07-31, commit `0c75467`): `.easignore` — this repo's `.gitignore`
+substitute for EAS archiving, required because eas-cli ignores every
+`.gitignore` outright once `.easignore` exists — never gained the
+`!/packages/*/android` negation that `.gitignore` picked up when this Kotlin
+module was scaffolded. Its bare `android` rule silently stripped
+`packages/react-native-localpay-transport/android/` out of every EAS build
+archive since Task 14, so the module was never merely unregistered in a
+shipped binary, it was never *present* in one. Both fixes are required
+together; neither alone produces a working Nearby path in an EAS-built app.
+
 ### Protocol mapping
 
 - **Roles:** payee **advertises**, payer **discovers** — mirroring the AWDL
