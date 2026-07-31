@@ -23,10 +23,9 @@ function walletStub() {
 }
 
 describe('buildPaymentFrame', () => {
-  it('echoes the session derivation nonces and amount', async () => {
+  it('echoes the session derivation nonces', async () => {
     const s = session()
     const { frame } = await buildPaymentFrame(walletStub() as never, s, 'admin.com', 777)
-    expect(frame.amount).toBe(777)
     expect(frame.derivationPrefix).toBe(s.derivationPrefix)
     expect(frame.derivationSuffix).toBe(s.derivationSuffix)
   })
@@ -150,8 +149,9 @@ describe('buildPaymentFrame', () => {
   //
   // On an OPEN request the session carries no figure at all, so the one number
   // that becomes a real output has to come from the payer. These pin that it is
-  // the argument — not `session.amount` — that reaches both `createAction` and
-  // the frame, and that the two can never disagree.
+  // the argument — not `session.amount` — that sizes the output. The frame
+  // carries no figure of its own to disagree with it: the payee reads the
+  // output's satoshis (see utils/localpay/verify.ts).
 
   const openSession = () => mintSession({
     identityKey: '02'.padEnd(66, 'e'),
@@ -161,17 +161,17 @@ describe('buildPaymentFrame', () => {
     supportsAwdl: true,
   })
 
-  it('uses the payer’s amount for the output and the frame on an open session', async () => {
+  it('uses the payer’s amount for the output on an open session', async () => {
     const w = walletStub()
-    const built = await buildPaymentFrame(w as never, openSession(), 'admin.com', 4200)
+    await buildPaymentFrame(w as never, openSession(), 'admin.com', 4200)
     expect(w.createAction.mock.calls[0][0].outputs[0].satoshis).toBe(4200)
-    expect(built.frame.amount).toBe(4200)
   })
 
-  it('puts the same figure in the output and the frame', async () => {
+  it('carries no amount of its own on the frame', async () => {
     const w = walletStub()
     const built = await buildPaymentFrame(w as never, session(), 'admin.com', 777)
-    expect(w.createAction.mock.calls[0][0].outputs[0].satoshis).toBe(built.frame.amount)
+    expect(w.createAction.mock.calls[0][0].outputs[0].satoshis).toBe(777)
+    expect('amount' in (built.frame as unknown as Record<string, unknown>)).toBe(false)
   })
 
   // The payee's settle path refuses a frame whose amount contradicts a figure

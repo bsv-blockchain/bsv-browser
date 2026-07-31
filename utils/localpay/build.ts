@@ -168,7 +168,6 @@ export async function buildPaymentFrame(
     frame: {
       version: FRAME_VERSION,
       senderIdentityKey,
-      amount,
       outputIndex: 0,
       derivationPrefix: session.derivationPrefix,
       derivationSuffix: session.derivationSuffix,

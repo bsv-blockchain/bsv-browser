@@ -14,7 +14,6 @@ import {
 const sample = (): PaymentFrame => ({
   version: FRAME_VERSION,
   senderIdentityKey: '02'.padEnd(66, 'a'),
-  amount: 1234,
   outputIndex: 0,
   derivationPrefix: 'cHJlZml4',
   derivationSuffix: 'c3VmZml4',
@@ -36,9 +35,20 @@ describe('localpay codec', () => {
     expect(Array.from(decoded.transaction).every(b => b === 7)).toBe(true)
   })
 
-  it('round-trips amounts above 32 bits', () => {
-    const f = { ...sample(), amount: 2 ** 40 }
-    expect(decodeFrame(encodeFrame(f)).amount).toBe(2 ** 40)
+  it('carries no amount field: the transaction is the only source of the figure', () => {
+    const decoded = decodeFrame(encodeFrame(sample())) as unknown as Record<string, unknown>
+    expect('amount' in decoded).toBe(false)
+  })
+
+  it('rejects a v1 frame, whose layout put an amount after the identity key', () => {
+    const v1 = encodeFrame(sample())
+    v1[0] = 1
+    expect(() => decodeFrame(v1)).toThrow('unsupported frame version 1')
+  })
+
+  it('is version 2', () => {
+    expect(FRAME_VERSION).toBe(2)
+    expect(encodeFrame(sample())[0]).toBe(2)
   })
 
   it('rejects truncated input', () => {

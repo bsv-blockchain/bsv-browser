@@ -17,7 +17,6 @@ function fakeStorage() {
 const frame = (): PaymentFrame => ({
   version: FRAME_VERSION,
   senderIdentityKey: '02'.padEnd(66, 'c'),
-  amount: 42,
   outputIndex: 0,
   derivationPrefix: 'cHJlZml4',
   derivationSuffix: 'c3VmZml4',
@@ -53,7 +52,7 @@ describe('localpay pending queue', () => {
     const all = await getPending(s)
     expect(all).toHaveLength(1)
     expect(all[0].status).toBe('pending')
-    expect(all[0].frame.amount).toBe(42)
+    expect(all[0].frame.outputIndex).toBe(0)
   })
 
   it('treats corrupt storage as empty rather than throwing', async () => {

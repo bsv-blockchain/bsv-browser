@@ -24,9 +24,8 @@ function bigFrame(transactionBytes: number): PaymentFrame {
   const transaction = new Uint8Array(transactionBytes)
   for (let i = 0; i < transactionBytes; i++) transaction[i] = (i * 31 + 7) & 0xff
   return {
-    version: 1,
+    version: 2,
     senderIdentityKey: '02' + 'ab'.repeat(32),
-    amount: 123456,
     outputIndex: 1,
     derivationPrefix: 'cHJlZml4',
     derivationSuffix: 'c3VmZml4',
@@ -54,7 +53,6 @@ describe('payment frames over @bsv/air-gap', () => {
 
     const decoded = decodeFrame(message!)
     expect(decoded.senderIdentityKey).toBe(frame.senderIdentityKey)
-    expect(decoded.amount).toBe(frame.amount)
     expect(decoded.outputIndex).toBe(frame.outputIndex)
     expect(decoded.derivationPrefix).toBe(frame.derivationPrefix)
     expect(decoded.derivationSuffix).toBe(frame.derivationSuffix)

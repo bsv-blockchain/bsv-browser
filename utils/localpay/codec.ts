@@ -1,4 +1,4 @@
-export const FRAME_VERSION = 1
+export const FRAME_VERSION = 2
 
 export class CodecError extends Error {
   constructor(message: string) {
@@ -11,15 +11,23 @@ export interface PaymentFrame {
   version: number
   /** 66-char hex, compressed pubkey */
   senderIdentityKey: string
-  amount: number
+  /**
+   * Which output of `transaction` pays the payee.
+   *
+   * There is deliberately no `amount` beside it. `internalizeAction` credits
+   * the output, so a satoshi count on the frame could only ever agree with the
+   * transaction or lie about it — and `verifyFramePayment` has to parse the
+   * transaction anyway, to prove the output is one the payee can spend. That
+   * proof is what makes the figure it reads back worth showing as a receipt.
+   */
   outputIndex: number
   derivationPrefix: string
   derivationSuffix: string
   /**
    * AtomicBEEF, on both transports. The design originally specified a bare
    * rawtx on the QR path to shrink the symbol, but ancestry is what lets the
-   * payee internalize offline — and MAX_FRAME_QR_CHARS already rejects frames
-   * too large to render, so one encoding serves both.
+   * payee internalize offline, and the fountain removed the symbol ceiling —
+   * so one encoding serves both.
    */
   transaction: Uint8Array
 }
@@ -97,7 +105,6 @@ export function encodeFrame(f: PaymentFrame): Uint8Array {
   }
   const out: number[] = [f.version & 0xff]
   for (const byte of hexToBytes(f.senderIdentityKey.toLowerCase())) out.push(byte)
-  putVarint(out, f.amount)
   putVarint(out, f.outputIndex)
   putStr(out, f.derivationPrefix)
   putStr(out, f.derivationSuffix)
@@ -112,13 +119,12 @@ export function decodeFrame(b: Uint8Array): PaymentFrame {
   const pos = { i: 1 }
   const senderIdentityKey = bytesToHex(b.slice(pos.i, pos.i + 33))
   pos.i += 33
-  const amount = getVarint(b, pos)
   const outputIndex = getVarint(b, pos)
   const derivationPrefix = getStr(b, pos)
   const derivationSuffix = getStr(b, pos)
   const transaction = getBytes(b, pos)
   if (pos.i !== b.length) throw new CodecError('trailing bytes after frame')
-  return { version, senderIdentityKey, amount, outputIndex, derivationPrefix, derivationSuffix, transaction }
+  return { version, senderIdentityKey, outputIndex, derivationPrefix, derivationSuffix, transaction }
 }
 
 // ── QR handoff ──
