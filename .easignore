@@ -59,11 +59,26 @@ android
 # would have been the next diagnostic step; check the EAS build log's own
 # file listing (not just "gradle succeeded") whenever a native module that
 # lives under packages/*/android stops showing up in a build's task list.
-!/packages/*/android
-!/packages/*/android/**
+#
+# `**` (any depth), not `*` (one level): a single-level negation still lets
+# the bare `android` rule above strip nitrogen's OWN generated glue at
+# packages/react-native-localpay-transport/nitrogen/generated/android/ (a
+# sibling of the package's ios/android/shared dirs, not a child of it) —
+# confirmed the hard way: `git ls-files --exclude-from .easignore --ignored
+# --cached` still listed all ten files under nitrogen/generated/android/
+# after the first (single-level) version of this fix, and the next EAS
+# build failed at Gradle configuration ("Could not read script
+# .../LocalPayTransport+autolinking.gradle as it does not exist") rather
+# than silently omitting the module the way the missing top-level android/
+# had. Re-run that exact `git ls-files` command against this file after any
+# future edit here — it is the fast, no-build way to prove what an EAS
+# archive will actually contain.
+!/packages/**/android
+!/packages/**/android/**
 
-# ...but still ignore Gradle/CMake build output nested inside those tracked
-# package android/ dirs.
+# ...but still ignore Gradle/CMake build output nested inside tracked
+# package android/ dirs (single-level: nitrogen's generated/android/ has no
+# build/.cxx of its own, only the package's own top-level android/ does).
 packages/*/android/build
 packages/*/android/.cxx
 

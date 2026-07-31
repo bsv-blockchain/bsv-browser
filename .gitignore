@@ -35,11 +35,21 @@ android
 # out of the bare `android` rule above, which exists to ignore the top-level
 # Expo-generated /android app dir and any incidental `android` directories
 # elsewhere (e.g. credentials/android, which must stay ignored).
-!/packages/*/android
-!/packages/*/android/**
+#
+# `**` (any depth): a nitro module's OWN generated glue lives at
+# packages/<pkg>/nitrogen/generated/android/ — a sibling of that package's
+# android/ dir, not a child of it — so a single-level `*/android` negation
+# does not reach it and the bare `android` rule above still matches it.
+# Those files are tracked today only because they were force-added past
+# this gap; without `**` they could not be re-added normally if ever
+# removed. (.easignore duplicates this same rule separately and needs the
+# same fix — it does not inherit from .gitignore.)
+!/packages/**/android
+!/packages/**/android/**
 
-# ...but still ignore Gradle/CMake build output nested inside those tracked
-# package android/ dirs.
+# ...but still ignore Gradle/CMake build output nested inside tracked
+# package android/ dirs (single-level: nitrogen's generated/android/ has no
+# build/.cxx of its own, only the package's own top-level android/ does).
 packages/*/android/build
 packages/*/android/.cxx
 
