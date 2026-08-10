@@ -180,14 +180,14 @@ describe('tld refresh guards', () => {
   })
 })
 
-describe('ord envelope multi-push bodies', () => {
-  it('concatenates consecutive body pushes', () => {
+describe('ord envelope body (1Sat spec: single push, not concatenated)', () => {
+  it('takes only the first body push', () => {
     const enc = new TextEncoder()
     const push = (d: Uint8Array) => { const o = new Uint8Array(1 + d.length); o[0] = d.length; o.set(d, 1); return o }
     const parts = [
       new Uint8Array([0x00, 0x63]), push(enc.encode('ord')),
       new Uint8Array([0x51]), push(enc.encode('text/plain')),
-      new Uint8Array([0x00]), push(enc.encode('hello ')), push(enc.encode('world')),
+      new Uint8Array([0x00]), push(enc.encode('hello')), push(enc.encode('IGNORED')),
       new Uint8Array([0x68])
     ]
     const total = parts.reduce((n, p) => n + p.length, 0)
@@ -195,7 +195,7 @@ describe('ord envelope multi-push bodies', () => {
     let o = 0
     for (const p of parts) { script.set(p, o); o += p.length }
     const parsed = parseOrdEnvelope(script)
-    expect(new TextDecoder().decode(parsed!.body)).toBe('hello world')
+    expect(new TextDecoder().decode(parsed!.body)).toBe('hello')
   })
 })
 

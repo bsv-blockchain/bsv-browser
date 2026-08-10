@@ -116,24 +116,11 @@ export function parseOrdEnvelope (script: Uint8Array): InscriptionContent | null
         k += 2
         continue
       }
-      if (tokens[k].op === 0 && tokens[k + 1] && tokens[k + 1].data) { // OP_0 <body pushes>
-        // The body may span multiple consecutive data pushes — concatenate
-        // every push until the next non-data token (typically OP_ENDIF).
-        const parts: Uint8Array[] = []
-        let j = k + 1
-        while (j < tokens.length && tokens[j].data) {
-          parts.push(tokens[j].data as Uint8Array)
-          j++
-        }
-        const total = parts.reduce((n, p) => n + p.length, 0)
-        const merged = new Uint8Array(total)
-        let off = 0
-        for (const p of parts) {
-          merged.set(p, off)
-          off += p.length
-        }
-        body = merged
-        k = j
+      if (tokens[k].op === 0 && tokens[k + 1] && tokens[k + 1].data) { // OP_0 <body>
+        // A single data push — per the 1Sat Ordinals spec, body values are NOT
+        // concatenated across multiple pushes. The first push after OP_0 is the body.
+        body = tokens[k + 1].data
+        k += 2
         continue
       }
       k++
