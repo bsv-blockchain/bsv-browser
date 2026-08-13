@@ -135,6 +135,15 @@ test('enroll refuses a key whose PIN is already blocked (fix #5)', async () => {
   ).rejects.toMatchObject({ code: 'pin-locked' })
 })
 
+test('enroll refuses to overwrite an occupied PIV slot (slot-occupied)', async () => {
+  mock.occupySlot() // e.g. an existing age-plugin-yubikey identity in slot 82
+  await expect(
+    enrollVault({ nickname: 'k', onPhase: () => {}, getPin: async () => '123456' })
+  ).rejects.toMatchObject({ code: 'slot-occupied' })
+  // nothing persisted, and the existing slot key is untouched
+  expect(await vaultStore.isEnrolled()).toBe(false)
+})
+
 test('recoverVaultKey rejects an invalid phrase', async () => {
   await expect(recoverVaultKey('not a valid mnemonic phrase at all')).rejects.toBeDefined()
 })

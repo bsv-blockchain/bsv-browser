@@ -17,7 +17,8 @@ import com.yubico.yubikit.core.keys.EllipticCurveValues
 import com.yubico.yubikit.core.keys.PublicKeyValues
 import com.yubico.yubikit.core.smartcard.ApduException
 import com.yubico.yubikit.core.smartcard.SmartCardConnection
-import com.yubico.yubikit.piv.InvalidPinException
+// 3.2.0: InvalidPinException lives in core.application, not piv.
+import com.yubico.yubikit.core.application.InvalidPinException
 import com.yubico.yubikit.piv.KeyType
 import com.yubico.yubikit.piv.PinPolicy
 import com.yubico.yubikit.piv.PivSession

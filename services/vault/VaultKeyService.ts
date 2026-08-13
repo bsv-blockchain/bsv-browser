@@ -66,6 +66,13 @@ export async function enrollVault(args: {
   // A key whose PIN is already blocked cannot be enrolled — say so before we
   // burn anything (fix #5: never probe, surface pin-locked up front).
   if (info.pinRetries === 0) throw new VaultError('pin-locked', 'PIN is blocked')
+  // Never silently overwrite an occupied slot: generating into a used PIV slot
+  // destroys the existing private key irrecoverably, and retired slots 82-95
+  // are exactly what age-plugin-yubikey and friends use. Refuse and let the
+  // user decide, rather than wiping their key.
+  if (await driver.readVaultPublicKey(VAULT_SLOT)) {
+    throw new VaultError('slot-occupied', `PIV slot ${VAULT_SLOT.toString(16)} already holds a key`)
+  }
 
   // Factory-default detection is exactly "the PIN the user entered is the
   // default" — no side probe against '123456', which would spend one of three
@@ -133,6 +140,11 @@ export async function resealToNewKey(
   const driver = getVaultDriver()
   if (!driver) throw new VaultError('driver-unavailable')
   const info = await driver.getKeyInfo()
+  if (info.pinRetries === 0) throw new VaultError('pin-locked', 'PIN is blocked')
+  // Same non-destructive rule as enrollVault: never overwrite an occupied slot.
+  if (await driver.readVaultPublicKey(VAULT_SLOT)) {
+    throw new VaultError('slot-occupied', `PIV slot ${VAULT_SLOT.toString(16)} already holds a key`)
+  }
   const pin = await getPin()
   const verified = await driver.verifyPin(pin)
   if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)

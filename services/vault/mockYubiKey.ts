@@ -56,6 +56,14 @@ export class MockYubiKey implements VaultDriver {
     this.pin = pin
   }
 
+  /** Simulate a slot that already holds a key (e.g. an age-plugin-yubikey
+   * identity in retired slot 82), so readVaultPublicKey reports it occupied
+   * before any generate. */
+  occupySlot(): void {
+    this.slotPriv = p256.utils.randomSecretKey()
+    this.slotPub = Utils.toHex(Array.from(p256.getPublicKey(this.slotPriv, false)))
+  }
+
   // ---- VaultDriver -----------------------------------------------------
   isSupported(): boolean {
     return true
