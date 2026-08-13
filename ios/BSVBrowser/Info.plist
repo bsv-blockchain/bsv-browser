@@ -129,5 +129,16 @@
 	<string>Automatic</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>NFCReaderUsageDescription</key>
+	<string>BSV Browser uses NFC to unlock your vault with your YubiKey. Hold the key to the top of your phone when asked.</string>
+	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+	<array>
+		<string>A000000308</string>
+		<string>A000000308000010000100</string>
+		<string>A0000006472F0001</string>
+		<string>A0000005272101</string>
+		<string>A000000527471117</string>
+		<string>A0000005272001</string>
+	</array>
 </dict>
 </plist>
