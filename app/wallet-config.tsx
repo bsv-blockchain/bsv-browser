@@ -491,6 +491,12 @@ export default function WalletConfigScreen() {
         {/* ── Data & Security ── */}
         <GroupedSection header={t('data_and_security')}>
           <ListRow
+            label={t('vault_row_title')}
+            icon="lock-closed"
+            iconColor="#30B0C7"
+            onPress={() => router.push('/vault' as any)}
+          />
+          <ListRow
             label={t('trust_network')}
             icon="shield-checkmark-outline"
             iconColor="#BF5AF2"

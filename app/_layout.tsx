@@ -23,6 +23,8 @@ import { ThemeProvider } from '@/context/theme/ThemeContext'
 import LocalStorageProvider from '@/context/LocalStorageProvider'
 import PermissionSheet from '@/components/ui/PermissionSheet'
 import { AlertHost } from '@/components/ui/AlertCard'
+import { VaultProvider } from '@/context/VaultContext'
+import { VaultCeremonySheet } from '@/components/vault/VaultCeremonySheet'
 import { ToastHost, showToast } from '@/components/ui/Toast'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
 import DefaultBrowserPrompt from '@/components/onboarding/DefaultBrowserPrompt'
@@ -124,6 +126,7 @@ export default function RootLayout() {
                   <BrowserModeProvider>
                     <ThemeProvider>
                       <WalletConnectionProvider>
+                       <VaultProvider>
                         <View style={{ flex: 1, backgroundColor }}>
                           {/* <DebuggerDisplay /> */}
                           <FirstTouchRecorder />
@@ -132,6 +135,7 @@ export default function RootLayout() {
                           {/* <TranslationTester /> */}
                           <DefaultBrowserPrompt />
                           <PermissionSheet />
+                          <VaultCeremonySheet />
                           <LocalPayNotificationBridge />
                           <AlertHost />
                           <Stack
@@ -146,6 +150,7 @@ export default function RootLayout() {
                             <Stack.Screen name="auth/mnemonic" />
                             <Stack.Screen name="transactions" />
                             <Stack.Screen name="wallet-config" />
+                            <Stack.Screen name="vault" />
                             <Stack.Screen name="pay" />
                             {/* The three below become redirect stubs into /pay (Task 14).
                                 They stay registered so an old link resolves instead of
@@ -159,6 +164,7 @@ export default function RootLayout() {
                           </Stack>
                           <ToastHost />
                         </View>
+                       </VaultProvider>
                       </WalletConnectionProvider>
                     </ThemeProvider>
                   </BrowserModeProvider>
