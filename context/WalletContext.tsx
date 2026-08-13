@@ -12,6 +12,10 @@ import {
   Monitor
 } from '@bsv/wallet-toolbox-mobile'
 import { KeyDeriver, PrivateKey, MerklePath, Transaction, Utils } from '@bsv/sdk'
+import { makePrivilegedKeyGetter, VAULT_RETENTION_MS } from '@/services/vault/privileged'
+import { requestCeremony, ceremony as vaultCeremony } from '@/services/vault/ceremonyHost'
+import { getVaultDriver } from '@/services/vault/driver'
+import { vaultStore } from '@/services/vault/vaultStore'
 import {
   DEFAULT_SETTINGS as LIB_DEFAULT_SETTINGS,
   WalletSettings,
@@ -351,6 +355,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // tipHeight after the async fs write, so two overlapping runs can both pass
   // the check and double-append the same range, corrupting the window.
   const headerSyncInFlightRef = useRef(false)
+  // The vault's PrivilegedKeyManager for the current wallet build — held so an
+  // unplugged YubiKey can relock it (destroyKey) the instant the key leaves.
+  const vaultPkmRef = useRef<PrivilegedKeyManager | null>(null)
   const adminOriginator = ADMIN_ORIGINATOR
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
   const walletBuildingRef = useRef<boolean>(false)
@@ -1216,9 +1223,20 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const { rootKey, primaryKey } = recoverMnemonicWallet(mnemonic)
         if (__DEV__) console.warn(`[perf] recoverMnemonicWallet (PBKDF2+BIP32): ${(performance.now() - __tRecoverStart).toFixed(0)}ms`)
 
-        // For noWAB, we don't need a PrivilegedKeyManager from WAB
-        // We can create a simple one that always returns the primary key
-        const privilegedKeyManager = new PrivilegedKeyManager(async () => rootKey)
+        // Privileged operations route through the vault when it is enrolled: the
+        // keyGetter runs the YubiKey ceremony and returns the sealed vault key.
+        // When the vault is NOT enrolled this is byte-identical to the previous
+        // behaviour (return the BIP32 root key), so enabling the vault is the
+        // only thing that changes privileged behaviour. See services/vault.
+        const privilegedKeyManager = new PrivilegedKeyManager(
+          makePrivilegedKeyGetter({
+            getLegacyRootKey: () => rootKey,
+            isEnrolled: () => vaultStore.isEnrolled(),
+            requestCeremony
+          }),
+          VAULT_RETENTION_MS
+        )
+        vaultPkmRef.current = privilegedKeyManager
 
         // Create SimpleWalletManager and provide keys for authentication
         const snap = await getSnap()
@@ -1263,8 +1281,17 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const recoveredKey = PrivateKey.fromWif(wif)
         const primaryKey = recoveredKey.toArray()
 
-        // Use the recovered primary key as both the signing key and the privileged key
-        const privilegedKeyManager = new PrivilegedKeyManager(async () => recoveredKey)
+        // Same vault-aware privileged getter as the mnemonic path; not enrolled
+        // → returns the recovered key exactly as before.
+        const privilegedKeyManager = new PrivilegedKeyManager(
+          makePrivilegedKeyGetter({
+            getLegacyRootKey: () => recoveredKey,
+            isEnrolled: () => vaultStore.isEnrolled(),
+            requestCeremony
+          }),
+          VAULT_RETENTION_MS
+        )
+        vaultPkmRef.current = privilegedKeyManager
 
         const snap = await getSnap()
         const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
@@ -1597,6 +1624,27 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })
 
     return () => subscription.remove()
+  }, [])
+
+  // Relock the vault the instant the YubiKey is unplugged. A detach event both
+  // destroys the privileged key held in the PKM's retention window and tells
+  // the ceremony controller (which fires its onRelock → close sound/haptic).
+  useEffect(() => {
+    const driver = getVaultDriver()
+    if (!driver) return
+    driver.start()
+    const off = driver.onKeyEvent(e => {
+      if (e.type === 'detached') {
+        try { vaultPkmRef.current?.destroyKey() } catch {}
+        vaultCeremony.notifyKeyDetached()
+      } else {
+        vaultCeremony.notifyKeyAttached()
+      }
+    })
+    return () => {
+      off()
+      try { driver.stop() } catch {}
+    }
   }, [])
 
   // Cleanup monitor on unmount
