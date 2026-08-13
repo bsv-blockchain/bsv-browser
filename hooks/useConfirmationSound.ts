@@ -1,33 +1,44 @@
 /**
- * The confirmation tone — the audible half of the "money landed" moment.
+ * The app's tiny sound palette — the audible half of key money/security moments.
  *
- * Companion to `hooks/useHaptics.ts`, and deliberately the same shape: a plain
+ * Companion to `hooks/useHaptics.ts`, deliberately the same shape: a plain
  * module object you can import anywhere, plus a hook alias for symmetry inside
  * components. Fire-and-forget, and it never throws.
  *
- * Three rules, all of them non-negotiable, because this plays in public:
+ * Three rules, all non-negotiable, because these play in public:
  *
  *  1. RESPECT THE SILENT SWITCH. `playsInSilentMode: false` — a phone set to
  *     silent stays silent. An app that overrides the ringer switch for its own
  *     receipt noise is an app people mute permanently.
- *  2. NEVER MIX BADLY. `interruptionMode: 'mixWithOthers'` — we are a 0.6s
- *     blip, not a media session. Ducking or pausing someone's music to announce
- *     a payment is rude and, on iOS, sticky.
- *  3. NEVER BLOCK, NEVER THROW. A payment is not a sound. Every call site is
- *     `void`; every failure — no native module, an audio session another app
- *     owns, a decode error — is swallowed to a single dev warning. A silent
- *     success screen is a complete success screen.
+ *  2. NEVER MIX BADLY. `interruptionMode: 'mixWithOthers'` — these are sub-1s
+ *     blips, not a media session. Ducking or pausing someone's music to
+ *     announce a payment is rude and, on iOS, sticky.
+ *  3. NEVER BLOCK, NEVER THROW. Every call site is `void`; every failure — no
+ *     native module, an audio session another app owns, a decode error — is
+ *     swallowed to a single dev warning. A silent success is still a success.
  *
- * Loaded lazily. `expo-audio` is required on first play rather than at import
- * so that a build where the native module is missing degrades to silence at the
- * one moment it is used, instead of taking the module graph down at startup.
+ * expo-audio is required lazily on first play, so a build missing the native
+ * module degrades to silence at the one moment it is used rather than taking
+ * the module graph down at startup.
+ *
+ * Pairing rules (each tone pairs with exactly one haptic; never fire both a
+ * tone's partner haptic AND the tone's own — Toast/Celebration already own
+ * haptics.success for their moments):
+ *   confirmation ↔ haptics.success   (money landed)
+ *   vaultOpen    ↔ haptics.success   (vault unlocked after the ceremony)
+ *   vaultClose   ↔ haptics.confirm   (vault relocked: timeout / unplug / manual)
  */
 import { useMemo } from 'react'
 
-// The bundled tone: a two-note chime, ~0.6s, peaking well below full scale.
-// A static require, not an import: Metro resolves this to an asset id at build
-// time, which is exactly the `number` shape expo-audio accepts as a source.
-const TONE = require('../assets/sounds/payment-confirmed.wav')
+// Bundled tones. Static requires, not imports: Metro resolves these to asset
+// ids at build time, which is exactly the `number` shape expo-audio accepts.
+const TONES = {
+  confirmation: require('../assets/sounds/payment-confirmed.wav'),
+  vaultOpen: require('../assets/sounds/vault-open.wav'),
+  vaultClose: require('../assets/sounds/vault-close.wav'),
+} as const
+
+type ToneName = keyof typeof TONES
 
 /** Minimal structural view of the bits of expo-audio this module touches. */
 interface Player {
@@ -41,11 +52,11 @@ interface AudioModule {
 }
 
 let audio: AudioModule | null | undefined
-let player: Player | null = null
 let modeSet = false
+const players: Partial<Record<ToneName, Player>> = {}
 
 function warn(e: unknown): void {
-  if (__DEV__) console.warn('[sound] confirmation tone unavailable:', e instanceof Error ? e.message : String(e))
+  if (__DEV__) console.warn('[sound] tone unavailable:', e instanceof Error ? e.message : String(e))
 }
 
 function load(): AudioModule | null {
@@ -61,20 +72,16 @@ function load(): AudioModule | null {
 }
 
 /**
- * Plays the confirmation tone, if the device is willing.
- *
- * Returns immediately. The audio-session configuration is awaited *inside* the
- * fire-and-forget promise rather than by the caller, so nothing on a payment
- * path ever waits on CoreAudio.
+ * Plays a tone, if the device is willing. Returns immediately; the audio-session
+ * configuration is awaited *inside* the fire-and-forget promise so nothing on a
+ * user-facing path ever waits on CoreAudio. One reused player per tone.
  */
-function playConfirmation(): void {
+function playTone(name: ToneName): void {
   const mod = load()
   if (!mod) return
   void (async () => {
     try {
       if (!modeSet) {
-        // Set once per process. Doing it before the first play (rather than at
-        // startup) keeps the app from claiming an audio session it may never use.
         await mod.setAudioModeAsync({
           playsInSilentMode: false,
           interruptionMode: 'mixWithOthers',
@@ -83,9 +90,11 @@ function playConfirmation(): void {
         })
         modeSet = true
       }
-      // One player, reused. Constructing a fresh one per payment leaks native
-      // objects on a screen a market stall might run all day.
-      if (!player) player = mod.createAudioPlayer(TONE)
+      let player = players[name]
+      if (!player) {
+        player = mod.createAudioPlayer(TONES[name])
+        players[name] = player
+      }
       await player.seekTo(0)
       player.play()
     } catch (e) {
@@ -94,25 +103,29 @@ function playConfirmation(): void {
   })()
 }
 
-/**
- * Releases the shared player. Optional — call it when the last screen that can
- * play a tone unmounts, to hand the native object back early.
- */
-function releaseConfirmation(): void {
-  const p = player
-  player = null
-  modeSet = false
-  try {
-    p?.remove()
-  } catch (e) {
-    warn(e)
+/** Releases every shared player. Optional — call when the last screen that can
+ * play a tone unmounts, to hand native objects back early. */
+function releaseAll(): void {
+  for (const key of Object.keys(players) as ToneName[]) {
+    const p = players[key]
+    delete players[key]
+    try {
+      p?.remove()
+    } catch (e) {
+      warn(e)
+    }
   }
+  modeSet = false
 }
 
 export const sounds = {
-  /** The money landed. Pairs with `haptics.success()`; never fires one for the other. */
-  confirmation: playConfirmation,
-  release: releaseConfirmation,
+  /** The money landed. Pairs with `haptics.success()`. */
+  confirmation: () => playTone('confirmation'),
+  /** The vault unlocked after a successful ceremony. Pairs with `haptics.success()`. */
+  vaultOpen: () => playTone('vaultOpen'),
+  /** The vault relocked (timeout, unplug, or manual). Pairs with `haptics.confirm()`. */
+  vaultClose: () => playTone('vaultClose'),
+  release: releaseAll,
 } as const
 
 export const useConfirmationSound = () => useMemo(() => sounds, [])

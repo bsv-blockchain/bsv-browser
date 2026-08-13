@@ -116,3 +116,73 @@ describe('confirmation sound', () => {
     }
   })
 })
+
+describe('vault tones', () => {
+  beforeEach(() => {
+    audio.__reset()
+    sounds.release()
+    audio.__reset()
+  })
+
+  it('vaultOpen and vaultClose return synchronously', () => {
+    expect(sounds.vaultOpen()).toBeUndefined()
+    expect(sounds.vaultClose()).toBeUndefined()
+  })
+
+  it('each tone lazily creates its own player, distinct from confirmation', async () => {
+    sounds.vaultOpen()
+    await settle()
+    sounds.vaultClose()
+    await settle()
+    sounds.confirmation()
+    await settle()
+    // three distinct sources created, one per tone
+    expect(audio.__calls.created).toHaveLength(3)
+    expect(audio.__calls.played).toBe(3)
+  })
+
+  it('shares the one-time audio-session config across tones', async () => {
+    sounds.vaultOpen()
+    await settle()
+    sounds.vaultClose()
+    await settle()
+    expect(audio.__calls.audioModes).toHaveLength(1)
+    expect(audio.__calls.audioModes[0]).toMatchObject({
+      playsInSilentMode: false,
+      interruptionMode: 'mixWithOthers',
+    })
+  })
+
+  it('reuses each tone player and rewinds it', async () => {
+    sounds.vaultOpen()
+    await settle()
+    sounds.vaultOpen()
+    await settle()
+    expect(audio.__calls.created).toHaveLength(1)
+    expect(audio.__calls.played).toBe(2)
+    expect(audio.__calls.sought).toEqual([0, 0])
+  })
+
+  it('release removes every tone player', async () => {
+    sounds.vaultOpen()
+    await settle()
+    sounds.vaultClose()
+    await settle()
+    sounds.release()
+    expect(audio.__calls.removed).toBe(2)
+  })
+
+  it('never throws when a vault tone cannot be created', async () => {
+    const real = audio.createAudioPlayer
+    audio.createAudioPlayer = () => {
+      throw new Error('no decoder')
+    }
+    try {
+      expect(() => sounds.vaultOpen()).not.toThrow()
+      await settle()
+      expect(audio.__calls.played).toBe(0)
+    } finally {
+      audio.createAudioPlayer = real
+    }
+  })
+})
