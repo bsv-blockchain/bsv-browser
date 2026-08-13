@@ -59,6 +59,7 @@ export default function WalletConfigScreen() {
   const [networkExpanded, setNetworkExpanded] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
+  const [vaultMockOn, setVaultMockOn] = useState(false)
   const [currencyExpanded, setCurrencyExpanded] = useState(false)
   const [thresholdExpanded, setThresholdExpanded] = useState(false)
   const [thresholdSats, setThresholdSats] = useState(DEFAULT_AUTO_APPROVE_THRESHOLD)
@@ -496,6 +497,21 @@ export default function WalletConfigScreen() {
             iconColor="#30B0C7"
             onPress={() => router.push('/vault' as any)}
           />
+          {__DEV__ && (
+            <ListRow
+              label={t('vault_mock_toggle')}
+              icon="bug-outline"
+              iconColor="#8E8E93"
+              showChevron={false}
+              value={vaultMockOn ? t('vault_on') : t('vault_off')}
+              onPress={() => {
+                const next = !vaultMockOn
+                setVaultMockOn(next)
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                require('@/services/vault/devMock').setMockDriverEnabled(next)
+              }}
+            />
+          )}
           <ListRow
             label={t('trust_network')}
             icon="shield-checkmark-outline"

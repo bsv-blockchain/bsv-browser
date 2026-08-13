@@ -105,6 +105,54 @@ describe('buildVaultUnlockingScript (cryptographic arbiter)', () => {
     }).validate()
     expect(valid).toBe(true)
   })
+
+  test('validates BOTH inputs of a two-input withdrawal (multi-input BIP143)', async () => {
+    // Two vault UTXOs from different keys spent into one change output — the
+    // real common case. Each input must produce a Spend-valid unlocking script.
+    const srcs = ['vault/0', 'vault/1'].map(keyID => {
+      const lock = new P2PKH().lock(Utils.toArray(derivedPkh(keyID), 'hex'))
+      const src = new Transaction()
+      src.addOutput({ satoshis: 6000, lockingScript: lock })
+      return { keyID, lock, src }
+    })
+
+    const spend = new Transaction()
+    srcs.forEach(s => spend.addInput({ sourceTransaction: s.src, sourceOutputIndex: 0, sequence: 0xffffffff }))
+    spend.addOutput({ satoshis: 11_800, lockingScript: new P2PKH().lock(Utils.toArray(derivedPkh('vault/9'), 'hex')) })
+
+    for (let i = 0; i < srcs.length; i++) {
+      const s = srcs[i]
+      const priv = derivedPriv(s.keyID)
+      const unlock = await buildVaultUnlockingScript({
+        tx: spend,
+        inputIndex: i,
+        sourceTXID: s.src.id('hex'),
+        sourceOutputIndex: 0,
+        sourceSatoshis: 6000,
+        sourceLockingScript: s.lock,
+        publicKeyHex: derivedPubHex(s.keyID),
+        sign: async digest => ECDSA.sign(new BigNumber(digest), priv, true).toDER() as number[]
+      })
+      spend.inputs[i].unlockingScript = unlock
+    }
+
+    for (let i = 0; i < srcs.length; i++) {
+      const valid = new Spend({
+        sourceTXID: srcs[i].src.id('hex'),
+        sourceOutputIndex: 0,
+        sourceSatoshis: 6000,
+        lockingScript: srcs[i].lock,
+        transactionVersion: spend.version,
+        otherInputs: spend.inputs.filter((_, j) => j !== i),
+        outputs: spend.outputs,
+        inputIndex: i,
+        unlockingScript: spend.inputs[i].unlockingScript!,
+        inputSequence: 0xffffffff,
+        lockTime: spend.lockTime
+      }).validate()
+      expect(valid).toBe(true)
+    }
+  })
 })
 
 // ── fake wallet ───────────────────────────────────────────────────────────

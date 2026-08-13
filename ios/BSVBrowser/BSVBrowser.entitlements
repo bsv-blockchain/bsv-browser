@@ -4,5 +4,7 @@
   <dict>
     <key>com.apple.developer.web-browser</key>
     <true/>
+    <key>com.apple.security.smartcard</key>
+    <true/>
   </dict>
 </plist>
