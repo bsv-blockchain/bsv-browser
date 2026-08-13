@@ -1,4 +1,3 @@
-import CoreNFC
 import Foundation
 import YubiKit
 
@@ -43,17 +42,20 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
 
   func startDiscovery() throws {
     YubiKitManager.shared.delegate = self
+    // USB-C / CCID only. This is called on every wallet launch (the vault
+    // relock effect starts discovery), and it must be silent and side-effect
+    // free for the vast majority of users who have no YubiKey.
     if #available(iOS 16.0, *) {
       YubiKitManager.shared.startSmartCardConnection()
     }
-    // MFi accessory (Lightning) — harmless where unavailable.
+    // MFi accessory (Lightning 5Ci) — silent, harmless where unavailable.
     YubiKitManager.shared.startAccessoryConnection()
-    // NFC is best-effort: starting a session shows the system NFC sheet, so it
-    // is only meaningful when the app actually wants a tap. Guarded so a device
-    // without NFC (or a denied session) never throws out of discovery.
-    if YubiKitManager.shared.nfcConnection != nil || NFCReaderSession.readingAvailable {
-      YubiKitManager.shared.startNFCConnection()
-    }
+    // NFC is deliberately NOT started here: startNFCConnection() shows the
+    // system NFC sheet, and this target ships only com.apple.security.smartcard
+    // (no com.apple.developer.nfc.readersession.formats + AIDs). Starting NFC on
+    // launch would surprise non-vault users and no-op without the entitlement.
+    // If a 5C-NFC tap ceremony is ever brought into scope, start NFC from that
+    // explicit user action after adding the NFC entitlement + Info.plist AIDs.
   }
 
   func stopDiscovery() throws {

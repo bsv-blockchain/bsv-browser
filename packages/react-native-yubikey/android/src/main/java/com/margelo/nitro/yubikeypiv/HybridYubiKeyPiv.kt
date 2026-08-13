@@ -9,6 +9,7 @@ import com.margelo.nitro.core.Promise
 import com.yubico.yubikit.android.YubiKitManager
 import com.yubico.yubikit.android.transport.nfc.NfcConfiguration
 import com.yubico.yubikit.android.transport.nfc.NfcNotAvailable
+import com.yubico.yubikit.android.transport.nfc.NfcYubiKeyDevice
 import com.yubico.yubikit.android.transport.usb.UsbConfiguration
 import com.yubico.yubikit.android.transport.usb.UsbYubiKeyDevice
 import com.yubico.yubikit.core.YubiKeyDevice
@@ -18,13 +19,11 @@ import com.yubico.yubikit.core.smartcard.ApduException
 import com.yubico.yubikit.core.smartcard.SmartCardConnection
 import com.yubico.yubikit.piv.InvalidPinException
 import com.yubico.yubikit.piv.KeyType
-import com.yubico.yubikit.piv.ManagementKeyType
 import com.yubico.yubikit.piv.PinPolicy
 import com.yubico.yubikit.piv.PivSession
 import com.yubico.yubikit.piv.Slot
 import com.yubico.yubikit.piv.TouchPolicy
 import java.io.IOException
-import java.security.interfaces.ECPublicKey
 
 /**
  * YubiKeyPiv over YubiKit-Android's PIV application (CCID).
@@ -98,6 +97,16 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
           m.startNfcDiscovery(NfcConfiguration(), activity) { device ->
             main.post { currentDevice = device }
             readSerialAndEmit(device, "nfc")
+            // An NFC tap is a transient session: when the tag leaves the field
+            // we must emit `removed` so the JS layer relocks the PKM, exactly
+            // like USB unplug. NfcYubiKeyDevice.remove(...) fires once the tag
+            // is gone. Without this the 120s PKM window outlives the tap.
+            (device as? NfcYubiKeyDevice)?.remove {
+              main.post {
+                if (currentDevice === device) currentDevice = null
+                emit("removed", "", "nfc")
+              }
+            }
           }
         }
       } catch (_: NfcNotAvailable) {
@@ -179,11 +188,9 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
   override fun changePin(oldPin: String, newPin: String): Promise<String> {
     val promise = Promise<String>()
     withPiv(promise) { piv ->
-      // Per the module spec, changePin is grouped with generateKey under the
-      // management-key gate. (PIV's CHANGE REFERENCE DATA itself only needs the
-      // old PIN; the management-key auth is here because the spec asks for it,
-      // and it is what surfaces mgmt-key-custom on a personalised key.)
-      authenticateManagementKey(piv)
+      // PIV CHANGE REFERENCE DATA needs only the old PIN — NOT management-key
+      // auth. Gating it on the management key would wrongly reject a key that
+      // has a custom management key but a still-default PIN.
       try {
         piv.changePin(oldPin.toCharArray(), newPin.toCharArray())
         "{\"ok\":true}"
@@ -198,7 +205,9 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
     val promise = Promise<String>()
     withPiv(promise) { piv ->
       authenticateManagementKey(piv)
-      val pub = piv.generateKeyValues(
+      // 3.2.0: generateKey(...) returns PublicKeyValues (generateKeyValues is
+      // @Deprecated / removed).
+      val pub = piv.generateKey(
         Slot.fromValue(slot.toInt()),
         KeyType.ECCP256,
         toPinPolicy(pinPolicy),
@@ -229,9 +238,9 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
     withPiv(promise) { piv ->
       piv.verifyPin(pin.toCharArray()) // pin-policy ONCE key gate; throws InvalidPinException on wrong PIN
       val peerBytes = hexToBytes(peerPublicKey)
-      val peer = PublicKeyValues.Ec
-        .fromEncodedPoint(EllipticCurveValues.SECP256R1, peerBytes)
-        .toPublicKey() as ECPublicKey
+      // 3.2.0: calculateSecret takes PublicKeyValues directly (the ECPublicKey
+      // overload was removed) — do NOT convert to a java.security key.
+      val peer = PublicKeyValues.Ec.fromEncodedPoint(EllipticCurveValues.SECP256R1, peerBytes)
       // TOUCH-gated when the key was generated with TouchPolicy.ALWAYS: this
       // blocks until the user taps the key, and surfaces as touch-timeout if
       // they never do (see mapError).
@@ -265,25 +274,16 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
   }
 
   /**
-   * Authenticate with the firmware-default management key so generateKey (and,
-   * per spec, changePin) can run. Pre-5.7 keys default to TDES, fw >= 5.7 to
-   * AES-192; both ship the same 24-byte default value. A rejection means the
-   * key has a custom management key we cannot supply → mgmt-key-custom.
-   *
-   * NOTE: the exact yubikit `authenticate` overload and metadata accessor are
-   * version-sensitive; verified against yubikit-android 3.2.0's two-arg
-   * `authenticate(ManagementKeyType, byte[])`.
+   * Authenticate with the firmware-default management key so generateKey can
+   * run. On yubikit-android 3.2.0 `authenticate(byte[])` reads the key's
+   * algorithm from card metadata itself, so we pass only the 24-byte default
+   * value (the same default for both the pre-5.7 TDES and fw >= 5.7 AES-192
+   * cards). A rejection means the key has a custom management key we cannot
+   * supply → mgmt-key-custom.
    */
   private fun authenticateManagementKey(piv: PivSession) {
-    val type = try {
-      piv.managementKeyMetadata.keyType
-    } catch (_: Throwable) {
-      val v = piv.version
-      val fw57 = v.major > 5 || (v.major == 5 && v.minor >= 7)
-      if (fw57) ManagementKeyType.AES192 else ManagementKeyType.TDES
-    }
     try {
-      piv.authenticate(type, DEFAULT_MANAGEMENT_KEY)
+      piv.authenticate(DEFAULT_MANAGEMENT_KEY)
     } catch (e: Throwable) {
       throw VaultException("mgmt-key-custom", "default management key rejected")
     }
