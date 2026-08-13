@@ -12,14 +12,18 @@
 # This script never sees or handles the .p12 password.
 #
 # Usage:
-#   scripts/resign-add-smartcard.sh                 # auto-pick newest build-*.ipa
-#   scripts/resign-add-smartcard.sh path/to.ipa
+#   scripts/resign-add-smartcard.sh                 # newest build-*.ipa -> build-smartcard-resigned.ipa
+#   scripts/resign-add-smartcard.sh path/to.ipa     # a specific ipa
+#   scripts/resign-add-smartcard.sh --in-place      # rewrite the newest build ipa in place
+#                                                     (used by `npm run ios-build-for-app-store`)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+INPLACE=0
+if [ "${1:-}" = "--in-place" ]; then INPLACE=1; shift; fi
 IPA="${1:-$(ls -t "$ROOT"/build-*.ipa 2>/dev/null | grep -v resigned | head -1)}"
 PROFILE="/Users/personal/git/apple-devlepment/BSV Browser/BSV_Browser_App_Store_Local_Build.mobileprovision"
-OUT="$ROOT/build-smartcard-resigned.ipa"
+if [ "$INPLACE" = "1" ]; then OUT="$IPA"; else OUT="$ROOT/build-smartcard-resigned.ipa"; fi
 
 [ -f "$IPA" ] || { echo "No ipa found. Pass one as an argument."; exit 1; }
 [ -f "$PROFILE" ] || { echo "Profile not found: $PROFILE"; exit 1; }
