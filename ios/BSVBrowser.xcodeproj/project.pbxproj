@@ -389,6 +389,8 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = SV8SWTHA2H;
 				PRODUCT_BUNDLE_IDENTIFIER = org.bsvassociation.browser;
 				PRODUCT_NAME = BSVBrowser;
 				SWIFT_OBJC_BRIDGING_HEADER = "BSVBrowser/BSVBrowser-Bridging-Header.h";
