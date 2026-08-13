@@ -491,12 +491,8 @@ export default function WalletConfigScreen() {
 
         {/* ── Data & Security ── */}
         <GroupedSection header={t('data_and_security')}>
-          <ListRow
-            label={t('vault_row_title')}
-            icon="lock-closed"
-            iconColor="#30B0C7"
-            onPress={() => router.push('/vault' as any)}
-          />
+          {/* Vault's primary entry lives on the wallet menu (below Payments).
+              The DEV mock toggle stays here. */}
           {__DEV__ && (
             <ListRow
               label={t('vault_mock_toggle')}

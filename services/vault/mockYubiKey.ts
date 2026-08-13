@@ -73,7 +73,12 @@ export class MockYubiKey implements VaultDriver {
   sessionBased = false
 
   start(): void {
-    /* discovery is driven by insertKey/removeKey in the mock */
+    // Session-based flows (NFC) call start() to open a scan session and wait
+    // for the tap to connect. Simulate that: if a key is "held", emit attached
+    // now. Persistent flows never rely on this (they see the key via getKeyInfo).
+    if (this.sessionBased && this.present) {
+      this.emit({ type: 'attached', serial: this.serial, transport: 'mock' })
+    }
   }
 
   stop(): void {

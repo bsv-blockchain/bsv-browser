@@ -173,33 +173,14 @@ export class CeremonyController {
       const seal = await this.deps.store.getSeal()
       if (!seal) throw new VaultError('not-enrolled')
 
-      // 1. ensure a key is present
-      this.set({ phase: 'connecting' })
-      let info = await this.safeKeyInfo(driver)
-      if (!info) {
-        this.set({ phase: 'waiting-for-key' })
-        this.attachWaiter = defer<void>()
-        driver.start()
-        await this.attachWaiter.promise
-        this.throwIfCancelled()
-        this.set({ phase: 'connecting' })
-        info = await this.safeKeyInfo(driver)
-      }
-      if (!info) throw new VaultError('no-key')
-
-      // 2. bind to the enrolled key
-      if (info.serial !== seal.yubiSerial) {
-        throw new VaultError('serial-mismatch', `Expected key ${seal.yubiSerial}`)
-      }
-
-      // 3. PIN (pinPolicy=once → one verify per session)
-      const pin = await this.collectPin(driver)
-
-      // 4. touch-gated ECDH → unseal, with retry on timeout
-      const key = await this.unsealWithTouch(driver, seal, pin)
+      // NFC (session-based) collects the PIN BEFORE the tap and runs every token
+      // op in that one tap (the scan sheet covers the app, so no PIN entry
+      // mid-tap). A persistent USB reader can interleave PIN entry and token ops.
+      const key = driver.sessionBased
+        ? await this.unsealViaTap(driver, seal)
+        : await this.unsealViaReader(driver, seal)
       this.throwIfCancelled()
 
-      // 5. armed
       this.arm()
       this.resolveAll(key)
       this.onArmed?.(key)
@@ -236,6 +217,69 @@ export class CeremonyController {
     } catch {
       return null
     }
+  }
+
+  /** Persistent reader (Android USB): the key is present (or gets plugged), so
+   * PIN entry and token ops interleave — verify during collection, retry on a
+   * wrong PIN without any re-tap. */
+  private async unsealViaReader(driver: VaultDriver, seal: SealedBlob): Promise<PrivateKey> {
+    this.set({ phase: 'connecting' })
+    let info = await this.safeKeyInfo(driver)
+    if (!info) {
+      this.set({ phase: 'waiting-for-key' })
+      // Hold the promise locally: notifyKeyAttached clears this.attachWaiter, and
+      // start() can resolve it synchronously (e.g. the mock).
+      const waiter = (this.attachWaiter = defer<void>())
+      driver.start()
+      await waiter.promise
+      this.throwIfCancelled()
+      this.set({ phase: 'connecting' })
+      info = await this.safeKeyInfo(driver)
+    }
+    if (!info) throw new VaultError('no-key')
+    if (info.serial !== seal.yubiSerial) {
+      throw new VaultError('serial-mismatch', `Expected key ${seal.yubiSerial}`)
+    }
+    const pin = await this.collectPin(driver)
+    return this.unsealWithTouch(driver, seal, pin)
+  }
+
+  /** NFC tap (iOS): PIN first in-app (the sheet is modal), then one tap does
+   * serial check → verify PIN → ECDH. A wrong PIN aborts (surfaced as an error);
+   * the user retries the whole ceremony, since we cannot re-prompt under the
+   * open sheet. */
+  private async unsealViaTap(driver: VaultDriver, seal: SealedBlob): Promise<PrivateKey> {
+    const pin = await this.collectPinValue()
+    this.set({ phase: 'waiting-for-key' })
+    const waiter = (this.attachWaiter = defer<void>())
+    driver.start()
+    await waiter.promise
+    this.throwIfCancelled()
+    this.set({ phase: 'connecting' })
+    const info = await driver.getKeyInfo()
+    if (info.serial !== seal.yubiSerial) {
+      throw new VaultError('serial-mismatch', `Expected key ${seal.yubiSerial}`)
+    }
+    const res = await driver.verifyPin(pin)
+    if (!res.ok) throw new VaultError('pin-invalid', 'Wrong PIN', res.retriesLeft)
+    this.set({ phase: 'awaiting-touch' })
+    const { secret } = await driver.ecdh(seal.slot, pin, seal.ePub)
+    this.set({ phase: 'unsealing' })
+    return new PrivateKey(unsealVaultKey(seal, secret))
+  }
+
+  /** Collect a PIN value from the UI only (no token verify) — used by the NFC
+   * path, which must gather the PIN before the tap. */
+  private async collectPinValue(): Promise<string> {
+    this.throwIfCancelled()
+    this.set({ phase: 'pin-entry' })
+    if (this.queuedPin !== undefined) {
+      const p = this.queuedPin
+      this.queuedPin = undefined
+      return p
+    }
+    this.pinWaiter = defer<string>()
+    return this.pinWaiter.promise
   }
 
   private async collectPin(driver: VaultDriver): Promise<string> {

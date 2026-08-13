@@ -144,6 +144,37 @@ test('enroll refuses to overwrite an occupied PIV slot (slot-occupied)', async (
   expect(await vaultStore.isEnrolled()).toBe(false)
 })
 
+test('session-based enroll (NFC): PIN collected BEFORE the tap; ops run in one session', async () => {
+  const nfc = new MockYubiKey()
+  ;(nfc as any).sessionBased = true
+  nfc.setPin('123456')
+  nfc.insertKey('MOCK-1')
+  setMockDriver(nfc)
+  const order: string[] = []
+  const startSpy = jest.spyOn(nfc, 'start').mockImplementation(() => {
+    order.push('session-start')
+    // simulate the tap connecting
+    ;(nfc as any).emit({ type: 'attached', serial: 'MOCK-1', transport: 'mock' })
+  })
+  const stopSpy = jest.spyOn(nfc, 'stop')
+
+  const { pending } = await enrollVault({
+    nickname: 'k',
+    onPhase: () => {},
+    getPin: async () => {
+      order.push('pin-entered')
+      return '123456'
+    }
+  })
+  await finalizeEnrollment(pending)
+
+  // PIN entered in the UI BEFORE the NFC session opened, and the session closed.
+  expect(order).toEqual(['pin-entered', 'session-start'])
+  expect(startSpy).toHaveBeenCalledTimes(1)
+  expect(stopSpy).toHaveBeenCalledTimes(1)
+  expect(await vaultStore.isEnrolled()).toBe(true)
+})
+
 test('recoverVaultKey rejects an invalid phrase', async () => {
   await expect(recoverVaultKey('not a valid mnemonic phrase at all')).rejects.toBeDefined()
 })

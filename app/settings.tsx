@@ -108,6 +108,12 @@ export default function SettingsScreen() {
             icon="swap-horizontal-outline"
             iconColor={colors.success}
             onPress={() => router.push('/pay')}
+          />
+          <ListRow
+            label={t('vault_row_title')}
+            icon="lock-closed"
+            iconColor="#30B0C7"
+            onPress={() => router.push('/vault' as any)}
             isLast
           />
         </GroupedSection>

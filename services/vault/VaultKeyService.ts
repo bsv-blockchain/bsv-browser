@@ -17,6 +17,7 @@
  */
 import { PrivateKey, KeyDeriver, HD, Mnemonic, WalletProtocol } from '@bsv/sdk'
 import { getVaultDriver } from './driver'
+import { withKeySession } from './session'
 import { vaultStore, VaultMeta } from './vaultStore'
 import { sealVaultKey } from './sealing'
 import { VaultError, SealedBlob } from './types'
@@ -61,35 +62,43 @@ export async function enrollVault(args: {
   const driver = getVaultDriver()
   if (!driver) throw new VaultError('driver-unavailable')
 
-  args.onPhase('connecting')
-  const info = await driver.getKeyInfo()
-  // A key whose PIN is already blocked cannot be enrolled — say so before we
-  // burn anything (fix #5: never probe, surface pin-locked up front).
-  if (info.pinRetries === 0) throw new VaultError('pin-locked', 'PIN is blocked')
-  // Never silently overwrite an occupied slot: generating into a used PIV slot
-  // destroys the existing private key irrecoverably, and retired slots 82-95
-  // are exactly what age-plugin-yubikey and friends use. Refuse and let the
-  // user decide, rather than wiping their key.
-  if (await driver.readVaultPublicKey(VAULT_SLOT)) {
-    throw new VaultError('slot-occupied', `PIV slot ${VAULT_SLOT.toString(16)} already holds a key`)
-  }
-
-  // Factory-default detection is exactly "the PIN the user entered is the
-  // default" — no side probe against '123456', which would spend one of three
-  // PIV retries on a key that is NOT on the factory PIN (fix #5).
+  // ── ALL user input up front, BEFORE any key contact ──
+  // On NFC the scan sheet is a modal that covers the app, so every prompt (the
+  // PIN, and a replacement PIN if the key is on the factory default) must be
+  // gathered before the tap; the whole enrollment then runs in one tap.
   args.onPhase('pin-check')
-  let pin = await args.getPin()
-  if (pin === DEFAULT_PIV_PIN && args.requestPinChange) {
-    const { oldPin, newPin } = await args.requestPinChange(info.pinRetries)
-    await driver.changePin(oldPin, newPin)
-    pin = newPin
+  const pin0 = await args.getPin()
+  let pin = pin0
+  let pinChange: { oldPin: string; newPin: string } | null = null
+  if (pin0 === DEFAULT_PIV_PIN && args.requestPinChange) {
+    // Factory-default detection is exactly "the PIN the user entered is the
+    // default" — no side probe against '123456' (fix #5).
+    pinChange = await args.requestPinChange(3)
+    pin = pinChange.newPin
   }
-  const verified = await driver.verifyPin(pin)
-  if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)
 
-  // Generate the on-token P-256 key (touch) and read its public key.
-  args.onPhase('generating')
-  const { publicKey } = await driver.generateVaultKey(VAULT_SLOT)
+  // ── Token phase: one session / one NFC tap ──
+  const { info, publicKey } = await withKeySession(
+    driver,
+    async () => {
+      const info = await driver.getKeyInfo()
+      // A blocked PIN can't be enrolled — surface it before burning anything.
+      if (info.pinRetries === 0) throw new VaultError('pin-locked', 'PIN is blocked')
+      // Never silently overwrite an occupied slot: generating into a used PIV
+      // slot destroys the existing key, and retired slots 82-95 are what
+      // age-plugin-yubikey uses. Refuse and let the user decide.
+      if (await driver.readVaultPublicKey(VAULT_SLOT)) {
+        throw new VaultError('slot-occupied', `PIV slot ${VAULT_SLOT.toString(16)} already holds a key`)
+      }
+      if (pinChange) await driver.changePin(pinChange.oldPin, pinChange.newPin)
+      const verified = await driver.verifyPin(pin)
+      if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)
+      args.onPhase('generating')
+      const { publicKey } = await driver.generateVaultKey(VAULT_SLOT)
+      return { info, publicKey }
+    },
+    () => args.onPhase('connecting')
+  )
 
   // Fresh vault key + its backup phrase.
   const backupMnemonic = Mnemonic.fromRandom(256).toString()
