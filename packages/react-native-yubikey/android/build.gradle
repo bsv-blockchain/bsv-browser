@@ -1,0 +1,70 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+// Same shape as react-native-nitro-modules/android/build.gradle: the plugin is
+// what wires up the `com.facebook.react:react-native:+` -> react-android
+// substitution and the ReactAndroid/fbjni prefab packages that our
+// CMakeLists.txt's find_package() calls need.
+def isNewArchitectureEnabled() {
+  return rootProject.hasProperty("newArchEnabled") && rootProject.getProperty("newArchEnabled") == "true"
+}
+
+if (isNewArchitectureEnabled()) {
+  apply plugin: "com.facebook.react"
+}
+
+def reactNativeArchitectures() {
+  def value = rootProject.getProperties().get("reactNativeArchitectures")
+  return value ? value.split(",") : ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
+}
+
+android {
+  namespace 'com.margelo.nitro.yubikeypiv'
+  ndkVersion rootProject.hasProperty('ndkVersion') ? rootProject.ndkVersion : "27.1.12297006"
+  compileSdkVersion rootProject.hasProperty('compileSdkVersion') ? rootProject.compileSdkVersion : 35
+  defaultConfig {
+    minSdkVersion rootProject.hasProperty('minSdkVersion') ? rootProject.minSdkVersion : 24
+
+    externalNativeBuild {
+      cmake {
+        cppFlags "-frtti -fexceptions -Wall -Wextra -fstack-protector-all"
+        // NDK r27 links 4 KB-aligned LOAD segments unless this is ON (default
+        // only from r28), and Play rejects 4 KB-only libs on 16 KB-page
+        // devices. Every other .so in the bundle is 0x4000; without this flag
+        // libYubiKeyPiv.so would be the one 0x1000 holdout.
+        arguments "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+        abiFilters (*reactNativeArchitectures())
+      }
+    }
+  }
+  externalNativeBuild {
+    cmake {
+      path "CMakeLists.txt"
+    }
+  }
+  buildFeatures {
+    prefab true
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+  kotlinOptions { jvmTarget = '17' }
+}
+
+dependencies {
+  implementation 'com.yubico.yubikit:android:3.2.0'
+  implementation 'com.yubico.yubikit:piv:3.2.0'
+  implementation 'com.yubico.yubikit:core:3.2.0'
+  implementation project(':react-native-nitro-modules')
+  // For < 0.71, this will be from the local maven repo; for > 0.71 this is
+  // replaced by `com.facebook.react:react-android:$version` by the react
+  // gradle plugin. Needed both for the Kotlin bridge classes (HybridData,
+  // DoNotStrip, ReactPackage, ...) and for the ReactAndroid/fbjni prefab
+  // packages CMake links against.
+  //noinspection GradleDynamicVersion
+  implementation "com.facebook.react:react-native:+"
+}
+
+// Nitro's generated sources, CMake wiring, and package registration.
+apply from: '../nitrogen/generated/android/YubiKeyPiv+autolinking.gradle'

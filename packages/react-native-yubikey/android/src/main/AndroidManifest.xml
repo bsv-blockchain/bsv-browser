@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- YubiKey PIV over CCID. USB host is how a hardware key plugs in over
+       USB-C; NFC is the tap transport. Both are declared not-required so the
+       app still installs on devices without them (the JS layer falls back to
+       its software-key path when isSupported() is false). -->
+  <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+  <uses-permission android:name="android.permission.NFC" />
+  <uses-feature android:name="android.hardware.nfc" android:required="false" />
+</manifest>

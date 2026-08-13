@@ -1,0 +1,20 @@
+{
+  "name": "react-native-yubikey",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nitro module wrapping YubiKey PIV over CCID for BSV Browser hardware-backed vault keys. iOS (YubiKit YKFPIVSession) + Android (yubikit-android PivSession).",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src",
+    "ios",
+    "android",
+    "nitrogen/generated",
+    "nitro.json",
+    "YubiKeyPiv.podspec"
+  ],
+  "peerDependencies": {
+    "react-native": "*",
+    "react-native-nitro-modules": "*"
+  }
+}

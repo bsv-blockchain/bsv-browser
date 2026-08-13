@@ -1,0 +1,14 @@
+{
+  "cxxNamespace": ["yubikeypiv"],
+  "ios": { "iosModuleName": "YubiKeyPiv" },
+  "android": {
+    "androidNamespace": ["yubikeypiv"],
+    "androidCxxLibName": "YubiKeyPiv"
+  },
+  "autolinking": {
+    "YubiKeyPiv": {
+      "ios": { "language": "swift", "implementationClassName": "HybridYubiKeyPiv" },
+      "android": { "language": "kotlin", "implementationClassName": "HybridYubiKeyPiv" }
+    }
+  }
+}
