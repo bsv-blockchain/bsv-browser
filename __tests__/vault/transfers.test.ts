@@ -40,6 +40,7 @@ import {
   buildVaultUnlockingScript,
   depositToVault,
   withdrawFromVault,
+  sweepVaultWithKey,
   replenishDepositKeys,
   getVaultBalance,
   VAULT_BASKET,
@@ -335,6 +336,47 @@ describe('withdrawFromVault', () => {
     await enrollFakeMeta()
     const w = makeFakeWallet({ async listOutputs() { return { outputs: [] } } })
     await expect(withdrawFromVault(w, ADMIN, 'all', 'x')).rejects.toMatchObject({ code: 'seal-corrupt' })
+  })
+})
+
+describe('sweepVaultWithKey (recovery, no YubiKey)', () => {
+  function vaultOutputsFixture() {
+    const mk = (keyID: string, sats: number) => {
+      const src = new Transaction()
+      src.addOutput({ satoshis: sats, lockingScript: new P2PKH().lock(Utils.toArray(derivedPkh(keyID), 'hex')) })
+      return { outpoint: `${src.id('hex')}.0`, satoshis: sats, customInstructions: JSON.stringify({ v: 1, keyID }), src }
+    }
+    return [mk('vault/0', 6000), mk('vault/1', 6000)]
+  }
+
+  test('sweeps every vault output to default, signing with the phrase key V', async () => {
+    await enrollFakeMeta()
+    const fx = vaultOutputsFixture()
+    const w = makeFakeWallet({
+      async listOutputs() {
+        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: [] }
+      },
+      async createAction(args: any) {
+        const tx = new Transaction()
+        for (const inp of args.inputs) {
+          const f = fx.find(x => x.outpoint === inp.outpoint)!
+          tx.addInput({ sourceTransaction: f.src, sourceOutputIndex: 0, sequence: 0xffffffff, unlockingScript: new UnlockingScript([]) })
+        }
+        return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'sweep-ref' } }
+      }
+    })
+    const res = await sweepVaultWithKey(w, ADMIN, new PrivateKey(V), 'Recover vault')
+    expect(res?.txid).toBeDefined()
+    const ca = w.calls.createAction[0] as any
+    expect(ca.inputs).toHaveLength(2)
+    expect(ca.outputs).toHaveLength(0) // all to default change, never re-vaulted
+    expect(w.calls.getPublicKey).toBeUndefined() // no privileged calls — local V only
+    expect(w.calls.createSignature).toBeUndefined()
+  })
+
+  test('returns null when the vault is already empty', async () => {
+    const w = makeFakeWallet({ async listOutputs() { return { outputs: [] } } })
+    expect(await sweepVaultWithKey(w, ADMIN, new PrivateKey(V), 'x')).toBeNull()
   })
 })
 

@@ -165,6 +165,10 @@ export interface WalletContextValue {
   getMonitorTaskNames: () => string[]
   /** Check spendability of all UTXOs against WoC */
   checkUtxoSpendability: () => Promise<string>
+  /** Immediately destroy any cached privileged (vault) key in the
+   * PrivilegedKeyManager — used when disabling the vault so `V` cannot linger
+   * in the retention window after the seal is gone. */
+  destroyPrivilegedKey: () => void
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -205,7 +209,8 @@ export const WalletContext = createContext<WalletContextValue>({
   clearLocalPayNotification: () => {},
   runMonitorTask: async () => '',
   getMonitorTaskNames: () => [],
-  checkUtxoSpendability: async () => ''
+  checkUtxoSpendability: async () => '',
+  destroyPrivilegedKey: () => {}
 })
 
 /**
@@ -1626,6 +1631,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     return () => subscription.remove()
   }, [])
 
+  // Destroy any cached vault key immediately (vault disable / manual relock).
+  const destroyPrivilegedKey = useCallback(() => {
+    try {
+      vaultPkmRef.current?.destroyKey()
+    } catch {
+      /* best-effort — nothing to destroy is fine */
+    }
+  }, [])
+
   // Relock the vault the instant the YubiKey is unplugged. A detach event both
   // destroys the privileged key held in the PKM's retention window and tells
   // the ceremony controller (which fires its onRelock → close sound/haptic).
@@ -1918,7 +1932,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       clearLocalPayNotification,
       runMonitorTask,
       getMonitorTaskNames,
-      checkUtxoSpendability
+      checkUtxoSpendability,
+      destroyPrivilegedKey
     }),
     [
       managers,
@@ -1958,7 +1973,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       clearLocalPayNotification,
       runMonitorTask,
       getMonitorTaskNames,
-      checkUtxoSpendability
+      checkUtxoSpendability,
+      destroyPrivilegedKey
     ]
   )
 

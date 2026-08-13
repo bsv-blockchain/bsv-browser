@@ -23,11 +23,15 @@
 import {
   P2PKH,
   PublicKey,
+  PrivateKey,
+  KeyDeriver,
   Transaction,
   TransactionSignature,
   UnlockingScript,
   Hash,
   Utils,
+  ECDSA,
+  BigNumber,
   WalletProtocol
 } from '@bsv/sdk'
 import { vaultStore } from './vaultStore'
@@ -163,13 +167,23 @@ export async function depositToVault(
   return { txid }
 }
 
-// ── withdraw ────────────────────────────────────────────────────────────
+// ── withdraw / sweep (shared spend core) ─────────────────────────────────
 
-export async function withdrawFromVault(
+/** Per-vault-key signer + public-key resolver. `withdrawFromVault` supplies the
+ * privileged (ceremony-backed) implementations; `sweepVaultWithKey` supplies
+ * ones that derive locally from a recovery-phrase key (no YubiKey). */
+interface VaultSigner {
+  getPublicKey(keyID: string): Promise<string>
+  sign(keyID: string, digest: number[]): Promise<number[]>
+}
+
+async function spendVaultOutputs(
   w: VaultWallet,
   adminOriginator: string,
   amount: number | 'all',
-  reason: string
+  reason: string,
+  signer: VaultSigner,
+  opts: { revaultRemainder: boolean }
 ): Promise<{ txid: string }> {
   const list = await w.listOutputs(
     { basket: VAULT_BASKET, include: 'entire transactions', limit: 1000 },
@@ -196,9 +210,10 @@ export async function withdrawFromVault(
 
   // Partial withdrawal: re-vault the remainder to a fresh deposit key so the
   // leftover stays protected instead of returning to the default basket.
+  // (Sweep/recovery empties everything to default and never re-vaults.)
   const outputs: unknown[] = []
   const remainder = amount === 'all' ? 0 : acc - want
-  if (remainder >= DUST_LIMIT) {
+  if (opts.revaultRemainder && remainder >= DUST_LIMIT) {
     const revaultKey = await vaultStore.popDepositKey()
     if (!revaultKey) throw new VaultError('pin-required', 'Vault needs your key to mint a change address')
     outputs.push({
@@ -228,7 +243,6 @@ export async function withdrawFromVault(
   )
 
   if (!created.signableTransaction) {
-    // Nothing to sign (shouldn't happen with deferred inputs) — treat as done.
     const txid = created.txid ?? (created.tx ? Transaction.fromAtomicBEEF(created.tx).id('hex') : undefined)
     if (!txid) throw new VaultError('seal-corrupt', 'Withdrawal produced no transaction')
     return { txid }
@@ -240,10 +254,7 @@ export async function withdrawFromVault(
     const spends: Record<number, { unlockingScript: string }> = {}
     for (let i = 0; i < selected.length; i++) {
       const o = selected[i]
-      const { publicKey } = await w.getPublicKey(
-        { protocolID: VAULT_PROTOCOL, keyID: o.keyID, counterparty: 'self', forSelf: true, privileged: true, privilegedReason: reason },
-        adminOriginator
-      )
+      const publicKey = await signer.getPublicKey(o.keyID as string)
       const [txidHex, voutStr] = o.outpoint.split('.')
       const unlock = await buildVaultUnlockingScript({
         tx,
@@ -253,20 +264,7 @@ export async function withdrawFromVault(
         sourceSatoshis: o.satoshis,
         sourceLockingScript: new P2PKH().lock(PublicKey.fromString(publicKey).toHash() as number[]),
         publicKeyHex: publicKey,
-        sign: async digest => {
-          const { signature } = await w.createSignature(
-            {
-              hashToDirectlySign: digest,
-              protocolID: VAULT_PROTOCOL,
-              keyID: o.keyID,
-              counterparty: 'self',
-              privileged: true,
-              privilegedReason: reason
-            },
-            adminOriginator
-          )
-          return signature
-        }
+        sign: digest => signer.sign(o.keyID as string, digest)
       })
       spends[i] = { unlockingScript: unlock.toHex() }
     }
@@ -280,6 +278,57 @@ export async function withdrawFromVault(
     return { txid }
   } catch (e) {
     await w.abortAction({ reference }, adminOriginator).catch(() => {})
+    throw e
+  }
+}
+
+/** Withdraw from the vault via the YubiKey ceremony (privileged signing). */
+export function withdrawFromVault(
+  w: VaultWallet,
+  adminOriginator: string,
+  amount: number | 'all',
+  reason: string
+): Promise<{ txid: string }> {
+  const signer: VaultSigner = {
+    getPublicKey: async keyID => {
+      const { publicKey } = await w.getPublicKey(
+        { protocolID: VAULT_PROTOCOL, keyID, counterparty: 'self', forSelf: true, privileged: true, privilegedReason: reason },
+        adminOriginator
+      )
+      return publicKey
+    },
+    sign: async (keyID, digest) => {
+      const { signature } = await w.createSignature(
+        { hashToDirectlySign: digest, protocolID: VAULT_PROTOCOL, keyID, counterparty: 'self', privileged: true, privilegedReason: reason },
+        adminOriginator
+      )
+      return signature
+    }
+  }
+  return spendVaultOutputs(w, adminOriginator, amount, reason, signer, { revaultRemainder: true })
+}
+
+/** Recovery path: sweep the ENTIRE vault to the default basket signing with the
+ * backup-phrase key `V` directly — no YubiKey required (the whole reason the
+ * phrase exists). Returns null when the vault is already empty. */
+export async function sweepVaultWithKey(
+  w: VaultWallet,
+  adminOriginator: string,
+  v: PrivateKey,
+  reason: string
+): Promise<{ txid: string } | null> {
+  const kd = new KeyDeriver(v)
+  const signer: VaultSigner = {
+    getPublicKey: async keyID => kd.derivePublicKey(VAULT_PROTOCOL, keyID, 'self', true).toString(),
+    sign: async (keyID, digest) => {
+      const priv = kd.derivePrivateKey(VAULT_PROTOCOL, keyID, 'self')
+      return ECDSA.sign(new BigNumber(digest), priv, true).toDER() as number[]
+    }
+  }
+  try {
+    return await spendVaultOutputs(w, adminOriginator, 'all', reason, signer, { revaultRemainder: false })
+  } catch (e) {
+    if (e instanceof VaultError && e.code === 'seal-corrupt' && /empty/i.test(e.message)) return null
     throw e
   }
 }

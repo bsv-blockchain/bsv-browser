@@ -24,7 +24,10 @@ import { TransferSheet } from '@/components/vault/TransferSheet'
 import { useVaultBalance } from '@/hooks/useVaultBalance'
 import { vaultStore, VaultMeta } from '@/services/vault/vaultStore'
 import { getVaultDriver } from '@/services/vault/driver'
-import { disableVault } from '@/services/vault/VaultKeyService'
+import { disableVault, recoverVaultKey } from '@/services/vault/VaultKeyService'
+import { sweepVaultWithKey, VaultWallet } from '@/services/vault/transfers'
+import { useWallet } from '@/context/WalletContext'
+import { RecoverSheet } from '@/components/vault/RecoverSheet'
 import { showAlert } from '@/components/ui/AlertCard'
 import { showToast } from '@/components/ui/Toast'
 import { haptics } from '@/hooks/useHaptics'
@@ -40,6 +43,8 @@ export default function VaultScreen() {
   const [meta, setMeta] = useState<VaultMeta | null>(null)
   const [enrolling, setEnrolling] = useState(false)
   const [transfer, setTransfer] = useState<'deposit' | 'withdraw' | null>(null)
+  const [recovering, setRecovering] = useState(false)
+  const { managers, adminOriginator, destroyPrivilegedKey } = useWallet()
 
   const supported = getVaultDriver()?.isSupported() ?? false
 
@@ -60,6 +65,17 @@ export default function VaultScreen() {
   }, [reload, refresh])
 
   const confirmDisable = useCallback(async () => {
+    // Refuse to disable while funds remain: disabling removes the key gate and
+    // the seal, and any vault UTXO left behind would be locked to a key with no
+    // in-app signer. Force a withdrawal (or recovery sweep) first.
+    if ((balance ?? 0) > 0) {
+      await showAlert({
+        title: t('vault_disable_blocked_title'),
+        message: t('vault_disable_blocked_message'),
+        buttons: [{ text: t('vault_ok'), key: 'ok' }]
+      })
+      return
+    }
     const choice = await showAlert({
       title: t('vault_disable_title'),
       message: t('vault_disable_message'),
@@ -69,12 +85,32 @@ export default function VaultScreen() {
       ]
     })
     if (choice !== 'confirm') return
-    // NOTE: funds should be swept first; v1 warns and disables the gate only.
     await disableVault()
+    destroyPrivilegedKey() // don't let V linger in the PKM retention window
     haptics.warning()
     showToast(t('vault_disabled_toast'), { type: 'info' })
     await reload()
-  }, [reload])
+  }, [balance, reload, destroyPrivilegedKey])
+
+  // Recovery: enter the backup phrase, sweep all vault funds to the everyday
+  // balance with the phrase key (no YubiKey), then clear the vault. This is the
+  // escape hatch when the key is lost or bricked.
+  const runRecovery = useCallback(
+    async (phrase: string) => {
+      const pm = managers?.permissionsManager
+      if (!pm) throw new Error('wallet not ready')
+      const v = await recoverVaultKey(phrase) // throws on an invalid phrase
+      await sweepVaultWithKey(pm as unknown as VaultWallet, adminOriginator, v, t('vault_recover_reason'))
+      await disableVault()
+      destroyPrivilegedKey()
+      haptics.success()
+      showToast(t('vault_recovered_toast'), { type: 'success' })
+      setRecovering(false)
+      await reload()
+      refresh()
+    },
+    [managers?.permissionsManager, adminOriginator, reload, refresh, destroyPrivilegedKey]
+  )
 
   const Header = (
     <View style={[styles.header, { borderBottomColor: colors.separator }]}>
@@ -201,6 +237,12 @@ export default function VaultScreen() {
 
         <GroupedSection header={t('vault_manage_section')}>
           <ListRow
+            label={t('vault_recover_row')}
+            icon="medkit-outline"
+            iconColor={colors.info ?? colors.accent}
+            onPress={() => setRecovering(true)}
+          />
+          <ListRow
             label={t('vault_disable_row')}
             icon="lock-open"
             iconColor={colors.error}
@@ -212,6 +254,7 @@ export default function VaultScreen() {
       </ScrollView>
 
       <TransferSheet direction={transfer} onClose={() => setTransfer(null)} onComplete={refresh} />
+      <RecoverSheet visible={recovering} onClose={() => setRecovering(false)} onRecover={runRecovery} />
     </View>
   )
 }
