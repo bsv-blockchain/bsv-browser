@@ -303,22 +303,22 @@ PODS:
   - hermes-engine (0.14.1):
     - hermes-engine/Pre-built (= 0.14.1)
   - hermes-engine/Pre-built (0.14.1)
-  - libavif/core (0.11.1)
-  - libavif/libdav1d (0.11.1):
+  - libavif/core (1.0.0)
+  - libavif/libdav1d (1.0.0):
     - libavif/core
     - libdav1d (>= 0.6.0)
   - libdav1d (1.2.0)
-  - libwebp (1.5.0):
-    - libwebp/demux (= 1.5.0)
-    - libwebp/mux (= 1.5.0)
-    - libwebp/sharpyuv (= 1.5.0)
-    - libwebp/webp (= 1.5.0)
-  - libwebp/demux (1.5.0):
+  - libwebp (1.6.0):
+    - libwebp/demux (= 1.6.0)
+    - libwebp/mux (= 1.6.0)
+    - libwebp/sharpyuv (= 1.6.0)
+    - libwebp/webp (= 1.6.0)
+  - libwebp/demux (1.6.0):
     - libwebp/webp
-  - libwebp/mux (1.5.0):
+  - libwebp/mux (1.6.0):
     - libwebp/demux
-  - libwebp/sharpyuv (1.5.0)
-  - libwebp/webp (1.5.0):
+  - libwebp/sharpyuv (1.6.0)
+  - libwebp/webp (1.6.0):
     - libwebp/sharpyuv
   - LiquidGlass (0.7.1):
     - hermes-engine
@@ -388,7 +388,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - OpenSSL-Universal (3.3.3001)
+  - OpenSSL-Universal (3.6.2000)
   - RCTDeprecation (0.83.6)
   - RCTRequired (0.83.6)
   - RCTSwiftUI (0.83.6)
@@ -2746,9 +2746,9 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - SDWebImage (5.21.2):
-    - SDWebImage/Core (= 5.21.2)
-  - SDWebImage/Core (5.21.2)
+  - SDWebImage (5.21.7):
+    - SDWebImage/Core (= 5.21.7)
+  - SDWebImage/Core (5.21.7)
   - SDWebImageAVIFCoder (0.11.1):
     - libavif/core (>= 0.11.0)
     - SDWebImage (~> 5.10)
@@ -2782,6 +2782,31 @@ PODS:
     - Yoga
   - SwiftUIIntrospect (1.3.0)
   - Yoga (0.0.0)
+  - YubiKeyPiv (0.1.0):
+    - hermes-engine
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+    - YubiKit (~> 4.4)
+  - YubiKit (4.4.0)
   - ZXingObjC/Core (3.6.9)
   - ZXingObjC/OneD (3.6.9):
     - ZXingObjC/Core
@@ -2926,6 +2951,7 @@ DEPENDENCIES:
   - RNWorklets (from `../node_modules/react-native-worklets`)
   - SecpNative (from `../packages/react-native-secp-native`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
+  - YubiKeyPiv (from `../packages/react-native-yubikey`)
 
 SPEC REPOS:
   trunk:
@@ -2938,6 +2964,7 @@ SPEC REPOS:
     - SDWebImageSVGCoder
     - SDWebImageWebPCoder
     - SwiftUIIntrospect
+    - YubiKit
     - ZXingObjC
 
 EXTERNAL SOURCES:
@@ -3214,6 +3241,8 @@ EXTERNAL SOURCES:
     :path: "../packages/react-native-secp-native"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
+  YubiKeyPiv:
+    :path: "../packages/react-native-yubikey"
 
 SPEC CHECKSUMS:
   EngineNative: f756c52bcacaaea8fd71d4eb5c29552ae4909fff
@@ -3259,13 +3288,13 @@ SPEC CHECKSUMS:
   EXUpdatesInterface: 4c11f4d1594526258f14d09817dc407acbf24e3b
   FBLazyVector: 427fa1856a481856091061293ce865a75aa4f20f
   hermes-engine: 43fb5c12207d34481ecb24418ff28e04d59d63c7
-  libavif: 84bbb62fb232c3018d6f1bab79beea87e35de7b7
+  libavif: 5f8e715bea24debec477006f21ef9e95432e254d
   libdav1d: 23581a4d8ec811ff171ed5e2e05cd27bad64c39f
-  libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
+  libwebp: af5937a13536ef73f3784d69cc342b98961acf33
   LiquidGlass: ce908019d1374704534dbbef911a6f58ad2aec8e
-  LocalPayTransport: dae93d2d65a50f32cd931bdbf09ff5be2d116a8d
+  LocalPayTransport: 5497cd1e3b8d5f1855a2c8a8031e79479d560255
   NitroModules: 48bc5e0cf2f9cab79f82754c0404a046c6cb6ed6
-  OpenSSL-Universal: 6082b0bf950e5636fe0d78def171184e2b3899c2
+  OpenSSL-Universal: ecee7b138fa75a74ecf00d7ffd248fb584739b9e
   RCTDeprecation: 9502b5eb8e3c9eb75ff5a333b2c591bab9d91e28
   RCTRequired: 0268a5d86aef1defea2e04289d74fdf3570197c1
   RCTSwiftUI: cff211c5e4d94e491dda240d663b8effd25296d7
@@ -3354,13 +3383,15 @@ SPEC CHECKSUMS:
   RNScreens: 79190e02585cffc9507d890ae99174f560e58698
   RNSVG: 0f9847106cff58a2017ee4f2ddf191efe83c0c9f
   RNWorklets: 5eddf924d11308d62920405addeddc3dfe1daaaa
-  SDWebImage: 9f177d83116802728e122410fb25ad88f5c7608a
+  SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   SDWebImageAVIFCoder: afe194a084e851f70228e4be35ef651df0fc5c57
   SDWebImageSVGCoder: 15a300a97ec1c8ac958f009c02220ac0402e936c
   SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
   SecpNative: cbff6cd522846673fa738e138e2a20c305bd596e
   SwiftUIIntrospect: fee9aa07293ee280373a591e1824e8ddc869ba5d
   Yoga: f6a505247d21ee720d1ea0463dbe6ac95116c644
+  YubiKeyPiv: cb9c638078e3fc47148408ca49f4a3145987f569
+  YubiKit: 390e7733942f9518f9b3f5890c60914f7b8d74c8
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 
 PODFILE CHECKSUM: 4ac479450d2ce466e7a0a218f881ddbd552625b1
