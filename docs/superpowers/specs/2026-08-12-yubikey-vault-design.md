@@ -434,3 +434,40 @@ interrupted withdrawals resume nothing — outputs stay unspent, retry is safe.
 1. Feature lands behind enrollment (nothing changes for non-enrolled users).
 2. Device matrix pass with real 5C hardware (user).
 3. TestFlight/internal track; watch the entitlement through App Store review.
+
+## 12. Transport addendum — iOS is NFC (2026-08-13)
+
+The original design assumed USB-C CCID on both platforms. That does not ship on
+the iOS App Store: `com.apple.security.smartcard` (the entitlement YubiKit's
+README names for USB-C on iOS 16+) is a **macOS App Sandbox** entitlement, and
+App Store validation rejects it (`Invalid Code Signing Entitlements … key
+'com.apple.security.smartcard' … is not supported`). It signs locally but fails
+at Transporter upload. There is no self-serve capability for it in the Developer
+portal, and no exportOptions hook — so the USB-C smart-card path cannot be
+distributed through the App Store by a third party.
+
+**Resolved transport matrix (YubiKey 5C NFC):**
+
+| Platform | USB-C (CCID) | NFC (ISO7816) |
+|---|---|---|
+| Android | ✅ yubikit-android USB | ✅ |
+| iOS (App Store) | ❌ entitlement rejected | ✅ this is the shipping path |
+
+**iOS = NFC.** App-Store-valid via the **NFC Tag Reading** capability
+(`com.apple.developer.nfc.readersession.formats` = `["TAG"]`, a real
+provisionable App ID capability) plus Info.plist `NFCReaderUsageDescription`
+and `com.apple.developer.nfc.readersession.iso7816.select-identifiers` (PIV +
+YubiKey AIDs). Requires an NFC-capable key (5C NFC); the plain 5C is USB-C-only
+and therefore Android-only. Implemented over `YKFNFCConnection` +
+`YKFPIVSession` (YubiKit 4.4 pod — the CocoaPods `YubiKit` tops out at 4.4).
+
+**Session semantics.** NFC is a modal per-ceremony tap, not a persistent reader:
+`startNFCConnection()` shows the scan sheet, the connection stays open across the
+whole ceremony (verify PIN → touch-gated ECDH in one tap), then
+`stopNFCConnection()` dismisses it. The driver exposes `sessionBased` (true on
+iOS): the ceremony starts the session only when it needs a key (never at launch)
+and stops it on arm/terminal; WalletContext's relock-on-unplug runs only for
+persistent readers (Android USB). iOS relock is purely the PKM retention
+timeout — there is no unplug event after a tap.
+
+Android keeps USB-C (the preferred transport) plus NFC, unchanged.
