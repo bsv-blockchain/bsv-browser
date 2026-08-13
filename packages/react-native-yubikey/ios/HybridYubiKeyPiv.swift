@@ -26,7 +26,16 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
   private var listener: ((String, String, String) -> Void)?
   /// The connection for the key currently on a reader. Set on didConnect*,
   /// cleared on didDisconnect*. Every operation runs against this.
-  private var activeConnection: (any YKFConnectionProtocol)?
+  fileprivate var activeConnection: (any YKFConnectionProtocol)?
+  /// YKFManagerDelegate requires an NSObject conformer, which this Nitro
+  /// HybridObject is not — so the delegate lives on a separate NSObject that
+  /// forwards connect/disconnect back here. Held strong; YubiKitManager keeps
+  /// only a weak reference.
+  private lazy var connDelegate: ConnectionDelegate = {
+    let d = ConnectionDelegate()
+    d.owner = self
+    return d
+  }()
 
   // MARK: - Capability
 
@@ -41,7 +50,7 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
   // MARK: - Discovery
 
   func startDiscovery() throws {
-    YubiKitManager.shared.delegate = self
+    YubiKitManager.shared.delegate = connDelegate
     // USB-C / CCID only. This is called on every wallet launch (the vault
     // relock effect starts discovery), and it must be silent and side-effect
     // free for the vast majority of users who have no YubiKey.
@@ -76,8 +85,21 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     self.listener = nil
   }
 
-  private func emit(_ eventType: String, _ serial: String, _ transport: String) {
+  fileprivate func emit(_ eventType: String, _ serial: String, _ transport: String) {
     listener?(eventType, serial, transport)
+  }
+
+  /// Called by the delegate on a connect: hold the connection and emit.
+  fileprivate func handleConnect(_ connection: any YKFConnectionProtocol, _ transport: String) {
+    activeConnection = connection
+    readSerialAndEmit(connection, transport)
+  }
+
+  /// Called by the delegate on a disconnect: drop the connection if it is the
+  /// one we hold, and emit a removal so the JS layer relocks.
+  fileprivate func handleDisconnect(_ connection: AnyObject, _ transport: String) {
+    if (activeConnection as AnyObject?) === connection { activeConnection = nil }
+    emit("removed", "", transport)
   }
 
   /// Opens a throwaway session just to read the serial for a connect event.
@@ -151,7 +173,7 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     withSession(promise) { session in
       self.authenticateManagementKey(session, promise) {
         session.generateKey(
-          inSlot: pivSlot,
+          in: pivSlot,
           type: .ECCP256,
           pinPolicy: Self.toPinPolicy(pinPolicy),
           touchPolicy: Self.toTouchPolicy(touchPolicy)
@@ -174,9 +196,17 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
       return promise
     }
     withSession(promise) { session in
-      session.getSlotMetadata(pivSlot) { metadata, error in
-        // Empty slot (metadata read fails) is not an error here — null pubkey.
-        guard error == nil, let metadata, let hex = Self.secKeyToSec1Hex(metadata.publicKey) else {
+      // YubiKit 4.4 exposes no slot key-metadata read (getSlotMetadata was added
+      // later / is Android-only here). We use the slot CERTIFICATE as the
+      // occupancy signal: PIV tooling that owns a retired slot (age-plugin-
+      // yubikey, ykman) writes an X.509 cert alongside the key, so a present
+      // cert means "occupied — don't overwrite". Limitation: a bare keypair
+      // with no cert reads as empty on iOS; the enrollment flow only generates
+      // over confirmed-empty slots, and this still protects the common case.
+      session.getCertificateIn(pivSlot) { certificate, error in
+        guard error == nil, let certificate,
+              let pub = SecCertificateCopyKey(certificate),
+              let hex = Self.secKeyToSec1Hex(pub) else {
           return promise.resolve(withResult: "{\"publicKey\":null}")
         }
         promise.resolve(withResult: "{\"publicKey\":\"\(hex)\"}")
@@ -202,7 +232,7 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
         // TOUCH-gated when the key was generated with TouchPolicy.ALWAYS: this
         // waits for the user to tap the key, and surfaces as touch-timeout if
         // they never do (see mapError).
-        session.calculateSecretKey(inSlot: pivSlot, peerPublicKey: peerKey) { secret, error in
+        session.calculateSecretKey(in: pivSlot, peerPublicKey: peerKey) { secret, error in
           if let error { return promise.reject(withError: Self.mapError(error)) }
           guard let secret else {
             return promise.reject(withError: Self.vaultError("touch-timeout", "no shared secret returned"))
@@ -244,7 +274,9 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
   ) {
     let version = session.version
     let fw57 = version.major > 5 || (version.major == 5 && version.minor >= 7)
-    let type: YKFPIVManagementKeyType = fw57 ? .aes192 : .tripleDES
+    // 4.4: these are class factory methods on YKFPIVManagementKeyType, so call
+    // them (they are not enum cases).
+    let type: YKFPIVManagementKeyType = fw57 ? .aes192() : .tripleDES()
     session.authenticate(withManagementKey: Self.defaultManagementKey, type: type) { error in
       if error != nil {
         return promise.reject(withError: Self.vaultError("mgmt-key-custom", "default management key rejected"))
@@ -335,37 +367,32 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
 
 // MARK: - Discovery delegate
 
-extension HybridYubiKeyPiv: YKFManagerDelegate {
+/// YKFManagerDelegate is declared `<NSObject>`, so its conformer must be an
+/// NSObject — which the Nitro HybridObject is not. This lightweight NSObject
+/// holds a weak back-reference and forwards every connect/disconnect to the
+/// owner. The SmartCard callbacks carry no availability annotation in YubiKit
+/// 4.4's protocol, so none is needed here (startSmartCardConnection, which is
+/// iOS 16+, is already guarded at the call site).
+private final class ConnectionDelegate: NSObject, YKFManagerDelegate {
+  weak var owner: HybridYubiKeyPiv?
+
   func didConnectNFC(_ connection: YKFNFCConnection) {
-    activeConnection = connection
-    readSerialAndEmit(connection, "nfc")
+    owner?.handleConnect(connection, "nfc")
   }
-
   func didDisconnectNFC(_ connection: YKFNFCConnection, error: Error?) {
-    if activeConnection === connection { activeConnection = nil }
-    emit("removed", "", "nfc")
+    owner?.handleDisconnect(connection, "nfc")
   }
-
   func didConnectAccessory(_ connection: YKFAccessoryConnection) {
-    activeConnection = connection
-    readSerialAndEmit(connection, "usb")
+    owner?.handleConnect(connection, "usb")
   }
-
   func didDisconnectAccessory(_ connection: YKFAccessoryConnection, error: Error?) {
-    if activeConnection === connection { activeConnection = nil }
-    emit("removed", "", "usb")
+    owner?.handleDisconnect(connection, "usb")
   }
-
-  @available(iOS 16.0, *)
   func didConnectSmartCard(_ connection: YKFSmartCardConnection) {
-    activeConnection = connection
-    readSerialAndEmit(connection, "usb")
+    owner?.handleConnect(connection, "usb")
   }
-
-  @available(iOS 16.0, *)
   func didDisconnectSmartCard(_ connection: YKFSmartCardConnection, error: Error?) {
-    if activeConnection === connection { activeConnection = nil }
-    emit("removed", "", "usb")
+    owner?.handleDisconnect(connection, "usb")
   }
 }
 
