@@ -19,7 +19,12 @@ import { PrivateKey, KeyDeriver, HD, Mnemonic, WalletProtocol } from '@bsv/sdk'
 import { getVaultDriver } from './driver'
 import { vaultStore, VaultMeta } from './vaultStore'
 import { sealVaultKey } from './sealing'
-import { VaultError } from './types'
+import { VaultError, SealedBlob } from './types'
+
+export interface PendingEnrollment {
+  seal: SealedBlob
+  meta: VaultMeta
+}
 
 export const VAULT_SLOT = 0x82
 export const VAULT_PROTOCOL: WalletProtocol = [2, 'vault']
@@ -52,25 +57,26 @@ export async function enrollVault(args: {
    * new PIN the user chose. If omitted, enrollment proceeds on the default PIN
    * (dev/test convenience). */
   requestPinChange?: (retries: number) => Promise<{ oldPin: string; newPin: string }>
-}): Promise<{ backupMnemonic: string }> {
+}): Promise<{ backupMnemonic: string; pending: PendingEnrollment }> {
   const driver = getVaultDriver()
   if (!driver) throw new VaultError('driver-unavailable')
 
   args.onPhase('connecting')
   const info = await driver.getKeyInfo()
+  // A key whose PIN is already blocked cannot be enrolled — say so before we
+  // burn anything (fix #5: never probe, surface pin-locked up front).
+  if (info.pinRetries === 0) throw new VaultError('pin-locked', 'PIN is blocked')
 
-  // Force a PIN change off the factory default when we can detect it.
+  // Factory-default detection is exactly "the PIN the user entered is the
+  // default" — no side probe against '123456', which would spend one of three
+  // PIV retries on a key that is NOT on the factory PIN (fix #5).
   args.onPhase('pin-check')
   let pin = await args.getPin()
-  if (args.requestPinChange) {
-    const probe = await driver.verifyPin(DEFAULT_PIV_PIN).catch(() => ({ ok: false, retriesLeft: 0 }))
-    if (probe.ok) {
-      const { oldPin, newPin } = await args.requestPinChange(info.pinRetries)
-      await driver.changePin(oldPin, newPin)
-      pin = newPin
-    }
+  if (pin === DEFAULT_PIV_PIN && args.requestPinChange) {
+    const { oldPin, newPin } = await args.requestPinChange(info.pinRetries)
+    await driver.changePin(oldPin, newPin)
+    pin = newPin
   }
-  // Ensure the PIN is valid before we commit an enrollment around it.
   const verified = await driver.verifyPin(pin)
   if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)
 
@@ -82,12 +88,12 @@ export async function enrollVault(args: {
   const backupMnemonic = Mnemonic.fromRandom(256).toString()
   const v = deriveVaultKey(backupMnemonic)
 
-  // Seal V to the token (software-only) and persist.
+  // Build the seal + meta but DO NOT persist yet (fix #4). Nothing touches
+  // disk until the caller confirms the backup phrase via finalizeEnrollment —
+  // so a user who backs out on the backup step is simply not enrolled, never
+  // enrolled-with-no-phrase.
   args.onPhase('sealing')
   const seal = sealVaultKey(v, publicKey, { slot: VAULT_SLOT, serial: info.serial })
-  await vaultStore.setSeal(seal)
-
-  const depositKeys = deriveDepositKeys(v, 0, DEPOSIT_QUEUE_SIZE)
   const meta: VaultMeta = {
     v: 1,
     enrolledAt: Date.now(),
@@ -95,14 +101,20 @@ export async function enrollVault(args: {
     nickname: args.nickname,
     slot: VAULT_SLOT,
     nextKeyIndex: DEPOSIT_QUEUE_SIZE,
-    depositKeys
+    depositKeys: deriveDepositKeys(v, 0, DEPOSIT_QUEUE_SIZE)
   }
-  await vaultStore.setMeta(meta)
 
   // Drop V.
   v.fill(0)
   args.onPhase('done')
-  return { backupMnemonic }
+  return { backupMnemonic, pending: { seal, meta } }
+}
+
+/** Commit an enrollment produced by enrollVault, after the user has confirmed
+ * the backup phrase. Only here does anything reach disk (fix #4). */
+export async function finalizeEnrollment(pending: { seal: SealedBlob; meta: VaultMeta }): Promise<void> {
+  await vaultStore.setSeal(pending.seal)
+  await vaultStore.setMeta(pending.meta)
 }
 
 /** Recover V from the backup phrase. Throws on an invalid phrase. */

@@ -56,6 +56,24 @@ export function setMockDriver(driver: VaultDriver | null): void {
   injectedMock = driver
 }
 
+/** Normalize a native key event into the driver's vocabulary.
+ *
+ * The native modules emit `connected` / `removed` (iOS YubiKit + Android
+ * yubikit-android naming); the driver — and the mock, ceremony, and tests —
+ * speak `attached` / `detached`. Only an explicit connect is an attach; an
+ * explicit disconnect is a detach; anything unrecognized is treated as a
+ * detach (fail-safe: a stray event relocks rather than silently keeping the
+ * PKM armed). Getting this wrong makes insert read as detach and aborts the
+ * in-flight ceremony as `key-removed-mid-op`. */
+export function mapNativeKeyEvent(eventType: string, serial: string, transport: string): KeyEvent {
+  const attached = eventType === 'attached' || eventType === 'connected'
+  return {
+    type: attached ? 'attached' : 'detached',
+    serial: serial || undefined,
+    transport: (transport as KeyEvent['transport']) || 'usb'
+  }
+}
+
 /** Wrap the native module's JSON-string surface as a VaultDriver. */
 function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
   const parse = async <T>(p: Promise<string>): Promise<T> => {
@@ -70,11 +88,7 @@ function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
     isSupported: () => native.isSupported(),
     start: () => {
       native.setKeyListener((eventType, serial, transport) => {
-        const e: KeyEvent = {
-          type: eventType === 'attached' ? 'attached' : 'detached',
-          serial: serial || undefined,
-          transport: (transport as KeyEvent['transport']) || 'usb'
-        }
+        const e = mapNativeKeyEvent(eventType, serial, transport)
         listeners.forEach(cb => cb(e))
       })
       native.startDiscovery()

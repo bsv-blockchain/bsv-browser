@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons'
 import PressableScale from '@/components/ui/PressableScale'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
-import { enrollVault } from '@/services/vault/VaultKeyService'
+import { enrollVault, finalizeEnrollment, type PendingEnrollment } from '@/services/vault/VaultKeyService'
 import { VaultError } from '@/services/vault/types'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
@@ -46,6 +46,7 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
   const [quizInputs, setQuizInputs] = useState<Record<number, string>>({})
   const [error, setError] = useState<string | null>(null)
   const mnemonicRef = useRef('')
+  const pendingRef = useRef<PendingEnrollment | null>(null)
 
   const requestPin = useCallback(
     () => new Promise<string>((resolve, reject) => setPinReq({ kind: 'pin', resolve, reject })),
@@ -63,12 +64,13 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
     setStep('running')
     setError(null)
     try {
-      const { backupMnemonic } = await enrollVault({
+      const { backupMnemonic, pending } = await enrollVault({
         nickname: nickname.trim() || t('vault_default_nickname'),
         onPhase: p => setPhaseLabel(t(`vault_enroll_phase_${p}`)),
         getPin: requestPin,
         requestPinChange
       })
+      pendingRef.current = pending // held in memory; persisted only after the quiz
       mnemonicRef.current = backupMnemonic
       setMnemonic(backupMnemonic)
       // Pick 3 distinct word positions for the confirmation quiz.
@@ -101,13 +103,16 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
     setNewPinInput('')
   }, [pinReq, pinInput, newPinInput])
 
-  const confirmQuiz = useCallback(() => {
+  const confirmQuiz = useCallback(async () => {
     const ok = quiz.every(q => (quizInputs[q.index] ?? '').trim().toLowerCase() === q.answer.toLowerCase())
     if (!ok) {
       setError(t('vault_backup_quiz_wrong'))
       haptics.error()
       return
     }
+    // Only NOW does the enrollment reach disk (fix #4).
+    if (pendingRef.current) await finalizeEnrollment(pendingRef.current)
+    pendingRef.current = null
     setMnemonic('')
     mnemonicRef.current = ''
     sounds.vaultOpen()

@@ -86,3 +86,23 @@ describe('getVaultDriver', () => {
     expect(getVaultDriver()).toBe(mock)
   })
 })
+
+// ── native event vocabulary (fix #1) ──
+import { mapNativeKeyEvent } from '../../services/vault/driver'
+
+describe('mapNativeKeyEvent', () => {
+  test("native 'connected' maps to attached (not detached)", () => {
+    expect(mapNativeKeyEvent('connected', 'S1', 'usb')).toEqual({ type: 'attached', serial: 'S1', transport: 'usb' })
+  })
+  test("native 'removed' maps to detached", () => {
+    expect(mapNativeKeyEvent('removed', '', 'nfc').type).toBe('detached')
+    expect(mapNativeKeyEvent('removed', '', 'nfc').transport).toBe('nfc')
+  })
+  test("'attached'/'detached' pass through (mock/robustness)", () => {
+    expect(mapNativeKeyEvent('attached', 'x', 'usb').type).toBe('attached')
+    expect(mapNativeKeyEvent('detached', 'x', 'usb').type).toBe('detached')
+  })
+  test('unknown event fails safe to detached', () => {
+    expect(mapNativeKeyEvent('garbage', '', '').type).toBe('detached')
+  })
+})

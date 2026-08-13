@@ -27,6 +27,8 @@ import { router } from 'expo-router'
 
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useWalletManagers } from '@/context/WalletContext'
+import { guardVaultAccess } from '@/services/vault/guard'
+import { ADMIN_ORIGINATOR } from '@/context/config'
 import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
@@ -707,7 +709,11 @@ const Browser = observer(function Browser() {
   const paymentInFlightUrl = useRef<string | null>(null)
   useEffect(() => {
     if (!isWeb2Mode && managers?.walletManager?.authenticated) {
-      setWallet(managers.walletManager)
+      // Guard the wallet exposed to in-tab pages: privileged (vault) ops are
+      // admin-only, so a page cannot enumerate or spend vault funds. The 402
+      // payment handler keeps the raw manager — it only does non-privileged
+      // createAction/signAction, which the guard passes through anyway.
+      setWallet(guardVaultAccess(managers.walletManager as any, ADMIN_ORIGINATOR))
       paymentHandlerRef.current = getPaymentHandler(managers.walletManager)
     } else if (isWeb2Mode) {
       setWallet(undefined)
