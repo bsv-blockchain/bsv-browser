@@ -69,6 +69,9 @@ export class MockYubiKey implements VaultDriver {
     return true
   }
 
+  /** The mock behaves like a persistent reader (insert/remove under test). */
+  sessionBased = false
+
   start(): void {
     /* discovery is driven by insertKey/removeKey in the mock */
   }

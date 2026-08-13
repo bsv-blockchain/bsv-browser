@@ -201,6 +201,8 @@ const resources = {
       vault_enrolled_toast: 'Vault ready',
       // ceremony
       vault_insert_key: 'Insert your YubiKey',
+      vault_hold_key_nfc: 'Hold your YubiKey to the top of your phone',
+      vault_keep_holding_nfc: 'Keep holding — unlocking…',
       vault_reading_key: 'Reading key…',
       vault_enter_pin: 'Enter your PIN',
       vault_touch_contact: 'Touch the gold contact',

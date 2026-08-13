@@ -160,6 +160,31 @@ describe('CeremonyController', () => {
     expect(relocks).toEqual(['timeout'])
   })
 
+  test('session-based driver: stop() is called after arm (dismiss NFC sheet); persistent is not', async () => {
+    // session-based (iOS NFC): stop after arm
+    const nfc = new MockYubiKey()
+    ;(nfc as any).sessionBased = true
+    nfc.insertKey('MOCK-1')
+    const { seal } = await enrollFakeSeal(nfc)
+    const nfcStop = jest.spyOn(nfc, 'stop')
+    const c1 = new CeremonyController({ getDriver: () => nfc, store: fakeStore(seal), retentionMs: RETENTION })
+    const p1 = c1.request('x')
+    c1.submitPin('123456')
+    await p1
+    expect(nfcStop).toHaveBeenCalled()
+
+    // persistent (Android USB): NOT stopped by the ceremony
+    const usb = new MockYubiKey()
+    usb.insertKey('MOCK-1')
+    const { seal: seal2 } = await enrollFakeSeal(usb)
+    const usbStop = jest.spyOn(usb, 'stop')
+    const c2 = new CeremonyController({ getDriver: () => usb, store: fakeStore(seal2), retentionMs: RETENTION })
+    const p2 = c2.request('x')
+    c2.submitPin('123456')
+    await p2
+    expect(usbStop).not.toHaveBeenCalled()
+  })
+
   test('notifyKeyDetached during armed window relocks immediately', async () => {
     const mock = new MockYubiKey()
     mock.insertKey('MOCK-1')

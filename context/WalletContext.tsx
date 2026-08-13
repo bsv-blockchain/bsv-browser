@@ -1640,12 +1640,18 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     }
   }, [])
 
-  // Relock the vault the instant the YubiKey is unplugged. A detach event both
-  // destroys the privileged key held in the PKM's retention window and tells
-  // the ceremony controller (which fires its onRelock → close sound/haptic).
+  // Relock-on-unplug, for PERSISTENT readers only (Android USB). Start discovery
+  // at launch and, when the key is pulled, destroy the cached privileged key and
+  // tell the ceremony (its onRelock fires the close sound/haptic).
+  //
+  // Session-based transports (iOS NFC) are skipped here: they have no persistent
+  // presence — the scan session is opened per ceremony and closed on arm — so
+  // starting discovery at launch would pop the NFC sheet, and a session-end
+  // "detach" is normal, not an unplug. On iOS the vault simply relocks when the
+  // PKM retention window elapses.
   useEffect(() => {
     const driver = getVaultDriver()
-    if (!driver) return
+    if (!driver || driver.sessionBased) return
     driver.start()
     const off = driver.onKeyEvent(e => {
       if (e.type === 'detached') {

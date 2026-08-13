@@ -161,6 +161,14 @@ export class CeremonyController {
       this.running = false
       return
     }
+    // Own driver-event subscription for the ceremony's lifetime: a key
+    // connecting (an NFC tap / a USB plug) resolves waiting-for-key; a key
+    // dropping mid-flow aborts. Self-contained so it works whether or not
+    // WalletContext also watches for persistent relock.
+    const off = driver.onKeyEvent(e => {
+      if (e.type === 'attached') this.notifyKeyAttached()
+      else if (this.running) this.notifyKeyDetached()
+    })
     try {
       const seal = await this.deps.store.getSeal()
       if (!seal) throw new VaultError('not-enrolled')
@@ -205,6 +213,20 @@ export class CeremonyController {
       this.failAll(err)
     } finally {
       this.running = false
+      // Unsubscribe BEFORE stopping so the session-end detach can't relock the
+      // key we just armed.
+      off()
+      // Session-based transports (iOS NFC) hold a modal scan session open for
+      // the whole ceremony; close it now (dismisses the sheet) whether we armed,
+      // errored, or were cancelled. Persistent readers (Android USB) are left
+      // running — WalletContext owns their lifecycle for relock-on-unplug.
+      if (driver.sessionBased) {
+        try {
+          driver.stop()
+        } catch {
+          /* stop is best-effort */
+        }
+      }
     }
   }
 

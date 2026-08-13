@@ -10,7 +10,7 @@
  * (the UIVisualEffectView freeze guardrail).
  */
 import React, { useEffect, useRef, useState } from 'react'
-import { View, Text, StyleSheet, TextInput, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, TextInput, ActivityIndicator, Platform } from 'react-native'
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -94,16 +94,19 @@ export const VaultCeremonySheet: React.FC = () => {
   const reason = state.reason
   const errCode = state.error?.code as VaultErrorCode | undefined
 
+  // iOS talks to the key over NFC (a tap), Android over USB (insert + touch).
+  const nfc = Platform.OS === 'ios'
+
   const title = (() => {
     switch (phase) {
       case 'waiting-for-key':
-        return t('vault_insert_key')
+        return nfc ? t('vault_hold_key_nfc') : t('vault_insert_key')
       case 'connecting':
         return t('vault_reading_key')
       case 'pin-entry':
         return t('vault_enter_pin')
       case 'awaiting-touch':
-        return t('vault_touch_contact')
+        return nfc ? t('vault_keep_holding_nfc') : t('vault_touch_contact')
       case 'unsealing':
         return t('vault_unlocking')
       case 'error':

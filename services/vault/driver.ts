@@ -11,6 +11,7 @@
  * "no YubiKey capability on this device", and every caller treats it as such —
  * the vault UI hides, exactly like localpay's getLocalPayTransport() null path.
  */
+import { Platform } from 'react-native'
 import { vaultErrorFromNative } from './types'
 
 export interface KeyEvent {
@@ -21,6 +22,11 @@ export interface KeyEvent {
 
 export interface VaultDriver {
   isSupported(): boolean
+  /** True when the transport is a modal per-ceremony session (iOS NFC: start()
+   * shows the scan sheet, stop() dismisses it) rather than a persistent reader
+   * (Android USB, mock). Session-based drivers are started only when a ceremony
+   * begins — never at launch — and stopped when it arms or fails. */
+  sessionBased: boolean
   start(): void
   stop(): void
   onKeyEvent(cb: (e: KeyEvent) => void): () => void
@@ -86,7 +92,12 @@ function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
   const listeners = new Set<(e: KeyEvent) => void>()
   return {
     isSupported: () => native.isSupported(),
+    // iOS = NFC (a modal per-tap session); Android = persistent USB reader.
+    sessionBased: Platform.OS === 'ios',
     start: () => {
+      // (Re)install the native listener each start; it forwards into the
+      // persistent JS `listeners` set so app subscribers survive stop/start
+      // cycles (a session-based transport starts and stops per ceremony).
       native.setKeyListener((eventType, serial, transport) => {
         const e = mapNativeKeyEvent(eventType, serial, transport)
         listeners.forEach(cb => cb(e))
@@ -96,7 +107,8 @@ function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
     stop: () => {
       native.stopDiscovery()
       native.clearKeyListener()
-      listeners.clear()
+      // NOTE: do NOT clear `listeners` — app subscribers (WalletContext) stay
+      // subscribed across ceremony sessions.
     },
     onKeyEvent: cb => {
       listeners.add(cb)

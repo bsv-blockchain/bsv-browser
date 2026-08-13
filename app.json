@@ -14,7 +14,7 @@
     },
     "plugins": [
       "./plugins/withWebBrowserEntitlement",
-      "./plugins/withSmartCardEntitlement",
+      "./plugins/withNfcReaderEntitlement",
       [
         "./plugins/withXcodeLastUpgradeVersion",
         {
@@ -154,7 +154,16 @@
         "NSBonjourServices": [
           "_bsvpay._tcp"
         ],
-        "NSLocalNetworkUsageDescription": "BSV Browser uses the local network to send and receive payments directly between nearby devices."
+        "NSLocalNetworkUsageDescription": "BSV Browser uses the local network to send and receive payments directly between nearby devices.",
+        "NFCReaderUsageDescription": "BSV Browser uses NFC to unlock your vault with your YubiKey. Hold the key to the top of your phone when asked.",
+        "com.apple.developer.nfc.readersession.iso7816.select-identifiers": [
+          "A000000308",
+          "A000000308000010000100",
+          "A0000006472F0001",
+          "A0000005272101",
+          "A000000527471117",
+          "A0000005272001"
+        ]
       }
     },
     "owner": "bsvb"

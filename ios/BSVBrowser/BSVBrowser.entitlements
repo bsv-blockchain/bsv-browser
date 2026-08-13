@@ -4,7 +4,9 @@
   <dict>
     <key>com.apple.developer.web-browser</key>
     <true/>
-    <key>com.apple.security.smartcard</key>
-    <true/>
+    <key>com.apple.developer.nfc.readersession.formats</key>
+    <array>
+      <string>TAG</string>
+    </array>
   </dict>
 </plist>

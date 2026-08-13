@@ -1,25 +1,29 @@
+import CoreNFC
 import Foundation
 import YubiKit
 
 /**
- * YubiKeyPiv over Yubico's YubiKit (YKFSmartCardConnection + YKFPIVSession).
+ * YubiKeyPiv over Yubico's YubiKit, NFC transport (`YKFNFCConnection` +
+ * `YKFPIVSession`).
  *
- * Mirrors the Android/yubikit-android backend's contract exactly (the JS
- * wrapper is shared): discovery streams key-connected / key-removed events to
- * the JS listener via YubiKit's `YKFManagerDelegate`, and each Promise-
- * returning method opens a `YKFPIVSession` on the connection currently held
- * open, does its one operation, and resolves/rejects.
+ * WHY NFC and not USB-C on iOS: the USB-C smart-card path
+ * (`YKFSmartCardConnection`) needs `com.apple.security.smartcard`, a macOS App
+ * Sandbox entitlement that iOS App Store validation rejects. NFC ISO7816 is the
+ * only App-Store-valid way for a third-party app to reach a YubiKey's PIV
+ * applet on iOS, via the `com.apple.developer.nfc.readersession.formats` (TAG)
+ * capability + the iso7816 select-identifiers in Info.plist. It requires an
+ * NFC-capable key (e.g. YubiKey 5C NFC). Android keeps USB-C CCID.
  *
- * Every rejection carries a `VAULT_ERR:<code>:<detail>` message (see
- * `mapError`) so the JS vault layer can branch on a stable machine code rather
- * than parse YubiKit's own English. Completion handlers are all guarded — a
- * dropped key or a YubiKit error becomes a rejection, never a crash.
+ * NFC lifecycle: unlike a persistent USB reader, an NFC session is a modal tap
+ * — `startNFCConnection()` shows the system scan sheet, the user holds the key
+ * to the top of the phone, `didConnectNFC` fires, and the connection stays open
+ * (so a whole ceremony — verify PIN then touch-gated ECDH — runs in ONE tap)
+ * until `stopNFCConnection()`. So the JS layer calls start() only when a
+ * ceremony begins (never at launch), and stop() when it arms or fails.
  *
- * The primary transport is the USB-C smart-card reader (`YKFSmartCardConnection`,
- * iOS 16+); NFC and MFi accessory are wired best-effort through the same
- * delegate. The active connection is held in `activeConnection` between the
- * delegate's connect and disconnect callbacks (both delivered on the main
- * thread by YubiKit), which is the only mutable discovery state here.
+ * Every rejection carries a `VAULT_ERR:<code>:<detail>` message (see `mapError`)
+ * so the JS vault layer can branch on a stable machine code. Completion handlers
+ * are all guarded — a dropped tap or a YubiKit error becomes a rejection.
  */
 final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
   /// (eventType, serial, transport) -> Void. Nitro dispatches the call to JS.
@@ -39,40 +43,33 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
 
   // MARK: - Capability
 
-  /// The USB-C smart-card APIs this module is built on (YKFSmartCardConnection)
-  /// require iOS 16. Below that there is no supported CCID transport for a
-  /// hardware key here, so the JS layer treats the device as reader-less and
-  /// stays on its software-key path.
+  /// NFC ISO7816 needs iOS 13+ and NFC hardware. There is no App-Store-valid
+  /// USB-C smart-card path on iOS, so when NFC is unavailable the JS layer
+  /// treats the device as reader-less and stays on its software-key path.
   func isSupported() throws -> Bool {
-    if #available(iOS 16, *) { return true } else { return false }
+    if #available(iOS 13, *) { return NFCReaderSession.readingAvailable } else { return false }
   }
 
-  // MARK: - Discovery
+  // MARK: - Discovery (an NFC tap)
 
+  /// Begin an NFC session — the JS layer calls this only when a ceremony needs a
+  /// key, NEVER at launch (it presents the system scan sheet). The session stays
+  /// open across the whole ceremony until stopDiscovery().
   func startDiscovery() throws {
     YubiKitManager.shared.delegate = connDelegate
-    // USB-C / CCID only. This is called on every wallet launch (the vault
-    // relock effect starts discovery), and it must be silent and side-effect
-    // free for the vast majority of users who have no YubiKey.
-    if #available(iOS 16.0, *) {
-      YubiKitManager.shared.startSmartCardConnection()
+    YubiKitExternalLocalization.nfcScanAlertMessage =
+      "Hold your YubiKey to the top of your phone to unlock the vault."
+    if #available(iOS 13.0, *) {
+      YubiKitManager.shared.startNFCConnection()
     }
-    // MFi accessory (Lightning 5Ci) — silent, harmless where unavailable.
-    YubiKitManager.shared.startAccessoryConnection()
-    // NFC is deliberately NOT started here: startNFCConnection() shows the
-    // system NFC sheet, and this target ships only com.apple.security.smartcard
-    // (no com.apple.developer.nfc.readersession.formats + AIDs). Starting NFC on
-    // launch would surprise non-vault users and no-op without the entitlement.
-    // If a 5C-NFC tap ceremony is ever brought into scope, start NFC from that
-    // explicit user action after adding the NFC entitlement + Info.plist AIDs.
   }
 
+  /// End the NFC session (dismisses the scan sheet). Called on arm / terminal
+  /// error / cancel by the JS ceremony.
   func stopDiscovery() throws {
-    if #available(iOS 16.0, *) {
-      YubiKitManager.shared.stopSmartCardConnection()
+    if #available(iOS 13.0, *) {
+      YubiKitManager.shared.stopNFCConnection()
     }
-    YubiKitManager.shared.stopAccessoryConnection()
-    YubiKitManager.shared.stopNFCConnection()
     YubiKitManager.shared.delegate = nil
     activeConnection = nil
   }
