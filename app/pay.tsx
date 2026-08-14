@@ -114,6 +114,7 @@ export default function PayScreen() {
 
   const params = useLocalSearchParams<{
     cell?: string | string[]
+    direction?: string | string[]
     identityKey?: string | string[]
     sats?: string | string[]
     peerpay?: string | string[]
@@ -135,7 +136,12 @@ export default function PayScreen() {
   // A peerpay link is a request to pay a handle, whatever cell was named.
   const openingCell: PayCell | null = peerpay ? 'pay-handle' : isPayCell(paramCell) ? paramCell : null
 
-  const [direction, setDirection] = useState<Direction>(openingCell?.startsWith('get') ? 'get' : 'pay')
+  // Fixed by how the user got here, not switchable on-screen: a named cell
+  // implies its own direction, and `?direction=get` opens the receive side on
+  // its CHOOSER (no cell), which is what the wallet's "Get paid" button wants —
+  // the transport is still the user's to pick.
+  const direction: Direction =
+    openingCell ? (openingCell.startsWith('get') ? 'get' : 'pay') : firstParam(params.direction) === 'get' ? 'get' : 'pay'
   const [cell, setCell] = useState<PayCell | null>(openingCell)
 
   // Refreshed whenever the wallet finishes building, connectivity changes, or
@@ -223,29 +229,9 @@ export default function PayScreen() {
         queuedSent={queuedSentRows}
         onShowCode={setShowCode}
       />
-      {/* Direction first: it is what the user already knows. */}
-      <View style={[styles.segment, { backgroundColor: colors.fillTertiary }]}>
-        {(['pay', 'get'] as const).map(d => {
-          const active = direction === d
-          return (
-            <PressableScale
-              key={d}
-              onPress={() => setDirection(d)}
-              haptic="tap"
-              scaleTo={0.98}
-              style={[styles.segmentBtn, active && { backgroundColor: colors.background }]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={t(d === 'pay' ? 'pay_direction_pay' : 'pay_direction_receive')}
-            >
-              <Text style={[styles.segmentLabel, { color: active ? colors.textPrimary : colors.textTertiary }]}>
-                {t(d === 'pay' ? 'pay_direction_pay' : 'pay_direction_receive')}
-              </Text>
-            </PressableScale>
-          )
-        })}
-      </View>
-
+      {/* No direction switcher here: the user already chose Pay or Get paid to
+          get to this screen, and the header title says which one they are in.
+          Offering the toggle again would ask a question they just answered. */}
       <View style={styles.rows}>
         {CELLS[direction].map(spec => {
           // Handle needs a message box round-trip and address needs an overlay
@@ -302,8 +288,11 @@ export default function PayScreen() {
           <Ionicons name={I18nManager.isRTL ? 'chevron-forward' : 'chevron-back'} size={24} color={colors.accent} />
         </PressableScale>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          {/* The screen is Payments; `pay` is the direction tab and the CTA. */}
-          {cell ? t(CELL_TITLE_KEYS[cell]) : t('payments')}
+          {/* Inside a rail, the rail names itself. Otherwise the title carries
+              the direction, since the switcher that used to show it is gone. */}
+          {cell
+            ? t(CELL_TITLE_KEYS[cell])
+            : t(direction === 'pay' ? 'pay_direction_pay' : 'pay_direction_receive')}
         </Text>
         <View style={styles.headerBtn} />
       </View>
@@ -346,15 +335,6 @@ const styles = StyleSheet.create({
   headerTitle: { ...typography.headline, fontWeight: '600', flex: 1, textAlign: 'center' },
   bodyWrap: { flex: 1 },
   grid: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
-  segment: { flexDirection: 'row', borderRadius: radii.xl, padding: 2, marginBottom: spacing.xl },
-  segmentBtn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radii.xl - 2
-  },
-  segmentLabel: { ...typography.subhead, fontWeight: '500' },
   rows: { gap: spacing.md },
   codeOverlay: {
     flex: 1,

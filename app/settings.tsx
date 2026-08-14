@@ -123,7 +123,8 @@ export default function SettingsScreen() {
           />
           <ListRow
             label={t('vault_row_title')}
-            icon="lock-closed"
+            icon="safe"
+            iconFamily="material-community"
             iconColor="#30B0C7"
             onPress={() => router.push('/vault' as any)}
             isLast

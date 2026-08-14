@@ -1,6 +1,6 @@
 import React from 'react'
 import { StyleSheet, Text, View } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography } from '@/context/theme/tokens'
 import PressableScale from '@/components/ui/PressableScale'
@@ -8,7 +8,13 @@ import PressableScale from '@/components/ui/PressableScale'
 interface ListRowProps {
   label: string
   value?: string
-  icon?: keyof typeof Ionicons.glyphMap
+  /** Ionicons name by default; a MaterialCommunityIcons name when
+   * `iconFamily="material-community"`. */
+  icon?: keyof typeof Ionicons.glyphMap | keyof typeof MaterialCommunityIcons.glyphMap
+  /** Ionicons covers almost everything here, but a few concepts have no glyph
+   * in it (e.g. a bank vault — `lock-closed` reads as a generic padlock).
+   * Opt into MaterialCommunityIcons per row for those. */
+  iconFamily?: 'ionicons' | 'material-community'
   iconColor?: string
   onPress?: () => void
   showChevron?: boolean
@@ -26,6 +32,7 @@ export const ListRow: React.FC<ListRowProps> = ({
   label,
   value,
   icon,
+  iconFamily = 'ionicons',
   iconColor,
   onPress,
   showChevron = true,
@@ -40,7 +47,15 @@ export const ListRow: React.FC<ListRowProps> = ({
     <View style={[styles.container, !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }]}>
       {icon && (
         <View style={[styles.iconContainer, { backgroundColor: iconColor || colors.accent }]}>
-          <Ionicons name={icon} size={18} color="#FFFFFF" />
+          {iconFamily === 'material-community' ? (
+            <MaterialCommunityIcons
+              name={icon as keyof typeof MaterialCommunityIcons.glyphMap}
+              size={18}
+              color="#FFFFFF"
+            />
+          ) : (
+            <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={18} color="#FFFFFF" />
+          )}
         </View>
       )}
       <Text

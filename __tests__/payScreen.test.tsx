@@ -127,13 +127,23 @@ describe('PayScreen', () => {
     expect(getByText('pay_cell_address_pay')).toBeTruthy()
   })
 
-  it('titles the screen Payments, keeping Pay for the direction tab', () => {
-    // The screen is a destination ("Payments"); `pay` is a direction and a verb
-    // on the button. Conflating them was the original naming mistake.
-    const { getByText } = draw()
-    expect(getByText('payments')).toBeTruthy()
+  it('titles the screen with the direction it was opened in, with no switcher', () => {
+    // The direction is chosen before arriving (Pay vs Get paid on the wallet
+    // screen), so the title carries it and the old segmented switcher is gone —
+    // re-offering the choice would ask a question the user just answered.
+    const { getByText, queryByText } = draw()
     expect(getByText('pay_direction_pay')).toBeTruthy()
+    expect(queryByText('pay_direction_receive')).toBeNull()
+  })
+
+  it('titles the screen Get paid and lists the receive rows for ?direction=get', () => {
+    mockParams.direction = 'get'
+    const { getByText, queryByText } = draw()
     expect(getByText('pay_direction_receive')).toBeTruthy()
+    expect(queryByText('pay_direction_pay')).toBeNull()
+    expect(getByText('pay_cell_nearby_get')).toBeTruthy()
+    expect(getByText('pay_cell_handle_get')).toBeTruthy()
+    expect(getByText('pay_cell_address_get')).toBeTruthy()
   })
 
   it('opens the handle cell when a deep link names it', () => {

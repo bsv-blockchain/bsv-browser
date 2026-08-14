@@ -42,6 +42,13 @@ export type VaultErrorCode =
   | 'below-dust'
   | 'no-transaction'
   | 'nfc-lost'
+  /** Vault passphrase missing or empty — an empty one would collide with the
+   * main wallet's master key. */
+  | 'bad-passphrase'
+  /** Main wallet recovery phrase failed BIP39 validation. */
+  | 'bad-mnemonic'
+  /** Deposit index outside the non-hardened BIP32 range. */
+  | 'bad-derivation-index'
 
 export class VaultError extends Error {
   code: VaultErrorCode

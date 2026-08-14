@@ -21,7 +21,7 @@ import Animated, {
 import Fuse from 'fuse.js'
 import { Ionicons } from '@expo/vector-icons'
 import { observer } from 'mobx-react-lite'
-import { useFocusEffect } from 'expo-router'
+import { useFocusEffect, router } from 'expo-router'
 
 import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -1120,7 +1120,9 @@ export const AddressBar = observer(
                 onShowTabs()
               }}
               onNewTab={onNewTab}
-              onSettings={() => onOpenSheet('settings')}
+              // Full-screen wallet, not a bottom sheet: balance, the three
+              // destinations, and activity all live on one screen now.
+              onSettings={() => router.push('/wallet')}
               onEnableWeb3={onEnableWeb3}
               onConnections={onConnections}
               onToggleDesktopMode={() => {

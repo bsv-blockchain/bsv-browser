@@ -10,7 +10,7 @@
  */
 import React, { useEffect, useState, useCallback } from 'react'
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '@/context/theme/ThemeContext'
@@ -20,14 +20,11 @@ import { ListRow } from '@/components/ui/ListRow'
 import PressableScale from '@/components/ui/PressableScale'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { EnrollWizard } from '@/components/vault/EnrollWizard'
-import { TransferSheet } from '@/components/vault/TransferSheet'
 import { useVaultBalance } from '@/hooks/useVaultBalance'
 import { vaultStore, VaultMeta } from '@/services/vault/vaultStore'
 import { getVaultDriver } from '@/services/vault/driver'
-import { disableVault, recoverVaultKey } from '@/services/vault/VaultKeyService'
-import { sweepVaultWithKey, VaultWallet } from '@/services/vault/transfers'
+import { disableVault } from '@/services/vault/VaultKeyService'
 import { useWallet } from '@/context/WalletContext'
-import { RecoverSheet } from '@/components/vault/RecoverSheet'
 import { showAlert } from '@/components/ui/AlertCard'
 import { showToast } from '@/components/ui/Toast'
 import { haptics } from '@/hooks/useHaptics'
@@ -42,8 +39,6 @@ export default function VaultScreen() {
   const [enrolled, setEnrolled] = useState<boolean | null>(null)
   const [meta, setMeta] = useState<VaultMeta | null>(null)
   const [enrolling, setEnrolling] = useState(false)
-  const [transfer, setTransfer] = useState<'deposit' | 'withdraw' | null>(null)
-  const [recovering, setRecovering] = useState(false)
   const { managers, adminOriginator, destroyPrivilegedKey } = useWallet()
 
   const supported = getVaultDriver()?.isSupported() ?? false
@@ -92,30 +87,10 @@ export default function VaultScreen() {
     await reload()
   }, [balance, reload, destroyPrivilegedKey])
 
-  // Recovery: enter the backup phrase, sweep all vault funds to the everyday
-  // balance with the phrase key (no YubiKey), then clear the vault. This is the
-  // escape hatch when the key is lost or bricked.
-  const runRecovery = useCallback(
-    async (phrase: string) => {
-      const pm = managers?.permissionsManager
-      if (!pm) throw new Error('wallet not ready')
-      const v = await recoverVaultKey(phrase) // throws on an invalid phrase
-      await sweepVaultWithKey(pm as unknown as VaultWallet, adminOriginator, v, t('vault_recover_reason'))
-      await disableVault()
-      destroyPrivilegedKey()
-      haptics.success()
-      showToast(t('vault_recovered_toast'), { type: 'success' })
-      setRecovering(false)
-      await reload()
-      refresh()
-    },
-    [managers?.permissionsManager, adminOriginator, reload, refresh, destroyPrivilegedKey]
-  )
-
   const Header = (
     <View style={[styles.header, { borderBottomColor: colors.separator }]}>
       <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-        <Ionicons name="chevron-back" size={24} color={colors.accent} />
+        <Ionicons name="chevron-back" size={24} color={colors.info} />
       </TouchableOpacity>
       <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('vault_title')}</Text>
       <View style={styles.iconBtn} />
@@ -163,8 +138,10 @@ export default function VaultScreen() {
       <View style={[styles.container, { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }]}>
         {Header}
         <ScrollView contentContainerStyle={styles.centered}>
-          <View style={[styles.heroBadge, { backgroundColor: colors.accent }]}>
-            <Ionicons name="lock-closed" size={40} color={colors.textOnAccent} />
+          {/* Quiet outline, not an accent fill: the CTA below is the only
+              accent-filled element on this screen, so it wins the eye. */}
+          <View style={[styles.heroBadge, { borderColor: colors.separator }]}>
+            <MaterialCommunityIcons name="safe" size={40} color={colors.textSecondary} />
           </View>
           <Text style={[styles.h1, { color: colors.textPrimary }]}>{t('vault_hero_title')}</Text>
           <Text style={[styles.p, { color: colors.textSecondary }]}>{t('vault_hero_body')}</Text>
@@ -201,7 +178,7 @@ export default function VaultScreen() {
         <View style={styles.actions}>
           <PressableScale
             haptic="confirm"
-            onPress={() => setTransfer('deposit')}
+            onPress={() => router.push('/vault-transfer?direction=deposit')}
             style={[styles.actionBtn, { backgroundColor: colors.accent }]}
           >
             <Ionicons name="arrow-down" size={18} color={colors.textOnAccent} />
@@ -209,7 +186,7 @@ export default function VaultScreen() {
           </PressableScale>
           <PressableScale
             haptic="confirm"
-            onPress={() => setTransfer('withdraw')}
+            onPress={() => router.push('/vault-transfer?direction=withdraw')}
             style={[styles.actionBtn, { backgroundColor: colors.backgroundElevated, borderColor: colors.separator, borderWidth: StyleSheet.hairlineWidth }]}
           >
             <Ionicons name="arrow-up" size={18} color={colors.accent} />
@@ -240,7 +217,7 @@ export default function VaultScreen() {
             label={t('vault_recover_row')}
             icon="medkit-outline"
             iconColor={colors.info ?? colors.accent}
-            onPress={() => setRecovering(true)}
+            onPress={() => router.push('/vault-recover')}
           />
           <ListRow
             label={t('vault_disable_row')}
@@ -253,8 +230,6 @@ export default function VaultScreen() {
         </GroupedSection>
       </ScrollView>
 
-      <TransferSheet direction={transfer} onClose={() => setTransfer(null)} onComplete={refresh} />
-      <RecoverSheet visible={recovering} onClose={() => setRecovering(false)} onRecover={runRecovery} />
     </View>
   )
 }
@@ -265,17 +240,45 @@ const styles = StyleSheet.create({
   iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { ...typography.headline },
   centered: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.lg },
-  content: { padding: spacing.lg, gap: spacing.xl },
-  heroBadge: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
+  // NO horizontal padding here. GroupedSection insets itself (its card carries
+  // marginHorizontal: spacing.lg, its header paddingHorizontal: spacing.xl), so
+  // padding this container double-inset every grouped card to 32pt while the
+  // balance and action row sat at 16pt — three different left edges on one
+  // screen. Direct children now carry their own gutter instead, matching the
+  // house pattern in app/settings.tsx and app/wallet-config.tsx.
+  content: { paddingTop: spacing.lg, paddingBottom: spacing.xxxl },
+  gutter: { paddingHorizontal: spacing.lg },
+  heroBadge: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth
+  },
   h1: { ...typography.title1, textAlign: 'center' },
   h2: { ...typography.title3, textAlign: 'center' },
   p: { ...typography.subhead, textAlign: 'center' },
   primary: { width: '100%', borderRadius: radii.md, paddingVertical: spacing.lg, alignItems: 'center' },
   primaryLabel: { ...typography.headline },
-  balanceBlock: { alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
-  balanceLabel: { ...typography.footnote, textTransform: 'uppercase' },
-  balance: { ...typography.display },
-  actions: { flexDirection: 'row', gap: spacing.md },
+  balanceBlock: {
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.lg
+  },
+  // No textTransform, matching the wallet screen: "Vault holds" is a phrase
+  // leading into the amount, and casing belongs to the translation.
+  balanceLabel: { ...typography.footnote },
+  // tabular-nums so the balance does not jitter as digits change — the repo
+  // convention (NearbyFlow, AmountInput).
+  balance: { ...typography.display, fontVariant: ['tabular-nums'] },
+  actions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xxl
+  },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, borderRadius: radii.md, paddingVertical: spacing.lg },
   actionLabel: { ...typography.headline }
 })

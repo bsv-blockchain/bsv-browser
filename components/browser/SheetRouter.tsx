@@ -11,7 +11,6 @@ import type { SheetContextType } from '@/context/SheetContext'
 import { BrowserPage } from '@/components/browser/BrowserPage'
 import { HistoryList } from '@/components/browser/HistoryList'
 import { BookmarkList } from '@/components/browser/BookmarkList'
-import SettingsScreen from '@/app/settings'
 import Sheet from '@/components/ui/Sheet'
 
 type Props = {
@@ -43,9 +42,10 @@ export function SheetRouter({
   const isNewTab = activeTab?.url === kNEW_TAB_URL
 
   const FULL_PAGE_ROUTES = ['bookmarks', 'history'] as const
-  const FIT_CONTENT_ROUTES = ['settings'] as const
   const isFullPage = FULL_PAGE_ROUTES.includes(sheet.route as any)
-  const isFitContent = FIT_CONTENT_ROUTES.includes(sheet.route as any)
+  // No route is fit-content any more: the wallet menu became a full screen
+  // (app/wallet.tsx) rather than a bottom sheet.
+  const isFitContent = false
 
   const getSheetTitle = (): string | undefined => {
     switch (sheet.route) {
@@ -97,7 +97,6 @@ export function SheetRouter({
         />
       )}
 
-      {sheet.route === 'settings' && <SettingsScreen />}
     </Sheet>
   )
 }

@@ -17,18 +17,44 @@ import { SealedBlob } from './types'
 const SEAL_KEY = 'vault_seal_v1'
 const META_KEY = 'vault_meta_v1'
 
-export interface VaultMeta {
-  v: 1
+interface VaultMetaCommon {
   enrolledAt: number
   yubiSerial: string
   nickname: string
   slot: number
-  /** Next unused index for keyID 'vault/<n>' — monotonic, never reused. */
+  /** Next unused deposit index — monotonic, never reused. */
   nextKeyIndex: number
-  /** Precomputed deposit keys so deposits never need the YubiKey. */
-  depositKeys: { keyID: string; pkh: string }[]
   lastUsedAt?: number
 }
+
+/**
+ * Legacy enrollment: V was a second random 24-word mnemonic, and deposits drew
+ * from a precomputed queue of BRC-42 key hashes that had to be refilled by a
+ * privileged ceremony once exhausted.
+ *
+ * Still read (never written) so existing vaults keep working — the seal is
+ * opaque to how V was derived, so device+PIN is unaffected. Only the
+ * mnemonic-recovery path differs by version.
+ */
+export interface VaultMetaV1 extends VaultMetaCommon {
+  v: 1
+  depositKeys: { keyID: string; pkh: string }[]
+}
+
+/**
+ * Current enrollment: V derives from the main wallet mnemonic plus a vault
+ * passphrase, and deposit addresses are BIP32 children of the stored xpub.
+ * No queue, no refill ceremony, unlimited addresses.
+ */
+export interface VaultMetaV2 extends VaultMetaCommon {
+  v: 2
+  /** Public-only vault node. Derives every deposit address; cannot spend. */
+  xpub: string
+}
+
+export type VaultMeta = VaultMetaV1 | VaultMetaV2
+
+export const isV2 = (m: VaultMeta | null): m is VaultMetaV2 => m?.v === 2
 
 const secureOpts = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY }
 
@@ -65,20 +91,37 @@ export const vaultStore = {
     await AsyncStorage.setItem(META_KEY, JSON.stringify(m))
   },
 
-  /** Pop the next deposit key off the queue (persisted immediately).
-   * Returns null when the queue is empty — callers replenish via ceremony. */
+  /**
+   * Reserve the next deposit index and advance the counter.
+   *
+   * Persisted before returning: a crash between deposits must never reissue an
+   * index, since two deposits to the same address are linkable and confusing.
+   * Returns null when there is no enrollment.
+   */
+  async takeNextIndex(): Promise<number | null> {
+    const meta = await vaultStore.getMeta()
+    if (!meta) return null
+    const index = meta.nextKeyIndex
+    await vaultStore.setMeta({ ...meta, nextKeyIndex: index + 1 })
+    return index
+  },
+
+  /** v1 only. Pop the next deposit key off the legacy queue (persisted
+   * immediately). Returns null when the queue is empty — v1 callers had to
+   * replenish via a privileged ceremony. */
   async popDepositKey(): Promise<{ keyID: string; pkh: string } | null> {
     const meta = await vaultStore.getMeta()
-    if (!meta || meta.depositKeys.length === 0) return null
+    if (!meta || meta.v !== 1 || meta.depositKeys.length === 0) return null
     const [head, ...rest] = meta.depositKeys
     await vaultStore.setMeta({ ...meta, depositKeys: rest })
     return head
   },
 
-  /** Append freshly derived deposit keys and advance the index cursor. */
+  /** v1 only. Append freshly derived deposit keys and advance the cursor. */
   async pushDepositKeys(keys: { keyID: string; pkh: string }[], nextKeyIndex: number): Promise<void> {
     const meta = await vaultStore.getMeta()
     if (!meta) throw new Error('vaultStore: no meta to push deposit keys into')
+    if (meta.v !== 1) throw new Error('vaultStore: deposit-key queue is v1 only')
     await vaultStore.setMeta({
       ...meta,
       depositKeys: [...meta.depositKeys, ...keys],

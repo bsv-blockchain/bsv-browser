@@ -1,21 +1,26 @@
 /**
- * Vault enrollment wizard — intro → insert → (PIN change if factory) → generate
- * (touch) → show backup phrase once → confirm quiz → done.
+ * Vault enrollment wizard — intro → passphrase → PIN → tap → done.
  *
- * enrollVault() drives the YubiKey directly (getKeyInfo → PIN → generate); this
- * component supplies the PIN and pin-change prompts and renders the phase it
- * reports. The backup phrase is shown exactly once and gated behind a 3-word
- * confirmation quiz, mirroring app/auth/mnemonic.tsx — losing both the key and
- * the phrase means losing the vault.
+ * The vault key is derived from the wallet's EXISTING mnemonic plus a vault
+ * passphrase, so there is no second phrase to write down and no confirmation
+ * quiz. What replaces them is the passphrase step: a strength meter, because
+ * the KDF is only 2048 rounds, and a confirm field, because BIP39 passphrases
+ * have no checksum and a typo silently opens a different, empty vault.
+ *
+ * enrollVault() drives the YubiKey (getKeyInfo → PIN → generate). Every prompt
+ * is gathered BEFORE the tap, since the NFC sheet covers the app.
  */
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { View, Text, StyleSheet, TextInput, ScrollView, ActivityIndicator } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import PressableScale from '@/components/ui/PressableScale'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
-import { enrollVault, finalizeEnrollment, type PendingEnrollment } from '@/services/vault/VaultKeyService'
+import { enrollVault, finalizeEnrollment } from '@/services/vault/VaultKeyService'
 import { VaultError } from '@/services/vault/types'
+import { PassphraseField } from './PassphraseField'
+import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { printRecoveryShares } from '@/utils/printRecoveryShares'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
 import { showToast } from '@/components/ui/Toast'
@@ -23,9 +28,8 @@ import i18n from '@/context/i18n/translations'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 
-type Step = 'intro' | 'running' | 'backup' | 'confirm' | 'done'
+type Step = 'intro' | 'passphrase' | 'running' | 'done'
 
-// A deferred prompt the wizard resolves when the user submits the PIN.
 interface PinRequest {
   kind: 'pin' | 'change'
   retries?: number
@@ -33,20 +37,23 @@ interface PinRequest {
   reject: (e: unknown) => void
 }
 
-export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }> = ({ onDone, onCancel }) => {
+export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }> = ({
+  onDone,
+  onCancel
+}) => {
   const { colors } = useTheme()
+  const { getMnemonic, getRecoveredKey } = useLocalStorage()
   const [step, setStep] = useState<Step>('intro')
   const [nickname, setNickname] = useState('')
+  const [passphrase, setPassphrase] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [passphraseOk, setPassphraseOk] = useState(false)
   const [phaseLabel, setPhaseLabel] = useState('')
   const [pinReq, setPinReq] = useState<PinRequest | null>(null)
   const [pinInput, setPinInput] = useState('')
   const [newPinInput, setNewPinInput] = useState('')
-  const [mnemonic, setMnemonic] = useState('')
-  const [quiz, setQuiz] = useState<{ index: number; answer: string }[]>([])
-  const [quizInputs, setQuizInputs] = useState<Record<number, string>>({})
+  const [printing, setPrinting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const mnemonicRef = useRef('')
-  const pendingRef = useRef<PendingEnrollment | null>(null)
 
   const requestPin = useCallback(
     () => new Promise<string>((resolve, reject) => setPinReq({ kind: 'pin', resolve, reject })),
@@ -60,34 +67,66 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
     []
   )
 
+  const onPrintShares = useCallback(async () => {
+    if (printing) return
+    setPrinting(true)
+    try {
+      const ok = await printRecoveryShares({
+        mnemonic: await getMnemonic(),
+        recoveredKeyWif: await getRecoveredKey?.()
+      })
+      if (!ok) showToast(t('vault_shares_unavailable'), { type: 'error' })
+    } catch {
+      // Print sheet dismissed or unavailable — not an error worth blocking on.
+    } finally {
+      setPrinting(false)
+    }
+  }, [printing, getMnemonic, getRecoveredKey])
+
+  // Gate: a wallet restored from backup shares has no mnemonic, so it can
+  // neither enroll nor ever recover a vault. Refuse rather than create a vault
+  // with only one recovery path.
+  const toPassphrase = useCallback(async () => {
+    setError(null)
+    const mnemonic = await getMnemonic()
+    if (!mnemonic) {
+      setError(t('vault_requires_mnemonic'))
+      haptics.error()
+      return
+    }
+    setStep('passphrase')
+  }, [getMnemonic])
+
   const start = useCallback(async () => {
     setStep('running')
     setError(null)
     try {
-      const { backupMnemonic, pending } = await enrollVault({
+      const mnemonic = await getMnemonic()
+      if (!mnemonic) throw new VaultError('bad-mnemonic', t('vault_requires_mnemonic'))
+      const { pending } = await enrollVault({
         nickname: nickname.trim() || t('vault_default_nickname'),
+        mnemonic,
+        passphrase,
         onPhase: p => setPhaseLabel(t(`vault_enroll_phase_${p}`)),
         getPin: requestPin,
         requestPinChange
       })
-      pendingRef.current = pending // held in memory; persisted only after the quiz
-      mnemonicRef.current = backupMnemonic
-      setMnemonic(backupMnemonic)
-      // Pick 3 distinct word positions for the confirmation quiz.
-      const words = backupMnemonic.split(' ')
-      const idxs = new Set<number>()
-      let guard = 0
-      while (idxs.size < 3 && guard++ < 100) idxs.add(Math.floor((words.length * (idxs.size + 1)) / 4))
-      setQuiz(Array.from(idxs).map(index => ({ index, answer: words[index] })))
+      await finalizeEnrollment(pending)
+      setPassphrase('')
+      setConfirm('')
+      sounds.vaultOpen()
       haptics.success()
-      setStep('backup')
+      showToast(t('vault_enrolled_toast'), { type: 'success' })
+      setStep('done')
+      onDone()
     } catch (e) {
-      const msg = e instanceof VaultError ? t(`vault_err_${e.code.replace(/-/g, '_')}`, {}) : String(e)
+      const msg =
+        e instanceof VaultError ? t(`vault_err_${e.code.replace(/-/g, '_')}`, {}) : String(e)
       setError(msg || t('vault_err_generic'))
       haptics.error()
-      setStep('intro')
+      setStep('passphrase')
     }
-  }, [nickname, requestPin, requestPinChange])
+  }, [nickname, passphrase, getMnemonic, requestPin, requestPinChange, onDone])
 
   const submitPin = useCallback(() => {
     if (!pinReq) return
@@ -103,63 +142,140 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
     setNewPinInput('')
   }, [pinReq, pinInput, newPinInput])
 
-  const confirmQuiz = useCallback(async () => {
-    const ok = quiz.every(q => (quizInputs[q.index] ?? '').trim().toLowerCase() === q.answer.toLowerCase())
-    if (!ok) {
-      setError(t('vault_backup_quiz_wrong'))
-      haptics.error()
-      return
-    }
-    // Only NOW does the enrollment reach disk (fix #4).
-    if (pendingRef.current) await finalizeEnrollment(pendingRef.current)
-    pendingRef.current = null
-    setMnemonic('')
-    mnemonicRef.current = ''
-    sounds.vaultOpen()
-    haptics.success()
-    showToast(t('vault_enrolled_toast'), { type: 'success' })
-    setStep('done')
-    onDone()
-  }, [quiz, quizInputs, onDone])
-
-  // ── render per step ─────────────────────────────────────────────────
+  // ── intro ───────────────────────────────────────────────────────────
   if (step === 'intro') {
     return (
       <ScrollView contentContainerStyle={styles.body}>
-        <Ionicons name="lock-closed" size={48} color={colors.accent} style={styles.hero} />
+        <MaterialCommunityIcons name="safe" size={48} color={colors.textPrimary} style={styles.hero} />
         <Text style={[styles.h1, { color: colors.textPrimary }]}>{t('vault_enroll_title')}</Text>
         <Text style={[styles.p, { color: colors.textSecondary }]}>{t('vault_enroll_intro')}</Text>
+
         <TextInput
-          style={[styles.input, { color: colors.textPrimary, backgroundColor: colors.backgroundSecondary }]}
+          style={[
+            styles.input,
+            { color: colors.textPrimary, backgroundColor: colors.backgroundSecondary }
+          ]}
           value={nickname}
           onChangeText={setNickname}
           placeholder={t('vault_nickname_placeholder')}
           placeholderTextColor={colors.textTertiary}
           maxLength={24}
         />
+
+        <RecoveryPaths />
+
+        <PressableScale
+          onPress={onPrintShares}
+          style={[styles.ghost, { borderColor: colors.separator }]}
+        >
+          {printing ? (
+            <ActivityIndicator color={colors.info} size="small" />
+          ) : (
+            <Ionicons name="print-outline" size={16} color={colors.info} />
+          )}
+          <Text style={[styles.ghostLabel, { color: colors.info }]}>
+            {t('vault_print_shares_cta')}
+          </Text>
+        </PressableScale>
+        <Text style={[styles.fine, { color: colors.textTertiary }]}>
+          {t('vault_print_shares_note')}
+        </Text>
+
         {error && <Text style={[styles.err, { color: colors.error }]}>{error}</Text>}
-        <PressableScale haptic="confirm" onPress={start} style={[styles.primary, { backgroundColor: colors.accent }]}>
-          <Text style={[styles.primaryLabel, { color: colors.textOnAccent }]}>{t('vault_enroll_begin')}</Text>
+        <PressableScale
+          haptic="confirm"
+          onPress={toPassphrase}
+          style={[styles.primary, { backgroundColor: colors.accent }]}
+        >
+          <Text style={[styles.primaryLabel, { color: colors.textOnAccent }]}>
+            {t('vault_continue')}
+          </Text>
         </PressableScale>
         <PressableScale onPress={onCancel} style={styles.secondary}>
-          <Text style={[styles.secondaryLabel, { color: colors.textSecondary }]}>{t('vault_cancel')}</Text>
+          <Text style={[styles.secondaryLabel, { color: colors.textSecondary }]}>
+            {t('vault_cancel')}
+          </Text>
         </PressableScale>
       </ScrollView>
     )
   }
 
+  // ── passphrase ──────────────────────────────────────────────────────
+  if (step === 'passphrase') {
+    return (
+      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <Text style={[styles.h1, { color: colors.textPrimary }]}>
+          {t('vault_passphrase_title')}
+        </Text>
+        <Text style={[styles.p, { color: colors.textSecondary }]}>
+          {t('vault_passphrase_intro')}
+        </Text>
+
+        <PassphraseField
+          value={passphrase}
+          onChangeText={setPassphrase}
+          confirm={confirm}
+          onChangeConfirm={setConfirm}
+          onValidityChange={setPassphraseOk}
+        />
+
+        <View style={[styles.warnBox, { borderColor: colors.warning }]}>
+          <Ionicons name="warning-outline" size={16} color={colors.warning} />
+          <Text style={[styles.warnText, { color: colors.textSecondary }]}>
+            {t('vault_passphrase_no_reset')}
+          </Text>
+        </View>
+
+        {error && <Text style={[styles.err, { color: colors.error }]}>{error}</Text>}
+        <PressableScale
+          haptic="confirm"
+          onPress={passphraseOk ? start : undefined}
+          style={[
+            styles.primary,
+            {
+              backgroundColor: passphraseOk ? colors.accent : colors.backgroundSecondary,
+              opacity: passphraseOk ? 1 : 0.6
+            }
+          ]}
+        >
+          <Text
+            style={[
+              styles.primaryLabel,
+              { color: passphraseOk ? colors.textOnAccent : colors.textTertiary }
+            ]}
+          >
+            {t('vault_enroll_begin')}
+          </Text>
+        </PressableScale>
+        <PressableScale onPress={() => setStep('intro')} style={styles.secondary}>
+          <Text style={[styles.secondaryLabel, { color: colors.textSecondary }]}>
+            {t('vault_back')}
+          </Text>
+        </PressableScale>
+      </ScrollView>
+    )
+  }
+
+  // ── running (PIN prompts + tap) ─────────────────────────────────────
   if (step === 'running') {
     return (
       <View style={styles.body}>
         {pinReq ? (
           <>
-            <Ionicons name="keypad-outline" size={40} color={colors.accent} style={styles.hero} />
+            <Ionicons name="keypad-outline" size={40} color={colors.textPrimary} style={styles.hero} />
             <Text style={[styles.h1, { color: colors.textPrimary }]}>
               {pinReq.kind === 'change' ? t('vault_set_new_pin') : t('vault_enter_pin')}
             </Text>
-            {pinReq.kind === 'change' && <Text style={[styles.p, { color: colors.textSecondary }]}>{t('vault_default_pin_warning')}</Text>}
+            {pinReq.kind === 'change' && (
+              <Text style={[styles.p, { color: colors.textSecondary }]}>
+                {t('vault_default_pin_warning')}
+              </Text>
+            )}
             <TextInput
-              style={[styles.pin, { color: colors.textPrimary, backgroundColor: colors.backgroundSecondary }]}
+              style={[
+                styles.pin,
+                { color: colors.textPrimary, backgroundColor: colors.backgroundSecondary }
+              ]}
               value={pinReq.kind === 'change' ? newPinInput : pinInput}
               onChangeText={pinReq.kind === 'change' ? setNewPinInput : setPinInput}
               placeholder="••••••"
@@ -169,87 +285,116 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
               maxLength={8}
               autoFocus
             />
-            <PressableScale haptic="confirm" onPress={submitPin} style={[styles.primary, { backgroundColor: colors.accent }]}>
-              <Text style={[styles.primaryLabel, { color: colors.textOnAccent }]}>{t('vault_continue')}</Text>
+            <PressableScale
+              haptic="confirm"
+              onPress={submitPin}
+              style={[styles.primary, { backgroundColor: colors.accent }]}
+            >
+              <Text style={[styles.primaryLabel, { color: colors.textOnAccent }]}>
+                {t('vault_continue')}
+              </Text>
             </PressableScale>
           </>
         ) : (
           <>
-            <ActivityIndicator color={colors.accent} size="large" style={styles.hero} />
-            <Text style={[styles.h1, { color: colors.textPrimary }]}>{phaseLabel || t('vault_reading_key')}</Text>
-            <Text style={[styles.p, { color: colors.textSecondary }]}>{t('vault_touch_when_blinks')}</Text>
+            <ActivityIndicator color={colors.textPrimary} size="large" style={styles.hero} />
+            <Text style={[styles.h1, { color: colors.textPrimary }]}>
+              {phaseLabel || t('vault_reading_key')}
+            </Text>
+            <Text style={[styles.p, { color: colors.textSecondary }]}>
+              {t('vault_touch_when_blinks')}
+            </Text>
           </>
         )}
       </View>
     )
   }
 
-  if (step === 'backup') {
-    const words = mnemonic.split(' ')
-    return (
-      <ScrollView contentContainerStyle={styles.body}>
-        <Ionicons name="key-outline" size={40} color={colors.warning} style={styles.hero} />
-        <Text style={[styles.h1, { color: colors.textPrimary }]}>{t('vault_backup_title')}</Text>
-        <Text style={[styles.p, { color: colors.error }]}>{t('vault_backup_warning')}</Text>
-        <View style={styles.wordGrid}>
-          {words.map((w, i) => (
-            <View key={i} style={[styles.wordChip, { backgroundColor: colors.backgroundSecondary }]}>
-              <Text style={[styles.wordIdx, { color: colors.textTertiary }]}>{i + 1}</Text>
-              <Text style={[styles.word, { color: colors.textPrimary }]}>{w}</Text>
-            </View>
-          ))}
-        </View>
-        <PressableScale haptic="confirm" onPress={() => setStep('confirm')} style={[styles.primary, { backgroundColor: colors.accent }]}>
-          <Text style={[styles.primaryLabel, { color: colors.textOnAccent }]}>{t('vault_backup_saved')}</Text>
-        </PressableScale>
-      </ScrollView>
-    )
-  }
-
-  if (step === 'confirm') {
-    return (
-      <ScrollView contentContainerStyle={styles.body}>
-        <Text style={[styles.h1, { color: colors.textPrimary }]}>{t('vault_backup_confirm_title')}</Text>
-        <Text style={[styles.p, { color: colors.textSecondary }]}>{t('vault_backup_confirm_sub')}</Text>
-        {quiz.map(q => (
-          <View key={q.index} style={styles.quizRow}>
-            <Text style={[styles.quizLabel, { color: colors.textSecondary }]}>{t('vault_word_n', { n: q.index + 1 })}</Text>
-            <TextInput
-              style={[styles.input, { flex: 1, color: colors.textPrimary, backgroundColor: colors.backgroundSecondary }]}
-              value={quizInputs[q.index] ?? ''}
-              onChangeText={v => setQuizInputs(s => ({ ...s, [q.index]: v }))}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-        ))}
-        {error && <Text style={[styles.err, { color: colors.error }]}>{error}</Text>}
-        <PressableScale haptic="confirm" onPress={confirmQuiz} style={[styles.primary, { backgroundColor: colors.accent }]}>
-          <Text style={[styles.primaryLabel, { color: colors.textOnAccent }]}>{t('vault_finish')}</Text>
-        </PressableScale>
-      </ScrollView>
-    )
-  }
-
   return null
 }
 
+/** The two — and only two — ways to get vault funds back. */
+const RecoveryPaths: React.FC = () => {
+  const { colors } = useTheme()
+  return (
+    <View style={[styles.paths, { borderColor: colors.separator }]}>
+      <Text style={[styles.pathsTitle, { color: colors.textPrimary }]}>
+        {t('vault_recovery_paths_title')}
+      </Text>
+      <View style={styles.pathRow}>
+        <Ionicons name="hardware-chip-outline" size={16} color={colors.textSecondary} />
+        <Text style={[styles.pathText, { color: colors.textSecondary }]}>
+          {t('vault_recovery_path_device')}
+        </Text>
+      </View>
+      <View style={styles.pathRow}>
+        <Ionicons name="document-text-outline" size={16} color={colors.textSecondary} />
+        <Text style={[styles.pathText, { color: colors.textSecondary }]}>
+          {t('vault_recovery_path_phrase')}
+        </Text>
+      </View>
+      <Text style={[styles.pathsFine, { color: colors.textTertiary }]}>
+        {t('vault_recovery_no_other')}
+      </Text>
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
-  body: { padding: spacing.xl, gap: spacing.lg, alignItems: 'center' },
-  hero: { marginTop: spacing.lg },
+  body: { padding: spacing.xl, gap: spacing.lg },
+  hero: { marginTop: spacing.lg, alignSelf: 'center' },
   h1: { ...typography.title2, textAlign: 'center' },
   p: { ...typography.subhead, textAlign: 'center' },
-  input: { width: '100%', borderRadius: radii.md, paddingVertical: spacing.md, paddingHorizontal: spacing.lg, ...typography.body },
-  pin: { width: '70%', textAlign: 'center', ...typography.title2, letterSpacing: 8, borderRadius: radii.md, paddingVertical: spacing.md },
+  input: {
+    width: '100%',
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    ...typography.body
+  },
+  pin: {
+    width: '70%',
+    alignSelf: 'center',
+    textAlign: 'center',
+    ...typography.title2,
+    letterSpacing: 8,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md
+  },
   primary: { width: '100%', borderRadius: radii.md, paddingVertical: spacing.lg, alignItems: 'center' },
   primaryLabel: { ...typography.headline },
   secondary: { paddingVertical: spacing.md, alignItems: 'center' },
   secondaryLabel: { ...typography.body },
   err: { ...typography.footnote, textAlign: 'center' },
-  wordGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, justifyContent: 'center' },
-  wordChip: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radii.sm, minWidth: 96 },
-  wordIdx: { ...typography.caption2 },
-  word: { ...typography.body },
-  quizRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, width: '100%' },
-  quizLabel: { ...typography.subhead, width: 72 }
+  fine: { ...typography.caption2, textAlign: 'center' },
+  ghost: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.md
+  },
+  ghostLabel: { ...typography.footnote, fontWeight: '600' },
+  paths: {
+    width: '100%',
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.lg
+  },
+  pathsTitle: { ...typography.footnote, fontWeight: '600' },
+  pathRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  pathText: { ...typography.footnote, flex: 1 },
+  pathsFine: { ...typography.caption2 },
+  warnBox: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'flex-start',
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.md
+  },
+  warnText: { ...typography.footnote, flex: 1 }
 })

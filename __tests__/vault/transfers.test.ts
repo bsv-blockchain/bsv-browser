@@ -36,7 +36,7 @@ jest.mock('expo-secure-store', () => ({
 }))
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { vaultStore } from '../../services/vault/vaultStore'
+import { vaultStore, type VaultMetaV1 } from '../../services/vault/vaultStore'
 import {
   buildVaultUnlockingScript,
   depositToVault,
@@ -237,7 +237,7 @@ describe('depositToVault', () => {
     expect(JSON.parse(args.outputs[0].customInstructions).keyID).toBe('vault/0')
     expect(args.labels).toEqual(['vault', 'vault-deposit'])
     // queue drained by one
-    expect((await vaultStore.getMeta())?.depositKeys[0].keyID).toBe('vault/1')
+    expect(((await vaultStore.getMeta()) as VaultMetaV1).depositKeys[0].keyID).toBe('vault/1')
   })
 
   test('rejects a below-dust deposit', async () => {
@@ -393,10 +393,10 @@ describe('replenishDepositKeys', () => {
     await enrollFakeMeta(60) // 60 keys, nextKeyIndex 60
     const w = makeFakeWallet()
     await replenishDepositKeys(w, ADMIN)
-    const meta = await vaultStore.getMeta()
-    expect(meta?.depositKeys).toHaveLength(64)
-    expect(meta?.nextKeyIndex).toBe(64)
-    expect(meta?.depositKeys[63].keyID).toBe('vault/63')
+    const meta = (await vaultStore.getMeta()) as VaultMetaV1
+    expect(meta.depositKeys).toHaveLength(64)
+    expect(meta.nextKeyIndex).toBe(64)
+    expect(meta.depositKeys[63].keyID).toBe('vault/63')
     expect(w.calls.getPublicKey).toHaveLength(4)
   })
 })

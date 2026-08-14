@@ -10,7 +10,6 @@ export type SheetRoute =
   | 'bookmarks'
   | 'history'
   | 'menu'
-  | 'settings'
   | 'identity'
   | 'trust'
   | 'permissions'

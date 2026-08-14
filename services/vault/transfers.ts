@@ -32,10 +32,12 @@ import {
   Utils,
   ECDSA,
   BigNumber,
+  HD,
   WalletProtocol
 } from '@bsv/sdk'
 import { vaultStore } from './vaultStore'
 import { VaultError } from './types'
+import { bip32KeyID, indexFromKeyID, depositPkhFromXpub, depositPrivKey } from './vaultDerivation'
 
 export const VAULT_BASKET = 'admin vault'
 export const VAULT_PROTOCOL: WalletProtocol = [2, 'vault']
@@ -73,6 +75,28 @@ interface ListOutputsResult {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Reserve the next deposit address.
+ *
+ * v2 derives it from the stored xpub on demand — no YubiKey, no ceiling.
+ * v1 pops the legacy precomputed queue, which fails closed once drained and
+ * needs a privileged ceremony to refill.
+ */
+async function nextDepositKey(): Promise<{ keyID: string; pkh: string }> {
+  const meta = await vaultStore.getMeta()
+  if (!meta) throw new VaultError('not-enrolled', 'Vault is not set up')
+
+  if (meta.v === 2) {
+    const index = await vaultStore.takeNextIndex()
+    if (index == null) throw new VaultError('not-enrolled', 'Vault is not set up')
+    return { keyID: bip32KeyID(index), pkh: depositPkhFromXpub(meta.xpub, index) }
+  }
+
+  const key = await vaultStore.popDepositKey()
+  if (!key) throw new VaultError('pin-required', 'Vault needs your key to mint a fresh deposit address')
+  return key
+}
 
 function keyIDFromInstructions(ci?: string): string | null {
   if (!ci) return null
@@ -204,9 +228,7 @@ export async function depositToVault(
   satoshis: number
 ): Promise<{ txid: string }> {
   if (satoshis < DUST_LIMIT) throw new VaultError('below-dust', 'Deposit below dust limit')
-  const key = await vaultStore.popDepositKey()
-  if (!key) throw new VaultError('pin-required', 'Vault needs your key to mint a fresh deposit address')
-
+  const key = await nextDepositKey()
   const lockingScript = new P2PKH().lock(Utils.toArray(key.pkh, 'hex')).toHex()
   const res = await w.createAction(
     {
@@ -282,8 +304,7 @@ async function spendVaultOutputs(
   const outputs: unknown[] = []
   const remainder = amount === 'all' ? 0 : acc - want
   if (opts.revaultRemainder && remainder >= DUST_LIMIT) {
-    const revaultKey = await vaultStore.popDepositKey()
-    if (!revaultKey) throw new VaultError('pin-required', 'Vault needs your key to mint a change address')
+    const revaultKey = await nextDepositKey()
     outputs.push({
       satoshis: remainder,
       lockingScript: new P2PKH().lock(Utils.toArray(revaultKey.pkh, 'hex')).toHex(),
@@ -405,6 +426,51 @@ export function withdrawFromVault(
   return spendVaultOutputs(w, adminOriginator, amount, reason, signer, { revaultRemainder: true })
 }
 
+/**
+ * Signer for v2 outputs, which are plain BIP32 children of the vault node
+ * rather than BRC-42 derivations. Used by both the ceremony withdrawal (HD
+ * unsealed from the YubiKey) and the passphrase recovery sweep.
+ */
+export function hdVaultSigner(hd: HD): VaultSigner {
+  const childFor = (keyID: string): PrivateKey => {
+    const index = indexFromKeyID(keyID)
+    if (index == null) {
+      // A v1 'vault/<n>' output cannot be signed by an HD node. Failing loudly
+      // beats signing with the wrong key and broadcasting an invalid spend.
+      throw new VaultError('bad-derivation-index', `Not a BIP32 vault output: ${keyID}`)
+    }
+    return depositPrivKey(hd, index)
+  }
+  return {
+    getPublicKey: async keyID => childFor(keyID).toPublicKey().toString(),
+    sign: async (keyID, digest) =>
+      ECDSA.sign(new BigNumber(digest), childFor(keyID), true).toDER() as number[]
+  }
+}
+
+/**
+ * Recovery path for v2: sweep the ENTIRE vault to the default basket, signing
+ * with the HD node derived from the main mnemonic + vault passphrase. No
+ * YubiKey required — this is the second of the two recovery paths.
+ *
+ * Returns null when the vault is already empty.
+ */
+export async function sweepVaultWithHD(
+  w: VaultWallet,
+  adminOriginator: string,
+  hd: HD,
+  reason: string
+): Promise<{ txid: string } | null> {
+  try {
+    return await spendVaultOutputs(w, adminOriginator, 'all', reason, hdVaultSigner(hd), {
+      revaultRemainder: false
+    })
+  } catch (e) {
+    if (e instanceof VaultError && e.code === 'vault-empty') return null
+    throw e
+  }
+}
+
 /** Recovery path: sweep the ENTIRE vault to the default basket signing with the
  * backup-phrase key `V` directly — no YubiKey required (the whole reason the
  * phrase exists). Returns null when the vault is already empty. */
@@ -435,6 +501,9 @@ export async function sweepVaultWithKey(
 export async function replenishDepositKeys(w: VaultWallet, adminOriginator: string): Promise<void> {
   const meta = await vaultStore.getMeta()
   if (!meta) return
+  // v2 derives deposit addresses from the xpub on demand, so there is no queue
+  // to refill and this ceremony hook is a no-op.
+  if (meta.v !== 1) return
   const need = DEPOSIT_QUEUE_TARGET - meta.depositKeys.length
   if (need <= 0) return
   const fresh: { keyID: string; pkh: string }[] = []

@@ -142,7 +142,7 @@ export interface WalletContextValue {
   rebuildWallet: () => Promise<void>
   storage: StorageExpoSQLite | null
   /** Fetch BUMP from WoC and store merkle proof, advancing tx status to completed */
-  refreshProof: (txid: string) => Promise<void>
+  refreshProof: (txid: string) => Promise<'confirmed' | 'pending' | 'failed'>
   /** Incremented when a transaction status changes via SSE, triggers UI refresh */
   txStatusVersion: number
   /** The active user's storage id, for scoping `offline_actions` reads. null if unknown. */
@@ -201,7 +201,7 @@ export const WalletContext = createContext<WalletContextValue>({
   switchNetwork: async () => {},
   rebuildWallet: async () => {},
   storage: null,
-  refreshProof: async () => {},
+  refreshProof: async () => 'pending',
   txStatusVersion: 0,
   walletUserId: null,
   walletBuilding: false,
@@ -1697,7 +1697,24 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })
   }, [deleteSnap, deleteMnemonic, deleteRecoveredKey])
 
-  const refreshProof = useCallback(async (txid: string): Promise<void> => {
+  /**
+   * Reconcile ONE transaction against the network, and repair it if the local
+   * record disagrees with reality.
+   *
+   * Three outcomes:
+   *  - 'confirmed': a merkle proof exists; record it, the tx is settled.
+   *  - 'pending':   the tx is on-chain (or too recent to judge) but unproven —
+   *                 leave it alone, it is legitimately in flight.
+   *  - 'failed':    the tx is NOT on-chain, the local record still claims it is
+   *                 in flight, and it is old enough that propagation cannot
+   *                 explain it. Mark it failed, which RELEASES the inputs it had
+   *                 reserved (see storage's updateTransactionStatus).
+   *
+   * The 'failed' branch fills a real gap: the monitor's TaskFailAbandoned only
+   * reaps 'unprocessed'/'unsigned', so a 'sending' transaction whose broadcast
+   * silently failed shows "Broadcasting" forever and holds its inputs hostage.
+   */
+  const refreshProof = useCallback(async (txid: string): Promise<'confirmed' | 'pending' | 'failed'> => {
     if (!storage) throw new Error('Storage not available')
 
     const wocBase = selectedNetwork === 'teratest'
@@ -1706,32 +1723,65 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     const chain = selectedNetwork === 'main' ? 'main' : 'test'
 
     const res = await fetch(`${wocBase}/v1/bsv/${chain}/tx/${txid}/proof/bump`)
-    if (!res.ok) throw new Error(`BUMP not available (HTTP ${res.status}) — transaction may not be mined yet`)
 
-    const bumpHex = (await res.text()).trim()
-    const merklePath = MerklePath.fromHex(bumpHex)
-    const merkleRoot = merklePath.computeRoot(txid)
-    const leaf = merklePath.path[0].find(l => l.txid === true && l.hash === txid)
-    if (!leaf) throw new Error('txid not found in BUMP path')
+    if (res.ok) {
+      const bumpHex = (await res.text()).trim()
+      const merklePath = MerklePath.fromHex(bumpHex)
+      const merkleRoot = merklePath.computeRoot(txid)
+      const leaf = merklePath.path[0].find(l => l.txid === true && l.hash === txid)
+      if (!leaf) throw new Error('txid not found in BUMP path')
 
-    const reqs = await storage.findProvenTxReqs({ partial: { txid } })
-    if (!reqs.length) throw new Error('No pending record found for this transaction')
+      const reqs = await storage.findProvenTxReqs({ partial: { txid } })
+      if (!reqs.length) throw new Error('No pending record found for this transaction')
 
-    const req = reqs[0]
-    await storage.updateProvenTxReqWithNewProvenTx({
-      provenTxReqId: req.provenTxReqId,
-      status: req.status,
-      txid,
-      attempts: req.attempts,
-      history: req.history,
-      index: leaf.offset,
-      height: merklePath.blockHeight,
-      blockHash: '',
-      merklePath: merklePath.toBinary(),
-      merkleRoot,
-    })
+      const req = reqs[0]
+      await storage.updateProvenTxReqWithNewProvenTx({
+        provenTxReqId: req.provenTxReqId,
+        status: req.status,
+        txid,
+        attempts: req.attempts,
+        history: req.history,
+        index: leaf.offset,
+        height: merklePath.blockHeight,
+        blockHash: '',
+        merklePath: merklePath.toBinary(),
+        merkleRoot
+      })
+      setTxStatusVersion(v => v + 1)
+      return 'confirmed'
+    }
 
+    // No proof. Before judging, find out whether the network has the tx at all.
+    // A 404 on the proof endpoint alone is NOT evidence of failure — an
+    // unconfirmed but perfectly healthy tx also has no proof.
+    let onChain = false
+    try {
+      const head = await fetch(`${wocBase}/v1/bsv/${chain}/tx/hash/${txid}`)
+      onChain = head.ok
+    } catch {
+      // Network unreachable — we cannot prove absence, so never fail the tx.
+      return 'pending'
+    }
+    if (onChain) return 'pending'
+
+    // Not on chain. Only repair records that still claim to be in flight, and
+    // only once propagation can no longer be the explanation.
+    const txs = await storage.findTransactions({ partial: { txid }, noRawTx: true })
+    const tx = txs[0]
+    if (!tx || tx.status === 'failed' || tx.status === 'completed') return 'pending'
+
+    const IN_FLIGHT: string[] = ['sending', 'unproven', 'nosend', 'unprocessed', 'unsigned', 'nonfinal']
+    if (!IN_FLIGHT.includes(tx.status)) return 'pending'
+
+    const STUCK_AFTER_MS = 5 * 60 * 1000 // matches the monitor's own abandonedMsecs
+    const updatedAt = tx.updated_at ? new Date(tx.updated_at).getTime() : 0
+    if (updatedAt && Date.now() - updatedAt < STUCK_AFTER_MS) return 'pending'
+
+    // Releases the inputs this transaction had reserved and marks its outputs
+    // unspendable — the same repair the monitor performs for abandoned rows.
+    await storage.updateTransactionStatus('failed', tx.transactionId)
     setTxStatusVersion(v => v + 1)
+    return 'failed'
   }, [storage, selectedNetwork])
 
   const runMonitorTask = useCallback(async (taskName: string): Promise<string> => {
