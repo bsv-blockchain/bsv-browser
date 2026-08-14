@@ -37,6 +37,11 @@ export type VaultErrorCode =
   | 'user-cancelled'
   | 'not-enrolled'
   | 'driver-unavailable'
+  | 'vault-empty'
+  | 'amount-exceeds-balance'
+  | 'below-dust'
+  | 'no-transaction'
+  | 'nfc-lost'
 
 export class VaultError extends Error {
   code: VaultErrorCode
@@ -51,14 +56,27 @@ export class VaultError extends Error {
   }
 }
 
+/** Native YubiKit description substrings for a dropped NFC field mid-command
+ * (the phone moved a hair off the key, or the key was lifted). This is
+ * transient and retryable — never a wrong key, but older/currently-installed
+ * builds' Swift `mapError` falls through to its `wrong-key` default for any
+ * description it doesn't specifically recognize, which includes this one. */
+const NFC_LOST_PATTERN = /tag response error|no response|tag connection lost|session invalidated/i
+
 /** Parse a native-module rejection (`VAULT_ERR:<code>:<detail>`) into a
  * VaultError; anything unrecognized becomes a generic driver failure. */
 export function vaultErrorFromNative(e: unknown): VaultError {
   const msg = e instanceof Error ? e.message : String(e)
   const m = /^VAULT_ERR:([a-z-]+):?(.*)$/.exec(msg)
   if (m) {
-    const code = m[1] as VaultErrorCode
+    let code = m[1] as VaultErrorCode
     const detailMatch = /retries=(\d+)/.exec(m[2])
+    // Reclassify a native `wrong-key` whose detail is really an NFC dropout —
+    // see NFC_LOST_PATTERN. Safe to keep even after the native side is fixed
+    // to classify this correctly at the source: this simply never matches then.
+    if (code === 'wrong-key' && NFC_LOST_PATTERN.test(m[2])) {
+      code = 'nfc-lost'
+    }
     return new VaultError(code, m[2] || undefined, detailMatch ? Number(detailMatch[1]) : undefined)
   }
   return new VaultError('driver-unavailable', msg)

@@ -57,6 +57,7 @@ export const TransferSheet: React.FC<{
       onComplete()
       onClose()
     } catch (e) {
+      console.error('[vault] transfer failed:', e instanceof Error ? e.message : e, e)
       const code = e instanceof VaultError ? e.code : undefined
       setError(code ? t(`vault_err_${code.replace(/-/g, '_')}`, {}) || t('vault_err_generic') : t('vault_err_generic'))
       haptics.error()
@@ -81,7 +82,9 @@ export const TransferSheet: React.FC<{
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {isDeposit ? t('vault_deposit_sub') : t('vault_withdraw_sub')}
         </Text>
-        <AmountInput value={amount} onChangeText={setAmount} showMax={false} />
+        <View style={styles.amountWrap}>
+          <AmountInput value={amount} onChangeText={setAmount} showMax={false} />
+        </View>
         {error && <Text style={[styles.err, { color: colors.error }]}>{error}</Text>}
         <PressableScale
           haptic="confirm"
@@ -104,6 +107,7 @@ export const TransferSheet: React.FC<{
 
 const styles = StyleSheet.create({
   body: { padding: spacing.xl, gap: spacing.lg, alignItems: 'center' },
+  amountWrap: { alignSelf: 'stretch' },
   sub: { ...typography.subhead, textAlign: 'center' },
   err: { ...typography.footnote, textAlign: 'center' },
   primary: { width: '100%', borderRadius: radii.md, paddingVertical: spacing.lg, alignItems: 'center' },

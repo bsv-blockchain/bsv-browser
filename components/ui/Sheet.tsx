@@ -1,6 +1,6 @@
-import React, { memo, useEffect } from 'react'
-import { Dimensions, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated'
+import React, { memo, useEffect, useRef } from 'react'
+import { Dimensions, Keyboard, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
@@ -52,21 +52,52 @@ const Sheet: React.FC<SheetProps> = ({
   // Track whether the sheet is visible for rendering children
   const [rendered, setRendered] = React.useState(false)
 
-  // Open / close driven by `visible` prop
+  // Open / close driven by `visible` prop. Only PLAY the enter animation on an
+  // actual closed→open transition — not on every re-run of this effect. In
+  // fitContent mode, sheetHeight tracks onLayout-measured content height, which
+  // jitters by a pixel or two on ordinary re-renders (e.g. a secureTextEntry
+  // keystroke). Without this guard, each jitter re-ran "jump to hidden, spring
+  // back to 0", flickering the whole sheet on every character typed.
+  const wasVisibleRef = useRef(false)
   useEffect(() => {
     if (visible) {
       setRendered(true)
-      translateY.value = sheetHeight
-      translateY.value = withSpring(0, { mass: 1, stiffness: 280, damping: 32 })
+      if (!wasVisibleRef.current) {
+        translateY.value = sheetHeight
+        translateY.value = withSpring(0, { mass: 1, stiffness: 280, damping: 32 })
+      }
     } else {
       translateY.value = withSpring(sheetHeight, { mass: 1, stiffness: 400, damping: 38 }, finished => {
         if (finished) runOnJS(setRendered)(false)
       })
     }
+    wasVisibleRef.current = visible
   }, [visible, sheetHeight]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Lift the sheet above the software keyboard so bottom-anchored content
+  // (PIN field, primary button) stays visible. Without this a number-pad — which
+  // has no "done" key — hides the submit button, forcing a tap-outside that
+  // reads as a backdrop dismiss. Standard bottom-sheet mode only; full-page
+  // sheets manage their own scrolling.
+  const kbShift = useSharedValue(0)
+  useEffect(() => {
+    if (fullPage) return
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
+    const show = Keyboard.addListener(showEvt, e => {
+      kbShift.value = withTiming(e.endCoordinates?.height ?? 0, { duration: e.duration || 250 })
+    })
+    const hide = Keyboard.addListener(hideEvt, e => {
+      kbShift.value = withTiming(0, { duration: e.duration || 200 })
+    })
+    return () => {
+      show.remove()
+      hide.remove()
+    }
+  }, [fullPage, kbShift])
+
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }]
+    transform: [{ translateY: translateY.value - kbShift.value }]
   }))
 
   const panGesture = Gesture.Pan()

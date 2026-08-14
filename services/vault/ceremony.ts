@@ -244,28 +244,63 @@ export class CeremonyController {
     return this.unsealWithTouch(driver, seal, pin)
   }
 
+  /** Errors from a single NFC tap attempt that are worth re-tapping for without
+   * throwing away the whole ceremony: a missed/short touch, or the field
+   * dropping mid-command (phone shifted, key lifted a hair early). Both leave
+   * the dead NFC session behind, so a retry must close it and open a fresh one
+   * — see the loop in `unsealViaTap`. */
+  private static readonly RETRYABLE_TAP_ERRORS = new Set(['touch-timeout', 'nfc-lost', 'key-removed-mid-op'])
+
   /** NFC tap (iOS): PIN first in-app (the sheet is modal), then one tap does
-   * serial check → verify PIN → ECDH. A wrong PIN aborts (surfaced as an error);
-   * the user retries the whole ceremony, since we cannot re-prompt under the
-   * open sheet. */
+   * serial check → verify PIN → ECDH.
+   *
+   * A wrong PIN aborts the whole ceremony — we cannot re-prompt for a PIN
+   * under an already-open system NFC sheet, so the caller must restart from
+   * the beginning (a fresh withdraw attempt collects the PIN again).
+   *
+   * A dropped/missed tap (RETRYABLE_TAP_ERRORS) is different: the PIN is
+   * already known-good for this attempt, only the physical tap failed. We loop
+   * in place — close the dead session, show the error with a real Retry, and
+   * on retry() reopen a fresh NFC session and redo serial-check → verify PIN →
+   * ECDH. Without this loop, ANY tap hiccup killed the whole ceremony and left
+   * a Retry button wired to nothing (retryWaiter was only ever set by the
+   * Android persistent-reader loop below) — indistinguishable from a frozen
+   * app. */
   private async unsealViaTap(driver: VaultDriver, seal: SealedBlob): Promise<PrivateKey> {
     const pin = await this.collectPinValue()
-    this.set({ phase: 'waiting-for-key' })
-    const waiter = (this.attachWaiter = defer<void>())
-    driver.start()
-    await waiter.promise
-    this.throwIfCancelled()
-    this.set({ phase: 'connecting' })
-    const info = await driver.getKeyInfo()
-    if (info.serial !== seal.yubiSerial) {
-      throw new VaultError('serial-mismatch', `Expected key ${seal.yubiSerial}`)
+    for (;;) {
+      this.throwIfCancelled()
+      this.set({ phase: 'waiting-for-key' })
+      const waiter = (this.attachWaiter = defer<void>())
+      driver.start()
+      await waiter.promise
+      this.throwIfCancelled()
+      this.set({ phase: 'connecting' })
+      const info = await driver.getKeyInfo()
+      if (info.serial !== seal.yubiSerial) {
+        throw new VaultError('serial-mismatch', `Expected key ${seal.yubiSerial}`)
+      }
+      const res = await driver.verifyPin(pin)
+      if (!res.ok) throw new VaultError('pin-invalid', 'Wrong PIN', res.retriesLeft)
+      this.set({ phase: 'awaiting-touch' })
+      try {
+        const { secret } = await driver.ecdh(seal.slot, pin, seal.ePub)
+        this.set({ phase: 'unsealing' })
+        return new PrivateKey(unsealVaultKey(seal, secret))
+      } catch (e) {
+        const err = e instanceof VaultError ? e : new VaultError('nfc-lost')
+        if (!CeremonyController.RETRYABLE_TAP_ERRORS.has(err.code)) throw err
+        try {
+          driver.stop()
+        } catch {
+          /* best-effort */
+        }
+        this.set({ phase: 'error', error: { code: err.code } })
+        this.retryWaiter = defer<void>()
+        await this.retryWaiter.promise // resolves on retry(); rejects on cancel/detach
+        // loop: reopen a fresh NFC session and redo the tap
+      }
     }
-    const res = await driver.verifyPin(pin)
-    if (!res.ok) throw new VaultError('pin-invalid', 'Wrong PIN', res.retriesLeft)
-    this.set({ phase: 'awaiting-touch' })
-    const { secret } = await driver.ecdh(seal.slot, pin, seal.ePub)
-    this.set({ phase: 'unsealing' })
-    return new PrivateKey(unsealVaultKey(seal, secret))
   }
 
   /** Collect a PIN value from the UI only (no token verify) — used by the NFC

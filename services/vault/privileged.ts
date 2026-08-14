@@ -22,7 +22,9 @@ export function makePrivilegedKeyGetter(opts: {
   requestCeremony: (reason: string) => Promise<PrivateKey>
 }): (reason: string) => Promise<PrivateKey> {
   return async (reason: string): Promise<PrivateKey> => {
-    if (!(await opts.isEnrolled())) return opts.getLegacyRootKey()
+    const enrolled = await opts.isEnrolled()
+    console.log('[vault] keyGetter invoked · reason=%s · enrolled=%s', reason, enrolled)
+    if (!enrolled) return opts.getLegacyRootKey()
     return opts.requestCeremony(reason)
   }
 }

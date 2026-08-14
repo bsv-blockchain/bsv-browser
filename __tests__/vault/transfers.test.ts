@@ -16,6 +16,7 @@ import {
   ECDSA,
   BigNumber,
   UnlockingScript,
+  Beef,
   Utils
 } from '@bsv/sdk'
 
@@ -56,6 +57,15 @@ const derivedPriv = (keyID: string): PrivateKey => kd.derivePrivateKey(VAULT_PRO
 const derivedPubHex = (keyID: string): string =>
   kd.derivePublicKey(VAULT_PROTOCOL, keyID, 'self', true).toString()
 const derivedPkh = (keyID: string): string => PublicKey.fromString(derivedPubHex(keyID)).toHash('hex') as string
+
+// A BEEF carrying a fixture's raw source txs, as listOutputs('entire
+// transactions') would return — so spendVaultOutputs' buildVaultInputBeef runs
+// against realistic data instead of being skipped.
+const stitchBeef = (fx: { src: Transaction }[]): number[] => {
+  const beef = new Beef()
+  for (const { src } of fx) beef.mergeRawTx(src.toBinary())
+  return beef.toBinary()
+}
 
 beforeEach(async () => {
   await AsyncStorage.clear()
@@ -232,7 +242,7 @@ describe('depositToVault', () => {
 
   test('rejects a below-dust deposit', async () => {
     await enrollFakeMeta()
-    await expect(depositToVault(makeFakeWallet(), ADMIN, 100)).rejects.toMatchObject({ code: 'seal-corrupt' })
+    await expect(depositToVault(makeFakeWallet(), ADMIN, 100)).rejects.toMatchObject({ code: 'below-dust' })
   })
 })
 
@@ -255,11 +265,9 @@ describe('withdrawFromVault', () => {
   test("'all' spends every output, no re-vault output, signs each input", async () => {
     await enrollFakeMeta()
     const fx = vaultOutputsFixture()
-    // stitch a combined BEEF from both source txs
-    const beef = new Transaction() // placeholder; withdraw parses signableTransaction, not this
     const w = makeFakeWallet({
       async listOutputs() {
-        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: [] }
+        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: stitchBeef(fx) }
       },
       async createAction(args: any) {
         // fabricate a signable spending tx from the declared inputs/outputs
@@ -287,7 +295,7 @@ describe('withdrawFromVault', () => {
     const fx = vaultOutputsFixture() // two 6000-sat outputs = 12000
     const w = makeFakeWallet({
       async listOutputs() {
-        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: [] }
+        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: stitchBeef(fx) }
       },
       async createAction(args: any) {
         const tx = new Transaction()
@@ -313,7 +321,7 @@ describe('withdrawFromVault', () => {
     const fx = vaultOutputsFixture()
     const w = makeFakeWallet({
       async listOutputs() {
-        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: [] }
+        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: stitchBeef(fx) }
       },
       async createAction(args: any) {
         const tx = new Transaction()
@@ -335,7 +343,7 @@ describe('withdrawFromVault', () => {
   test('rejects when the vault is empty', async () => {
     await enrollFakeMeta()
     const w = makeFakeWallet({ async listOutputs() { return { outputs: [] } } })
-    await expect(withdrawFromVault(w, ADMIN, 'all', 'x')).rejects.toMatchObject({ code: 'seal-corrupt' })
+    await expect(withdrawFromVault(w, ADMIN, 'all', 'x')).rejects.toMatchObject({ code: 'vault-empty' })
   })
 })
 
@@ -354,7 +362,7 @@ describe('sweepVaultWithKey (recovery, no YubiKey)', () => {
     const fx = vaultOutputsFixture()
     const w = makeFakeWallet({
       async listOutputs() {
-        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: [] }
+        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: stitchBeef(fx) }
       },
       async createAction(args: any) {
         const tx = new Transaction()
@@ -401,5 +409,94 @@ describe('getVaultBalance', () => {
       }
     })
     expect(await getVaultBalance(w, ADMIN)).toBe(7500)
+  })
+})
+
+/**
+ * The signer (buildSignableTransaction) reads each vault input's
+ * sourceTransaction ONLY from inputBEEF and throws if it is missing; storage
+ * also re-verifies the whole BEEF with allowTxidOnly=true. buildVaultInputBeef
+ * must satisfy BOTH: carry the raw source tx AND verify without a merkle proof.
+ * This exercises the REAL @bsv/sdk Beef (the fake wallet cannot catch it).
+ */
+/**
+ * A prior failed attempt can leave the vault UTXO reserved by an orphaned
+ * 'nosend'/'unsigned' withdrawal → the toolbox raises WERR_REVIEW_ACTIONS
+ * (double-spend) on the next createAction. The withdraw must abort only the
+ * abortable orphans and retry once.
+ */
+describe('withdraw self-heals a double-spend from stuck reservations', () => {
+  // The review error names the reserving txid(s) via reviewActionResults.competingTxs.
+  const reviewError = (competingTxs: string[]) =>
+    Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
+      code: 5,
+      reviewActionResults: [{ txid: '', status: 'doubleSpend', competingTxs }]
+    })
+
+  const oneOutputFx = () => {
+    const src = new Transaction()
+    src.addOutput({ satoshis: 6000, lockingScript: new P2PKH().lock(Utils.toArray(derivedPkh('vault/0'), 'hex')) })
+    return [{ outpoint: `${src.id('hex')}.0`, satoshis: 6000, customInstructions: JSON.stringify({ v: 1, keyID: 'vault/0' }), src }]
+  }
+
+  test('aborts exactly the reserving txid (by txid match) then retries createAction', async () => {
+    await enrollFakeMeta()
+    const fx = oneOutputFx()
+    const RESERVING = 'ab'.repeat(32)
+    let createCalls = 0
+    const aborted: string[] = []
+    const w = makeFakeWallet({
+      async listOutputs() {
+        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: stitchBeef(fx) }
+      },
+      // Reserving tx carries no vault label — matched by txid, not label.
+      async listActions() {
+        return {
+          actions: [
+            { txid: RESERVING, status: 'nosend', reference: 'ref-reserving' }, // the culprit
+            { txid: 'cd'.repeat(32), status: 'nosend', reference: 'ref-other' }, // unrelated txid
+            { txid: RESERVING, status: 'completed', reference: 'ref-terminal' } // same txid, terminal
+          ]
+        }
+      },
+      async abortAction(args: any) {
+        aborted.push(args.reference)
+        return {}
+      },
+      async createAction(args: any) {
+        if (++createCalls === 1) throw reviewError([RESERVING])
+        const tx = new Transaction()
+        for (const inp of args.inputs) {
+          const f = fx.find(x => x.outpoint === inp.outpoint)!
+          tx.addInput({ sourceTransaction: f.src, sourceOutputIndex: 0, sequence: 0xffffffff, unlockingScript: new UnlockingScript([]) })
+        }
+        tx.addOutput({ satoshis: 5800, lockingScript: new P2PKH().lock(Utils.toArray(derivedPkh('vault/9'), 'hex')) })
+        return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-heal' } }
+      }
+    })
+
+    const { txid } = await withdrawFromVault(w, ADMIN, 'all', 'Withdraw all')
+    expect(txid).toBeDefined()
+    expect(createCalls).toBe(2) // threw once, retried once
+    expect(aborted).toEqual(['ref-reserving']) // only the matching txid + abortable status
+  })
+
+  test('rethrows the review error when the reserving tx is not abortable/found', async () => {
+    await enrollFakeMeta()
+    const fx = oneOutputFx()
+    const RESERVING = 'ab'.repeat(32)
+    const w = makeFakeWallet({
+      async listOutputs() {
+        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: stitchBeef(fx) }
+      },
+      async listActions() {
+        // Same txid exists but only in a terminal state → cannot abort.
+        return { actions: [{ txid: RESERVING, status: 'completed', reference: 'ref-terminal' }] }
+      },
+      async createAction() {
+        throw reviewError([RESERVING])
+      }
+    })
+    await expect(withdrawFromVault(w, ADMIN, 'all', 'x')).rejects.toMatchObject({ code: 5 })
   })
 })

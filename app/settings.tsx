@@ -17,7 +17,7 @@ const CACHE_DURATION = 30000
 export default function SettingsScreen() {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  const { managers, adminOriginator, selectedNetwork } = useWallet()
+  const { managers, adminOriginator, selectedNetwork, txStatusVersion } = useWallet()
 
   const balanceCacheKey = `cached_wallet_balance_${selectedNetwork}`
   const balanceCacheTimestampKey = `cached_wallet_balance_ts_${selectedNetwork}`
@@ -74,6 +74,18 @@ export default function SettingsScreen() {
       cancelled = true
     }
   }, [managers.permissionsManager, refreshBalance, balanceCacheKey, balanceCacheTimestampKey])
+
+  // Re-fetch whenever a transaction lands (deposit, withdrawal, anything that
+  // bumps txStatusVersion) instead of waiting out the cache TTL — skip the
+  // initial mount, which the effect above already covers.
+  const mountedRef = React.useRef(false)
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      return
+    }
+    refreshBalance()
+  }, [txStatusVersion, refreshBalance])
 
   return (
     <View style={{ backgroundColor: colors.backgroundSecondary }}>

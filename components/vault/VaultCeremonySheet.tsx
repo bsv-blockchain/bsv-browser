@@ -49,8 +49,17 @@ const ERROR_COPY: Record<string, string> = {
   'user-cancelled': 'vault_err_generic',
   'unsupported-platform': 'vault_err_unavailable',
   'slot-occupied': 'vault_err_generic',
-  'pin-required': 'vault_enter_pin'
+  'pin-required': 'vault_enter_pin',
+  'nfc-lost': 'vault_err_nfc_lost'
 }
+
+/** Errors where the fix is simply "do the tap again" — worth a Retry button
+ * instead of only Dismiss. Must stay a SUBSET of `CeremonyController`'s own
+ * retryable set (services/vault/ceremony.ts) or the button renders but does
+ * nothing — 'key-removed-mid-op' is deliberately excluded even though the
+ * ceremony loop can produce it, because it can ALSO arrive from a moment the
+ * loop doesn't cover (waiting-for-key), where retry would be a dead button. */
+const RETRYABLE_ERRORS = new Set<string>(['touch-timeout', 'nfc-lost'])
 
 const PhaseIcon: Record<CeremonyPhase, keyof typeof Ionicons.glyphMap> = {
   idle: 'lock-closed',
@@ -139,6 +148,9 @@ export const VaultCeremonySheet: React.FC = () => {
 
         {phase === 'pin-entry' && (
           <>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+              {nfc ? t('vault_pin_sub_nfc') : t('vault_pin_sub_usb')}
+            </Text>
             <TextInput
               style={[styles.pin, { color: colors.textPrimary, backgroundColor: colors.backgroundSecondary }]}
               value={pin}
@@ -167,9 +179,17 @@ export const VaultCeremonySheet: React.FC = () => {
           </>
         )}
 
+        {phase === 'error' && errCode === 'pin-invalid' && (
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            {typeof state.error?.retriesLeft === 'number'
+              ? t('vault_pin_invalid_retry', { count: state.error.retriesLeft })
+              : t('vault_pin_invalid_retry_generic')}
+          </Text>
+        )}
+
         {phase === 'error' && (
           <View style={styles.errorActions}>
-            {errCode === 'touch-timeout' && (
+            {errCode && RETRYABLE_ERRORS.has(errCode) && (
               <PressableScale
                 haptic="confirm"
                 onPress={retry}
@@ -221,6 +241,7 @@ const styles = StyleSheet.create({
   reason: { ...typography.subhead, textAlign: 'center' },
   iconWrap: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center', marginTop: spacing.md },
   title: { ...typography.title3, textAlign: 'center' },
+  subtitle: { ...typography.subhead, textAlign: 'center', marginTop: -spacing.sm },
   pin: { width: '70%', textAlign: 'center', ...typography.title2, letterSpacing: 8, borderRadius: radii.md, paddingVertical: spacing.md },
   hint: { ...typography.footnote },
   primaryBtn: { width: '100%', borderRadius: radii.md, paddingVertical: spacing.lg, alignItems: 'center' },

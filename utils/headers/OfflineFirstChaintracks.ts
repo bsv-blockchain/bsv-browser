@@ -13,8 +13,18 @@
  * `isValidRootForHeight`, because we want the root itself to cache — a coin
  * whose ancestry we resolved once should verify offline forever after.
  */
+import { Utils } from '@bsv/sdk'
 import type { ChaintracksClientApi } from '@bsv/wallet-toolbox-mobile/out/src/services/chaintracker/chaintracks/Api/ChaintracksClientApi'
 import type { HeaderStore } from './headerStore'
+
+/** A merkle root as display-order hex, whether the source gave us a hex string
+ * or raw bytes. The remote's `findHeaderForHeight` may return either; plain
+ * `String(bytes)` yields "1,2,3,…" which never matches a real root — the source
+ * of a chain-tracker that rejects valid proofs. Mirrors the toolbox's own
+ * `asString(merkleRoot)`. */
+function rootHex(v: unknown): string {
+  return typeof v === 'string' ? v : Utils.toHex(Array.from(v as ArrayLike<number>))
+}
 
 export class OfflineFirstChaintracks implements ChaintracksClientApi {
   private store: HeaderStore | undefined
@@ -35,8 +45,12 @@ export class OfflineFirstChaintracks implements ChaintracksClientApi {
   }
 
   async isValidRootForHeight(root: string, height: number): Promise<boolean> {
+    // Fast path: a local root that AGREES is trusted offline forever (validated
+    // window headers, or a previously-resolved root). We do NOT trust a local
+    // DISAGREEMENT — it can be a stale/poisoned cache entry or an index error —
+    // so a miss OR a mismatch both fall through to the authoritative network.
     const local = this.store?.rootForHeight(height)
-    if (local !== undefined) return local === root
+    if (local === root) return true
 
     if (!(await this.online())) {
       this.lastMissHeight = height
@@ -49,8 +63,15 @@ export class OfflineFirstChaintracks implements ChaintracksClientApi {
         this.lastMissHeight = height
         return false
       }
-      const remoteRoot = String(header.merkleRoot)
+      const remoteRoot = rootHex(header.merkleRoot)
+      // Refresh the cache with the authoritative value (self-heals a poisoned
+      // extra entry from an earlier bad conversion).
       await this.store?.putExtraRoot(height, remoteRoot)
+      if (local !== undefined && local !== remoteRoot) {
+        console.warn(
+          `[OfflineFirstChaintracks] local root disagreed with network at height ${height} (local=${local} network=${remoteRoot}); healed`
+        )
+      }
       return remoteRoot === root
     } catch (e: any) {
       // A verification path must never throw a network error at the caller:

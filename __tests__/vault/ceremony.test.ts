@@ -115,6 +115,56 @@ describe('CeremonyController', () => {
     await expect(p).resolves.toBeDefined()
   })
 
+  test('NFC: a dropped tap loops in place — retry reopens the session and succeeds without re-entering PIN', async () => {
+    // Regression for a real freeze: unsealViaTap had no retry loop at all, so
+    // ANY tap hiccup (dropped connection, missed touch) killed the whole
+    // ceremony and left the sheet's Retry button wired to nothing (retryWaiter
+    // was only ever set by the persistent-reader loop below). The user saw an
+    // error screen with a dead button — indistinguishable from a frozen app.
+    const nfc = new MockYubiKey()
+    ;(nfc as any).sessionBased = true
+    nfc.insertKey('MOCK-1')
+    const { seal } = await enrollFakeSeal(nfc)
+    const c = new CeremonyController({ getDriver: () => nfc, store: fakeStore(seal), retentionMs: RETENTION })
+    const startSpy = jest.spyOn(nfc, 'start')
+    const stopSpy = jest.spyOn(nfc, 'stop')
+
+    nfc.setTouchBehavior('timeout') // first tap "drops"
+    const p = c.request('x')
+    await flush()
+    c.submitPin('123456')
+    await flush()
+    expect(c.state.phase).toBe('error')
+    expect(c.state.error?.code).toBe('touch-timeout')
+    expect(startSpy).toHaveBeenCalledTimes(1)
+    expect(stopSpy).toHaveBeenCalledTimes(1) // dead session closed before showing Retry
+
+    nfc.setTouchBehavior('instant') // second tap succeeds
+    c.retry()
+    await expect(p).resolves.toBeDefined()
+    expect(startSpy).toHaveBeenCalledTimes(2) // retry reopened a fresh NFC session
+    expect(c.state.phase).toBe('armed')
+  })
+
+  test('NFC: a wrong PIN aborts the whole ceremony (no in-place retry) with retriesLeft intact', async () => {
+    // A wrong PIN cannot be corrected in place on NFC — the PIN is collected
+    // before the system scan sheet ever opens, so there is nothing to
+    // re-prompt mid-tap. This must NOT enter the same retry loop as a dropped
+    // tap; the caller (a fresh withdraw attempt) collects the PIN again.
+    const nfc = new MockYubiKey()
+    ;(nfc as any).sessionBased = true
+    nfc.insertKey('MOCK-1')
+    const { seal } = await enrollFakeSeal(nfc)
+    const c = new CeremonyController({ getDriver: () => nfc, store: fakeStore(seal), retentionMs: RETENTION })
+    const p = c.request('x')
+    await flush()
+    c.submitPin('000000') // wrong
+    await expect(p).rejects.toMatchObject({ code: 'pin-invalid', retriesLeft: 2 })
+    expect(c.state.phase).toBe('error')
+    expect(c.state.error?.code).toBe('pin-invalid')
+    expect(c.state.error?.retriesLeft).toBe(2)
+  })
+
   test('detach during awaiting-touch → key-removed-mid-op', async () => {
     const mock = new MockYubiKey()
     mock.insertKey('MOCK-1')

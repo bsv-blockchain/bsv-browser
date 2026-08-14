@@ -27,7 +27,7 @@ interface LogEntry {
 export default function MonitorLogsScreen() {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { runMonitorTask, getMonitorTaskNames, checkUtxoSpendability } = useWallet()
+  const { runMonitorTask, getMonitorTaskNames, checkUtxoSpendability, releaseStuckReservations } = useWallet()
 
   const [taskNames, setTaskNames] = useState<string[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -92,6 +92,26 @@ export default function MonitorLogsScreen() {
       setRunning(null)
     }
   }, [checkUtxoSpendability])
+
+  const runRelease = useCallback(async () => {
+    const name = 'ReleaseStuck'
+    setRunning(name)
+    try {
+      const output = await releaseStuckReservations()
+      setLogs(prev => [
+        ...prev,
+        { id: `${Date.now()}_${name}`, taskName: name, timestamp: new Date().toISOString(), output: output || '(no output)' }
+      ])
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100)
+    } catch (e: any) {
+      setLogs(prev => [
+        ...prev,
+        { id: `${Date.now()}_${name}`, taskName: name, timestamp: new Date().toISOString(), output: `Error: ${e.message || 'unknown'}` }
+      ])
+    } finally {
+      setRunning(null)
+    }
+  }, [releaseStuckReservations])
 
   const runAll = useCallback(async () => {
     for (const name of taskNames) {
@@ -201,6 +221,30 @@ export default function MonitorLogsScreen() {
                 numberOfLines={1}
               >
                 CheckUTXOs
+              </Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={runRelease}
+            disabled={!!running}
+            style={[
+              styles.taskPill,
+              {
+                backgroundColor: running === 'ReleaseStuck' ? colors.accent : colors.backgroundSecondary,
+                borderColor: colors.separator,
+                borderWidth: running === 'ReleaseStuck' ? 0 : StyleSheet.hairlineWidth,
+                opacity: running && running !== 'ReleaseStuck' ? 0.5 : 1
+              }
+            ]}
+          >
+            {running === 'ReleaseStuck' ? (
+              <ActivityIndicator size="small" color={colors.background} />
+            ) : (
+              <Text
+                style={[styles.taskPillText, { color: running === 'ReleaseStuck' ? colors.background : colors.textPrimary }]}
+                numberOfLines={1}
+              >
+                Release stuck
               </Text>
             )}
           </TouchableOpacity>

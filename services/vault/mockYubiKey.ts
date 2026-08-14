@@ -82,7 +82,13 @@ export class MockYubiKey implements VaultDriver {
   }
 
   stop(): void {
-    this.listeners.clear()
+    // Matches the real adapter's contract (driver.ts adaptNative.stop): do NOT
+    // clear listeners. App subscribers (WalletContext, and now the ceremony's
+    // own mid-flight NFC retry loop) stay subscribed across a session-based
+    // transport's stop/start cycles. Clearing here would silently break any
+    // ceremony that calls stop() and then start() again on the SAME run (e.g.
+    // reopening a fresh NFC session after a dropped tap) — its own attach
+    // listener, registered once at the top of that run, would be gone.
   }
 
   onKeyEvent(cb: (e: KeyEvent) => void): () => void {

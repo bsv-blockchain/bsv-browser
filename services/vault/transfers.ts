@@ -53,6 +53,7 @@ export interface VaultWallet {
   getPublicKey(args: unknown, originator: string): Promise<{ publicKey: string }>
   createSignature(args: unknown, originator: string): Promise<{ signature: number[] }>
   abortAction(args: unknown, originator: string): Promise<unknown>
+  listActions?(args: unknown, originator: string): Promise<{ actions: { txid?: string; status: string; reference?: string }[] }>
 }
 
 interface CreateActionResult {
@@ -81,6 +82,69 @@ function keyIDFromInstructions(ci?: string): string | null {
   } catch {
     return null
   }
+}
+
+/** True for the toolbox's WERR_REVIEW_ACTIONS — an undelayed action that needs
+ * review, in our case a double-spend against a vault UTXO still reserved by a
+ * stuck prior attempt. */
+function isReviewActionsError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false
+  const anyE = e as { code?: unknown; message?: string; reviewActionResults?: unknown }
+  return anyE.code === 5 || 'reviewActionResults' in anyE || /require review/i.test(anyE.message ?? '')
+}
+
+/** The txids the review error blames for the double-spend — the transactions
+ * still reserving our vault UTXO. */
+function competingTxids(e: unknown): string[] {
+  const rr = (e as { reviewActionResults?: unknown }).reviewActionResults
+  if (!Array.isArray(rr)) return []
+  const out: string[] = []
+  for (const r of rr) {
+    const c = (r as { competingTxs?: unknown }).competingTxs
+    if (Array.isArray(c)) out.push(...(c as string[]))
+  }
+  return out
+}
+
+/** Abort the specific orphaned transactions still reserving the vault UTXO
+ * (identified by txid from the review error). The reserving tx may carry no
+ * vault label, so we page ALL actions and match by txid — then abort only those
+ * exact txids, which resets their inputs' `spentBy` and frees the coin.
+ * Best-effort — returns how many were aborted. */
+async function abortReservingTxids(w: VaultWallet, adminOriginator: string, txids: string[]): Promise<number> {
+  if (!w.listActions || txids.length === 0) return 0
+  const want = new Set(txids)
+  // A locally-held reservation is never in a terminal on-chain state; these are
+  // the states abortAction accepts, plus 'failed' which also holds inputs.
+  const ABORTABLE = new Set(['unsigned', 'nosend', 'nonfinal', 'failed'])
+  let aborted = 0
+  let scanned = 0
+  const matches: string[] = []
+  try {
+    let offset = 0
+    for (let page = 0; page < 25 && aborted < want.size; page++) {
+      const res = await w.listActions({ labels: [], limit: 200, offset }, adminOriginator)
+      const actions = res.actions ?? []
+      if (actions.length === 0) break
+      scanned += actions.length
+      for (const a of actions) {
+        if (a.txid && want.has(a.txid)) {
+          matches.push(`${a.status}${a.reference ? '' : '/no-ref'}`)
+          if (a.reference && ABORTABLE.has(a.status)) {
+            await w.abortAction({ reference: a.reference }, adminOriginator).catch(err =>
+              console.log('[vault] abortAction rejected:', (err as Error)?.message)
+            )
+            aborted++
+          }
+        }
+      }
+      offset += actions.length
+    }
+    console.log('[vault] abort scan · scanned=%d · matches=[%s] · aborted=%d', scanned, matches.join(', ') || 'NONE', aborted)
+  } catch (e) {
+    console.log('[vault] abort scan error:', (e as Error)?.message)
+  }
+  return aborted
 }
 
 /**
@@ -139,7 +203,7 @@ export async function depositToVault(
   adminOriginator: string,
   satoshis: number
 ): Promise<{ txid: string }> {
-  if (satoshis < DUST_LIMIT) throw new VaultError('seal-corrupt', 'Deposit below dust limit')
+  if (satoshis < DUST_LIMIT) throw new VaultError('below-dust', 'Deposit below dust limit')
   const key = await vaultStore.popDepositKey()
   if (!key) throw new VaultError('pin-required', 'Vault needs your key to mint a fresh deposit address')
 
@@ -163,7 +227,7 @@ export async function depositToVault(
     adminOriginator
   )
   const txid = res.txid ?? (res.tx ? Transaction.fromAtomicBEEF(res.tx).id('hex') : undefined)
-  if (!txid) throw new VaultError('seal-corrupt', 'Deposit produced no transaction')
+  if (!txid) throw new VaultError('no-transaction', 'Deposit produced no transaction')
   return { txid }
 }
 
@@ -186,18 +250,22 @@ async function spendVaultOutputs(
   opts: { revaultRemainder: boolean }
 ): Promise<{ txid: string }> {
   const list = await w.listOutputs(
-    { basket: VAULT_BASKET, include: 'entire transactions', limit: 1000 },
+    // includeCustomInstructions is REQUIRED: each vault output carries its
+    // derivation keyID in customInstructions, and listOutputs omits that field
+    // unless asked (BooleanDefaultFalse). Without it every output filters out as
+    // keyless and the vault looks empty even when funded.
+    { basket: VAULT_BASKET, include: 'entire transactions', includeCustomInstructions: true, limit: 1000 },
     adminOriginator
   )
   const spendable = list.outputs
     .map(o => ({ ...o, keyID: keyIDFromInstructions(o.customInstructions) }))
     .filter(o => o.keyID != null)
     .sort((a, b) => a.outpoint.localeCompare(b.outpoint)) // deterministic, oldest-first-ish
-  if (spendable.length === 0) throw new VaultError('seal-corrupt', 'Vault is empty')
+  if (spendable.length === 0) throw new VaultError('vault-empty', 'Vault is empty')
 
   const total = spendable.reduce((s, o) => s + o.satoshis, 0)
   const want = amount === 'all' ? total : amount
-  if (want > total) throw new VaultError('seal-corrupt', 'Withdrawal exceeds vault balance')
+  if (want > total) throw new VaultError('amount-exceeds-balance', 'Withdrawal exceeds vault balance')
 
   // Select oldest-first until the target is covered.
   const selected: typeof spendable = []
@@ -226,25 +294,48 @@ async function spendVaultOutputs(
     })
   }
 
-  const created = await w.createAction(
-    {
-      description: reason,
-      inputBEEF: list.BEEF,
-      inputs: selected.map(o => ({
-        outpoint: o.outpoint,
-        unlockingScriptLength: P2PKH_UNLOCK_LEN,
-        inputDescription: 'Vault withdrawal'
-      })),
-      outputs,
-      labels: ['vault', 'vault-withdraw'],
-      options: { randomizeOutputs: false, acceptDelayedBroadcast: false }
-    },
-    adminOriginator
-  )
+  // Use storage's own BEEF for the source transactions. listOutputs('entire
+  // transactions') returns a COMPLETE, verifiable BEEF: a confirmed deposit
+  // carries its merkle proof, an unconfirmed one carries its ancestry back to
+  // proven roots (its source txs are already tracked in our storage). We do not
+  // strip or hand-craft it — that was only a workaround for the chain-tracker bug
+  // (it rejected a valid proof), now fixed. This spends confirmed AND unconfirmed
+  // deposits and needs no `returnTXIDOnly`/delayed hacks.
+  const inputBEEF = list.BEEF?.length ? list.BEEF : undefined
+
+  const caArgs = {
+    description: reason,
+    inputBEEF,
+    inputs: selected.map(o => ({
+      outpoint: o.outpoint,
+      unlockingScriptLength: P2PKH_UNLOCK_LEN,
+      inputDescription: 'Vault withdrawal'
+    })),
+    outputs,
+    labels: ['vault', 'vault-withdraw'],
+    // trustSelf:'known' lets storage vouch for its own known input txids.
+    options: { randomizeOutputs: false, acceptDelayedBroadcast: false, trustSelf: 'known' }
+  }
+
+  let created: CreateActionResult
+  try {
+    created = await w.createAction(caArgs, adminOriginator)
+  } catch (e) {
+    // A prior failed attempt can leave the vault UTXO reserved by an orphaned
+    // transaction, surfacing here as a double-spend review. The error names the
+    // reserving txids; abort exactly those to free the coin, then retry once.
+    if (!isReviewActionsError(e)) throw e
+    const competing = competingTxids(e)
+    const freed = await abortReservingTxids(w, adminOriginator, competing)
+    console.log('[vault] double-spend review — competing=%s aborted=%d, retrying', competing.join(',') || '(none reported)', freed)
+    if (freed === 0) throw e
+    created = await w.createAction(caArgs, adminOriginator)
+  }
+  console.log('[vault] withdraw createAction ok · signable=%s · inputs=%d', !!created.signableTransaction, selected.length)
 
   if (!created.signableTransaction) {
     const txid = created.txid ?? (created.tx ? Transaction.fromAtomicBEEF(created.tx).id('hex') : undefined)
-    if (!txid) throw new VaultError('seal-corrupt', 'Withdrawal produced no transaction')
+    if (!txid) throw new VaultError('no-transaction', 'Withdrawal produced no transaction')
     return { txid }
   }
 
@@ -254,7 +345,9 @@ async function spendVaultOutputs(
     const spends: Record<number, { unlockingScript: string }> = {}
     for (let i = 0; i < selected.length; i++) {
       const o = selected[i]
+      console.log('[vault] withdraw signing input %d · keyID=%s', i, o.keyID)
       const publicKey = await signer.getPublicKey(o.keyID as string)
+      console.log('[vault] input %d · pubkey ok', i)
       const [txidHex, voutStr] = o.outpoint.split('.')
       const unlock = await buildVaultUnlockingScript({
         tx,
@@ -266,17 +359,21 @@ async function spendVaultOutputs(
         publicKeyHex: publicKey,
         sign: digest => signer.sign(o.keyID as string, digest)
       })
+      console.log('[vault] input %d · unlock built', i)
       spends[i] = { unlockingScript: unlock.toHex() }
     }
 
+    console.log('[vault] calling signAction · spends=%d · ref=%s', Object.keys(spends).length, reference)
     const signed = await w.signAction(
       { reference, spends, options: { acceptDelayedBroadcast: false } },
       adminOriginator
     )
     const txid = signed.txid ?? (signed.tx ? Transaction.fromAtomicBEEF(signed.tx).id('hex') : undefined)
-    if (!txid) throw new VaultError('seal-corrupt', 'Withdrawal was not broadcast')
+    console.log('[vault] signAction done · txid=%s', txid)
+    if (!txid) throw new VaultError('no-transaction', 'Withdrawal was not broadcast')
     return { txid }
   } catch (e) {
+    console.error('[vault] spend FAILED:', e instanceof Error ? e.message : e, e)
     await w.abortAction({ reference }, adminOriginator).catch(() => {})
     throw e
   }
@@ -328,7 +425,7 @@ export async function sweepVaultWithKey(
   try {
     return await spendVaultOutputs(w, adminOriginator, 'all', reason, signer, { revaultRemainder: false })
   } catch (e) {
-    if (e instanceof VaultError && e.code === 'seal-corrupt' && /empty/i.test(e.message)) return null
+    if (e instanceof VaultError && e.code === 'vault-empty') return null
     throw e
   }
 }

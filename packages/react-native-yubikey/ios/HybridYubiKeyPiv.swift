@@ -186,20 +186,37 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     return promise
   }
 
+  /// The five PIV slots YubiKit 4.4 can map to a data-object id, and therefore
+  /// the only ones `getCertificateInSlot:` accepts. For ANY other slot it calls
+  /// `[NSException raise:@"UnknownObjectId"...]` — a synchronous Objective-C
+  /// exception that unwinds straight through this Swift frame and TRAPS the whole
+  /// app (Swift cannot catch ObjC exceptions). The vault lives in retired slot
+  /// 0x82, which is not in this set.
+  private static let certReadableSlots: Set<UInt> = [0x9a, 0x9c, 0x9d, 0x9e, 0xf9]
+
   func readVaultPublicKey(slot: Double) throws -> Promise<String> {
     let promise = Promise<String>()
-    guard let pivSlot = YKFPIVSlot(rawValue: UInt(slot)) else {
+    let rawSlot = UInt(slot)
+    guard let pivSlot = YKFPIVSlot(rawValue: rawSlot) else {
       promise.reject(withError: Self.vaultError("no-key", "bad slot"))
       return promise
     }
+    // Cert-based occupancy is only readable for the five standard slots (see
+    // `certReadableSlots`). For a retired slot like the vault's 0x82,
+    // getCertificateInSlot would RAISE and crash the app, and YubiKit 4.4 offers
+    // no other slot-occupancy read (getSlotMetadata is later/Android-only). So on
+    // iOS the retired-slot occupancy is genuinely unknowable: report empty (the
+    // enroll flow then generates over the slot) rather than crash. The overwrite
+    // guard therefore only holds on the standard slots + Android; documented as
+    // best-effort on iOS.
+    guard Self.certReadableSlots.contains(rawSlot) else {
+      promise.resolve(withResult: "{\"publicKey\":null}")
+      return promise
+    }
     withSession(promise) { session in
-      // YubiKit 4.4 exposes no slot key-metadata read (getSlotMetadata was added
-      // later / is Android-only here). We use the slot CERTIFICATE as the
-      // occupancy signal: PIV tooling that owns a retired slot (age-plugin-
-      // yubikey, ykman) writes an X.509 cert alongside the key, so a present
-      // cert means "occupied — don't overwrite". Limitation: a bare keypair
-      // with no cert reads as empty on iOS; the enrollment flow only generates
-      // over confirmed-empty slots, and this still protects the common case.
+      // Standard slot: PIV tooling writes an X.509 cert alongside the key, so a
+      // present cert means "occupied — don't overwrite". A bare keypair with no
+      // cert still reads as empty.
       session.getCertificateIn(pivSlot) { certificate, error in
         guard error == nil, let certificate,
               let pub = SecCertificateCopyKey(certificate),

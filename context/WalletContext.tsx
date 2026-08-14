@@ -165,6 +165,7 @@ export interface WalletContextValue {
   getMonitorTaskNames: () => string[]
   /** Check spendability of all UTXOs against WoC */
   checkUtxoSpendability: () => Promise<string>
+  releaseStuckReservations: () => Promise<string>
   /** Immediately destroy any cached privileged (vault) key in the
    * PrivilegedKeyManager — used when disabling the vault so `V` cannot linger
    * in the retention window after the seal is gone. */
@@ -210,6 +211,7 @@ export const WalletContext = createContext<WalletContextValue>({
   runMonitorTask: async () => '',
   getMonitorTaskNames: () => [],
   checkUtxoSpendability: async () => '',
+  releaseStuckReservations: async () => '',
   destroyPrivilegedKey: () => {}
 })
 
@@ -1755,10 +1757,46 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       .filter(n => DIAGNOSTIC_TASKS.has(n))
   }, [])
 
+  // Fast, targeted repair. A FAILED transaction never confirms, but the toolbox
+  // leaves the inputs it had reserved marked `spentBy` that dead txid — so the
+  // coin reads as an unresolvable double-spend forever (WERR_REVIEW_ACTIONS on
+  // every new spend, even though the output is still `spendable`). Null out
+  // spentBy and restore spendable for every output still reserved by a failed
+  // tx. Pure local SQL scoped to failed-tx reservations — NO per-UTXO network
+  // scan (unlike checkUtxoSpendability), so it is instant and safe to run often.
+  const releaseStuckReservations = useCallback(async (): Promise<string> => {
+    if (!storage) return 'Storage not available'
+    const db = (storage as any)?.sqliteDb
+    if (!db?.runAsync) return 'DB not available'
+    try {
+      const rows = (await db.getAllAsync(
+        `SELECT o.outputId AS outputId, o.satoshis AS satoshis, t.txid AS txid
+           FROM outputs o JOIN transactions t ON t.transactionId = o.spentBy
+          WHERE t.status = 'failed'`
+      )) as { outputId: number; satoshis: number; txid: string }[]
+      if (!rows || rows.length === 0) return 'No stuck reservations found.'
+      await db.runAsync(
+        `UPDATE outputs SET spentBy = NULL, spendable = 1
+           WHERE spentBy IN (SELECT transactionId FROM transactions WHERE status = 'failed')`
+      )
+      const detail = rows
+        .map(r => `  • ${r.satoshis} sat (output ${r.outputId}) ← failed ${String(r.txid).slice(0, 12)}…`)
+        .join('\n')
+      return `✓ Released ${rows.length} stuck reservation(s):\n${detail}`
+    } catch (e: any) {
+      return `⚠ Release failed: ${e.message}`
+    }
+  }, [storage])
+
   const checkUtxoSpendability = useCallback(async (): Promise<string> => {
     if (!storage) return 'Storage not available'
     const wallet = managers?.permissionsManager
     if (!wallet) return 'Wallet not ready'
+
+    // Clear stuck failed-tx reservations first (see releaseStuckReservations).
+    const releaseResult = await releaseStuckReservations()
+    const releasedNote = releaseResult === 'No stuck reservations found.' ? '' : releaseResult + '\n\n'
+
     const wocBase =
       selectedNetwork === 'main'
         ? 'https://api.whatsonchain.com/v1/bsv/main'
@@ -1783,7 +1821,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         noScript: true,
         txStatus: ['completed', 'unproven', 'nosend'] as any
       })
-      if (outputs.length === 0) return 'No spendable outputs found.'
+      if (outputs.length === 0) return releasedNote + 'No spendable outputs found.'
 
       const lines: string[] = [`Found ${outputs.length} spendable output(s). Checking WoC...\n`]
       let spentCount = 0
@@ -1893,11 +1931,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       if (spentCount > internalizedCount) {
         lines.push(`⚠ ${spentCount - internalizedCount} stale output(s) marked unspendable (no change to recover)`)
       }
-      return lines.join('\n')
+      return releasedNote + lines.join('\n')
     } catch (e: any) {
-      return `Error querying outputs: ${e.message}`
+      return releasedNote + `Error querying outputs: ${e.message}`
     }
-  }, [storage, selectedNetwork, managers, adminOriginator])
+  }, [storage, selectedNetwork, managers, adminOriginator, releaseStuckReservations])
 
   const contextValue = useMemo<WalletContextValue>(
     () => ({
@@ -1939,6 +1977,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability,
+      releaseStuckReservations,
       destroyPrivilegedKey
     }),
     [
@@ -1980,6 +2019,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability,
+      releaseStuckReservations,
       destroyPrivilegedKey
     ]
   )
