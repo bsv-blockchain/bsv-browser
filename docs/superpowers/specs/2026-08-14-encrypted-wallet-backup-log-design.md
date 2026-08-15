@@ -39,7 +39,29 @@ first time.
   entropy into it is circular. A separate mechanism (platform-synced keychain, passkey
   PRF, hardware wrap) would be a future change. See [BRC-157 entropy backup migration](2026-08-14-brc157-entropy-backup-migration.md).
 - **Forcing, gating, or nagging users to back up.** Decided out of scope. This feature is
-  automatic and requires no user consent flow beyond enabling the service.
+  automatic; there is no prompt, snooze, or blocking gate anywhere in it.
+
+### Enablement — on by default, with disclosure and an off switch
+
+**Assumption, stated for the record and easily overturned.** The stated goal is that
+users who back up nothing today are protected. An opt-in service reproduces exactly the
+problem it exists to solve — the people who never printed shares are the people who will
+never tick a box. So backup is **on by default**.
+
+That default means the app sends the user's encrypted wallet database to a
+BSV-Association-operated server without them asking, which deserves honesty rather than
+silence:
+
+- Disclose it at wallet creation and in settings — what is sent, that it is encrypted
+  with a key only their seed can derive, and that the operator cannot read it.
+- Provide an off switch in settings that stops pushing and offers to delete the log
+  (`DELETE /v1/generation/...`).
+- Do not present this as a substitute for the mnemonic. The log is useless without the
+  seed or shares, and the UI must not imply otherwise — that misconception would make
+  users *less* likely to keep their paper backup, actively worsening the situation.
+
+If the preference is opt-in instead, everything else in this design is unchanged; only the
+default flips and the expected coverage drops sharply.
 
 ---
 
@@ -73,7 +95,7 @@ first time.
 │                                                                        │
 │  push:    phoneStorage.getSyncChunk({since,offsets,maxRoughSize})      │
 │             → stringifyJsonRpc(chunk, binary=true)                     │
-│             → deflate → encrypt → POST (raw on SDK 2.4.0, else base64) │
+│             → encrypt → POST (raw on SDK 2.4.0, else base64)           │
 │                                                                        │
 │  restore: EncryptedRemoteSyncReader implements WalletStorageSyncReader │
 │             → WalletStorageManager.syncFromReader()                    │
@@ -165,7 +187,7 @@ Registered as a monitor task beside `TaskSendOffline`
      maxRoughSize: 512_000, maxItems: 200,
    })
 3. if every entity array is empty → nothing to do, return
-4. body = deflate(stringifyJsonRpc(chunk, /* binary */ true))
+4. body = stringifyJsonRpc(chunk, /* binary */ true)   // optional deflate — see Wire format
 5. ct = await backupWallet.encrypt({ plaintext: body, protocolID, keyID, counterparty: 'self' })
 6. POST /v1/log/{deviceId}
      SDK 2.4.0: raw octet-stream body, seq/generation/prevSha256 as query params
@@ -203,8 +225,17 @@ Use the toolbox's own `binaryJsonReplacer` / `binaryJsonReviver` / `stringifyJso
 round-trip fidelity with the toolbox's types rather than inventing an encoding.
 
 Because the server stores opaque bytes and never parses payloads, the serialization
-format is a purely client-internal choice with no interop constraint. Compress **before**
-encrypting; ciphertext is incompressible.
+format is a purely client-internal choice with no interop constraint.
+
+**Compression is optional and deferred.** If used it must happen *before* encryption,
+since ciphertext is incompressible. But no compression library is currently a dependency
+(`pako` and `fflate` are both absent), and the gain is modest: the payload is dominated by
+transaction bytes — hashes, keys and signatures — which are high-entropy and barely
+compress. Deflate would mostly reclaim the base64 expansion introduced by `BinaryJson`
+plus the JSON field names, on the order of 30%. Weigh that against a new dependency
+(`fflate` is the lighter choice, pure JS, no native code) and CPU spent on a
+non-yielding monitor task. Recommend shipping without it and revisiting if real-world
+blob sizes justify it — especially since moving to SDK 2.4.0 removes the larger overhead.
 
 Chunk sizing: the protocol default `maxRoughSize` is 10,000,000 — far too large to push
 from a phone on cellular, and the server-side estimator re-marshals the accumulating
