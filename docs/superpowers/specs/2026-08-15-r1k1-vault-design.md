@@ -38,7 +38,7 @@ Recorded with rationale so the next reader does not relitigate them.
 | D6 | `customInstructions` carries a BIP32 `keyID`, not BRC-29 prefix/suffix | Follows from D3. Supersedes the "prefix and suffix" wording in the original request. |
 | D7 | Wallet fee model unchanged at 100 sat/kb | Vault actions cost ~96,000 sats (~3¢). Not worth a per-action fee override. |
 | D8 | Fix the RN gzip gap with `patch-package`, not a global polyfill | Six patched lines and one small dependency versus shimming four web APIs globally. |
-| D9 | Hard cap of 4 inputs per withdraw | Memory, not fees. Each R1 input materialises a ~960 KB preimage as a JS number array. |
+| D9 | **No input cap** — a withdrawal spends every vault output | Measured (§3.7): peak heap is flat regardless of input count, because signing is sequential and each preimage is collected before the next. The binding constraint is broadcast payload size — a server limit to be found by testing, not a client memory limit. |
 
 ### Non-goals
 
@@ -125,6 +125,54 @@ Two consequences:
 
 The K1 path is fast because the `OP_1` branch selector short-circuits past the P-256
 code entirely.
+
+### 3.7 Signing does not scale memory with input count
+
+Signing N R1 inputs sequentially, measuring peak RSS and peak heap on a 5 ms sampler:
+
+| inputs | sign time | peak heap | peak RSS | retained unlock hex | spending tx |
+|---|---|---|---|---|---|
+| 1 | 61 ms | 30.7 MB | 109 MB | 1.8 MB | 0.9 MB |
+| 4 | 208 ms | 30.2 MB | 110 MB | 7.3 MB | 3.7 MB |
+| 10 | 529 ms | 30.4 MB | 110 MB | 18.3 MB | 9.2 MB |
+| 25 | 1296 ms | 30.5 MB | 110 MB | 45.8 MB | 22.9 MB |
+
+**Peak heap is flat.** Each input's ~960 KB preimage — and the intermediate `number[]`
+forms of it inside `TransactionSignature.format` and `Array.from(preimage)` — is
+allocated and collected before the next input starts. There is no scenario where N
+preimages are live at once. Sign time is linear at ~52 ms/input and irrelevant.
+
+What does grow linearly is **retained** state: 1.8 MB of unlocking-script hex per input
+(hex is two chars per byte) held in the `spends` map until `signAction`, plus the
+transaction itself at 0.92 MB per input.
+
+The real ceiling is therefore the **broadcast payload**, not device memory. Arcade and
+TAAL are fed extended format, not BEEF — `arcadeBroadcastProvider.ts:59` posts
+`new Uint8Array(tx.toEF())`. EF inlines each input's *source locking script* alongside
+its unlocking script, and for a vault input both are ~0.92 MB, so the payload is
+almost exactly double the raw transaction:
+
+| inputs | raw tx | EF posted |
+|---|---|---|
+| 1 | 0.92 MB | **1.83 MB** |
+| 2 | 1.83 MB | 3.66 MB |
+| 4 | 3.66 MB | 7.32 MB |
+| 10 | 9.15 MB | 18.31 MB |
+
+Exactly 1.83 MB per input, linear. Neither the SDK's `ARC` broadcaster nor the app
+imposes a client-side limit.
+
+Arcade's limit is **32 MiB** on the single-tx submit endpoint —
+`maxSingleTxBytes = 32 << 20` at `services/api_server/handlers.go:645`, applied at
+line 672 via `http.MaxBytesReader` on `POST /tx`. (Batch submit is 256 MiB, unused
+here.) At 1.83 MB of EF per input that permits **~18 vault inputs** per withdrawal,
+far above anything the 200,000-sat floor makes reachable in practice. Arcade's
+transaction-size policy is a separate and looser bound: `MaxTxSizePolicy: 10485760`
+(10 MB) at `validator/validator.go:216`, against a raw transaction of 0.92 MB per
+input, i.e. ~10 inputs.
+
+TAAL's ARC is a second, independent broadcaster (`WalletContext.tsx:743`) whose limits
+are not visible from this repo and are not assumed here.
 
 ### 3.5 The template throws on device as shipped
 
@@ -368,11 +416,17 @@ is what keeps megabytes of BEEF out of JS memory; if `createAction` turns out to
 require `inputBEEF` despite `trustSelf: 'known'`, that is an implementation-time
 finding to resolve, not a design change.
 
-Selection: **largest-first, hard cap of 4 inputs**, remainder re-vaulted as one
-consolidated output if it clears the 200,000-sat floor (otherwise folded into the
-withdrawal). The cap is a memory bound — each R1 input materialises a ~960 KB preimage
-as a JS number array inside `unlockR1`, and ten of those live simultaneously is a real
-problem on Hermes. UTXO count still trends monotonically downward across withdrawals.
+Selection: **spend every vault output, no cap.** The remainder is re-vaulted as one
+consolidated output when it clears the 200,000-sat floor, and folded into the
+withdrawal when it does not. The vault therefore converges to at most one UTXO after
+any withdrawal, which is what keeps subsequent withdrawals cheap and single-tap.
+
+There is no input cap because there is no memory reason for one — §3.7 shows peak heap
+flat across 1 to 25 inputs, since inputs are signed sequentially and each preimage is
+collected before the next. The only scaling concern is the 1.83 MB per input of
+extended format posted at broadcast, which is a server-side limit at Arcade/TAAL,
+unknown until tested (§14). If a ceiling turns up, bound by *EF payload size* against
+the measured limit — not by an arbitrary input count.
 
 ```
 createAction({ inputs: [{ outpoint, unlockingScriptLength: R1K1_R1_UNLOCK_LEN, … }], … })
@@ -469,8 +523,11 @@ under 300 ms.
 **Flows**
 - Deposit below 200,000 sats rejected; at or above, accepted, with
   `customInstructions` carrying `v:2`, `keyID`, `salt`, `r1PublicKey`, `slot`.
-- Withdraw honours the 4-input cap, selects largest-first, re-vaults the remainder,
-  and folds a sub-floor remainder into the withdrawal.
+- Withdraw spends *every* vault output, re-vaults the remainder as one output when it
+  clears the floor, and folds a sub-floor remainder into the withdrawal — so the vault
+  converges to at most one UTXO.
+- Signing 10 inputs stays within a flat heap ceiling (guards the §3.7 finding against
+  a future change that accidentally holds all preimages live).
 - Withdraw never requests `include: 'entire transactions'`.
 - `abortAction` still fires on signing failure; the `WERR_REVIEW_ACTIONS` heal still
   works.
@@ -507,5 +564,7 @@ release note.
 | `createAction` may demand `inputBEEF` despite `trustSelf: 'known'`, reintroducing multi-MB BEEF | Resolve at implementation. Worst case, accept the BEEF cost on withdraw only; deposits are unaffected. |
 | The iOS Swift spelling of `signWithKeyInSlot:type:algorithm:message:completion:` is importer-derived and carries no `NS_SWIFT_NAME` | Let the compiler name it. Sibling selectors in the same class import inconsistently (`calculateSecretKey(in:…)` vs `getCertificateIn(_:)`), so do not guess. |
 | `patch-package` drift on a future `@bsv/templates` bump | The template's own length + SHA-256 assertions fail loudly rather than silently. |
-| ~1 MB transactions may hit an ARC or storage limit not yet exercised | Broadcast a real deposit early in implementation, before building the rest on the assumption it works. |
+| **`MaxScriptSizePolicy: 500000` may reject R1-K1 outright.** `validator/validator.go:219` hardcodes a 500,000-byte script-size policy into the settings handed to teranode's BDK validator. Both our scripts are ~960 KB, roughly 1.9× over. `AcceptNonStdOutputs: true` / `RequireStandard: false` are also set and may exempt the deposit, but the spend evaluates scriptSig + prevout scriptPubKey together. | **Blocking — resolve before any implementation.** If enforced, R1-K1 cannot be broadcast through arcade at default policy and the whole approach needs a rethink (operator policy change, or a different broadcaster). Under investigation; note the `Policy` struct exposes only `MaxTxSizePolicy`, `MaxTxSigopsCountsPolicy` and `MinFeePerKB`, so 500,000 has no operator override in arcade today. |
+| `MaxOpsPerScriptPolicy: 1000000` may be exceeded by the in-script P-256 verifier | Same investigation. A ~960 KB unrolled ECDSA verifier plausibly approaches 1M opcodes. |
+| Storage: ~1 MB per vault transaction in SQLite | Broadcast and store a real deposit early, before building the rest on the assumption it works. |
 | `readVaultPublicKey` returns null unconditionally for slot `0x82` on iOS, so the slot-occupancy guard is inert there | Pre-existing, unchanged by this work. Re-enrollment will silently overwrite an occupied slot on iOS. Worth a separate fix. |
