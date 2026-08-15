@@ -61,6 +61,7 @@ import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSour
 import { buildWalletDocumentStartScript } from '@/utils/webview/documentStartScript'
 import { walletFrameIdentityFromUrl } from '@/utils/webview/walletOrigin'
 import { buildWalletResponseScript } from '@/utils/webview/walletResponseScript'
+import { normalizeWalletByteFields } from '@/utils/webview/walletByteJson'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
 import { getErrorPage, getNativeErrorInfo, paymentLoadingPage, navigationLoadingPage, escapeForTemplateLiteral, escapeForJsSingleQuote } from '@/utils/webview/errorPages'
 
@@ -1212,7 +1213,7 @@ const Browser = observer(function Browser() {
       let msg
       const endParse = perf.mark('webview.message.parse')
       try {
-        msg = JSON.parse(eventData)
+        msg = normalizeWalletByteFields(JSON.parse(eventData))
       } catch {
         endParse()
         return
