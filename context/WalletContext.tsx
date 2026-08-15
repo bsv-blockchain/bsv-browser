@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS: WalletSettings = {
 }
 import { showToast } from '@/components/ui/Toast'
 import type { AppChain } from './config'
-import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR, toWalletChain } from './config'
+import { DEFAULT_STORAGE_URL, DEFAULT_CHAIN, ADMIN_ORIGINATOR, DEFAULT_BACKUP_URL, toWalletChain } from './config'
 import { DEFAULT_AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_COOLDOWN_MS, AUTO_APPROVE_STORAGE_KEY } from '@/shared/constants'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { UserContext } from './UserContext'
@@ -79,6 +79,8 @@ class QuietEventSource extends (RNEventSource as any) {
 import { getOnline, subscribeOnline } from '@/utils/net/online'
 import { processPending } from '@/utils/localpay/pending'
 import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
+import { TaskBackupPush } from '@/utils/monitor/TaskBackupPush'
+import { pushOnce } from '@/utils/backup/push'
 import { processOfflineActions } from '@/storage/methods/processOfflineActions'
 import { wocConfigFor } from '@/utils/pay/rails/address'
 import { SWEEP_INTERVAL_MS, runSweep, shouldSweepNow, sweptTotal } from '@/utils/pay/sweeper'
@@ -917,6 +919,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           monitorOptions.EventSourceClass = QuietEventSource
           monitorOptions.onTransactionStatusChanged = async (_txid: string, _newStatus: string) => {
             setTxStatusVersion(v => v + 1)
+            // The database moved, so the backup log has something to catch up on.
+            TaskBackupPush.noteChanged()
           }
           if (phoneStorage) {
             const SSE_KEY = 'sse_last_event_id'
@@ -969,6 +973,29 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
             // Rows may be sitting in offline_actions from a previous session.
             // Pessimistic: one idle drain clears it the first time we are online.
             TaskSendOffline.noteEnqueued()
+
+            // Encrypted backup log. The database is required to spend — change outputs
+            // carry a random derivation suffix and BRC-29 receipts carry sender-chosen
+            // derivation data, none of it on-chain and none of it recoverable from the
+            // seed — so without this a user with their recovery phrase still cannot
+            // restore their funds.
+            //
+            // Reads chunks straight from phoneStorage rather than through
+            // WalletStorageManager, whose sync lock would block all storage access.
+            if (DEFAULT_BACKUP_URL !== '') {
+              monitor.addTask(
+                new TaskBackupPush(monitor, async () => {
+                  return await pushOnce({
+                    storage: phoneStorage!,
+                    primaryKey,
+                    identityKey: keyDeriver.identityKey,
+                    baseUrl: DEFAULT_BACKUP_URL
+                  })
+                })
+              )
+              // Pessimistic: one idle pass clears it if there is nothing to send.
+              TaskBackupPush.noteChanged()
+            }
           }
           monitor.addDefaultTasks()
 
@@ -1601,10 +1628,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })
   }, [walletBuilt, selectedNetwork, runHeaderSync])
 
-  // Feed the drain's online gate and arm an immediate pass on reconnect.
+  // Feed the drain's and the backup push's online gates, arming an immediate pass on
+  // reconnect. Both are gated on the app's single online signal.
   useEffect(() => {
     if (!walletBuilt) return
-    return subscribeOnline(online => TaskSendOffline.noteConnectivity(online))
+    return subscribeOnline(online => {
+      TaskSendOffline.noteConnectivity(online)
+      TaskBackupPush.noteConnectivity(online)
+    })
   }, [walletBuilt])
 
   // Fetch Arcade status events when app returns to foreground
