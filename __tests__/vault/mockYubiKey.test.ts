@@ -106,3 +106,57 @@ describe('mapNativeKeyEvent', () => {
     expect(mapNativeKeyEvent('garbage', '', '').type).toBe('detached')
   })
 })
+
+// ── signEcdsa (task 4) ──
+import { Signature } from '@bsv/sdk'
+
+describe('MockYubiKey.signEcdsa', () => {
+  const digest = 'ab'.repeat(32)
+
+  async function armed() {
+    const mock = new MockYubiKey()
+    mock.insertKey()
+    await mock.generateVaultKey(0x82)
+    await mock.verifyPin('123456')
+    return mock
+  }
+
+  it('returns a DER signature that verifies against the slot public key', async () => {
+    const mock = await armed()
+    const { publicKey } = (await mock.readVaultPublicKey(0x82))!
+    const { signature } = await mock.signEcdsa(0x82, '123456', digest)
+
+    // DER, as the real card emits — not raw r||s.
+    expect(signature.startsWith('30')).toBe(true)
+    const parsed = Signature.fromDER(Utils.toArray(signature, 'hex'))
+    const raw = Uint8Array.from([...parsed.r.toArray('be', 32), ...parsed.s.toArray('be', 32)])
+    const compressed = p256.Point.fromBytes(Uint8Array.from(Utils.toArray(publicKey, 'hex'))).toBytes(true)
+
+    expect(p256.verify(raw, Uint8Array.from(Utils.toArray(digest, 'hex')), compressed, { prehash: false })).toBe(true)
+  })
+
+  it('rejects a digest that is not exactly 32 bytes', async () => {
+    const mock = await armed()
+    await expect(mock.signEcdsa(0x82, '123456', 'ab'.repeat(31))).rejects.toMatchObject({ code: 'template-invalid' })
+    await expect(mock.signEcdsa(0x82, '123456', 'ab'.repeat(33))).rejects.toMatchObject({ code: 'template-invalid' })
+  })
+
+  it('refuses to sign without a verified PIN', async () => {
+    const mock = new MockYubiKey()
+    mock.insertKey()
+    await mock.generateVaultKey(0x82)
+    await expect(mock.signEcdsa(0x82, '', digest)).rejects.toMatchObject({ code: 'pin-required' })
+  })
+
+  it('surfaces a touch timeout', async () => {
+    const mock = await armed()
+    mock.setTouchBehavior('timeout')
+    await expect(mock.signEcdsa(0x82, '123456', digest)).rejects.toMatchObject({ code: 'touch-timeout' })
+  })
+
+  it('fails when the key is removed', async () => {
+    const mock = await armed()
+    mock.removeKey()
+    await expect(mock.signEcdsa(0x82, '123456', digest)).rejects.toBeInstanceOf(VaultError)
+  })
+})

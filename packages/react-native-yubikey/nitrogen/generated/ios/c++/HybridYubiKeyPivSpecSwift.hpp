@@ -148,6 +148,14 @@ namespace margelo::nitro::yubikeypiv {
       auto __value = std::move(__result.value());
       return __value;
     }
+    inline std::shared_ptr<Promise<std::string>> signEcdsa(double slot, const std::string& pin, const std::string& digest) override {
+      auto __result = _swiftPart.signEcdsa(std::forward<decltype(slot)>(slot), pin, digest);
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
 
   private:
     YubiKeyPiv::HybridYubiKeyPivSpec_cxx _swiftPart;

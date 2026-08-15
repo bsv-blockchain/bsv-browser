@@ -152,6 +152,34 @@ export class MockYubiKey implements VaultDriver {
     return { secret }
   }
 
+  /** Software stand-in for the card's GENERAL AUTHENTICATE.
+   *
+   * Emits DER, exactly like both real platforms, so a DER-parsing bug cannot
+   * hide behind the mock. Enforces the same 32-byte digest rule the native
+   * modules do — on iOS an unrecognised algorithm constant silently signs 32
+   * ZERO bytes, and on Android an over-long payload is silently truncated, so
+   * this check is load-bearing, not decorative.
+   */
+  async signEcdsa(_slot: number, pin: string, digest: string): Promise<{ signature: string }> {
+    this.requirePresent()
+    if (!this.pinVerified) {
+      if (!pin) throw new VaultError('pin-required', 'PIN required before signing')
+      const res = await this.verifyPin(pin)
+      if (!res.ok) throw new VaultError('pin-invalid', 'Wrong PIN', res.retriesLeft)
+    }
+    if (!this.slotPriv) throw new VaultError('no-key', 'No key in slot')
+
+    const bytes = Utils.toArray(digest, 'hex')
+    if (bytes.length !== 32) {
+      throw new VaultError('template-invalid', `Digest must be 32 bytes, got ${bytes.length}`)
+    }
+    if (this.touch === 'timeout') throw new VaultError('touch-timeout', 'Touch not detected')
+
+    const raw = p256.sign(Uint8Array.from(bytes), this.slotPriv, { prehash: false })
+    const der = p256.Signature.fromBytes(raw).toBytes('der')
+    return { signature: Utils.toHex(Array.from(der)) }
+  }
+
   // ---- internals -------------------------------------------------------
   private requirePresent(): void {
     if (!this.present) throw new VaultError('no-key', 'No YubiKey present')
