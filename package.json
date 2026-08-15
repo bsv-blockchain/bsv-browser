@@ -168,7 +168,8 @@
       "**/?(*.)+(spec|test).[jt]s?(x)"
     ],
     "modulePathIgnorePatterns": [
-      "<rootDir>/.worktrees/"
+      "<rootDir>/.worktrees/",
+      "<rootDir>/.claude/worktrees/"
     ],
     "moduleNameMapper": {
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
