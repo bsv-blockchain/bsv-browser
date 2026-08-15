@@ -1,58 +1,64 @@
 # R1-K1 Vault — design
 
 Date: 2026-08-15
-Status: **BLOCKED — do not implement.** The design below is sound, but R1-K1 outputs
-are unspendable under default BSV script-size policy. See §0.
+Status: approved design, not yet implemented. Carries one **deployment
+prerequisite** — see §0.
 
-## 0. Blocker
+## 0. Deployment prerequisite: arcade's script-size policy
 
-`MaxScriptSizePolicy` defaults to **500,000 bytes** — in arcade
-(`validator/validator.go:219`), in teranode (`settings/settings.go:107`), and in the
-BSV node itself. Both R1-K1 scripts are ~960 KB, roughly 1.9× over.
+Miner policy for max script size is **100,000,000 bytes**, ~100× our ~960 KB scripts,
+so the network itself is not a constraint. But **arcade's own default is 500,000
+bytes** and must be raised before go-live. This is an operator action, tracked here
+because until it lands, R1-K1 outputs can be created and never spent.
 
-The limit is enforced **per script, on the spend**. `VerifyScript` invokes `EvalScript`
-twice — once with the scriptSig, once with the prevout scriptPubKey — and each
-invocation re-reads the limit (`interpreter.cpp.o` @ 0x685c, calls at 0x6950 and
-0x6af0; the check is at @ 0x338-0x354, `size <= max`, failing with
-`SCRIPT_ERR_SCRIPT_SIZE`). Consequences:
+`MaxScriptSizePolicy: 500000` is hardcoded at `validator/validator.go:219` with no
+config override — `validatorPolicyFromConfig` (`app/app.go:294`) only ever sets
+`MinFeePerKB`, and teranode's `maxscriptsizepolicy` env key is inert because arcade
+constructs `settings.Settings` literally rather than calling `settings.NewSettings()`.
+Raising it means patching that line; the BDK accepts any value in
+`[0, 4294967295]`, and `0` means unlimited.
+
+### Why it matters, precisely
+
+Verified by disassembling the prebuilt BDK archives arcade links against, not inferred
+from upstream. The limit is enforced **per script, on the spend**: `VerifyScript`
+invokes `EvalScript` twice — once with the scriptSig, once with the prevout
+scriptPubKey — and each invocation re-reads the limit (`interpreter.cpp.o` @ 0x685c,
+calls at 0x6950 and 0x6af0; check at @ 0x338-0x354, `size <= max`, failing
+`SCRIPT_ERR_SCRIPT_SIZE`). So under an unraised arcade:
 
 - **Deposits succeed.** A transaction's own output scripts are never evaluated. Only
   `MaxTxSizePolicy` (10 MB) and standardness apply, and `RequireStandard: false`
   discards the standardness verdict entirely.
-- **Every spend fails.** The 959,632-byte *locking* script exceeds the limit by itself,
-  so the K1 recovery path fails too despite its 107-byte unlocking script. Both legs
-  are dead.
+- **Every spend fails.** The 959,632-byte *locking* script busts the limit by itself,
+  so the K1 recovery path dies too despite its 107-byte unlocking script.
 
-**This is a funds-lock trap: money goes in and cannot come out.** Any implementation
-must therefore prove a spend end-to-end on the target network *before* any deposit
-path is enabled, regardless of how the blocker is resolved.
+That asymmetry is a funds-lock trap, which drives a hard sequencing rule:
 
-`AcceptNonStdOutputs: true` / `RequireStandard: false` do not help — they gate
-`implCheckStandardness`, which has no reach into script evaluation. teranode's own
-`TestMaxScriptSizePolicy` (`services/validator/TxValidator_test.go:543`) demonstrates
-the limit biting with exactly those defaults.
+> **Prove a spend end-to-end against the actually-deployed arcade configuration
+> before enabling any deposit path.** Both branches, on the target network.
 
-Arcade offers no operator override: `validatorPolicyFromConfig` (`app/app.go:294`)
-only ever sets `MinFeePerKB`, and teranode's `maxscriptsizepolicy` env key is inert
-because arcade constructs `settings.Settings` literally rather than calling
-`settings.NewSettings()`. Raising it means patching `validator.go:219` (`0` is
-accepted and means unlimited).
+This is not merely prudence about the policy — it is also the only way to settle
+`MaxStackMemoryUsagePolicy: 104857600`, whose headroom for a ~960 KB P-256 verifier
+cannot be determined from source.
 
-Relaying is not the binding constraint — **whoever mines the transaction must also
-have raised the policy.** Resolve that before writing any code.
+Note `AcceptNonStdOutputs: true` / `RequireStandard: false` do **not** relax the
+script-size check — they gate `implCheckStandardness`, which never reaches script
+evaluation. teranode's own `TestMaxScriptSizePolicy`
+(`services/validator/TxValidator_test.go:543`) demonstrates the limit biting with
+exactly those defaults, so do not read them as an escape hatch.
 
 Cleared as non-issues by the same investigation: `MaxOpsPerScriptPolicy: 1000000`
 cannot bind (only opcodes above `OP_16` are counted, each is one byte, and script has
 no loops, so executed ops < script length < 1M; the counter is a per-`EvalScript`
 stack local, so it never accumulates across scripts or inputs), and
 `MaxScriptNumLengthPolicy: 10000` is irrelevant to 32-byte P-256 field elements.
-`MaxStackMemoryUsagePolicy: 104857600` cannot be determined from source and remains
-empirical.
 
-One diagnostic wrinkle: arcade's `classifyByMessage` (`validator/errmap.go:60-66`)
-matches `"too big"` before its `"script"` case, so this rejection surfaces to clients
-as `StatusTxSize`, not `StatusUnlockingScripts`. Expect a misleading
-"transaction size" error for what is a script-size rejection.
+One diagnostic wrinkle to expect while the policy is still unraised: arcade's
+`classifyByMessage` (`validator/errmap.go:60-66`) matches `"too big"` before its
+`"script"` case, so the rejection surfaces as `StatusTxSize`, not
+`StatusUnlockingScripts`. A misleading "transaction size" error is the symptom of a
+script-size rejection.
 Supersedes: the sealing/ceremony half of `2026-08-12-yubikey-vault-design.md` and
 `2026-08-14-vault-key-from-wallet-entropy.md`. The derivation half of the latter
 (`vaultDerivation.ts`, `vaultPassphrase.ts`) survives intact.
@@ -597,6 +603,10 @@ under 300 ms.
 
 ## 13. Rollout
 
+0. Raise arcade's `MaxScriptSizePolicy` (§0), then prove a spend of both branches
+   end-to-end against the deployed configuration. **Gates enabling the deposit path**,
+   and settles `MaxStackMemoryUsagePolicy` at the same time. Can run against a
+   software P-256 signer, so it does not wait on step 2.
 1. Bump `@bsv/templates` to `^1.10.0`; add `fflate`; add the patch. `@bsv/sdk` stays
    at 2.1.9.
 2. Native module change, nitrogen regen, new dev builds for both platforms.
@@ -615,8 +625,8 @@ release note.
 | `createAction` may demand `inputBEEF` despite `trustSelf: 'known'`, reintroducing multi-MB BEEF | Resolve at implementation. Worst case, accept the BEEF cost on withdraw only; deposits are unaffected. |
 | The iOS Swift spelling of `signWithKeyInSlot:type:algorithm:message:completion:` is importer-derived and carries no `NS_SWIFT_NAME` | Let the compiler name it. Sibling selectors in the same class import inconsistently (`calculateSecretKey(in:…)` vs `getCertificateIn(_:)`), so do not guess. |
 | `patch-package` drift on a future `@bsv/templates` bump | The template's own length + SHA-256 assertions fail loudly rather than silently. |
-| **`MaxScriptSizePolicy: 500000` makes every spend fail** | **Resolved: confirmed enforced. Blocking.** See §0. |
-| `MaxStackMemoryUsagePolicy: 104857600` headroom for a ~960 KB P-256 verifier | Not determinable from source. Falls out of the §0 spend test for free. |
+| Arcade's `MaxScriptSizePolicy: 500000` makes every spend fail until raised | Operator action, owned outside this repo; miner policy is already 100,000,000. See §0 for the sequencing rule it imposes. |
+| `MaxStackMemoryUsagePolicy: 104857600` headroom for a ~960 KB P-256 verifier | Not determinable from source. Falls out of the §0 spend proof for free. |
 | TAAL's ARC limits are not visible from this repo | A second independent broadcaster (`WalletContext.tsx:743`). Assume it enforces the same 500,000 default until shown otherwise. |
 | Storage: ~1 MB per vault transaction in SQLite | Exercise alongside the §0 spend test. |
 | `readVaultPublicKey` returns null unconditionally for slot `0x82` on iOS, so the slot-occupancy guard is inert there | Pre-existing, unchanged by this work. Re-enrollment will silently overwrite an occupied slot on iOS. Worth a separate fix. |
