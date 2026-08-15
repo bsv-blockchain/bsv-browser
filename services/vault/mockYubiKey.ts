@@ -159,6 +159,13 @@ export class MockYubiKey implements VaultDriver {
    * modules do — on iOS an unrecognised algorithm constant silently signs 32
    * ZERO bytes, and on Android an over-long payload is silently truncated, so
    * this check is load-bearing, not decorative.
+   *
+   * `lowS: false` is passed explicitly: @noble/curves defaults P-256 signing
+   * to low-S normalisation, but real YubiKey PIV hardware does not normalise
+   * — roughly half of real signatures are high-S. A mock that only ever
+   * emitted low-S signatures could not catch downstream code that mishandles
+   * a non-canonical signature; that failure would first appear against real
+   * hardware, exactly the scenario this mock exists to prevent.
    */
   async signEcdsa(_slot: number, pin: string, digest: string): Promise<{ signature: string }> {
     this.requirePresent()
@@ -175,7 +182,7 @@ export class MockYubiKey implements VaultDriver {
     }
     if (this.touch === 'timeout') throw new VaultError('touch-timeout', 'Touch not detected')
 
-    const raw = p256.sign(Uint8Array.from(bytes), this.slotPriv, { prehash: false })
+    const raw = p256.sign(Uint8Array.from(bytes), this.slotPriv, { prehash: false, lowS: false })
     const der = p256.Signature.fromBytes(raw).toBytes('der')
     return { signature: Utils.toHex(Array.from(der)) }
   }

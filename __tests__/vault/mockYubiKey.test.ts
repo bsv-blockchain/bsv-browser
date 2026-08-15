@@ -132,7 +132,14 @@ describe('MockYubiKey.signEcdsa', () => {
     const raw = Uint8Array.from([...parsed.r.toArray('be', 32), ...parsed.s.toArray('be', 32)])
     const compressed = p256.Point.fromBytes(Uint8Array.from(Utils.toArray(publicKey, 'hex'))).toBytes(true)
 
-    expect(p256.verify(raw, Uint8Array.from(Utils.toArray(digest, 'hex')), compressed, { prehash: false })).toBe(true)
+    // lowS: false on verify too — the mock (like real PIV hardware) does not
+    // low-S normalise, so a random run of this test can legitimately produce
+    // a high-S signature; @noble/curves' verify() defaults to rejecting
+    // exactly those as non-canonical, which would make this assertion flake
+    // roughly half the time if left at its default.
+    expect(
+      p256.verify(raw, Uint8Array.from(Utils.toArray(digest, 'hex')), compressed, { prehash: false, lowS: false })
+    ).toBe(true)
   })
 
   it('rejects a digest that is not exactly 32 bytes', async () => {
@@ -158,5 +165,38 @@ describe('MockYubiKey.signEcdsa', () => {
     const mock = await armed()
     mock.removeKey()
     await expect(mock.signEcdsa(0x82, '123456', digest)).rejects.toBeInstanceOf(VaultError)
+  })
+
+  // Real YubiKey PIV hardware does not low-S normalise; @noble/curves defaults
+  // P-256 signing to lowS: true unless told otherwise. A mock that only ever
+  // emitted canonical (low-S) signatures could not catch downstream code that
+  // mishandles a non-canonical one — that bug would surface first against
+  // real hardware, exactly what this mock exists to prevent. Sign across many
+  // fresh keys and require at least one high-S result (~50% per trial, so the
+  // odds of a false failure here are negligible) while every signature still
+  // verifies against its own slot public key.
+  it('does not low-S normalise — can and does produce high-S signatures that still verify', async () => {
+    const digestBytes = Uint8Array.from(Utils.toArray(digest, 'hex'))
+    let sawHighS = false
+
+    for (let i = 0; i < 64; i++) {
+      const mock = await armed()
+      const { publicKey } = (await mock.readVaultPublicKey(0x82))!
+      const { signature } = await mock.signEcdsa(0x82, '123456', digest)
+
+      const sig = p256.Signature.fromBytes(Uint8Array.from(Utils.toArray(signature, 'hex')), 'der')
+      const compressed = p256.Point.fromBytes(Uint8Array.from(Utils.toArray(publicKey, 'hex'))).toBytes(true)
+      // lowS: false — see comment on the DER round-trip test above; verify()
+      // must accept the non-canonical signatures this test is specifically
+      // trying to produce, not reject them as invalid.
+      expect(p256.verify(sig.toBytes(), digestBytes, compressed, { prehash: false, lowS: false })).toBe(true)
+
+      if (sig.hasHighS()) {
+        sawHighS = true
+        break
+      }
+    }
+
+    expect(sawHighS).toBe(true)
   })
 })
