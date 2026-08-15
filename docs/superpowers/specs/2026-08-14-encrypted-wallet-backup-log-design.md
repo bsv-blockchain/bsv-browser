@@ -77,7 +77,8 @@ default flips and the expected coverage drops sharply.
 | Blob persistence | Postgres `bytea` behind a `BlobStore` interface | Transactional generation swaps; S3 seam preserved |
 | Retention | Keep 2 generations, never idle-expire | Deleting an idle backup destroys exactly the user who lost their phone |
 | Deployment | Single instance, `SessionManager` seam for later | Backup traffic is tiny and latency-insensitive |
-| Payments | None, ever | See "402 is a privacy invariant" below |
+| Client SDK | `@bsv/sdk` 2.4.0 only, no 2.1.9 path | Raw binary upload; 2.1.9's AuthFetch cannot send it |
+| Payments | Free for v1; paid variant under review | See open questions |
 
 ---
 
@@ -95,7 +96,7 @@ default flips and the expected coverage drops sharply.
 │                                                                        │
 │  push:    phoneStorage.getSyncChunk({since,offsets,maxRoughSize})      │
 │             → stringifyJsonRpc(chunk, binary=true)                     │
-│             → encrypt → POST (raw on SDK 2.4.0, else base64)           │
+│             → encrypt → POST raw octet-stream                          │
 │                                                                        │
 │  restore: EncryptedRemoteSyncReader implements WalletStorageSyncReader │
 │             → WalletStorageManager.syncFromReader()                    │
@@ -151,7 +152,7 @@ export function deriveBackupWallet(primaryKey: number[]): CompletedProtoWallet {
 Protocol names are validated at runtime, not compile time: 5–400 chars, `^[a-z0-9 ]+$`,
 no double spaces, must not end in `" protocol"`.
 
-`CompletedProtoWallet` is exported from the `@bsv/sdk` root (verified at 2.1.9) and
+`CompletedProtoWallet` is exported from the `@bsv/sdk` root (verified at 2.1.9 and 2.4.0) and
 implements the full `WalletInterface` that `AuthFetch` requires. `ProtoWallet` alone is
 insufficient — `AuthFetch`'s constructor is typed against `WalletInterface`.
 
@@ -189,9 +190,7 @@ Registered as a monitor task beside `TaskSendOffline`
 3. if every entity array is empty → nothing to do, return
 4. body = stringifyJsonRpc(chunk, /* binary */ true)   // optional deflate — see Wire format
 5. ct = await backupWallet.encrypt({ plaintext: body, protocolID, keyID, counterparty: 'self' })
-6. POST /v1/log/{deviceId}
-     SDK 2.4.0: raw octet-stream body, seq/generation/prevSha256 as query params
-     SDK 2.1.9: JSON { seq, generation, prevSha256, ciphertext: base64(ct), ciphertextLen }
+6. POST /v1/log/{deviceId}?seq=&generation=&prevSha256=   // raw octet-stream body
 7. advance cursor from the chunk's max updated_at + returned offsets; persist
 ```
 
@@ -242,30 +241,27 @@ from a phone on cellular, and the server-side estimator re-marshals the accumula
 chunk on every page (O(n²) on large syncs). Use ~512 KB with `maxItems: 200`, yielding
 ciphertext comfortably under the 1 MiB cap.
 
-### Upload body encoding depends on the SDK version — prefer 2.4.0
+### Upload is raw binary — and that requires SDK 2.4.0
 
-On the **installed `@bsv/sdk@2.1.9`**, raw binary upload is impossible.
-`AuthFetch.normalizeBodyToNumberArray`
+Uploads `POST` raw `application/octet-stream`. There is no base64 envelope and no JSON
+body encoding. **This is only possible on `@bsv/sdk` 2.4.0**, which is therefore a hard
+prerequisite (see below), not a nice-to-have.
+
+The reason it is version-gated is worth recording, because it is not obvious and someone
+will otherwise try to backport. On `2.1.9`, `AuthFetch.normalizeBodyToNumberArray`
 (`dist/cjs/src/auth/clients/AuthFetch.js:724-745`) tests `typeof body === 'object'` as its
-first branch and returns `Utils.toArray(JSON.stringify(body))`. Because arrays,
-`Uint8Array`, `ArrayBuffer`, `Blob`, `FormData` and `URLSearchParams` are all
-`typeof 'object'`, every subsequent binary branch is unreachable — a `Uint8Array` body is
-serialized as `{"0":12,"1":255,…}`. On 2.1.9, uploads must carry base64 ciphertext inside
-a JSON object (~1.33× overhead).
+*first* branch and returns `Utils.toArray(JSON.stringify(body))`. Arrays, `Uint8Array`,
+`ArrayBuffer`, `Blob`, `FormData` and `URLSearchParams` are all `typeof 'object'`, so every
+subsequent binary branch is dead code and a `Uint8Array` body is serialized as
+`{"0":12,"1":255,…}`.
 
-**This is fixed in 2.4.0.** The `typeof body === 'object'` branch is removed and the
-ordering corrected to `number[]` → `string` → `ArrayBuffer`/`TypedArray` → `Blob` →
-`FormData`. The 2.4.0 version also fixes a latent bug in the TypedArray branch: 2.1.9 does
-`new Uint8Array(body.buffer)`, ignoring `byteOffset`/`byteLength`, which silently corrupts
-any subarray view; 2.4.0 passes all three.
+2.4.0 removes that branch and restores the intended order — `number[]` → `string` →
+`ArrayBuffer`/`TypedArray` → `Blob` → `FormData`. It also fixes a latent bug in the
+TypedArray branch: 2.1.9 does `new Uint8Array(body.buffer)`, ignoring `byteOffset` and
+`byteLength`, which silently corrupts any subarray view. 2.4.0 passes all three.
 
-On 2.4.0 the client should `POST` raw `application/octet-stream` and drop the base64
-envelope entirely. **Target 2.4.0** — see the SDK upgrade section below.
-
-Downloads are unaffected on both versions: the response path builds
-`new Response(new Uint8Array(responseBody))` (`AuthFetch.js:191-196`), so `GET` returns
-raw binary either way. If shipping against 2.1.9 first, the upload/download asymmetry is
-deliberate and should be commented in the client.
+Downloads need no special handling on either version — the response path builds
+`new Response(new Uint8Array(responseBody))` (`AuthFetch.js:191-196`).
 
 ### Generations and compaction
 
@@ -314,12 +310,12 @@ into a fresh DB, and asserts `listOutputs`/`listActions` equality.
 (`DEFAULT_MESSAGEBOX_URL`). Add `DEFAULT_BACKUP_URL`. `DEFAULT_STORAGE_URL` stays
 `'local'` — the backup service is deliberately not a storage provider.
 
-### SDK upgrade to 2.4.0 — recommended prerequisite
+### SDK upgrade to 2.4.0 — hard prerequisite
 
-The app is on `@bsv/sdk@2.1.9`; latest is **2.4.0**. Upgrading is not merely housekeeping
-here — it directly improves this feature:
+The app is on `@bsv/sdk@2.1.9`; latest is **2.4.0**. This feature targets 2.4.0 only.
+There is no 2.1.9 compatibility path, and the client should not carry one.
 
-- **Raw binary upload becomes possible**, removing the base64 envelope and ~1.33× of
+- **Raw binary upload requires it**, removing the base64 envelope and ~1.33× of
   bandwidth and server storage on every push (see above).
 - The `byteOffset`-ignoring TypedArray bug is fixed, which matters as soon as any code
   passes a subarray view.
@@ -341,9 +337,8 @@ the companion `patches/@bsv+wallet-toolbox-mobile+2.4.3.patch` reviewed alongsid
 
 This is a three-minor jump underneath a live wallet. Per the BRC-157 spec's conclusion, it
 should be **its own branch and its own verification pass** against the existing test
-suite, not folded into this feature's commits. Sequence it first; if it slips, this
-feature can ship against 2.1.9 with base64 uploads and switch the encoding later — the
-server accepts both if the upload handler content-types are distinguished.
+suite, not folded into this feature's commits. It is a blocking dependency: the backup
+client cannot ship before it lands.
 
 ---
 
@@ -470,20 +465,16 @@ contiguous per `(pseudonym, deviceId, generation)`.
 | `GET` | `/v1/log/{deviceId}/{seq}` | `200 application/octet-stream` | `401`, `404 ERR_BLOB_NOT_FOUND` |
 | `DELETE` | `/v1/generation/{deviceId}/{generation}` | `204` | `401`, `404`, `409` |
 
-`POST` accepts two encodings, distinguished by `Content-Type`, so the client can ship on
-either SDK version:
-
-- `application/octet-stream` (preferred, requires SDK 2.4.0) — raw ciphertext as the body,
-  with `seq`, `generation` and `prevSha256` as query parameters.
-- `application/json` (SDK 2.1.9 fallback):
-
-```json
-{ "seq": 42, "generation": 3, "prevSha256": "…", "ciphertext": "<base64>", "ciphertextLen": 524336 }
-```
+`POST /v1/log/{deviceId}` takes the raw ciphertext as an `application/octet-stream` body,
+with `seq`, `generation` and `prevSha256` as query parameters. Reject any other
+`Content-Type` with `415`. There is no JSON upload encoding.
 
 `prevSha256` chains entries so a client can detect a gap or a fork before trusting a
-restore. `ciphertextLen` is redundant-but-checked, following uhrp's declared-vs-actual
-pattern. Slices are normalized to `[]` before encoding so JSON never contains `null`.
+restore. The server computes and stores `sha256` of the received bytes and returns it, so
+the client can verify the round trip without a redundant declared-length field.
+
+JSON responses use the house envelope; slices are normalized to `[]` before encoding so
+JSON never contains `null`.
 
 ### Size limits are mandatory, not defensive
 
@@ -581,15 +572,21 @@ so a Postgres-backed implementation is a drop-in when a second replica is needed
 | First full snapshot is large on cellular | 512 KB chunks; resumable via `seq`; defer to unmetered where detectable |
 | Blob log forked across two devices | `prevSha256` chain + per-device logs; restore picks one device |
 | Someone adds 402 later | Documented as a privacy invariant, not a preference |
-| SDK 2.4.0 upgrade destabilises the native-secp patch | Own branch, own verification pass, existing suite as the net; feature can ship on 2.1.9 if it slips |
+| SDK 2.4.0 upgrade destabilises the native-secp patch | Own branch, own verification pass, existing suite as the net. Blocking: there is no 2.1.9 fallback path |
 
 ---
 
 ## Open questions
 
 - Repo name: `go-wallet-backup-server` is the proposal.
-- Does the SDK 2.4.0 upgrade land before or alongside this feature? It is sequenced first
-  above, but the design does not hard-require it.
+- **Whether the service is free or paid is under active review.** The "402 is a privacy
+  invariant" section below reflects the original free-only decision. A paid variant using
+  [go-402-pay](https://github.com/bsv-blockchain/go-402-pay) (BRC-121) with a
+  [BRC-228](https://bsv.brc.dev/payments/0228) ephemeral `senderIdentityKey` is being
+  evaluated. The structural obstacle is that the pseudonymous `CompletedProtoWallet`
+  cannot fund transactions — `createAction` throws `not implemented` — so only the real
+  wallet can pay, and the bridge between paying identity and authenticating pseudonym is
+  where linkage can leak. Resolve before implementing the server's route table.
 - Generation-rotation threshold — 200 chunks is a guess; needs a measurement against a
   real wallet's growth rate.
 - Should push be gated on unmetered connectivity? The app has `hooks/useOnline.ts` but no
