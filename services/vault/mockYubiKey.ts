@@ -144,7 +144,12 @@ export class MockYubiKey implements VaultDriver {
     // is supplied here and not yet verified, verify it inline.
     if (!this.pinVerified) {
       if (!pin) throw new VaultError('pin-required', 'PIN required before ECDH')
-      await this.verifyPin(pin)
+      // verifyPin only THROWS for pin-locked; a merely wrong PIN comes back as
+      // { ok: false }. Discarding that result let a wrong PIN fall straight
+      // through to a valid shared secret, silently defeating any test meant to
+      // prove PIN gating end-to-end.
+      const res = await this.verifyPin(pin)
+      if (!res.ok) throw new VaultError('pin-invalid', 'Wrong PIN', res.retriesLeft)
     }
     if (!this.slotPriv) throw new VaultError('no-key', 'No key in slot')
     if (this.touch === 'timeout') throw new VaultError('touch-timeout', 'Touch not detected')

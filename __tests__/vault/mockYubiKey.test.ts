@@ -45,6 +45,26 @@ describe('MockYubiKey', () => {
     await expect(mock.ecdh(0x82, '', ephPub)).rejects.toMatchObject({ code: 'pin-required' })
   })
 
+  test('ecdh with a WRONG PIN is rejected, not silently satisfied', async () => {
+    // verifyPin only throws for pin-locked; a wrong PIN returns { ok: false }.
+    // ecdh used to discard that result and fall through to a valid secret, so a
+    // wrong PIN was indistinguishable from a correct one — which would silently
+    // hollow out any test relying on the mock to prove PIN gating.
+    const mock = new MockYubiKey()
+    mock.insertKey('MOCK-1')
+    await mock.generateVaultKey(0x82)
+    const ephPub = Utils.toHex(Array.from(p256.getPublicKey(p256.utils.randomSecretKey(), false)))
+
+    await expect(mock.ecdh(0x82, '000000', ephPub)).rejects.toMatchObject({
+      code: 'pin-invalid',
+      retriesLeft: 2
+    })
+
+    // and the failed attempt must still have burned a retry
+    const { pinRetries } = await mock.getKeyInfo()
+    expect(pinRetries).toBe(2)
+  })
+
   test('touch timeout surfaces touch-timeout', async () => {
     const mock = new MockYubiKey()
     mock.insertKey('MOCK-1')
