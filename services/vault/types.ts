@@ -33,6 +33,11 @@ export type VaultErrorCode =
   | 'mgmt-key-custom'
   | 'slot-occupied'
   | 'seal-corrupt'
+  /** The R1-K1 template artifact, a locking script, or a digest failed a
+   * structural check. Programmer error or a corrupted dependency — never
+   * something a user can cause or fix. Distinct from 'wrong-key', which
+   * vaultErrorFromNative may reclassify to 'nfc-lost'. */
+  | 'template-invalid'
   | 'serial-mismatch'
   | 'user-cancelled'
   | 'not-enrolled'
