@@ -88,12 +88,16 @@ the app has never generated anything but 12 words.
 Accepted, never silently. On classifying a payload as legacy, tell the user the format changed and
 that these shares cannot open a vault.
 
-The remedy depends on who is reading the warning, and the copy must branch accordingly:
+The remedy depends on what else the user still holds, and the copy must offer them in this order:
 
-- **Still holding the phrase** (re-printing from Settings, or restoring onto a device that already
-  has the wallet): recover from the mnemonic and re-print. One action, keeps the wallet.
-- **Restoring from paper alone**: there is no mnemonic to re-print from, so the only remedy is to
-  sweep everything to a fresh wallet. Offering "re-print" here dead-ends.
+1. **Has the phrase** — whether re-printing from Settings or restoring on a device that already
+   has the wallet. Recover from the mnemonic and re-print. Keeps the wallet, keeps the vault.
+2. **Restoring from legacy paper, but the phrase exists somewhere** — restore from the phrase
+   instead. It recovers everything the shares do plus the vault, then re-print from there. Prompt
+   for this before assuming the phrase is gone; a user reaching for paper has not necessarily lost
+   it.
+3. **Phrase genuinely gone** — sweep everything to a fresh wallet. Last resort, not the default
+   advice, and the only case where the legacy restore cannot be upgraded in place.
 
 Mixing v1 and v2 paper is already impossible — `validateShareCompatibility` rejects mismatched
 integrity hashes (`utils/backupShares.ts:68`), and the two versions carry different secrets. The
