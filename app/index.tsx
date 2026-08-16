@@ -73,6 +73,24 @@ import { shouldForwardWebViewLogs } from '@/utils/logging'
 import { useRenderCount } from '@/hooks/useRenderCount'
 import { PerfProfiler } from '@/components/PerfProfiler'
 import { mark } from '@/utils/perfMarks'
+import { TaskBackupPush } from '@/utils/monitor/TaskBackupPush'
+
+/**
+ * Wallet calls that can write to the storage database.
+ *
+ * Used to nudge the encrypted backup log. Over-inclusion is harmless — an unnecessary pass
+ * is one local getSyncChunk that returns empty — while omitting a writer means its changes
+ * wait for the idle re-check.
+ */
+const WALLET_MUTATING_CALLS = new Set([
+  'createAction',
+  'signAction',
+  'abortAction',
+  'internalizeAction',
+  'relinquishOutput',
+  'acquireCertificate',
+  'relinquishCertificate'
+])
 
 /* -------------------------------------------------------------------------- */
 /*                                   CONSTS                                   */
@@ -1324,6 +1342,10 @@ const Browser = observer(function Browser() {
           case 'getNetwork':
           case 'getVersion':
             response = await (wallet as any)[msg.call](typeof msg.args !== 'undefined' ? msg.args : {}, origin)
+            // A dApp writing to the wallet produces no status *transition*, so the
+            // Monitor's onTransactionStatusChanged never fires for it and the backup task
+            // would otherwise not learn there is anything new to send.
+            if (WALLET_MUTATING_CALLS.has(msg.call)) TaskBackupPush.noteChanged()
             break
           default:
             throw new Error('Unsupported method.')

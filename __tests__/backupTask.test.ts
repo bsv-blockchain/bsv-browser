@@ -29,11 +29,13 @@ describe('TaskBackupPush trigger', () => {
     expect(task().trigger(Date.now()).run).toBe(true)
   })
 
-  it('does not run when nothing has changed', () => {
+  it('does not run when nothing has changed and a pass ran recently', () => {
     TaskBackupPush.noteConnectivity(true)
+    const now = Date.now()
+    TaskBackupPush.noteRan(now)
     TaskBackupPush.checkNow = false
 
-    expect(task().trigger(Date.now()).run).toBe(false)
+    expect(task().trigger(now + 1_000).run).toBe(false)
   })
 
   it('runs when the database has changed and the interval has elapsed', () => {
@@ -67,6 +69,26 @@ describe('TaskBackupPush trigger', () => {
     TaskBackupPush.requestNow()
 
     expect(task().trigger(now + 1_000).run).toBe(true)
+  })
+
+  it('re-checks eventually even when nothing announced a change', () => {
+    // Regression: a dApp creating an action writes rows but produces no status
+    // *transition*, so the Monitor's onTransactionStatusChanged never fires and hasChanges
+    // stays false. Observed live — a wallet created an event ticket and the chunk was never
+    // pushed. The idle floor guarantees the log converges regardless of which writer ran.
+    TaskBackupPush.noteConnectivity(true)
+    const now = Date.now()
+    TaskBackupPush.noteRan(now)
+    TaskBackupPush.checkNow = false
+    TaskBackupPush.hasChanges = false
+
+    expect(task().trigger(now + 60_000).run).toBe(false)
+    expect(task().trigger(now + TaskBackupPush.IDLE_RECHECK_MS + 1).run).toBe(true)
+  })
+
+  it('still never runs the idle re-check while offline', () => {
+    TaskBackupPush.noteConnectivity(false)
+    expect(task().trigger(Date.now() + TaskBackupPush.IDLE_RECHECK_MS * 10).run).toBe(false)
   })
 })
 
