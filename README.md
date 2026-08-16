@@ -177,7 +177,7 @@ GestureHandlerRootView
 
 **Wallet storage** is backed by `expo-sqlite` with a schema defined in `storage/schema/createTables.ts`. See `storage/README.md` for detailed documentation.
 
-**CWI Provider** (`utils/webview/cwiProvider.ts`) exposes `window.CWI` to web apps inside the browser. This implements the BRC-100 wallet interface, including `createAction`, `signAction`, `listActions`, `getPublicKey`, `encrypt`/`decrypt`, `createSignature`/`verifySignature`, `acquireCertificate`/`listCertificates`, and identity discovery methods. All operations go through a permission system with user-facing approval modals.
+**CWI Provider** (`utils/webview/cwiProvider.ts`) exposes `window.CWI` to web apps inside the browser, including embedded child frames. Frame calls are attributed to the native-reported frame URL and responses are posted back only to that origin. This implements the BRC-100 wallet interface, including `createAction`, `signAction`, `listActions`, `getPublicKey`, `encrypt`/`decrypt`, `createSignature`/`verifySignature`, `acquireCertificate`/`listCertificates`, and identity discovery methods. All operations go through a permission system with user-facing approval modals.
 
 **WebView communication** happens via injected polyfills (`utils/webview/`) that bridge web-app wallet requests to the native wallet layer through a message router. Custom user-agent spoofing and media polyfills ensure compatibility with sites that use bot detection or advanced media APIs.
 

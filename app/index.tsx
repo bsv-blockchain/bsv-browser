@@ -56,7 +56,9 @@ import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
 import { captureThumbnail, cleanupOrphanedThumbnails, thumbnailExists } from '@/utils/thumbnailService'
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
-import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
+import { buildWalletDocumentStartScript } from '@/utils/webview/documentStartScript'
+import { walletFrameIdentityFromUrl } from '@/utils/webview/walletOrigin'
+import { buildWalletResponseScript } from '@/utils/webview/walletResponseScript'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
 import { getErrorPage, getNativeErrorInfo, paymentLoadingPage, navigationLoadingPage, escapeForTemplateLiteral, escapeForJsSingleQuote } from '@/utils/webview/errorPages'
 
@@ -88,17 +90,6 @@ const CWI_NO_YIELD = new Set<string>([
   'getPublicKey', 'createHmac', 'verifyHmac', 'createSignature', 'verifySignature',
   'encrypt', 'decrypt'
 ])
-
-function getInjectableJSMessage(message: any = {}) {
-  const messageString = JSON.stringify(message)
-  return `
-    (function() {
-      window.dispatchEvent(new MessageEvent('message', {
-        data: JSON.stringify(${messageString})
-      }));
-    })();
-  `
-}
 
 /* -------------------------------------------------------------------------- */
 /*                               USER AGENTS                                  */
@@ -339,6 +330,10 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         enableApplePay={isWeb2Mode}
         injectedJavaScript={isWeb2Mode ? undefined : injectedJavaScript}
         injectedJavaScriptBeforeContentLoaded={isWeb2Mode ? undefined : injectedJSBefore}
+        // Install the wallet provider in child frames too. The native message
+        // event identifies the source-frame URL, so embedded apps retain their
+        // own BRC-100 origin instead of inheriting the top-level site's identity.
+        injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
         // Default ["phoneNumber"] makes WebKit scan + auto-link phone numbers on
         // every page parse — pure cost, no benefit for a general-purpose browser.
         // iOS/WebKit-only feature: on New-Arch Android the RNCWebView codegen prop
@@ -1111,15 +1106,16 @@ const Browser = observer(function Browser() {
   // each time and forcing the whole WebView subtree to reconcile.
   const injectedJSBefore = useMemo(
     () =>
-      nativeSpoofSetup +
-      '\n' +
-      (isWeb2Mode ? '' : buildCWIProviderScript() + '\n') +
-      mediaSourcePolyfill +
-      '\n' +
-      downloadInterceptScript +
-      '\n' +
-      getPermissionScript(permissionsDeniedForCurrentDomain, pendingPermission),
-    [downloadInterceptScript, isWeb2Mode, permissionsDeniedForCurrentDomain, pendingPermission]
+      buildWalletDocumentStartScript(
+        nativeSpoofSetup +
+          '\n' +
+          mediaSourcePolyfill +
+          '\n' +
+          downloadInterceptScript +
+          '\n' +
+          getPermissionScript(permissionsDeniedForCurrentDomain, pendingPermission)
+      ),
+    [downloadInterceptScript, permissionsDeniedForCurrentDomain, pendingPermission]
   )
 
   const routeWebViewMessage = useMemo(
@@ -1145,6 +1141,8 @@ const Browser = observer(function Browser() {
       // user returns to it.
       if (tabId !== activeTab.id) return
 
+      const frameIdentity = walletFrameIdentityFromUrl(event.nativeEvent.url)
+
       const sendResponseToWebView = (id: string, result: any) => {
         if (!activeTab?.webviewRef?.current) return
         const message = {
@@ -1154,7 +1152,7 @@ const Browser = observer(function Browser() {
           result,
           status: 'ok'
         }
-        activeTab.webviewRef.current.injectJavaScript(getInjectableJSMessage(message))
+        activeTab.webviewRef.current.injectJavaScript(buildWalletResponseScript(message, frameIdentity?.responseOrigin))
       }
 
       const sendErrorToWebView = (id: string, description: string, code: number = 1) => {
@@ -1167,7 +1165,7 @@ const Browser = observer(function Browser() {
           code,
           description
         }
-        activeTab.webviewRef.current.injectJavaScript(getInjectableJSMessage(message))
+        activeTab.webviewRef.current.injectJavaScript(buildWalletResponseScript(message, frameIdentity?.responseOrigin))
       }
 
       let msg
@@ -1272,7 +1270,13 @@ const Browser = observer(function Browser() {
         return
       }
 
-      const origin = activeTab.url.replace(/^https?:\/\//, '').split('/')[0]
+      if (!frameIdentity) {
+        if (msg.type === 'CWI' && msg.id) {
+          sendErrorToWebView(msg.id, 'Unable to verify the wallet request origin', 1)
+        }
+        return
+      }
+      const origin = frameIdentity.originator
       let response: any
 
       // Yield to any in-flight interaction (Reanimated spring on the address bar,
