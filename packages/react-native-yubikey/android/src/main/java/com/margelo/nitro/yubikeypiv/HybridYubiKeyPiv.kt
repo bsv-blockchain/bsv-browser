@@ -251,6 +251,39 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
     return promise
   }
 
+  override fun signEcdsa(slot: Double, pin: String, digest: String): Promise<String> {
+    val promise = Promise<String>()
+    // MUST be exactly 32 bytes: rawSignOrDecrypt silently TRUNCATES an over-long
+    // EC payload (Arrays.copyOf to the key's 32-byte length) and left zero-pads a
+    // short one, so an off-length digest signs the wrong message rather than
+    // failing. Checked BEFORE any card command so a malformed digest never burns
+    // a PIN retry.
+    val digestBytes = try {
+      hexToBytes(digest)
+    } catch (t: Throwable) {
+      promise.reject(vaultError("template-invalid", "digest must be hex"))
+      return promise
+    }
+    if (digestBytes.size != 32) {
+      promise.reject(vaultError("template-invalid", "digest must be exactly 32 bytes, got ${digestBytes.size}"))
+      return promise
+    }
+
+    withPiv(promise) { piv ->
+      // withPiv opens a FRESH PivSession per call, so the PIN must be verified
+      // inside every operation — this is not redundant with an earlier verify.
+      piv.verifyPin(pin.toCharArray())
+      // TOUCH-gated by the slot's touch policy; a required-but-unmet touch
+      // surfaces as SW 0x6982/0x6985, which mapError folds into touch-timeout.
+      // rawSignOrDecrypt sends the digest verbatim (no local hashing/re-encoding)
+      // and the card returns raw DER (SEQUENCE { r, s }), NOT low-S normalised —
+      // returned here unmodified.
+      val der = piv.rawSignOrDecrypt(Slot.fromValue(slot.toInt()), KeyType.ECCP256, digestBytes)
+      "{\"signature\":\"${der.toHex()}\"}"
+    }
+    return promise
+  }
+
   // ── helpers ──
 
   /**
