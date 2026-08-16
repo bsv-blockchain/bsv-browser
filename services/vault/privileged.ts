@@ -14,7 +14,7 @@
  */
 import { PrivateKey } from '@bsv/sdk'
 
-export const VAULT_RETENTION_MS = 120_000
+export { VAULT_RETENTION_MS } from './ceremonyHost'
 
 export function makePrivilegedKeyGetter(opts: {
   getLegacyRootKey: () => PrivateKey

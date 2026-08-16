@@ -2,7 +2,21 @@
  * Privileged keyGetter — the seam that re-points BRC-100 privileged operations
  * at the vault. Not enrolled → the legacy root key, byte-identical to today.
  * Enrolled → resolves through the ceremony.
+ *
+ * privileged.ts now re-exports VAULT_RETENTION_MS from ./ceremonyHost (Task
+ * 9), which transitively imports vaultStore's AsyncStorage — mock the same
+ * native modules vaultStore.test.ts does so this file can still load standalone.
  */
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock')
+)
+jest.mock('expo-secure-store', () => ({
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'afudo',
+  getItemAsync: jest.fn(async () => null),
+  setItemAsync: jest.fn(async () => undefined),
+  deleteItemAsync: jest.fn(async () => undefined)
+}))
+
 import { PrivateKey } from '@bsv/sdk'
 import { makePrivilegedKeyGetter } from '../../services/vault/privileged'
 
