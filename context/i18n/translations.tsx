@@ -481,6 +481,16 @@ const resources = {
       // Biometric prompts
       biometric_store_wallet: 'Securely Store Your Wallet',
       biometric_load_wallet: 'Securely Load Your Wallet',
+      biometric_unlock_wallet: 'Unlock your wallet',
+      wallet_lost_title: 'Wallet key destroyed',
+      wallet_lost_body: 'This device changed its biometric settings, so the system destroyed the key protecting this wallet. Your coins are safe on the blockchain — restore this wallet with your recovery phrase.',
+      wallet_lost_restore: 'Restore with recovery phrase',
+      wallet_lost_later: 'Not now',
+      wallet_locked_title: 'Wallet locked',
+      wallet_locked_body: 'Unlock to load your wallet keys.',
+      wallet_unlock_retry: 'Unlock wallet',
+      wallet_lockout_body: 'Too many failed attempts. Unlock your phone with its passcode, then try again.',
+      wallet_no_biometrics_body: 'This device has no biometrics set up. Your wallet keys are still encrypted by the device keystore, but they are not protected by a biometric check.',
 
       // Connections screen
       connections: 'Connections',
@@ -883,6 +893,16 @@ const resources = {
 
       biometric_store_wallet: '安全存储您的钱包',
       biometric_load_wallet: '安全加载您的钱包',
+      biometric_unlock_wallet: '解锁您的钱包',
+      wallet_lost_title: '钱包密钥已被销毁',
+      wallet_lost_body: '此设备的生物识别设置已更改，系统因此销毁了保护此钱包的密钥。您的币在区块链上是安全的——请使用助记词恢复此钱包。',
+      wallet_lost_restore: '使用助记词恢复',
+      wallet_lost_later: '暂不',
+      wallet_locked_title: '钱包已锁定',
+      wallet_locked_body: '解锁以加载您的钱包密钥。',
+      wallet_unlock_retry: '解锁钱包',
+      wallet_lockout_body: '尝试次数过多。请先用密码解锁手机，然后重试。',
+      wallet_no_biometrics_body: '此设备未设置生物识别。您的钱包密钥仍由设备密钥库加密，但没有生物识别保护。',
 
       // Connections screen
       connections: '连接',
@@ -1287,6 +1307,16 @@ const resources = {
 
       biometric_store_wallet: 'अपने वॉलेट को सुरक्षित रूप से संग्रहित करें',
       biometric_load_wallet: 'अपने वॉलेट को सुरक्षित रूप से लोड करें',
+      biometric_unlock_wallet: 'अपना वॉलेट अनलॉक करें',
+      wallet_lost_title: 'वॉलेट कुंजी नष्ट हो गई',
+      wallet_lost_body: 'इस डिवाइस की बायोमेट्रिक सेटिंग्स बदल गईं, इसलिए सिस्टम ने इस वॉलेट की सुरक्षा करने वाली कुंजी नष्ट कर दी। आपके सिक्के ब्लॉकचेन पर सुरक्षित हैं — रिकवरी वाक्यांश से इस वॉलेट को पुनर्स्थापित करें।',
+      wallet_lost_restore: 'रिकवरी वाक्यांश से पुनर्स्थापित करें',
+      wallet_lost_later: 'अभी नहीं',
+      wallet_locked_title: 'वॉलेट लॉक है',
+      wallet_locked_body: 'अपनी वॉलेट कुंजियाँ लोड करने के लिए अनलॉक करें।',
+      wallet_unlock_retry: 'वॉलेट अनलॉक करें',
+      wallet_lockout_body: 'बहुत अधिक असफल प्रयास। पहले अपने फ़ोन को पासकोड से अनलॉक करें, फिर पुनः प्रयास करें।',
+      wallet_no_biometrics_body: 'इस डिवाइस पर बायोमेट्रिक्स सेट नहीं है। आपकी वॉलेट कुंजियाँ अभी भी डिवाइस कीस्टोर द्वारा एन्क्रिप्टेड हैं, लेकिन बायोमेट्रिक जाँच से सुरक्षित नहीं हैं।',
 
       // Connections screen
       connections: 'कनेक्शन',
@@ -1695,6 +1725,16 @@ const resources = {
 
       biometric_store_wallet: 'Almacene su billetera de forma segura',
       biometric_load_wallet: 'Cargue su billetera de forma segura',
+      biometric_unlock_wallet: 'Desbloquee su billetera',
+      wallet_lost_title: 'Clave de la billetera destruida',
+      wallet_lost_body: 'Este dispositivo cambió su configuración biométrica, por lo que el sistema destruyó la clave que protegía esta billetera. Sus monedas están seguras en la blockchain: restaure esta billetera con su frase de recuperación.',
+      wallet_lost_restore: 'Restaurar con la frase de recuperación',
+      wallet_lost_later: 'Ahora no',
+      wallet_locked_title: 'Billetera bloqueada',
+      wallet_locked_body: 'Desbloquee para cargar las claves de su billetera.',
+      wallet_unlock_retry: 'Desbloquear billetera',
+      wallet_lockout_body: 'Demasiados intentos fallidos. Desbloquee su teléfono con su código y vuelva a intentarlo.',
+      wallet_no_biometrics_body: 'Este dispositivo no tiene biometría configurada. Las claves de su billetera siguen cifradas por el almacén de claves del dispositivo, pero no están protegidas por una comprobación biométrica.',
 
       // Connections screen
       connections: 'Conexiones',
@@ -2097,6 +2137,16 @@ const resources = {
 
       biometric_store_wallet: 'Stocker votre portefeuille en toute sécurité',
       biometric_load_wallet: 'Charger votre portefeuille en toute sécurité',
+      biometric_unlock_wallet: 'Déverrouillez votre portefeuille',
+      wallet_lost_title: 'Clé du portefeuille détruite',
+      wallet_lost_body: 'Cet appareil a modifié ses réglages biométriques ; le système a donc détruit la clé qui protégeait ce portefeuille. Vos pièces sont en sécurité sur la blockchain — restaurez ce portefeuille avec votre phrase de récupération.',
+      wallet_lost_restore: 'Restaurer avec la phrase de récupération',
+      wallet_lost_later: 'Plus tard',
+      wallet_locked_title: 'Portefeuille verrouillé',
+      wallet_locked_body: 'Déverrouillez pour charger les clés de votre portefeuille.',
+      wallet_unlock_retry: 'Déverrouiller le portefeuille',
+      wallet_lockout_body: 'Trop de tentatives échouées. Déverrouillez votre téléphone avec son code, puis réessayez.',
+      wallet_no_biometrics_body: 'Aucune biométrie n’est configurée sur cet appareil. Vos clés restent chiffrées par le magasin de clés de l’appareil, mais elles ne sont pas protégées par une vérification biométrique.',
 
       // Connections screen
       connections: 'Connexions',
@@ -2495,6 +2545,16 @@ const resources = {
 
       biometric_store_wallet: 'تخزين محفظتك بأمان',
       biometric_load_wallet: 'تحميل محفظتك بأمان',
+      biometric_unlock_wallet: 'افتح قفل محفظتك',
+      wallet_lost_title: 'تم إتلاف مفتاح المحفظة',
+      wallet_lost_body: 'غيّر هذا الجهاز إعدادات القياسات الحيوية، لذلك أتلف النظام المفتاح الذي يحمي هذه المحفظة. عملاتك آمنة على البلوكتشين — استعد هذه المحفظة باستخدام عبارة الاسترداد.',
+      wallet_lost_restore: 'الاستعادة بعبارة الاسترداد',
+      wallet_lost_later: 'ليس الآن',
+      wallet_locked_title: 'المحفظة مقفلة',
+      wallet_locked_body: 'افتح القفل لتحميل مفاتيح محفظتك.',
+      wallet_unlock_retry: 'فتح قفل المحفظة',
+      wallet_lockout_body: 'محاولات فاشلة كثيرة. افتح قفل هاتفك برمز المرور ثم حاول مرة أخرى.',
+      wallet_no_biometrics_body: 'لا توجد قياسات حيوية مُعدّة على هذا الجهاز. لا تزال مفاتيح محفظتك مشفّرة بمخزن مفاتيح الجهاز، لكنها غير محمية بفحص حيوي.',
 
       // Connections screen
       connections: 'الاتصالات',
@@ -2895,6 +2955,16 @@ const resources = {
 
       biometric_store_wallet: 'Armazene sua carteira com segurança',
       biometric_load_wallet: 'Carregue sua carteira com segurança',
+      biometric_unlock_wallet: 'Desbloqueie sua carteira',
+      wallet_lost_title: 'Chave da carteira destruída',
+      wallet_lost_body: 'Este dispositivo alterou suas configurações biométricas, então o sistema destruiu a chave que protegia esta carteira. Suas moedas estão seguras na blockchain — restaure esta carteira com sua frase de recuperação.',
+      wallet_lost_restore: 'Restaurar com a frase de recuperação',
+      wallet_lost_later: 'Agora não',
+      wallet_locked_title: 'Carteira bloqueada',
+      wallet_locked_body: 'Desbloqueie para carregar as chaves da sua carteira.',
+      wallet_unlock_retry: 'Desbloquear carteira',
+      wallet_lockout_body: 'Muitas tentativas malsucedidas. Desbloqueie seu telefone com a senha e tente novamente.',
+      wallet_no_biometrics_body: 'Este dispositivo não tem biometria configurada. Suas chaves continuam criptografadas pelo keystore do dispositivo, mas não são protegidas por uma verificação biométrica.',
 
       // Connections screen
       connections: 'Conexões',
@@ -3295,6 +3365,16 @@ const resources = {
 
       biometric_store_wallet: 'আপনার ওয়ালেট নিরাপদে সংরক্ষণ করুন',
       biometric_load_wallet: 'আপনার ওয়ালেট নিরাপদে লোড করুন',
+      biometric_unlock_wallet: 'আপনার ওয়ালেট আনলক করুন',
+      wallet_lost_title: 'ওয়ালেট কী ধ্বংস হয়েছে',
+      wallet_lost_body: 'এই ডিভাইসের বায়োমেট্রিক সেটিংস পরিবর্তিত হয়েছে, তাই সিস্টেম এই ওয়ালেট রক্ষাকারী কী ধ্বংস করেছে। আপনার কয়েন ব্লকচেইনে নিরাপদ — রিকভারি ফ্রেজ দিয়ে এই ওয়ালেট পুনরুদ্ধার করুন।',
+      wallet_lost_restore: 'রিকভারি ফ্রেজ দিয়ে পুনরুদ্ধার করুন',
+      wallet_lost_later: 'এখন নয়',
+      wallet_locked_title: 'ওয়ালেট লক করা',
+      wallet_locked_body: 'আপনার ওয়ালেট কী লোড করতে আনলক করুন।',
+      wallet_unlock_retry: 'ওয়ালেট আনলক করুন',
+      wallet_lockout_body: 'অনেকবার ব্যর্থ চেষ্টা। প্রথমে পাসকোড দিয়ে ফোন আনলক করুন, তারপর আবার চেষ্টা করুন।',
+      wallet_no_biometrics_body: 'এই ডিভাইসে বায়োমেট্রিক সেট করা নেই। আপনার ওয়ালেট কী এখনও ডিভাইস কীস্টোর দ্বারা এনক্রিপ্ট করা, তবে বায়োমেট্রিক যাচাই দ্বারা সুরক্ষিত নয়।',
 
       // Connections screen
       connections: 'সংযোগ',
@@ -3697,6 +3777,16 @@ const resources = {
 
       biometric_store_wallet: 'Безопасно сохранить ваш кошелёк',
       biometric_load_wallet: 'Безопасно загрузить ваш кошелёк',
+      biometric_unlock_wallet: 'Разблокируйте кошелёк',
+      wallet_lost_title: 'Ключ кошелька уничтожен',
+      wallet_lost_body: 'На этом устройстве изменились биометрические настройки, поэтому система уничтожила ключ, защищавший этот кошелёк. Ваши монеты в безопасности в блокчейне — восстановите кошелёк с помощью секретной фразы.',
+      wallet_lost_restore: 'Восстановить по секретной фразе',
+      wallet_lost_later: 'Не сейчас',
+      wallet_locked_title: 'Кошелёк заблокирован',
+      wallet_locked_body: 'Разблокируйте, чтобы загрузить ключи кошелька.',
+      wallet_unlock_retry: 'Разблокировать кошелёк',
+      wallet_lockout_body: 'Слишком много неудачных попыток. Разблокируйте телефон кодом-паролем и попробуйте снова.',
+      wallet_no_biometrics_body: 'На этом устройстве не настроена биометрия. Ключи кошелька по-прежнему зашифрованы хранилищем ключей устройства, но не защищены биометрической проверкой.',
 
       // Connections screen
       connections: 'Подключения',
@@ -4098,6 +4188,16 @@ const resources = {
 
       biometric_store_wallet: 'Simpan dompet Anda dengan aman',
       biometric_load_wallet: 'Muat dompet Anda dengan aman',
+      biometric_unlock_wallet: 'Buka kunci dompet Anda',
+      wallet_lost_title: 'Kunci dompet dimusnahkan',
+      wallet_lost_body: 'Pengaturan biometrik perangkat ini berubah, sehingga sistem memusnahkan kunci yang melindungi dompet ini. Koin Anda aman di blockchain — pulihkan dompet ini dengan frasa pemulihan Anda.',
+      wallet_lost_restore: 'Pulihkan dengan frasa pemulihan',
+      wallet_lost_later: 'Nanti saja',
+      wallet_locked_title: 'Dompet terkunci',
+      wallet_locked_body: 'Buka kunci untuk memuat kunci dompet Anda.',
+      wallet_unlock_retry: 'Buka kunci dompet',
+      wallet_lockout_body: 'Terlalu banyak percobaan gagal. Buka kunci ponsel Anda dengan kode sandi, lalu coba lagi.',
+      wallet_no_biometrics_body: 'Perangkat ini tidak memiliki biometrik. Kunci dompet Anda tetap dienkripsi oleh keystore perangkat, tetapi tidak dilindungi pemeriksaan biometrik.',
 
       // Connections screen
       connections: 'Koneksi',
@@ -4516,6 +4616,16 @@ const resources = {
       // Biometric prompts
       biometric_store_wallet: 'ウォレットを安全に保存',
       biometric_load_wallet: 'ウォレットを安全に読み込み',
+      biometric_unlock_wallet: 'ウォレットのロックを解除',
+      wallet_lost_title: 'ウォレットの鍵が破棄されました',
+      wallet_lost_body: 'この端末の生体認証設定が変更されたため、システムがこのウォレットを保護していた鍵を破棄しました。コインはブロックチェーン上で安全です。リカバリーフレーズでこのウォレットを復元してください。',
+      wallet_lost_restore: 'リカバリーフレーズで復元',
+      wallet_lost_later: 'あとで',
+      wallet_locked_title: 'ウォレットはロック中',
+      wallet_locked_body: 'ウォレットの鍵を読み込むにはロックを解除してください。',
+      wallet_unlock_retry: 'ロックを解除',
+      wallet_lockout_body: '失敗が続いたため一時的にロックされました。パスコードで端末のロックを解除してから、もう一度お試しください。',
+      wallet_no_biometrics_body: 'この端末では生体認証が設定されていません。ウォレットの鍵は端末のキーストアで暗号化されていますが、生体認証では保護されていません。',
 
       // Connections screen
       connections: '接続',
@@ -4933,6 +5043,16 @@ const resources = {
       // Biometric prompts
       biometric_store_wallet: 'Bezpiecznie zapisz portfel',
       biometric_load_wallet: 'Bezpiecznie wczytaj portfel',
+      biometric_unlock_wallet: 'Odblokuj portfel',
+      wallet_lost_title: 'Klucz portfela został zniszczony',
+      wallet_lost_body: 'To urządzenie zmieniło ustawienia biometryczne, więc system zniszczył klucz chroniący ten portfel. Twoje monety są bezpieczne w blockchainie — przywróć ten portfel za pomocą frazy odzyskiwania.',
+      wallet_lost_restore: 'Przywróć z frazy odzyskiwania',
+      wallet_lost_later: 'Nie teraz',
+      wallet_locked_title: 'Portfel zablokowany',
+      wallet_locked_body: 'Odblokuj, aby wczytać klucze portfela.',
+      wallet_unlock_retry: 'Odblokuj portfel',
+      wallet_lockout_body: 'Zbyt wiele nieudanych prób. Odblokuj telefon kodem, a następnie spróbuj ponownie.',
+      wallet_no_biometrics_body: 'To urządzenie nie ma skonfigurowanej biometrii. Klucze portfela są nadal szyfrowane przez magazyn kluczy urządzenia, ale nie chroni ich weryfikacja biometryczna.',
 
       // Connections screen
       connections: 'Połączenia',
