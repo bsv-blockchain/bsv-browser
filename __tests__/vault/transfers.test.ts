@@ -9,7 +9,7 @@
  * signs for real with a P-256 key (so the R1 template's own commitment
  * check inside the signing loop is exercised, not just mocked away).
  */
-import { HD, P2PKH, Transaction, UnlockingScript, Utils } from '@bsv/sdk'
+import { Beef, HD, P2PKH, Transaction, UnlockingScript, Utils } from '@bsv/sdk'
 import { p256 } from '@noble/curves/nist.js'
 import {
   R1K1_R1_UNLOCK_LEN,
@@ -44,6 +44,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { vaultStore } from '@/services/vault/vaultStore'
 import { bip32KeyID, depositPkhFromXpub } from '@/services/vault/vaultDerivation'
 import { requestVaultSigner } from '@/services/vault/ceremonyHost'
+import { VaultError } from '@/services/vault/types'
 import {
   VAULT_BASKET,
   VAULT_DEPOSIT_MIN,
@@ -85,6 +86,17 @@ interface Fixture {
   src: Transaction
 }
 
+/** A BEEF carrying every fixture's raw source transaction, as listOutputs
+ * with `include: 'entire transactions'` returns. createAction's signer layer
+ * (buildSignableTransaction) resolves each input's sourceTransaction ONLY
+ * from this BEEF — a mocked wallet boundary can't catch a missing inputBEEF,
+ * but it CAN catch a missing BEEF here if we actually assert on it. */
+const stitchBeef = (fx: { src: Transaction }[]): number[] => {
+  const beef = new Beef()
+  for (const { src } of fx) beef.mergeRawTx(src.toBinary())
+  return beef.toBinary()
+}
+
 /** Seed `n` real R1-K1 vault outputs (fresh salt each) and wire the fake
  * wallet's listOutputs/createAction to serve them, fabricating a signable
  * transaction from whatever inputs/outputs the code under test asks for. */
@@ -116,7 +128,7 @@ async function seedVaultOutputs(n: number, sats = 300_000): Promise<Fixture[]> {
   const meta = await vaultStore.getMeta()
   await vaultStore.setMeta({ ...meta!, nextKeyIndex: n })
 
-  wallet.listOutputs.mockResolvedValue({ outputs: fx.map(({ src: _s, ...o }) => o) })
+  wallet.listOutputs.mockResolvedValue({ outputs: fx.map(({ src: _s, ...o }) => o), BEEF: stitchBeef(fx) })
   wallet.createAction.mockImplementation(async (args: any) => {
     const tx = new Transaction()
     for (const inp of args.inputs) {
@@ -162,16 +174,56 @@ beforeEach(async () => {
   }
 
   signerRelease = jest.fn()
+  // A concurrency guard mirroring the real CeremonyController's `signing`
+  // flag (services/vault/ceremony.ts) — NOT exercised by the current
+  // sequential for-loop, but load-bearing as a regression guard: without it,
+  // a future rewrite to Promise.all/an unlockingScriptTemplate would keep
+  // this suite green and silently reopen the landmine (VaultR1Signer.sign()
+  // rejecting fast on overlap is what actually breaks a parallel fan-out on
+  // real hardware — the mock must reproduce that, not just the happy path).
+  // The `await Promise.resolve()` before doing any work is required for the
+  // guard to mean anything: without an internal await point, two back-to-
+  // back synchronous calls (as Promise.all would issue) would each run to
+  // completion before the next one starts, and `signing` would never
+  // observe an overlap.
+  let signing = false
   mockSigner = {
     publicKey: Utils.toArray(R1_PUBLIC_KEY, 'hex'),
     sign: jest.fn(async (digest: Uint8Array) => {
-      const sig = p256.Signature.fromBytes(p256.sign(digest, R1_PRIV, { prehash: false }))
-      return Array.from(sig.toBytes('der'))
+      if (signing) {
+        throw new VaultError('template-invalid', 'Concurrent sign() calls on one signer are not supported')
+      }
+      signing = true
+      try {
+        await Promise.resolve()
+        const sig = p256.Signature.fromBytes(p256.sign(digest, R1_PRIV, { prehash: false }))
+        return Array.from(sig.toBytes('der'))
+      } finally {
+        signing = false
+      }
     }),
     release: signerRelease
   }
   ;(requestVaultSigner as jest.Mock).mockClear()
   ;(requestVaultSigner as jest.Mock).mockImplementation(async () => mockSigner)
+})
+
+// Pins the harness's own fidelity to the real VaultR1Signer contract: this is
+// what makes the multi-input withdraw tests below double as a regression
+// guard for the sequential-signing landmine. If this test ever stopped
+// passing, the "spends every vault output"/"actually signs every input"
+// tests below would no longer catch a Promise.all/unlockingScriptTemplate
+// regression in spendVaultOutputs — they'd just be exercising a mock that
+// happens to tolerate concurrency the real ceremony does not.
+describe('mockSigner fidelity: mirrors VaultR1Signer\'s no-overlap contract', () => {
+  it('rejects an overlapping sign() call the same way the real ceremony does', async () => {
+    const d1 = new Uint8Array(32).fill(1)
+    const d2 = new Uint8Array(32).fill(2)
+    const [r1, r2] = await Promise.allSettled([mockSigner.sign(d1), mockSigner.sign(d2)])
+    expect(r1.status).toBe('fulfilled')
+    expect(r2.status).toBe('rejected')
+    expect((r2 as PromiseRejectedResult).reason).toMatchObject({ code: 'template-invalid' })
+  })
 })
 
 // ── deposit ───────────────────────────────────────────────────────────────
@@ -230,18 +282,28 @@ describe('depositToVault', () => {
 // ── withdraw ──────────────────────────────────────────────────────────────
 
 describe('withdrawFromVault', () => {
-  it('never requests entire transactions and passes no inputBEEF', async () => {
-    await seedVaultOutputs(2)
+  it('requests entire transactions and forwards the resulting BEEF as inputBEEF', async () => {
+    const fx = await seedVaultOutputs(2)
     await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')
 
     const [listArgs] = wallet.listOutputs.mock.calls[0]
     expect(listArgs.includeCustomInstructions).toBe(true)
-    // ~1.83 MB of extended format per input — never pull the source
-    // transactions into memory just to rebuild a script we can derive.
-    expect(listArgs.include).toBeUndefined()
+    // Required, not optional: every vault input carries unlockingScriptLength
+    // with no unlockingScript, so @bsv/sdk's createAction treats this as a
+    // signable action and resolves each input's sourceTransaction ONLY from
+    // inputBEEF (buildSignableTransaction.js) — trustSelf/storage's own
+    // known-input shortcut does not substitute for supplying it. Omitting
+    // this throws WERR_INTERNAL on the real toolbox before signing starts,
+    // which a mocked createAction can't catch — hence asserting on it here.
+    expect(listArgs.include).toBe('entire transactions')
 
     const [caArgs] = wallet.createAction.mock.calls[0]
-    expect(caArgs.inputBEEF).toBeUndefined()
+    expect(caArgs.inputBEEF).toBeDefined()
+    expect(caArgs.inputBEEF.length).toBeGreaterThan(0)
+    // Sourced from the listOutputs result, not fabricated — and it actually
+    // decodes to a BEEF containing every spent output's source transaction.
+    const beef = Beef.fromBinary(caArgs.inputBEEF)
+    for (const f of fx) expect(beef.findTxid(f.src.id('hex'))).toBeDefined()
     expect(caArgs.options.trustSelf).toBe('known')
   })
 

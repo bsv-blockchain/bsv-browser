@@ -80,6 +80,10 @@ interface ListOutputsResult {
     satoshis: number
     customInstructions?: string
   }[]
+  /** Present when `include: 'entire transactions'` was requested — the AtomicBEEF
+   * (well, the multi-tx BEEF) covering every listed output's source transaction.
+   * Forwarded verbatim as createAction's inputBEEF; see spendVaultOutputs. */
+  BEEF?: number[]
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────
@@ -235,13 +239,27 @@ async function spendVaultOutputs(
   spend: SpendPath,
   opts: { revaultRemainder: boolean }
 ): Promise<{ txid: string }> {
-  // NO `include: 'entire transactions'`. Extended format costs ~1.83 MB per
-  // vault input; we rebuild each prevout script locally from salt +
-  // r1PublicKey + the xpub child instead, and hand it to the template
-  // explicitly. includeCustomInstructions IS required — listOutputs omits that
-  // field unless asked, and without it every output filters out as unreadable.
+  // `include: 'entire transactions'` IS required, despite costing ~1.83 MB per
+  // vault input: every input here carries unlockingScriptLength but no
+  // unlockingScript, so @bsv/sdk's validateCreateActionArgs sets
+  // isSignAction=true for this createAction call. buildSignableTransaction
+  // then resolves each input's sourceTransaction ONLY from args.inputBEEF
+  // (buildSignableTransaction.js:14,101) — trustSelf and storage's own
+  // "known input" shortcut (storage/methods/createAction.js's
+  // localKnownInputTxids) are a STORAGE-side allowance to skip merkle-proof
+  // verification, not a substitute for the client supplying inputBEEF at all.
+  // Omit it and createAction.js's makeSignableTransactionBeef throws
+  // WERR_INTERNAL('Every signableTransaction input must have a
+  // sourceTransaction') on the very first input, before signing ever starts.
+  // (This does not apply to depositToVault: it supplies no explicit inputs,
+  // so isSignAction is false there and no BEEF is ever needed.) The memory
+  // cost is real but not a NEW one: broadcasting already pays ~1.83 MB per
+  // input in extended format regardless, so this list call just front-loads
+  // a cost the wallet incurs either way. includeCustomInstructions IS also
+  // required — listOutputs omits that field unless asked, and without it
+  // every output filters out as unreadable.
   const list = await w.listOutputs(
-    { basket: VAULT_BASKET, includeCustomInstructions: true, limit: 1000 },
+    { basket: VAULT_BASKET, include: 'entire transactions', includeCustomInstructions: true, limit: 1000 },
     adminOriginator
   )
   const spendable = list.outputs
@@ -294,17 +312,13 @@ async function spendVaultOutputs(
     })),
     outputs,
     labels: ['vault', 'vault-withdraw'],
-    // No inputBEEF is needed here: these outpoints were created by this same
-    // wallet's own prior createAction calls, so storage already holds their
-    // lockingScript+satoshis locally and createAction's own
-    // validateRequiredInputs short-circuits the BEEF requirement for a
-    // locally-known input before trustSelf is even consulted (verified
-    // against @bsv/wallet-toolbox-client's storage/methods/createAction.js —
-    // see the ensureBeefContainsAllInputTxids/localKnownInputTxids path).
-    // trustSelf:'known' is kept anyway as the documented fallback for the
-    // case a vault output is NOT already a full local record (e.g. storage
-    // eviction), where it lets storage vouch for the txid instead of us
-    // needing to supply inputBEEF.
+    // inputBEEF, from the 'entire transactions' listOutputs call above — see
+    // the comment there for why this is required, not optional. trustSelf:
+    // 'known' is kept alongside it: it is what lets storage skip re-walking
+    // each source transaction's own merkle-proof ancestry for a basket this
+    // wallet already trusts (its own prior deposits), rather than what makes
+    // inputBEEF itself unnecessary.
+    inputBEEF: list.BEEF?.length ? list.BEEF : undefined,
     options: { randomizeOutputs: false, acceptDelayedBroadcast: false, trustSelf: 'known' }
   }
 
