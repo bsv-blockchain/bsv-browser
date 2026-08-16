@@ -220,3 +220,36 @@ describe('MockYubiKey.signEcdsa', () => {
     expect(sawHighS).toBe(true)
   })
 })
+
+// ── generateVaultKey policy (task 7) ──
+describe('generateVaultKey policy', () => {
+  it('generates with touch policy cached and pin policy once', async () => {
+    const calls: unknown[][] = []
+    const native = {
+      isSupported: () => true,
+      startDiscovery: () => {},
+      stopDiscovery: () => {},
+      setKeyListener: () => {},
+      clearKeyListener: () => {},
+      getKeyInfo: async () => '{}',
+      verifyPin: async () => '{}',
+      changePin: async () => '{}',
+      generateVaultKey: async (...args: unknown[]) => {
+        calls.push(args)
+        return JSON.stringify({ publicKey: '04' + '11'.repeat(64) })
+      },
+      readVaultPublicKey: async () => '{"publicKey":null}',
+      ecdh: async () => '{}',
+      signEcdsa: async () => '{}'
+    }
+    jest.doMock('react-native-yubikey', () => ({ getYubiKeyPiv: () => native }))
+    jest.resetModules()
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getVaultDriver } = require('@/services/vault/driver')
+
+    await getVaultDriver()!.generateVaultKey(0x82)
+
+    // R1-K1 signs once per input; 'always' would cost one physical touch each.
+    expect(calls[0]).toEqual([0x82, 'cached', 'once'])
+  })
+})

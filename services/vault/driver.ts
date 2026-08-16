@@ -121,7 +121,10 @@ function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
     getKeyInfo: () => parse(native.getKeyInfo()),
     verifyPin: pin => parse(native.verifyPin(pin)),
     changePin: (o, n) => parse(native.changePin(o, n)),
-    generateVaultKey: slot => parse(native.generateVaultKey(slot, 'always', 'once')),
+    // 'cached' (not 'always'): R1-K1 needs one signature per input, so 'always'
+    // would demand a separate physical touch for every vault UTXO in a
+    // withdrawal. 'cached' satisfies the touch once per ~15s window.
+    generateVaultKey: slot => parse(native.generateVaultKey(slot, 'cached', 'once')),
     readVaultPublicKey: async slot => {
       const r = await parse<{ publicKey: string | null }>(native.readVaultPublicKey(slot))
       return r.publicKey ? { publicKey: r.publicKey } : null
