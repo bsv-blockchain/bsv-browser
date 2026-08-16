@@ -229,6 +229,49 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     return promise
   }
 
+  func signEcdsa(slot: Double, pin: String, digest: String) throws -> Promise<String> {
+    let promise = Promise<String>()
+    guard let pivSlot = YKFPIVSlot(rawValue: UInt(slot)) else {
+      promise.reject(withError: Self.vaultError("no-key", "bad slot"))
+      return promise
+    }
+    // MUST be exactly 32 bytes, checked BEFORE any card command. YKFPIVPadding
+    // returns 32 ZERO bytes rather than an error when it does not recognise the
+    // algorithm constant, and pads/truncates anything off-length — either way the
+    // card would happily sign the wrong message.
+    guard let digestData = Data(hexString: digest), digestData.count == 32 else {
+      promise.reject(withError: Self.vaultError("template-invalid", "digest must be exactly 32 bytes"))
+      return promise
+    }
+
+    // Guards YubiKit 4.4.0's double-callback in signWithKeyInSlot: (see SettleGuard).
+    let settled = SettleGuard()
+    withSession(promise) { session in
+      // pin-policy ONCE gate: neither YubiKit nor the card verifies for us.
+      session.verifyPin(pin) { _, error in
+        if let error { return settled.reject(promise, Self.mapError(error)) }
+        // .ecdsaSignatureDigestX962SHA256 is the DIGEST variant — YKFPIVPadding
+        // passes it through unhashed (`hash = [data mutableCopy]`). Never use the
+        // ...MessageX962... variants: those hash locally with CommonCrypto and
+        // would sign the wrong value. Signature is the card's raw DER bytes,
+        // returned unmodified (P-256 signatures here are NOT low-S normalised).
+        session.signWithKey(
+          in: pivSlot,
+          type: .ECCP256,
+          algorithm: .ecdsaSignatureDigestX962SHA256,
+          message: digestData
+        ) { signature, error in
+          if let error { return settled.reject(promise, Self.mapError(error)) }
+          guard let signature, !signature.isEmpty else {
+            return settled.reject(promise, Self.vaultError("touch-timeout", "no signature returned"))
+          }
+          settled.resolve(promise, "{\"signature\":\"\(signature.hexString)\"}")
+        }
+      }
+    }
+    return promise
+  }
+
   func ecdh(slot: Double, pin: String, peerPublicKey: String) throws -> Promise<String> {
     let promise = Promise<String>()
     guard let pivSlot = YKFPIVSlot(rawValue: UInt(slot)) else {
@@ -377,6 +420,32 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
   ])
+}
+
+// MARK: - Settle guard
+
+/// Guards against YubiKit 4.4.0's double-callback in signWithKeyInSlot:.
+/// On a padding error it invokes the completion block and then falls through
+/// to invoke it AGAIN — a double settle on a Nitro Promise is a crash.
+private final class SettleGuard {
+  private var settled = false
+  private let lock = NSLock()
+
+  private func claim() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    if settled { return false }
+    settled = true
+    return true
+  }
+
+  func resolve(_ promise: Promise<String>, _ value: String) {
+    if claim() { promise.resolve(withResult: value) }
+  }
+
+  func reject(_ promise: Promise<String>, _ error: Error) {
+    if claim() { promise.reject(withError: error) }
+  }
 }
 
 // MARK: - Discovery delegate
