@@ -1,5 +1,5 @@
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js b/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js
-index 7ba5047..0140b3e 100644
+index 34b8cce..10bf940 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js
 @@ -9,6 +9,7 @@ const Signature_js_1 = __importDefault(require("./Signature.js"));
@@ -10,7 +10,7 @@ index 7ba5047..0140b3e 100644
  /**
   * Truncates a BigNumber message to the length of the curve order n, in the context of the Elliptic Curve Digital Signature Algorithm (ECDSA).
   * This method is used as part of ECDSA signing and verification.
-@@ -89,6 +90,28 @@ const sign = (msg, key, forceLowS = false, customK) => {
+@@ -131,6 +132,28 @@ const sign = (msg, key, forceLowS = false, customK) => {
      if (msg.bitLength() > nBitLength) {
          throw new Error(`ECDSA message is too large: expected <= ${nBitLength} bits. Callers must hash messages before signing.`);
      }
@@ -39,19 +39,14 @@ index 7ba5047..0140b3e 100644
      msg = truncateToN(msg);
      const msgBig = bnToBigInt(msg);
      const keyBig = bnToBigInt(key);
-@@ -184,11 +207,24 @@ const verify = (msg, sig, key) => {
-         // could be throw or return false; returning false is typical for verify
-         return false;
-     }
--    // Convert inputs to BigInt
--    const hash = bnToBigInt(msg);
-     if ((key.x == null) || (key.y == null)) {
+@@ -183,6 +206,19 @@ const verify = (msg, sig, key) => {
+     if (key.x == null || key.y == null) {
          throw new Error('Invalid public key: missing coordinates.');
      }
-+    // Native route (BSV Browser patch): libsecp256k1 verify with S normalized
-+    // first — semantics equal to this implementation (accepts any s in [1, n-1]).
-+    // Any native failure (e.g. malformed sig/pubkey for strict parsers) falls
-+    // through to the pure-JS path so edge-case behavior is preserved.
++    // Native route (BSV Browser patch): libsecp256k1 verify with S normalized first —
++    // semantics equal to this implementation (accepts any s in [1, n-1]). Any native
++    // failure (e.g. a malformed sig/pubkey for strict parsers) falls through to the
++    // pure-JS path so edge-case behaviour is preserved.
 +    {
 +        const n = (0, NativeSecp_js_1.nativeSecp)();
 +        if (n != null) {
@@ -61,8 +56,6 @@ index 7ba5047..0140b3e 100644
 +            catch (e) { /* fall through to pure-JS */ }
 +        }
 +    }
-+    // Convert inputs to BigInt
-+    const hash = bnToBigInt(msg);
      const publicKey = {
          x: bnToBigInt(key.x),
          y: bnToBigInt(key.y)
@@ -268,7 +261,7 @@ index 0000000..2cedd4b
 +    }
 +}
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/primitives/PrivateKey.js b/node_modules/@bsv/sdk/dist/cjs/src/primitives/PrivateKey.js
-index 04839a7..3a68a91 100644
+index 2946cbe..859f6ad 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/primitives/PrivateKey.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/primitives/PrivateKey.js
 @@ -45,6 +45,8 @@ const Hash_js_1 = require("./Hash.js");
@@ -626,10 +619,10 @@ index 171fc4d..667914d 100644
              let Qprime;
              try {
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js b/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js
-index fc37cf4..6ae6cb1 100644
+index 0aaf101..b9863d0 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js
-@@ -61,7 +61,19 @@ class P2PKH {
+@@ -63,7 +63,19 @@ class P2PKH {
       * @returns {Object} - An object containing the `sign` and `estimateLength` functions.
       */
      unlock(privateKey, signOutputs = 'all', anyoneCanPay = false, sourceSatoshis, lockingScript) {
@@ -650,7 +643,7 @@ index fc37cf4..6ae6cb1 100644
                  const signatureScope = (0, SignatureUtils_js_1.computeSignatureScope)(signOutputs, anyoneCanPay);
                  const resolved = (0, SignatureUtils_js_1.resolveSourceDetails)(tx, inputIndex, sourceSatoshis, lockingScript);
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js b/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js
-index d3e7c68..a8ac1ba 100644
+index f798e87..bc5a3dd 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js
 @@ -15,6 +15,9 @@ const Beef_js_1 = require("./Beef.js");
@@ -660,10 +653,10 @@ index d3e7c68..a8ac1ba 100644
 +const Signature_js_1 = __importDefault(require("../primitives/Signature.js"));
 +const SignatureUtils_js_1 = require("../script/templates/SignatureUtils.js");
 +const NativeSecp_js_1 = require("../primitives/NativeSecp.js");
+ const ScriptVerificationBackend_js_1 = require("./ScriptVerificationBackend.js");
  /** Post-Chronicle height used when an input's source UTXO mined-height is unobtainable. */
  const POST_CHRONICLE_HEIGHT_FALLBACK = 943816;
- /**
-@@ -642,6 +645,427 @@ class Transaction {
+@@ -658,6 +661,427 @@ class Transaction {
              }
          }
          this.materializeSourceTXIDs();
@@ -1092,7 +1085,7 @@ index d3e7c68..a8ac1ba 100644
          this.activeSignatureHashCache = { hashOutputsSingle: new Map() };
          let unlockingScripts;
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js
-index db011b6..3fbbd60 100644
+index 9e23ad4..dd88fd1 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js
 @@ -3,6 +3,7 @@ import Signature from './Signature.js';
@@ -1103,7 +1096,7 @@ index db011b6..3fbbd60 100644
  /**
   * Truncates a BigNumber message to the length of the curve order n, in the context of the Elliptic Curve Digital Signature Algorithm (ECDSA).
   * This method is used as part of ECDSA signing and verification.
-@@ -83,6 +84,28 @@ export const sign = (msg, key, forceLowS = false, customK) => {
+@@ -125,6 +126,28 @@ export const sign = (msg, key, forceLowS = false, customK) => {
      if (msg.bitLength() > nBitLength) {
          throw new Error(`ECDSA message is too large: expected <= ${nBitLength} bits. Callers must hash messages before signing.`);
      }
@@ -1132,19 +1125,14 @@ index db011b6..3fbbd60 100644
      msg = truncateToN(msg);
      const msgBig = bnToBigInt(msg);
      const keyBig = bnToBigInt(key);
-@@ -177,11 +200,24 @@ export const verify = (msg, sig, key) => {
-         // could be throw or return false; returning false is typical for verify
-         return false;
-     }
--    // Convert inputs to BigInt
--    const hash = bnToBigInt(msg);
-     if ((key.x == null) || (key.y == null)) {
+@@ -176,6 +199,19 @@ export const verify = (msg, sig, key) => {
+     if (key.x == null || key.y == null) {
          throw new Error('Invalid public key: missing coordinates.');
      }
-+    // Native route (BSV Browser patch): libsecp256k1 verify with S normalized
-+    // first — semantics equal to this implementation (accepts any s in [1, n-1]).
-+    // Any native failure (e.g. malformed sig/pubkey for strict parsers) falls
-+    // through to the pure-JS path so edge-case behavior is preserved.
++    // Native route (BSV Browser patch): libsecp256k1 verify with S normalized first —
++    // semantics equal to this implementation (accepts any s in [1, n-1]). Any native
++    // failure (e.g. a malformed sig/pubkey for strict parsers) falls through to the
++    // pure-JS path so edge-case behaviour is preserved.
 +    {
 +        const n = nativeSecp();
 +        if (n != null) {
@@ -1154,8 +1142,6 @@ index db011b6..3fbbd60 100644
 +            catch (e) { /* fall through to pure-JS */ }
 +        }
 +    }
-+    // Convert inputs to BigInt
-+    const hash = bnToBigInt(msg);
      const publicKey = {
          x: bnToBigInt(key.x),
          y: bnToBigInt(key.y)
@@ -1341,7 +1327,7 @@ index 0000000..9672b48
 +    }
 +}
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/PrivateKey.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/PrivateKey.js
-index 50868ae..4047a5b 100644
+index 59628ce..5f7019b 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/primitives/PrivateKey.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/primitives/PrivateKey.js
 @@ -6,6 +6,8 @@ import { sha256, sha256hmac, sha512hmac } from './Hash.js';
@@ -1629,7 +1615,7 @@ index 71f5213..0df629f 100644
          // Check zG = R + eA
          const zG = this.curve.g.mul(z);
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/Signature.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/Signature.js
-index f56f7a5..18a548f 100644
+index da97bed..5792973 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/primitives/Signature.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/primitives/Signature.js
 @@ -5,6 +5,7 @@ import { sha256 } from './Hash.js';
@@ -1640,7 +1626,7 @@ index f56f7a5..18a548f 100644
  /**
   * Represents a digital signature.
   *
-@@ -298,6 +299,34 @@ export default class Signature {
+@@ -295,6 +296,34 @@ export default class Signature {
       * const publicKey = signature.RecoverPublicKey(0, msgHash);
       */
      RecoverPublicKey(recovery, e) {
@@ -1675,7 +1661,7 @@ index f56f7a5..18a548f 100644
          const r = this.r;
          const s = this.s;
          // A set LSB signifies that the y-coordinate is odd
-@@ -343,6 +372,22 @@ export default class Signature {
+@@ -340,6 +369,22 @@ export default class Signature {
       * const recovery = signature.CalculateRecoveryFactor(publicKey, msgHash);
       */
      CalculateRecoveryFactor(pubkey, msgHash) {
@@ -1699,10 +1685,10 @@ index f56f7a5..18a548f 100644
              let Qprime;
              try {
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js b/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js
-index b21dda5..b386547 100644
+index b3f162e..e840f74 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js
-@@ -56,7 +56,19 @@ export default class P2PKH {
+@@ -58,7 +58,19 @@ export default class P2PKH {
       * @returns {Object} - An object containing the `sign` and `estimateLength` functions.
       */
      unlock(privateKey, signOutputs = 'all', anyoneCanPay = false, sourceSatoshis, lockingScript) {
@@ -1723,7 +1709,7 @@ index b21dda5..b386547 100644
                  const signatureScope = computeSignatureScope(signOutputs, anyoneCanPay);
                  const resolved = resolveSourceDetails(tx, inputIndex, sourceSatoshis, lockingScript);
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js b/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js
-index 7bf1a4c..a1ea57a 100644
+index 5ca4747..2beb7ab 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js
 @@ -1,7 +1,10 @@
@@ -1738,7 +1724,7 @@ index 7bf1a4c..a1ea57a 100644
  import LivePolicy from './fee-models/LivePolicy.js';
  import Spend from '../script/Spend.js';
  import { defaultBroadcaster } from './broadcasters/DefaultBroadcaster.js';
-@@ -649,6 +652,427 @@ export default class Transaction {
+@@ -666,6 +669,427 @@ export default class Transaction {
              }
          }
          this.materializeSourceTXIDs();

@@ -38,7 +38,7 @@
     "@bsv/btms": "^1.1.0",
     "@bsv/btms-permission-module": "^1.1.0",
     "@bsv/message-box-client": "^2.2.1",
-    "@bsv/sdk": "^2.1.9",
+    "@bsv/sdk": "2.4.0",
     "@bsv/templates": "^1.9.6",
     "@bsv/wallet-relay": "^0.2.1",
     "@bsv/wallet-toolbox-mobile": "^2.4.3",
@@ -168,7 +168,8 @@
       "**/?(*.)+(spec|test).[jt]s?(x)"
     ],
     "modulePathIgnorePatterns": [
-      "<rootDir>/.worktrees/"
+      "<rootDir>/.worktrees/",
+      "<rootDir>/.claude/worktrees/"
     ],
     "moduleNameMapper": {
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
