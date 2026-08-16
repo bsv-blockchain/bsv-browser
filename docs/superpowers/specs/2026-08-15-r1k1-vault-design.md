@@ -466,12 +466,22 @@ createAction({ outputs: [{ satoshis, lockingScript, basket: 'admin vault',
 
 ### 9.2 Withdraw — R1 path
 
-`listOutputs` is called **without** `include: 'entire transactions'`. The locking
-script is rebuilt locally from `salt` + `r1PublicKey` + the xpub child, so
-`unlockR1({ sourceSatoshis, lockingScript })` never needs the source transaction. This
-is what keeps megabytes of BEEF out of JS memory; if `createAction` turns out to
-require `inputBEEF` despite `trustSelf: 'known'`, that is an implementation-time
-finding to resolve, not a design change.
+`listOutputs` **must** be called with `include: 'entire transactions'`, and
+`list.BEEF` forwarded as `inputBEEF`. This was originally specified the other way
+round — the intent being to rebuild the locking script locally from `salt` +
+`r1PublicKey` + the xpub child, so `unlockR1({ sourceSatoshis, lockingScript })`
+never needs the source transaction, keeping megabytes of BEEF out of memory.
+
+That reasoning is sound for *our* code and wrong about the toolbox. The signer layer
+resolves `sourceTransaction` solely from the caller's `inputBEEF` and throws
+`WERR_INTERNAL` without it — see §14. Every withdrawal and sweep fails before signing
+if the BEEF is omitted, and no mocked-wallet test can detect it. The local rebuild is
+still done (it is what lets the template verify its own commitment), but it does not
+remove the toolbox's requirement.
+
+The memory saving was illusory in any case: broadcast pays ~1.83 MB per input in
+extended format regardless (§3.7), so carrying the BEEF through `createAction` is not
+a new order of cost.
 
 Selection: **spend every vault output, no cap.** The remainder is re-vaulted as one
 consolidated output when it clears the 200,000-sat floor, and folded into the
@@ -622,7 +632,7 @@ release note.
 
 | Risk | Handling |
 |---|---|
-| `createAction` may demand `inputBEEF` despite `trustSelf: 'known'`, reintroducing multi-MB BEEF | Resolve at implementation. Worst case, accept the BEEF cost on withdraw only; deposits are unaffected. |
+| ~~`createAction` may demand `inputBEEF` despite `trustSelf: 'known'`~~ | **RESOLVED 2026-08-15 — it does demand it. The fallback is mandatory.** `trustSelf`/`localKnownInputTxids` govern the *storage* layer's merkle-proof check; the *signer* layer is what binds. Vault inputs carry `unlockingScriptLength` but no `unlockingScript`, so `isSignAction` is true (`@bsv/sdk` `validationHelpers.js:461-462`); `buildSignableTransaction` resolves `sourceTransaction` **only** from `args.inputBEEF` (`:14`, `:101`); with none supplied it throws `WERR_INTERNAL('Every signableTransaction input must have a sourceTransaction')` (`createAction.js:76-79`) on the first input, before signing. Withdraw and sweep therefore keep `include: 'entire transactions'` and forward `list.BEEF`. Deposits are unaffected — they supply no explicit inputs, so their `isSignAction` is false. Note the memory saving was always illusory: broadcast pays ~1.83 MB/input in extended format regardless. |
 | ~~The iOS Swift spelling of `signWithKeyInSlot:type:algorithm:message:completion:` is importer-derived~~ | **RESOLVED 2026-08-15 by compilation.** It imports as `signWithKey(in:type:algorithm:message:)`. The `...InSlot:` → `in:` pattern from `calculateSecretKey(in:)` held; the guess in the implementation plan (`sign(withKeyInSlot:…)`) was wrong and failed with `incorrect argument label in call … expected 'in:type:algorithm:message:_:'`. `xcodebuild` on the `BSVBrowser` workspace then reported BUILD SUCCEEDED, 0 errors, 0 warnings. |
 | `patch-package` drift on a future `@bsv/templates` bump | The template's own length + SHA-256 assertions fail loudly rather than silently. |
 | Arcade's `MaxScriptSizePolicy: 500000` makes every spend fail until raised | Operator action, owned outside this repo; miner policy is already 100,000,000. See §0 for the sequencing rule it imposes. |
