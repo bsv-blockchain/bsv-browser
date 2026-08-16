@@ -148,6 +148,21 @@ describe('r1k1 script module', () => {
     await expect(u.sign(s.spend, 0)).rejects.toThrow(/does not match the locking script commitment/)
   })
 
+  it('rejects an uncompressed r1PublicKey before building the locking script', async () => {
+    const f = fixture()
+    const uncompressed = Utils.toHex(Array.from(p256.getPublicKey(f.r1priv, false)))
+
+    await expect(
+      buildVaultLockingScript({ ...f, r1PublicKey: uncompressed })
+    ).rejects.toMatchObject({ code: 'template-invalid' })
+
+    // A garbage-length value is caught the same way, not just the "65 bytes"
+    // uncompressed case.
+    await expect(
+      buildVaultLockingScript({ ...f, r1PublicKey: 'ab'.repeat(10) })
+    ).rejects.toMatchObject({ code: 'template-invalid' })
+  })
+
   it('compresses a 65-byte uncompressed SEC1 point', () => {
     const priv = p256.utils.randomSecretKey()
     const uncompressed = Utils.toHex(Array.from(p256.getPublicKey(priv, false)))

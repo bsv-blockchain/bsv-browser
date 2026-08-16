@@ -117,12 +117,25 @@ export function r1Commitment(r1PublicKey: string, salt: string): number[] {
 
 /** Build a vault locking script. Deposits call this; spends call it again to
  * reconstruct the prevout script locally instead of fetching the source
- * transaction — which is what keeps megabytes of BEEF out of memory. */
+ * transaction — which is what keeps megabytes of BEEF out of memory.
+ *
+ * `r1PublicKey` MUST already be compressed (33 bytes, 0x02/0x03 prefix). An
+ * uncompressed 65-byte point would still hash160 to *something*, silently
+ * baking a commitment nobody holds the matching salted preimage for — a
+ * funds-lock bug with no error. Callers that may hold an uncompressed point
+ * should run it through `compressP256` first. */
 export async function buildVaultLockingScript(a: {
   r1PublicKey: string
   salt: string
   k1PublicKeyHash: number[]
 }): Promise<LockingScript> {
+  const r1Bytes = Utils.toArray(a.r1PublicKey, 'hex')
+  if (r1Bytes.length !== 33 || (r1Bytes[0] !== 0x02 && r1Bytes[0] !== 0x03)) {
+    throw new VaultError(
+      'template-invalid',
+      `r1PublicKey must be a 33-byte compressed P-256 point, got ${r1Bytes.length} bytes`
+    )
+  }
   return new R1K1Wallet().lock(r1Commitment(a.r1PublicKey, a.salt), a.k1PublicKeyHash)
 }
 
