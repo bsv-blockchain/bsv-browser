@@ -261,7 +261,9 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
     val digestBytes = try {
       hexToBytes(digest)
     } catch (t: Throwable) {
-      promise.reject(vaultError("template-invalid", "digest must be hex"))
+      // hexToBytes' message distinguishes odd-length from non-hex-content so
+      // this detail doesn't misreport which check actually failed.
+      promise.reject(vaultError("template-invalid", "digest ${t.message ?: "must be hex"}"))
       return promise
     }
     if (digestBytes.size != 32) {
@@ -279,6 +281,12 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
       // and the card returns raw DER (SEQUENCE { r, s }), NOT low-S normalised —
       // returned here unmodified.
       val der = piv.rawSignOrDecrypt(Slot.fromValue(slot.toInt()), KeyType.ECCP256, digestBytes)
+      if (der.isEmpty()) {
+        // Mirrors iOS: an empty result without a thrown error should not
+        // resolve as a "signature" — surface it as touch-timeout rather than
+        // silently returning {"signature":""}.
+        throw VaultException("touch-timeout", "no signature returned")
+      }
       "{\"signature\":\"${der.toHex()}\"}"
     }
     return promise
@@ -367,7 +375,13 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
 
   private fun hexToBytes(hex: String): ByteArray {
     val clean = hex.removePrefix("0x").removePrefix("0X")
-    require(clean.length % 2 == 0) { "odd-length hex" }
+    require(clean.length % 2 == 0) { "must have even length" }
+    // Character.digit(c, 16) returns -1 for a non-hex character rather than
+    // throwing, so without this explicit check a garbage string of the right
+    // length (e.g. "g".repeat(64)) would silently decode to a byte array of
+    // 0xEF instead of failing — exactly the class of bug this function must
+    // not produce for callers that gate on decoded length alone (signEcdsa).
+    require(clean.all { Character.digit(it, 16) != -1 }) { "contains a non-hex character" }
     return ByteArray(clean.length / 2) {
       ((Character.digit(clean[it * 2], 16) shl 4) + Character.digit(clean[it * 2 + 1], 16)).toByte()
     }
