@@ -41,6 +41,7 @@ import { exportTransactionsAsCsv } from '@/utils/exportTransactions'
 import { findOfflineActions, type OfflineActionRow } from '@/storage/methods/offlineActions'
 import { txStatusView, toneColor, tonePill } from '@/utils/txStatus'
 import tabStore from '@/stores/TabStore'
+import WalletLockNotice from '@/components/security/WalletLockNotice'
 
 const PAGE_SIZE = 30
 
@@ -532,6 +533,11 @@ export default function WalletScreen() {
           <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
+
+      {/* Renders only when the keys could not be released — a destroyed key, a
+          dismissed prompt, or biometric lockout. Previously all three looked
+          identical to "you have no wallet". */}
+      <WalletLockNotice />
 
       <FlatList
         data={actions}
