@@ -30,16 +30,19 @@ export const R1K1_R1_UNLOCK_LEN = 959_871
  * measures 107, because DER signatures vary between 70 and 72 bytes. */
 export const R1K1_K1_UNLOCK_LEN = 109
 
-/** Byte offsets of the two 20-byte commitments inside the baked script. */
-const R1_COMMITMENT_OFFSET = 17
-const K1_COMMITMENT_OFFSET = 959_609
-
 /**
  * What a vault output records about itself.
  *
- * `r1PublicKey` is stored per output rather than read from vault meta so an
- * output stays spendable after a re-enrollment to a different YubiKey, and so
- * the template's commitment check has everything it needs locally.
+ * `r1PublicKey` is stored per output rather than read from vault meta so
+ * `buildVaultLockingScript` can reconstruct EVERY output's exact locking
+ * script regardless of which key enrolled it (meta's r1PublicKey moves on
+ * re-enrollment; an output's own does not), and so a spend attempt can
+ * detect a signer/output key mismatch (transfers.ts's wrong-key check)
+ * before ever attempting to sign. This does NOT make an output spendable via
+ * R1 after a re-enrollment to a different YubiKey — the ceremony's serial
+ * check refuses the old physical key outright, so such outputs remain
+ * spendable only via the K1 recovery sweep; see VaultKeyService.ts's
+ * resealHDToNewKey.
  *
  * `v` is the customInstructions format version and is INDEPENDENT of the vault
  * meta version — meta v1 and v2 both wrote customInstructions v1.
@@ -138,9 +141,3 @@ export async function buildVaultLockingScript(a: {
   }
   return new R1K1Wallet().lock(r1Commitment(a.r1PublicKey, a.salt), a.k1PublicKeyHash)
 }
-
-/** Commitment offsets, exported for tests that assert script structure. */
-export const R1K1_OFFSETS = {
-  r1Commitment: R1_COMMITMENT_OFFSET,
-  k1Commitment: K1_COMMITMENT_OFFSET
-} as const

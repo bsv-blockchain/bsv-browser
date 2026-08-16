@@ -381,11 +381,49 @@ describe('withdrawFromVault', () => {
     })
     await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toMatchObject({ code: 'vault-empty' })
   })
+
+  // F8: the "wrong YubiKey" signal spec §11 documents has to be a real
+  // comparison against the ARMED signer, not a self-consistency check
+  // against values `buildVaultLockingScript` reconstructs from the SAME
+  // output's own customInstructions (which can never disagree with itself).
+  it('rejects with wrong-key when the armed signer is not the one this output was locked to', async () => {
+    await seedVaultOutputs(1)
+    // A different, real P-256 key standing in for "the wrong physical
+    // YubiKey" — e.g. a card from a different (or since-re-enrolled) vault.
+    const otherPriv = p256.utils.randomSecretKey()
+    mockSigner.publicKey = Utils.toArray(Utils.toHex(Array.from(p256.getPublicKey(otherPriv, true))), 'hex')
+
+    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toMatchObject({ code: 'wrong-key' })
+    // Caught before any signature is attempted or broadcast — "costs no tap".
+    expect(mockSigner.sign).not.toHaveBeenCalled()
+    expect(wallet.signAction).not.toHaveBeenCalled()
+    // Still released, exactly like any other mid-withdrawal failure.
+    expect(signerRelease).toHaveBeenCalled()
+  })
 })
 
 // ── sweep (K1 recovery, no YubiKey) ────────────────────────────────────────
 
 describe('sweepVaultWithHD', () => {
+  // B2: the K1 path used to read the xpub from vaultStore even though
+  // spend.hd (the caller's own HD node) already yields the identical value
+  // via vaultXpub(spend.hd) — a device-local dependency in exactly the
+  // recovery path that is supposed to work when everything except the
+  // mnemonic and passphrase is gone. Proven here by clearing vaultStore
+  // entirely (simulating a device restore with no local vault state at all)
+  // AFTER the outputs exist on "chain" and confirming the sweep still
+  // succeeds using only the HD node handed in.
+  it('derives the xpub from the HD node directly, not from vaultStore — sweep survives vaultStore being empty', async () => {
+    await seedVaultOutputs(2)
+    await vaultStore.clear()
+    expect(await vaultStore.getMeta()).toBeNull()
+
+    const res = await sweepVaultWithHD(wallet, ADMIN, VAULT_HD, 'Recover vault')
+    expect(res?.txid).toBeDefined()
+    const [saArgs] = wallet.signAction.mock.calls[0]
+    expect(Object.keys(saArgs.spends)).toHaveLength(2)
+  })
+
   it('spends every output via K1, signed locally with the HD node, never re-vaulting', async () => {
     await seedVaultOutputs(2)
     const res = await sweepVaultWithHD(wallet, ADMIN, VAULT_HD, 'Recover vault')

@@ -462,43 +462,49 @@ describe('CeremonyController: one singleton, sequential ceremonies', () => {
     signer3.release()
   })
 
-  test("a late release() from a stale signer does not tear down a successor ceremony's session", async () => {
+  test("a late release() from a stale signer must not steal a successor's PENDING attach-wait", async () => {
     const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
 
-    // Ceremony A arms but its caller is slow to release() — e.g. still
-    // finalizing/broadcasting the transaction — a realistic "late release"
-    // window in which a second ceremony can legitimately start.
+    // Ceremony A arms normally.
     const p1 = c.requestSigner('withdraw A')
     nfc.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
     const signerA = await p1
     expect(c.state.phase).toBe('armed')
 
-    // Ceremony B starts — and arms — BEFORE A is released. The key was never
-    // removed, so B's own openTapSession reconnects to it directly.
+    // Ceremony B starts — a SECOND, independent ceremony — before A's caller
+    // has released: the realistic "slow finalize/broadcast" case the module
+    // doc describes. The mock's start() would normally re-detect the
+    // still-"present" key SYNCHRONOUSLY (see MockYubiKey.start), which
+    // resolves B's own attach-wait before this test ever gets a chance to
+    // interleave anything — exactly why the PREVIOUS version of this test
+    // could never actually land A's release() while B was inside
+    // `await waiter.promise`, and so never exercised the real bug (it passed
+    // whether or not the per-attempt KeyEventSession box existed). Stubbing
+    // start() removes that synchronous shortcut and opens the genuine
+    // window: B is now parked awaiting a fresh attach event, same as a real
+    // NFC tap that has not landed yet.
+    const startSpy = jest.spyOn(nfc, 'start').mockImplementation(() => {})
     const p2 = c.requestSigner('withdraw B')
     c.submitPin('123456')
+    await flush()
+    expect(c.state.phase).toBe('waiting-for-key') // B is genuinely pending, not yet armed
+
+    // *** A's caller finally releases here — squarely inside B's pending
+    // attach-wait. This is exactly the scenario the KeyEventSession box (a
+    // per-attempt subscription, not one shared controller-wide field) exists
+    // to protect: with a single shared field, A's release() unsubscribing it
+    // would remove the listener B just registered for its own arm, and B's
+    // `await waiter.promise` below would then hang forever — the physical
+    // tap fired below would have no listener left to reach. ***
+    signerA.release()
+
+    // The physical tap for B lands.
+    startSpy.mockRestore()
+    nfc.insertKey(DEFAULT_SERIAL)
     const signerB = await p2
     expect(signerB).not.toBe(signerA) // a genuinely new session, not shared
     expect(c.state.phase).toBe('armed')
-
-    // A's caller finally releases — late, after B has already armed. This
-    // must not tear down B's subscription or stop B's session.
-    signerA.release()
-    expect(c.state.phase).toBe('armed') // B's arm survives A's late release
-
-    // Prove B's session is genuinely still alive by forcing a dropped tap and
-    // reopening it: this is exactly the path that hangs forever if A's late
-    // release() stole B's subscription (B's post-retry openTapSession would
-    // await an attachWaiter nothing could ever resolve).
-    nfc.setTouchBehavior('timeout')
-    const signing = signerB.sign(digest(1))
-    await flush()
-    expect(c.state.phase).toBe('error')
-    nfc.setTouchBehavior('instant')
-    c.retry()
-    const sig = await signing
-    expect(sig.length).toBeGreaterThan(0)
 
     signerB.release()
   })

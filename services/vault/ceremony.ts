@@ -4,11 +4,20 @@
  * renders the ceremony sheet; kept free of React and native imports so it is
  * fully unit-testable against the mock driver.
  *
- * Concurrency: one ceremony at a time. Concurrent requestSigner() calls (e.g.
- * the several inputs of one withdrawal, or two callers racing) share the same
- * in-flight ceremony and all resolve to the SAME VaultR1Signer — release() on
- * it is idempotent by construction, so whichever caller releases last simply
- * no-ops.
+ * Concurrency: one ceremony ARMING at a time — `requestSigner()` calls that
+ * overlap a single in-flight arm attempt (e.g. the several inputs of one
+ * withdrawal, or two callers racing while `running` is true) share that one
+ * attempt and all resolve to the SAME VaultR1Signer; release() on it is
+ * idempotent by construction, so whichever caller releases last simply
+ * no-ops. That guarantee does NOT extend across separate ceremonies: once an
+ * attempt finishes arming, `running` goes back to false, and the NEXT
+ * requestSigner() call starts an entirely new ceremony with its own signer —
+ * even if the previous one has not been released yet. Two live,
+ * independently-armed VaultR1Signers can therefore coexist for a stretch (see
+ * ceremony.test.ts's "late release() from a stale signer" cases); what is
+ * guaranteed is that a signer released late can only affect its OWN
+ * subscription, never a successor's — see makeSigner's `release()` doc for
+ * the one exception (the shared native transport).
  *
  * Session lifetime: arming no longer means "the operation is done" — it means
  * "the signer is ready." A session-based transport's driver.stop() (which
@@ -274,6 +283,10 @@ export class CeremonyController {
     // watches for persistent relock. Boxed per-attempt — see KeyEventSession.
     const session: KeyEventSession = {}
     this.subscribeKeyEvents(driver, session)
+    // Attempt-local: whether THIS run() reached a successful arm. Deliberately
+    // NOT this.activeSigner, which is controller-wide — see the finally guard
+    // below for why that distinction is load-bearing.
+    let armed = false
     try {
       const meta = await this.deps.store.getMeta()
       if (!meta) throw new VaultError('not-enrolled')
@@ -288,6 +301,7 @@ export class CeremonyController {
       this.throwIfCancelled()
 
       this.activeSigner = signer
+      armed = true
       this.arm()
       this.resolveAll(signer)
       this.onArmed?.(signer)
@@ -306,7 +320,14 @@ export class CeremonyController {
       this.failAll(err)
     } finally {
       this.running = false
-      if (!this.activeSigner) {
+      // `armed` (this attempt's own outcome), NOT this.activeSigner (whoever
+      // the CONTROLLER currently considers active): an unreleased predecessor
+      // ceremony leaves this.activeSigner truthy for the whole time this
+      // attempt runs, which would otherwise make a FAILED successor's finally
+      // wrongly conclude "some signer must already own this session/
+      // subscription" and skip closing its own — the predecessor's activeSigner
+      // has nothing to do with whether this attempt itself succeeded.
+      if (!armed) {
         // Arming never completed: no signer exists to own the subscription
         // or the session, so close both now — nothing else ever will.
         // Unsubscribe BEFORE any stop so a session-end detach echo cannot
@@ -456,9 +477,23 @@ export class CeremonyController {
    * cancel/detach/timeout paths) reaches it first does the real cleanup: the
    * transport session AND — only if this is still the current signer — the
    * shared arm timer, activeSigner, and phase. That makes a signer released
-   * late (after a successor has already armed) a pure no-op against the
-   * controller: it can only ever affect its OWN transport session, never a
-   * successor's.
+   * late (after a successor has already armed) a no-op against the
+   * CONTROLLER's own state (activeSigner/timer/phase) and against the
+   * SUBSCRIPTION (each attempt owns its own KeyEventSession box, so
+   * unsubscribing here can never touch a successor's listener — see
+   * KeyEventSession).
+   *
+   * That scoping does NOT extend to the native transport itself:
+   * `driver.stop()` (via the real adapter, `driver.ts`'s `adaptNative.stop`)
+   * calls `native.stopDiscovery()` + `native.clearKeyListener()`, which are
+   * process-wide — there is exactly one NFC/USB discovery session at the
+   * native layer, not one per KeyEventSession box. A late release() on a
+   * session-based transport therefore CAN silence a successor's still-open
+   * native session even though it cannot touch the successor's JS-level
+   * subscription or controller state. In practice this window is narrow (the
+   * successor's own subsequent driver.start() reopens discovery), but it is
+   * a real gap, not a theoretical one — do not read the subscription-safety
+   * property above as a transport-safety one too.
    */
   private makeSigner(driver: VaultDriver, meta: CeremonyMeta, pin: string, session: KeyEventSession): VaultR1Signer {
     let released = false
@@ -492,6 +527,14 @@ export class CeremonyController {
             this.set({ phase: 'awaiting-touch' })
             try {
               const { signature } = await driver.signEcdsa(meta.slot, pin, digestHex)
+              // A release() (cancel/detach/timeout) may have landed WHILE
+              // signEcdsa was in flight — the native call itself can still
+              // complete successfully after the session is meant to be dead.
+              // Without this check, a signature completing that late would
+              // re-arm a session release() already tore down, resurrecting
+              // controller state (activeSigner/timer/phase) nothing else
+              // expects to still be live.
+              ensureLive()
               // Re-arm rather than cosmetically setting phase back to
               // 'armed': this refreshes armedUntil and reschedules the
               // retention timer, and clears the stale error a prior retry may
@@ -508,6 +551,14 @@ export class CeremonyController {
                 throw err
               }
               this.set({ phase: 'error', error: { code: err.code } })
+              // A release() may ALSO have landed while THIS signEcdsa call was
+              // in flight and about to be classified as retryable — without
+              // this check, the retryWaiter created next would be a waiter no
+              // controller path owns (retry()/cancel()/notifyKeyDetached() all
+              // resolve/reject THE session's own field, but this session is
+              // already gone), parking here forever while the UI shows a live
+              // "retry?" prompt for a session that is already dead.
+              ensureLive()
               this.retryWaiter = defer<void>()
               await this.retryWaiter.promise // resolves on retry(); rejects on cancel/detach/timeout
               // A relock (cancel/detach/timeout) may have released us while

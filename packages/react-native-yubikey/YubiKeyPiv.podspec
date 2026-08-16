@@ -15,7 +15,9 @@ Pod::Spec.new do |s|
   # Yubico's CocoaPods-published `YubiKit` pod tops out at 4.4.x (newer work
   # moved to Swift Package Manager). 4.4 has everything we use — the
   # YKFSmartCardConnection CCID transport (since 4.3) and YKFPIVSession's
-  # generateKeyInSlot / calculateSecretKeyInSlot for ECC P-256 keygen + ECDH.
+  # generateKeyInSlot (ECC P-256 keygen) and signWithKey(in:type:algorithm:
+  # message:) for signing a digest directly. No ECDH/key-wrapping: the R1
+  # key is generated on the card and never leaves it.
   s.dependency 'YubiKit', '~> 4.4'
 
   load File.join(__dir__, 'nitrogen', 'generated', 'ios', 'YubiKeyPiv+autolinking.rb')

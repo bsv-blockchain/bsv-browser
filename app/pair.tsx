@@ -13,6 +13,8 @@ import { useWallet } from '@/context/WalletContext'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWalletConnection } from '@/context/WalletConnectionContext'
+import { guardVaultAccess } from '@/services/vault/guard'
+import { ADMIN_ORIGINATOR } from '@/context/config'
 
 function domainFromOrigin(origin: string): string {
   try { return new URL(origin).hostname } catch { return origin }
@@ -83,7 +85,11 @@ export default function PairScreen() {
       return
     }
     const originator = domainFromOrigin(params.origin)
-    const wallet = new WalletClient(managers.permissionsManager, originator)
+    // Guarded exactly like every sibling call site (connections.tsx): this is
+    // an external surface (the desktop/browser pairing peer dispatches
+    // BRC-100 methods by name), so it must never receive the unguarded
+    // manager — see guard.ts for what that would otherwise expose.
+    const wallet = new WalletClient(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR), originator)
     try {
       await connect({
         topic:              params.topic,

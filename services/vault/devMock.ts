@@ -10,21 +10,13 @@
 import { setMockDriver } from './driver'
 import { MockYubiKey } from './mockYubiKey'
 
-let active: MockYubiKey | null = null
-
-export function isMockDriverActive(): boolean {
-  return active != null
-}
-
 export function setMockDriverEnabled(on: boolean): void {
   if (on) {
     const mock = new MockYubiKey()
     mock.setPin('123456')
     mock.insertKey('MOCK-DEV-1')
-    active = mock
     setMockDriver(mock)
   } else {
-    active = null
     setMockDriver(null)
   }
 }

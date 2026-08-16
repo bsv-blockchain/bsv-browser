@@ -517,7 +517,7 @@ tpl.unlockK1({
 ```
 
 107-byte unlocking scripts, so a full sweep stays cheap regardless of output count.
-The 4-input cap does not apply to the K1 sweep.
+There is no input cap on either branch — see §9.2's `spendVaultOutputs`.
 
 ## 10. Deletions
 
@@ -557,12 +557,20 @@ untested because every `transfers` fixture used v1 `vault/<n>` keyIDs.
 | Condition | Code |
 |---|---|
 | digest not exactly 32 bytes | `template-invalid` — programmer error, must never reach a user |
-| commitment mismatch in `unlockR1` | `wrong-key` — the YubiKey present is not the one that locked this output |
+| armed signer's public key ≠ the output's recorded `r1PublicKey` | `wrong-key` — the YubiKey present is not the one that locked this output |
 | template gzip / length / SHA-256 failure | `template-invalid` |
 | tap dropped mid-signature | `nfc-lost`, retried per §7 |
 
-A commitment mismatch is the user-visible signal for "wrong YubiKey", and is caught
-before any APDU is sent, so it costs no tap.
+The "wrong YubiKey" signal is a direct comparison, in `spendVaultOutputs` (transfers.ts),
+between the armed `VaultR1Signer.publicKey` (read from the card at arm time) and the
+output's own recorded `r1PublicKey` — checked once per input, before `unlockR1` is ever
+invoked, so it costs no tap. (An earlier draft of this section described the check as
+living *inside* `unlockR1`'s own commitment verification; that cannot work; `unlockR1`
+is handed `r1PublicKey`/`salt` reconstructed from the same output's own
+customInstructions, so its internal check is self-consistent by construction and can
+never observe a real mismatch. The serial check in the ceremony — `ceremony.ts`'s
+`armViaReader`/`openTapSession` — independently catches the same wrong-card case even
+earlier, before a PIN is even collected.)
 
 One caution on `wrong-key`: `vaultErrorFromNative` reclassifies it to `nfc-lost` when
 the detail string matches `NFC_LOST_PATTERN` (`types.ts:71`). Commitment mismatches
@@ -595,7 +603,8 @@ under 300 ms.
   converges to at most one UTXO.
 - Signing 10 inputs stays within a flat heap ceiling (guards the §3.7 finding against
   a future change that accidentally holds all preimages live).
-- Withdraw never requests `include: 'entire transactions'`.
+- Withdraw always requests `include: 'entire transactions'` and forwards the resulting
+  BEEF as `inputBEEF` — required, not optional; see §14's RESOLVED row.
 - `abortAction` still fires on signing failure; the `WERR_REVIEW_ACTIONS` heal still
   works.
 - K1 sweep spends every output regardless of count.

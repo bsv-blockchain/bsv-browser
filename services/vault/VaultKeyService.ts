@@ -152,10 +152,20 @@ export async function recoverVaultHD(mnemonic: string, passphrase: string, expec
 
 /** Re-enroll an existing vault to a fresh YubiKey, e.g. after a lost key.
  *
- * Preserves nextKeyIndex so deposit indices are never reissued. Outputs created
- * under the OLD key stay spendable via the r1PublicKey recorded in their own
- * customInstructions — which is exactly why that field is stored per output
- * rather than read from meta.
+ * Preserves nextKeyIndex so deposit indices are never reissued.
+ *
+ * Outputs created under the OLD key do NOT become spendable via the R1
+ * branch again — not with the new key (it never held the old key's private
+ * material) and not with the old physical key either (the ceremony's serial
+ * check in armViaReader/openTapSession, ceremony.ts, rejects any card whose
+ * serial does not match the newly-stored yubiSerial, before any signing is
+ * attempted). Those outputs remain spendable ONLY via the K1 recovery sweep
+ * (transfers.ts's sweepVaultWithHD), which never touches a YubiKey at all.
+ * r1PublicKey is still stored per output rather than read from meta — that is
+ * what lets buildVaultLockingScript reconstruct every output's exact locking
+ * script regardless of which key enrolled it, and what lets the R1 spend path
+ * detect and reject a signer/output key mismatch (transfers.ts's wrong-key
+ * check) before ever attempting to sign.
  */
 export async function resealHDToNewKey(hd: HD, nickname: string, getPin: () => Promise<string>): Promise<void> {
   const driver = getVaultDriver()

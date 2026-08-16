@@ -35,7 +35,7 @@ import { VaultError } from './types'
 import { VaultR1Signer } from './ceremony'
 import { requestVaultSigner } from './ceremonyHost'
 import { randomBytes } from './random'
-import { bip32KeyID, indexFromKeyID, depositPkhFromXpub, depositPrivKey } from './vaultDerivation'
+import { bip32KeyID, indexFromKeyID, depositPkhFromXpub, depositPrivKey, vaultXpub } from './vaultDerivation'
 import {
   R1K1_R1_UNLOCK_LEN,
   R1K1_K1_UNLOCK_LEN,
@@ -74,7 +74,6 @@ interface CreateActionResult {
   signableTransaction?: { tx: number[]; reference: string }
 }
 interface ListOutputsResult {
-  totalOutputs?: number
   outputs: {
     outpoint: string
     satoshis: number
@@ -349,8 +348,13 @@ async function spendVaultOutputs(
     const spends: Record<number, { unlockingScript: string }> = {}
 
     // Read once, not per input — takeNextIndex above may have rewritten meta,
-    // but xpub is immutable for the life of an enrollment.
-    const xpub = (await vaultStore.getMeta())?.xpub
+    // but xpub is immutable for the life of an enrollment. On the K1
+    // recovery path we already hold the HD node in hand, and vaultXpub(hd)
+    // is the IDENTICAL value vault meta's xpub would give — deriving it
+    // locally means the path that is supposed to work when everything except
+    // the mnemonic and passphrase is gone does not also depend on
+    // vaultStore/device-local state still being intact.
+    const xpub = spend.path === 'k1' ? vaultXpub(spend.hd) : (await vaultStore.getMeta())?.xpub
     if (!xpub) throw new VaultError('not-enrolled', 'Vault is not set up')
 
     // SEQUENTIAL BY DESIGN — do not "simplify" this into an
@@ -376,6 +380,21 @@ async function spendVaultOutputs(
         salt: o.ci.salt,
         k1PublicKeyHash: Utils.toArray(depositPkhFromXpub(xpub, index), 'hex')
       })
+
+      // The real "wrong YubiKey" check, done BEFORE any signing: the
+      // commitment `unlockR1` verifies is built from this exact output's own
+      // r1PublicKey/salt (immediately above), so it can never actually catch
+      // a mismatch — it is self-consistent by construction, not a check
+      // against what is physically inserted. The armed signer's own public
+      // key (read from the card, via ceremony.ts's makeSigner) is the only
+      // thing that can genuinely differ from the key an output was locked
+      // to — e.g. after a re-enrollment, when older outputs still carry the
+      // OLD r1PublicKey. Comparing the two here is what spec §11 describes
+      // as "caught before any APDU" — an output that fails this never reaches
+      // signEcdsa at all.
+      if (spend.path === 'r1' && Utils.toHex(spend.signer.publicKey).toLowerCase() !== o.ci.r1PublicKey.toLowerCase()) {
+        throw new VaultError('wrong-key', 'This output was locked to a different YubiKey')
+      }
 
       const unlocker =
         spend.path === 'r1'

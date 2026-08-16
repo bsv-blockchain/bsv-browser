@@ -6,7 +6,7 @@
  * only job is to generate the PIV key, record its compressed public key, and
  * write v3 meta.
  */
-import { HD, Utils } from '@bsv/sdk'
+import { CeremonyController } from '../../services/vault/ceremony'
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
@@ -36,7 +36,7 @@ import {
   VAULT_SLOT
 } from '../../services/vault/VaultKeyService'
 import { deriveVaultHD, vaultXpub } from '../../services/vault/vaultDerivation'
-import { compressP256, buildVaultLockingScript } from '../../services/vault/r1k1'
+import { compressP256 } from '../../services/vault/r1k1'
 
 let mock: MockYubiKey
 
@@ -247,7 +247,7 @@ describe('recoverVaultHD', () => {
 })
 
 describe('resealHDToNewKey', () => {
-  test('writes v3 meta for the new key, preserving nextKeyIndex, without touching outputs recorded under the old key', async () => {
+  test('writes v3 meta for the new key, preserving nextKeyIndex', async () => {
     // Enroll and finalize under the FIRST key.
     const { pending } = await enrollVault(args())
     await finalizeEnrollment(pending)
@@ -257,18 +257,6 @@ describe('resealHDToNewKey', () => {
     await vaultStore.takeNextIndex()
     await vaultStore.takeNextIndex()
     expect((await vaultStore.getMeta())!.nextKeyIndex).toBe(2)
-
-    // An output built under the OLD key records that key on itself.
-    const k1PublicKeyHash = Utils.toArray(
-      HD.fromString(pending.meta.xpub).deriveChild(0).pubKey.toHash('hex') as string,
-      'hex'
-    )
-    const salt = '00'.repeat(32)
-    const oldLockingScript = await buildVaultLockingScript({
-      r1PublicKey: oldR1PublicKey,
-      salt,
-      k1PublicKeyHash
-    })
 
     // Lose the key; enroll a fresh one via resealHDToNewKey.
     const fresh = new MockYubiKey()
@@ -283,16 +271,41 @@ describe('resealHDToNewKey', () => {
     expect(after!.r1PublicKey).not.toBe(oldR1PublicKey)
     // The counter must never be reissued to a second address.
     expect(after!.nextKeyIndex).toBe(2)
+  })
 
-    // The OLD output's own locking script is unaffected by the re-enrollment
-    // — it was built from, and stays keyed to, the r1PublicKey recorded on
-    // itself, never from vault meta.
-    const rebuiltOldScript = await buildVaultLockingScript({
-      r1PublicKey: oldR1PublicKey,
-      salt,
-      k1PublicKeyHash
+  // F2: this used to be "asserted" by rebuilding a locking script from the
+  // same three arguments and checking it equals itself — a determinism check
+  // on a pure function, not a spendability guarantee. The real claim (see
+  // VaultKeyService.ts's and r1k1.ts's corrected doc comments) is the
+  // opposite of what the old comment said: R1 spendability does NOT survive
+  // a re-enrollment. Proven here directly against the ceremony: the OLD
+  // physical key, presented against the vault's NOW-current meta (whose
+  // yubiSerial is the NEW key's), is rejected by the serial check before any
+  // signing is attempted — exactly the mechanism that makes outputs from the
+  // old key unspendable via R1 afterward, leaving the K1 recovery sweep
+  // (transfers.ts's sweepVaultWithHD, which never touches a YubiKey) as the
+  // only way to move them.
+  test('the OLD physical key is rejected by the ceremony after re-enrollment — R1 does not survive, only K1 recovery does', async () => {
+    const { pending } = await enrollVault(args())
+    await finalizeEnrollment(pending)
+    const oldMock = mock // still "physically present" with its original serial
+
+    const fresh = new MockYubiKey()
+    fresh.insertKey('MOCK-2')
+    setMockDriver(fresh)
+    const hd = deriveVaultHD(MNEMONIC, PASSPHRASE)
+    await resealHDToNewKey(hd, 'k', async () => '123456')
+
+    const after = (await vaultStore.getMeta())!
+    expect(after.yubiSerial).toBe('MOCK-2')
+    expect(after.yubiSerial).not.toBe(pending.meta.yubiSerial)
+
+    const ceremony = new CeremonyController({
+      getDriver: () => oldMock,
+      store: { getMeta: async () => ({ slot: after.slot, yubiSerial: after.yubiSerial, r1PublicKey: after.r1PublicKey }) },
+      retentionMs: 120_000
     })
-    expect(rebuiltOldScript.toHex()).toBe(oldLockingScript.toHex())
+    await expect(ceremony.requestSigner('withdraw')).rejects.toMatchObject({ code: 'serial-mismatch' })
   })
 })
 
