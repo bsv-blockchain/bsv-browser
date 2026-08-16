@@ -119,6 +119,26 @@ describe('MockYubiKey.signEcdsa', () => {
     await expect(mock.signEcdsa(0x82, '', digest)).rejects.toMatchObject({ code: 'pin-required' })
   })
 
+  it('rejects a WRONG PIN, not silently satisfied', async () => {
+    // verifyPin only throws for pin-locked; a wrong PIN returns { ok: false }.
+    // signEcdsa's inline verify used to discard that result and fall through
+    // to a real signature, so a wrong PIN was indistinguishable from a correct
+    // one — the exact bug this test (moved over from the deleted ecdh suite)
+    // exists to catch on the method that actually matters now.
+    const mock = new MockYubiKey()
+    mock.insertKey()
+    await mock.generateVaultKey(0x82)
+
+    await expect(mock.signEcdsa(0x82, '000000', digest)).rejects.toMatchObject({
+      code: 'pin-invalid',
+      retriesLeft: 2
+    })
+
+    // and the failed attempt must still have burned a retry
+    const { pinRetries } = await mock.getKeyInfo()
+    expect(pinRetries).toBe(2)
+  })
+
   it('surfaces a touch timeout', async () => {
     const mock = await armed()
     mock.setTouchBehavior('timeout')

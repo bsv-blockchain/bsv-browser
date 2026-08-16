@@ -68,8 +68,13 @@ describe('vaultStore v3', () => {
   })
 
   it('clears the legacy seal entry', async () => {
+    // Seed the legacy SecureStore key directly — nothing in current code
+    // writes it any more, but an upgraded install may still have one sitting
+    // in the Keychain from before the seal was removed.
+    secureItems['vault_seal_v1'] = 'legacy-sealed-blob'
     await vaultStore.setMeta(META)
     await vaultStore.clear()
     expect(await vaultStore.getMeta()).toBeNull()
+    expect(secureItems['vault_seal_v1']).toBeUndefined()
   })
 })
