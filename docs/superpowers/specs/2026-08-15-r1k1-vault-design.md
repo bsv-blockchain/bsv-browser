@@ -623,7 +623,7 @@ release note.
 | Risk | Handling |
 |---|---|
 | `createAction` may demand `inputBEEF` despite `trustSelf: 'known'`, reintroducing multi-MB BEEF | Resolve at implementation. Worst case, accept the BEEF cost on withdraw only; deposits are unaffected. |
-| The iOS Swift spelling of `signWithKeyInSlot:type:algorithm:message:completion:` is importer-derived and carries no `NS_SWIFT_NAME` | Let the compiler name it. Sibling selectors in the same class import inconsistently (`calculateSecretKey(in:…)` vs `getCertificateIn(_:)`), so do not guess. |
+| ~~The iOS Swift spelling of `signWithKeyInSlot:type:algorithm:message:completion:` is importer-derived~~ | **RESOLVED 2026-08-15 by compilation.** It imports as `signWithKey(in:type:algorithm:message:)`. The `...InSlot:` → `in:` pattern from `calculateSecretKey(in:)` held; the guess in the implementation plan (`sign(withKeyInSlot:…)`) was wrong and failed with `incorrect argument label in call … expected 'in:type:algorithm:message:_:'`. `xcodebuild` on the `BSVBrowser` workspace then reported BUILD SUCCEEDED, 0 errors, 0 warnings. |
 | `patch-package` drift on a future `@bsv/templates` bump | The template's own length + SHA-256 assertions fail loudly rather than silently. |
 | Arcade's `MaxScriptSizePolicy: 500000` makes every spend fail until raised | Operator action, owned outside this repo; miner policy is already 100,000,000. See §0 for the sequencing rule it imposes. |
 | `MaxStackMemoryUsagePolicy: 104857600` headroom for a ~960 KB P-256 verifier | Not determinable from source. Falls out of the §0 spend proof for free. |
