@@ -8,6 +8,7 @@ import { Utils } from '@bsv/sdk'
 import { CeremonyController } from '../../services/vault/ceremony'
 import { MockYubiKey } from '../../services/vault/mockYubiKey'
 import { compressP256 } from '../../services/vault/r1k1'
+import { VaultError } from '../../services/vault/types'
 
 const VAULT_SLOT = 0x82
 const RETENTION = 120_000
@@ -415,5 +416,213 @@ describe('ceremony signing session', () => {
     expect(relocks).toEqual(['manual'])
 
     await expect(signer.sign(digest(7))).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+  })
+})
+
+// The ceremonyHost singleton is ONE CeremonyController for the whole process
+// lifetime — every fixture above builds a fresh controller per test, which
+// cannot see anything that only becomes reachable on a SECOND ceremony
+// against the same controller. These tests deliberately reuse one `c` across
+// two (or more) full arm→sign→release cycles, the way production actually
+// runs.
+describe('CeremonyController: one singleton, sequential ceremonies', () => {
+  test("a signer released normally clears activeSigner, so a SECOND ceremony's error path still stops the session", async () => {
+    const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
+
+    // Ceremony 1: arm normally and release, exactly as a caller finishing a
+    // withdrawal would in its own finally.
+    const p1 = c.requestSigner('withdraw 1')
+    nfc.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const signer1 = await p1
+    expect(c.state.phase).toBe('armed')
+    signer1.release()
+    expect(c.state.phase).toBe('idle')
+
+    // Ceremony 2: force a serial-mismatch by presenting a different key.
+    const stopSpy = jest.spyOn(nfc, 'stop')
+    const p2 = c.requestSigner('withdraw 2')
+    nfc.insertKey('WRONG-SERIAL')
+    c.submitPin('123456')
+    await expect(p2).rejects.toMatchObject({ code: 'serial-mismatch' })
+
+    // The bug this guards against: if release() never cleared activeSigner,
+    // run()'s finally guard `if (!this.activeSigner)` would see the STALE
+    // signer from ceremony 1 and skip closing ceremony 2's dead session
+    // entirely — leaving the system NFC sheet open on exactly the error path
+    // that guard exists to handle.
+    expect(stopSpy).toHaveBeenCalledTimes(1)
+
+    // And the controller is left clean enough for a third ceremony to arm.
+    const p3 = c.requestSigner('withdraw 3')
+    nfc.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const signer3 = await p3
+    expect(c.state.phase).toBe('armed')
+    signer3.release()
+  })
+
+  test("a late release() from a stale signer does not tear down a successor ceremony's session", async () => {
+    const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
+
+    // Ceremony A arms but its caller is slow to release() — e.g. still
+    // finalizing/broadcasting the transaction — a realistic "late release"
+    // window in which a second ceremony can legitimately start.
+    const p1 = c.requestSigner('withdraw A')
+    nfc.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const signerA = await p1
+    expect(c.state.phase).toBe('armed')
+
+    // Ceremony B starts — and arms — BEFORE A is released. The key was never
+    // removed, so B's own openTapSession reconnects to it directly.
+    const p2 = c.requestSigner('withdraw B')
+    c.submitPin('123456')
+    const signerB = await p2
+    expect(signerB).not.toBe(signerA) // a genuinely new session, not shared
+    expect(c.state.phase).toBe('armed')
+
+    // A's caller finally releases — late, after B has already armed. This
+    // must not tear down B's subscription or stop B's session.
+    signerA.release()
+    expect(c.state.phase).toBe('armed') // B's arm survives A's late release
+
+    // Prove B's session is genuinely still alive by forcing a dropped tap and
+    // reopening it: this is exactly the path that hangs forever if A's late
+    // release() stole B's subscription (B's post-retry openTapSession would
+    // await an attachWaiter nothing could ever resolve).
+    nfc.setTouchBehavior('timeout')
+    const signing = signerB.sign(digest(1))
+    await flush()
+    expect(c.state.phase).toBe('error')
+    nfc.setTouchBehavior('instant')
+    c.retry()
+    const sig = await signing
+    expect(sig.length).toBeGreaterThan(0)
+
+    signerB.release()
+  })
+})
+
+describe('CeremonyController: retention timeout robustness', () => {
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  test('the retention window elapsing during a mid-signature retry wait relocks rather than staying armed forever', async () => {
+    jest.useFakeTimers()
+    const { ceremony: c, mock } = await makeCeremony({ retentionMs: 1000 })
+    const relocks: string[] = []
+    c.onRelock = why => relocks.push(why)
+    const p = c.requestSigner('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const signer = await p
+    expect(c.state.phase).toBe('armed')
+
+    mock.setTouchBehavior('timeout')
+    const signing = signer.sign(digest(1))
+    // The real assertion is the `await expect(signing).rejects...` below, but
+    // that rejection actually happens asynchronously inside the
+    // advanceTimersByTimeAsync call further down — attach a no-op handler
+    // now so Node never sees an unhandled rejection in the gap between then
+    // and when this test gets around to awaiting it.
+    signing.catch(() => {})
+    // Let the touch-timeout rejection land us in the retry wait — phase is
+    // 'error', not 'armed', for the whole rest of this test.
+    await jest.advanceTimersByTimeAsync(0)
+    expect(c.state.phase).toBe('error')
+
+    // Nobody ever calls retry() — simulating a user who wandered off
+    // mid-hiccup. Advance past the full retention window plus the grace
+    // recheck the busy-path fallback schedules.
+    await jest.advanceTimersByTimeAsync(1000 + 5_000 + 10)
+
+    // The bug this guards against: the ORIGINAL one-shot timer's callback was
+    // guarded by `phase === 'armed'`, which is false here (phase is 'error');
+    // without a reschedule, the callback would return and NOTHING would ever
+    // check again — an armed session that never auto-relocks.
+    expect(c.state.phase).toBe('idle')
+    expect(relocks).toEqual(['timeout'])
+    await expect(signing).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+
+    // The session is closed for good.
+    await expect(signer.sign(digest(2))).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+  })
+
+  test('a successful signature refreshes the retention window instead of letting the original deadline expire underneath it', async () => {
+    jest.useFakeTimers()
+    const { ceremony: c, mock } = await makeCeremony({ retentionMs: 1000 })
+    const relocks: string[] = []
+    c.onRelock = why => relocks.push(why)
+    const p = c.requestSigner('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const signer = await p
+
+    // Sign well before the window elapses...
+    await jest.advanceTimersByTimeAsync(600)
+    await signer.sign(digest(1))
+    expect(c.state.phase).toBe('armed')
+
+    // ...then advance PAST the original window's nominal deadline (600 + 500
+    // = 1100 > 1000) without ever going idle, proving the signature refreshed
+    // armedUntil and rescheduled the timer rather than leaving the original
+    // one-shot deadline to fire underneath the still-active session.
+    await jest.advanceTimersByTimeAsync(500)
+    expect(c.state.phase).toBe('armed')
+    expect(relocks).toEqual([])
+
+    signer.release()
+  })
+})
+
+describe('CeremonyController: signing error handling', () => {
+  test('a non-retryable signEcdsa error surfaces phase: error with the code, instead of leaving awaiting-touch stuck', async () => {
+    const { ceremony: c, mock } = await makeCeremony()
+    const p = c.requestSigner('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const signer = await p
+
+    // pin-locked is a real driver failure, not one of the RETRYABLE_TAP_ERRORS
+    // (touch-timeout / nfc-lost / key-removed-mid-op) — it must not be
+    // retried in place.
+    jest.spyOn(mock, 'signEcdsa').mockRejectedValueOnce(new VaultError('pin-locked', 'PIN is blocked'))
+
+    await expect(signer.sign(digest(1))).rejects.toMatchObject({ code: 'pin-locked' })
+    // The bug: relocating signing out of run() dropped the conversion run()'s
+    // own catch used to do (throw → phase: 'error' with the code). Without
+    // it, a hard failure left the sheet stuck showing "awaiting touch" with
+    // no error and no way forward.
+    expect(c.state.phase).toBe('error')
+    expect(c.state.error?.code).toBe('pin-locked')
+
+    signer.release()
+  })
+
+  test('concurrent sign() calls on one signer reject instead of clobbering the shared retry state', async () => {
+    const { ceremony: c, mock } = await makeCeremony()
+    const p = c.requestSigner('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const signer = await p
+
+    mock.setTouchBehavior('timeout')
+    const first = signer.sign(digest(1)) // parks in the retry wait
+    await flush()
+    expect(c.state.phase).toBe('error')
+
+    // A second, overlapping sign() call must fail fast, not hang forever
+    // waiting on a retryWaiter the first call already owns (retryWaiter is a
+    // controller field, not per-call, so a second retryable error here would
+    // silently clobber the first call's deferred).
+    await expect(signer.sign(digest(2))).rejects.toMatchObject({ code: 'template-invalid' })
+
+    mock.setTouchBehavior('instant')
+    c.retry()
+    const sig = await first
+    expect(sig.length).toBeGreaterThan(0)
+    signer.release()
   })
 })
