@@ -525,8 +525,8 @@ The vault's `PrivilegedKeyManager` exists solely to serve vault withdrawals — 
 consumer was checked. With the YubiKey signing directly, none of it is reachable.
 
 **Removed:** `services/vault/sealing.ts` and `__tests__/vault/sealing.test.ts`;
-`SealedBlob`; the `vault_seal_v1` SecureStore entry; `VaultKeyService.resealHDToNewKey`,
-`resealToNewKey`, `recoverVaultKeyV1`, `deriveVaultKey`, `deriveDepositKeys`; all v1
+`SealedBlob`; the `vault_seal_v1` SecureStore entry; `VaultKeyService.resealToNewKey`,
+`recoverVaultKeyV1`, `deriveVaultKey`, `deriveDepositKeys`; all v1
 meta handling (`depositKeys`, `popDepositKey`, `pushDepositKeys`,
 `replenishDepositKeys`, `sweepVaultWithKey`); `buildVaultUnlockingScript` and the
 `VaultSigner` interface in `transfers.ts`, both superseded by the template; the vault
