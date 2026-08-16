@@ -45,7 +45,6 @@ const ERROR_COPY: Record<string, string> = {
   'driver-unavailable': 'vault_err_unavailable',
   'not-enrolled': 'vault_err_unavailable',
   'mgmt-key-custom': 'vault_err_mgmt_key',
-  'seal-corrupt': 'vault_err_generic',
   'user-cancelled': 'vault_err_generic',
   'unsupported-platform': 'vault_err_unavailable',
   'slot-occupied': 'vault_err_generic',
@@ -123,7 +122,7 @@ export const VaultCeremonySheet: React.FC = () => {
       case 'awaiting-touch':
         return nfc ? t('vault_keep_holding_nfc') : t('vault_touch_contact')
       case 'error':
-        return t(ERROR_COPY[errCode ?? 'seal-corrupt'] ?? 'vault_err_generic')
+        return t((errCode && ERROR_COPY[errCode]) ?? 'vault_err_generic')
       default:
         return ''
     }

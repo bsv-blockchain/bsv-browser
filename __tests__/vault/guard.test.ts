@@ -24,6 +24,9 @@ function fakeWallet() {
       verifySignature: rec('verifySignature'),
       revealCounterpartyKeyLinkage: rec('revealCounterpartyKeyLinkage'),
       revealSpecificKeyLinkage: rec('revealSpecificKeyLinkage'),
+      acquireCertificate: rec('acquireCertificate'),
+      proveCertificate: rec('proveCertificate'),
+      listCertificates: rec('listCertificates'),
       // not privileged-capable → must always pass through
       listOutputs: rec('listOutputs'),
       createAction: rec('createAction'),
@@ -79,3 +82,60 @@ test('treats missing/false privileged flag as allowed', async () => {
   await guarded.decrypt({ protocolID: [2, 'x'], keyID: '1' } as any, 'evil.com')
   expect(calls).toHaveLength(2)
 })
+
+// ── certificate ops (privilege-escalation review round 1) ──
+//
+// acquireCertificate's 'direct' branch and proveCertificate both thread
+// `privileged` straight into the underlying wallet's own getPublicKey /
+// MasterCertificate.createKeyringForVerifier call — the same root-key
+// exposure createSignature/getPublicKey above already guard against. These
+// three were missing from PRIVILEGED_CAPABLE entirely, so the Proxy trap
+// never intercepted them and they passed straight through unchecked
+// regardless of origin.
+const CERT_CASES: { method: 'acquireCertificate' | 'proveCertificate' | 'listCertificates'; args: any }[] = [
+  {
+    method: 'acquireCertificate',
+    args: {
+      type: 'dGVzdA==',
+      certifier: '02' + '11'.repeat(32),
+      acquisitionProtocol: 'direct',
+      fields: { name: 'x' }
+    }
+  },
+  {
+    method: 'proveCertificate',
+    args: {
+      certificate: { type: 'dGVzdA==', subject: '02' + '11'.repeat(32) },
+      fieldsToReveal: ['name'],
+      verifier: '02' + '22'.repeat(32)
+    }
+  },
+  {
+    method: 'listCertificates',
+    args: { certifiers: ['02' + '11'.repeat(32)], types: ['dGVzdA=='] }
+  }
+]
+
+for (const { method, args } of CERT_CASES) {
+  test(`blocks non-admin privileged ${method}`, async () => {
+    const { wallet } = fakeWallet()
+    const guarded = guardVaultAccess(wallet, ADMIN)
+    await expect((guarded as any)[method]({ ...args, privileged: true }, 'evil.com')).rejects.toBeInstanceOf(
+      VaultAccessDenied
+    )
+  })
+
+  test(`allows non-privileged ${method} from any origin`, async () => {
+    const { wallet, calls } = fakeWallet()
+    const guarded = guardVaultAccess(wallet, ADMIN)
+    await (guarded as any)[method](args, 'evil.com')
+    expect(calls.find(c => c.method === method)).toBeDefined()
+  })
+
+  test(`allows admin-originated privileged ${method}`, async () => {
+    const { wallet, calls } = fakeWallet()
+    const guarded = guardVaultAccess(wallet, ADMIN)
+    await (guarded as any)[method]({ ...args, privileged: true }, ADMIN)
+    expect(calls.find(c => c.method === method)).toBeDefined()
+  })
+}

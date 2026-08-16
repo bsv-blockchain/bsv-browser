@@ -17,9 +17,14 @@
  * the root key — none of which are spend actions, so none of them ever trip
  * the spending-authorization sheet.
  *
- * Blocking privileged ops for external originators closes that exposure, and
- * it also means the YubiKey ceremony can only ever be triggered by the admin
- * originator (our own vault UI), never by a page.
+ * Blocking privileged ops for external originators is what closes that
+ * exposure: it is the only thing standing between a web page and the root
+ * key, now that the keyGetter itself no longer discriminates by enrollment
+ * or caller. (It is not what keeps the YubiKey ceremony admin-only — that
+ * follows separately, because nothing outside `services/vault` ever calls
+ * `requestVaultSigner`/`ceremony.requestSigner` in the first place; a page
+ * cannot reach the ceremony through this guarded surface even in principle,
+ * privileged or not.)
  *
  * Privileged operations have never been used by external origins in this app
  * (the keyGetter has only ever returned the root key with no ceremony and no
@@ -39,7 +44,16 @@ const PRIVILEGED_CAPABLE = new Set<keyof WalletInterface>([
   'createHmac',
   'verifyHmac',
   'createSignature',
-  'verifySignature'
+  'verifySignature',
+  // Certificate ops thread `privileged` straight into the underlying wallet
+  // too: acquireCertificate's 'direct' branch calls getPublicKey({
+  // identityKey: true, privileged, privilegedReason }) on the unwrapped
+  // wallet, and proveCertificate threads privileged into
+  // MasterCertificate.createKeyringForVerifier. Omitting these left a hole
+  // to the same root key the other entries above are here to block.
+  'acquireCertificate',
+  'proveCertificate',
+  'listCertificates'
 ])
 
 export class VaultAccessDenied extends Error {
