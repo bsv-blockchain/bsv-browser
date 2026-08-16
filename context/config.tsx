@@ -20,5 +20,15 @@ export function toWalletChain(chain: AppChain): WalletChain {
 export const DEFAULT_WAB_URL = 'noWAB'
 export const DEFAULT_STORAGE_URL = 'local'
 export const DEFAULT_MESSAGEBOX_URL = 'https://messagebox.babbage.systems'
+/**
+ * Encrypted wallet-backup log.
+ *
+ * Deliberately separate from DEFAULT_STORAGE_URL, which stays 'local': this service is not
+ * a wallet storage provider. It stores opaque ciphertext it cannot read, addressed by a
+ * pseudonym derived from the wallet seed.
+ *
+ * Empty string disables backup entirely.
+ */
+export const DEFAULT_BACKUP_URL = ''
 export const DEFAULT_CHAIN: AppChain = 'main'
 export const ADMIN_ORIGINATOR = 'admin.com'

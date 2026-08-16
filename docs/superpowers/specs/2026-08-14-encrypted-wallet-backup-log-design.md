@@ -220,8 +220,18 @@ Sync chunks are dominated by raw transaction bytes — `TableProvenTx.rawTx`,
 all typed `number[]`. Naive `JSON.stringify` renders each byte as up to four characters.
 
 Use the toolbox's own `binaryJsonReplacer` / `binaryJsonReviver` / `stringifyJsonRpc`
-(`.../storage/remoting/BinaryJson.ts`), which base64-tag binary arrays. This guarantees
-round-trip fidelity with the toolbox's types rather than inventing an encoding.
+(`.../storage/remoting/BinaryJson.ts`) for round-trip fidelity with the toolbox's types
+rather than inventing an encoding.
+
+**Correction, found during implementation:** that serialiser does **not**, on its own,
+compact these fields. `binaryJsonReplacer` base64-encodes `Uint8Array` only, and every
+binary field on the toolbox's tables is typed `number[]`, so `rawTx` and friends would go
+over the wire as decimal arrays at roughly 2.9 characters per byte. The client therefore
+runs a packing pass first, converting byte-valued arrays to `Uint8Array` so the serialiser
+can compact them and converting them back on decode. The transform is lossless in both
+directions — an array that merely looks byte-like, such as small integer ids, returns
+exactly the values it started with — and is covered by tests including a 256-value
+all-bytes case and a non-byte numeric array.
 
 Because the server stores opaque bytes and never parses payloads, the serialization
 format is a purely client-internal choice with no interop constraint.
@@ -418,10 +428,69 @@ which returns `(nil, nil)`.
 
 ### 402 is a privacy invariant, not a product preference
 
-A 402 payment would be constructed by the user's **real** wallet, re-linking the
-pseudonym to their on-chain identity in a single request — destroying the entire property
-this design exists to provide. The service must be free. Write this down where someone
-proposing monetization will read it.
+The service is free. This was re-examined in detail against
+[go-402-pay](https://github.com/bsv-blockchain/go-402-pay) (BRC-121) combined with a
+[BRC-228](https://bsv.brc.dev/payments/0228) ephemeral `senderIdentityKey`, on the
+reasoning that an unlinked payment identity would preserve the property. **It does not.**
+BRC-228 removes the least important leak.
+
+The pseudonymous `CompletedProtoWallet` cannot fund anything — `createAction` throws
+`not implemented` — so the user's real wallet must pay. What that hands the server:
+
+- **The BEEF is the leak, not the sender key.** `x-bsv-beef` carries each input's ancestry
+  back to a proof, which means one or more *complete prior transactions of the user's
+  wallet* — the bytes, not references. Delivered inside a request BRC-104 has
+  cryptographically bound to the pseudonym, it is a signed assertion that this pseudonym
+  controls these outpoints. BRC-228 does not touch this.
+- **Change chaining collapses the pseudonym.** Payment *n*'s change funds payment *n+1*,
+  so after two payments the operator can walk the wallet forward indefinitely with any
+  public indexer. Change *amounts* additionally disclose balance and balance trajectory,
+  which is close to a unique fingerprint at this user-base size.
+- **A cross-service join needs no chain analysis at all.** This app already sends the real
+  identity key in cleartext as `x-bsv-sender` to ordinary BRC-121 merchants
+  (`utils/webview/bsvPaymentHandler.ts:175-179`), and every BRC-103 peer learns it by
+  construction. One join against any service holding both the identity key and an outpoint
+  from the same wallet is sufficient — and the operator here also runs the app and the
+  ARC broadcaster the client posts to directly from the device's IP.
+- **Charging forces the server to keep records it otherwise would not.** go-402-pay
+  delegates replay protection to the wallet's `InternalizeAction`, so a paid server needs
+  a funded, storage-backed wallet and gains a permanent per-payment ledger keyed by
+  pseudonym. The free server holds one key and opaque bytes.
+
+The distinction that decides it: today's residual is **correlational and deniable** —
+it requires the operator to deliberately retain and cross-reference logs they have no
+business reason to keep, it degrades under CGNAT, VPNs and roaming, and it leaves no
+artifact that survives a breach or a subpoena. Payment replaces all of that at once with a
+**cryptographic, durable, self-documenting and legally-retained** record.
+
+If revenue becomes necessary, in order of preference: charge elsewhere in a relationship
+where the user is already identified; or, if the real motive is abuse control, enforce
+per-pseudonym quotas and rate limits, which cost a day and leak nothing. Blind-signed
+tokens are the only genuinely private paid design and are not worth building for a small
+user base, because the anonymity set would not support the claim.
+
+**Do not ship per-request 402 and describe the result as pseudonymous.** That is worse
+than either honest alternative, because users would act on a claim the architecture does
+not support.
+
+Three engineering blockers stand independently of privacy, recorded so nobody rediscovers
+them: the server's `CompletedProtoWallet` panics on a nil dereference under the payment
+middleware; `AuthFetch` hard-errors on a BRC-121 402 response, demanding an
+`x-bsv-payment-version` header go-402-pay never sends, so **no client today speaks both
+BRC-103 auth and BRC-121 payment**; and this app's own 402 client is GET/HTML-only with no
+retry, so a binary `POST` upload would be a rewrite rather than a reuse.
+
+### The honest residual, free design included
+
+The free design is **not** unlinkable. The server observes source IP, TLS fingerprint,
+request cadence, ciphertext lengths, device count, total volume, and — because one
+pseudonym spans a user's devices so restore can enumerate them — that those devices belong
+to one person.
+
+IP is the real residual and it is not small: a phone's IP is geolocatable,
+ISP-attributable, and often stable enough within a session to individuate. Any claim that
+this design achieves unlinkability against *this* operator is overselling it. What it does
+buy is that the correlation is a policy failure rather than an architectural fact.
 
 ### The pseudonym, honestly
 
@@ -579,14 +648,8 @@ so a Postgres-backed implementation is a drop-in when a second replica is needed
 ## Open questions
 
 - Repo name: `go-wallet-backup-server` is the proposal.
-- **Whether the service is free or paid is under active review.** The "402 is a privacy
-  invariant" section below reflects the original free-only decision. A paid variant using
-  [go-402-pay](https://github.com/bsv-blockchain/go-402-pay) (BRC-121) with a
-  [BRC-228](https://bsv.brc.dev/payments/0228) ephemeral `senderIdentityKey` is being
-  evaluated. The structural obstacle is that the pseudonymous `CompletedProtoWallet`
-  cannot fund transactions — `createAction` throws `not implemented` — so only the real
-  wallet can pay, and the bridge between paying identity and authenticating pseudonym is
-  where linkage can leak. Resolve before implementing the server's route table.
+- Repository: **`github.com/bsv-blockchain/go-private-backup-cache`**.
+- ~~Whether the service is free or paid~~ — **resolved: free.** See below.
 - Generation-rotation threshold — 200 chunks is a guess; needs a measurement against a
   real wallet's growth rate.
 - Should push be gated on unmetered connectivity? The app has `hooks/useOnline.ts` but no
