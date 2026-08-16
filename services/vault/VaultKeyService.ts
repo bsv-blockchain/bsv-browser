@@ -142,11 +142,7 @@ export async function finalizeEnrollment(pending: PendingEnrollment): Promise<vo
  * silently derives a different, valid, EMPTY vault and the user concludes
  * their funds are gone.
  */
-export async function recoverVaultHD(
-  mnemonic: string,
-  passphrase: string,
-  expectedXpub?: string
-): Promise<HD> {
+export async function recoverVaultHD(mnemonic: string, passphrase: string, expectedXpub?: string): Promise<HD> {
   const hd = deriveVaultHD(mnemonic, passphrase) // throws on empty/invalid
   if (expectedXpub && vaultXpub(hd) !== expectedXpub) {
     throw new VaultError('bad-passphrase', 'That passphrase does not match this vault')
@@ -161,11 +157,7 @@ export async function recoverVaultHD(
  * customInstructions — which is exactly why that field is stored per output
  * rather than read from meta.
  */
-export async function resealHDToNewKey(
-  hd: HD,
-  nickname: string,
-  getPin: () => Promise<string>
-): Promise<void> {
+export async function resealHDToNewKey(hd: HD, nickname: string, getPin: () => Promise<string>): Promise<void> {
   const driver = getVaultDriver()
   if (!driver) throw new VaultError('driver-unavailable')
   const info = await driver.getKeyInfo()
@@ -194,7 +186,7 @@ export async function resealHDToNewKey(
 }
 
 /** Remove all vault state. Callers must sweep funds to the default basket
- * BEFORE calling this — see transfers.sweepVaultWithKey. */
+ * BEFORE calling this — see transfers.sweepVaultWithHD. */
 export async function disableVault(): Promise<void> {
   await vaultStore.clear()
 }

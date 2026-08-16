@@ -13,7 +13,6 @@ import com.yubico.yubikit.android.transport.nfc.NfcYubiKeyDevice
 import com.yubico.yubikit.android.transport.usb.UsbConfiguration
 import com.yubico.yubikit.android.transport.usb.UsbYubiKeyDevice
 import com.yubico.yubikit.core.YubiKeyDevice
-import com.yubico.yubikit.core.keys.EllipticCurveValues
 import com.yubico.yubikit.core.keys.PublicKeyValues
 import com.yubico.yubikit.core.smartcard.ApduException
 import com.yubico.yubikit.core.smartcard.SmartCardConnection
@@ -230,23 +229,6 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
         // Empty slot (reference-data-not-found) is not an error here.
         "{\"publicKey\":null}"
       }
-    }
-    return promise
-  }
-
-  override fun ecdh(slot: Double, pin: String, peerPublicKey: String): Promise<String> {
-    val promise = Promise<String>()
-    withPiv(promise) { piv ->
-      piv.verifyPin(pin.toCharArray()) // pin-policy ONCE key gate; throws InvalidPinException on wrong PIN
-      val peerBytes = hexToBytes(peerPublicKey)
-      // 3.2.0: calculateSecret takes PublicKeyValues directly (the ECPublicKey
-      // overload was removed) — do NOT convert to a java.security key.
-      val peer = PublicKeyValues.Ec.fromEncodedPoint(EllipticCurveValues.SECP256R1, peerBytes)
-      // TOUCH-gated when the key was generated with TouchPolicy.ALWAYS: this
-      // blocks until the user taps the key, and surfaces as touch-timeout if
-      // they never do (see mapError).
-      val secret = piv.calculateSecret(Slot.fromValue(slot.toInt()), peer)
-      "{\"secret\":\"${secret.toHex()}\"}"
     }
     return promise
   }

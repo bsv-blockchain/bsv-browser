@@ -15,7 +15,6 @@ export const VAULT_RETENTION_MS = 120_000
 export const ceremony = new CeremonyController({
   getDriver: getVaultDriver,
   store: {
-    isEnrolled: () => vaultStore.isEnrolled(),
     getMeta: async () => {
       const m = await vaultStore.getMeta()
       return m ? { slot: m.slot, yubiSerial: m.yubiSerial, r1PublicKey: m.r1PublicKey } : null

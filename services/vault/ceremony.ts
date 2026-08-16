@@ -33,7 +33,6 @@ export type CeremonyPhase =
   | 'connecting'
   | 'pin-entry'
   | 'awaiting-touch'
-  | 'unsealing'
   | 'armed'
   | 'error'
 
@@ -75,7 +74,6 @@ interface CeremonyMeta {
 }
 
 interface CeremonyStoreView {
-  isEnrolled(): Promise<boolean>
   getMeta(): Promise<CeremonyMeta | null>
 }
 
@@ -335,7 +333,11 @@ export class CeremonyController {
 
   /** Persistent reader (Android USB): key present, PIN entry and token ops
    * interleave, so a wrong PIN is retried in place. */
-  private async armViaReader(driver: VaultDriver, meta: CeremonyMeta, session: KeyEventSession): Promise<VaultR1Signer> {
+  private async armViaReader(
+    driver: VaultDriver,
+    meta: CeremonyMeta,
+    session: KeyEventSession
+  ): Promise<VaultR1Signer> {
     this.set({ phase: 'connecting' })
     let info = await this.safeKeyInfo(driver)
     if (!info) {
@@ -380,7 +382,12 @@ export class CeremonyController {
    * top-level subscription on the SAME box (harmless — nothing was pending on
    * it yet), and every reopen needs a fresh one since the caller unsubscribed
    * this same box around its matching driver.stop(). */
-  private async openTapSession(driver: VaultDriver, meta: CeremonyMeta, pin: string, session: KeyEventSession): Promise<void> {
+  private async openTapSession(
+    driver: VaultDriver,
+    meta: CeremonyMeta,
+    pin: string,
+    session: KeyEventSession
+  ): Promise<void> {
     this.throwIfCancelled()
     this.subscribeKeyEvents(driver, session)
     this.set({ phase: 'waiting-for-key' })

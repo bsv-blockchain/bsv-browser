@@ -12,10 +12,8 @@ import {
   Monitor
 } from '@bsv/wallet-toolbox-mobile'
 import { KeyDeriver, PrivateKey, MerklePath, Transaction, Utils } from '@bsv/sdk'
-import { makePrivilegedKeyGetter, VAULT_RETENTION_MS } from '@/services/vault/privileged'
-import { requestCeremony, ceremony as vaultCeremony } from '@/services/vault/ceremonyHost'
+import { VAULT_RETENTION_MS, ceremony as vaultCeremony } from '@/services/vault/ceremonyHost'
 import { getVaultDriver } from '@/services/vault/driver'
-import { vaultStore } from '@/services/vault/vaultStore'
 import {
   DEFAULT_SETTINGS as LIB_DEFAULT_SETTINGS,
   WalletSettings,
@@ -166,10 +164,6 @@ export interface WalletContextValue {
   /** Check spendability of all UTXOs against WoC */
   checkUtxoSpendability: () => Promise<string>
   releaseStuckReservations: () => Promise<string>
-  /** Immediately destroy any cached privileged (vault) key in the
-   * PrivilegedKeyManager — used when disabling the vault so `V` cannot linger
-   * in the retention window after the seal is gone. */
-  destroyPrivilegedKey: () => void
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -211,8 +205,7 @@ export const WalletContext = createContext<WalletContextValue>({
   runMonitorTask: async () => '',
   getMonitorTaskNames: () => [],
   checkUtxoSpendability: async () => '',
-  releaseStuckReservations: async () => '',
-  destroyPrivilegedKey: () => {}
+  releaseStuckReservations: async () => ''
 })
 
 /**
@@ -362,9 +355,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // tipHeight after the async fs write, so two overlapping runs can both pass
   // the check and double-append the same range, corrupting the window.
   const headerSyncInFlightRef = useRef(false)
-  // The vault's PrivilegedKeyManager for the current wallet build — held so an
-  // unplugged YubiKey can relock it (destroyKey) the instant the key leaves.
-  const vaultPkmRef = useRef<PrivilegedKeyManager | null>(null)
   const adminOriginator = ADMIN_ORIGINATOR
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
   const walletBuildingRef = useRef<boolean>(false)
@@ -383,7 +373,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // Auto-approve: cached threshold (satoshis) and managers ref for use in callback
   const autoApproveThresholdRef = useRef<number>(DEFAULT_AUTO_APPROVE_THRESHOLD)
   const managersRef = useRef<ManagerState>({})
-  useEffect(() => { managersRef.current = managers }, [managers])
+  useEffect(() => {
+    managersRef.current = managers
+  }, [managers])
 
   // [perf] JS-thread-stall watchdog — started at provider MOUNT (not in the
   // monitor setup) so it also covers the cold-start window BEFORE the wallet
@@ -595,7 +587,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         }
         if (__DEV__) console.log(`[spend-auth] cooldown blocked → manual modal requestID=${requestID}`)
       } else if (__DEV__) {
-        console.log(`[spend-auth] not eligible → manual modal requestID=${requestID} sats=${spending.satoshis} threshold=${threshold}`)
+        console.log(
+          `[spend-auth] not eligible → manual modal requestID=${requestID} sats=${spending.satoshis} threshold=${threshold}`
+        )
       }
 
       spendingQueue.enqueue({
@@ -739,7 +733,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         services.postBeefServices.remove('Bitails')
         services.postBeefServices.remove('WhatsOnChain')
         services.postBeefServices.add(createArcadeBroadcastService(serviceOptions.arcUrl!, callbackToken))
-        const taalArcUrl = chain === 'main' ? 'https://arc.taal.com' : chain === 'test' ? 'https://arc-test.taal.com' : 'https://arc-teratest.taal.com'
+        const taalArcUrl =
+          chain === 'main'
+            ? 'https://arc.taal.com'
+            : chain === 'test'
+              ? 'https://arc-test.taal.com'
+              : 'https://arc-teratest.taal.com'
         services.postBeefServices.add(createTaalBroadcastService(taalArcUrl, serviceOptions.taalApiKey))
         if (chain === 'main') {
           services.postBeefServices.add(createGorillaPoolBroadcastService('https://arc.gorillapool.io'))
@@ -751,11 +750,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         // Replace WoC getMerklePath with BUMP endpoint — no TSC→BUMP conversion needed.
         // Remove all providers then re-add in order: WoC BUMP first, Bitails fallback.
-        const wocBumpBase = chain === 'main'
-          ? 'https://api.whatsonchain.com/v1/bsv/main'
-          : chain === 'test'
-            ? 'https://api.whatsonchain.com/v1/bsv/test'
-            : 'https://api.woc-ttn.bsvblockchain.tech/v1/bsv/test'
+        const wocBumpBase =
+          chain === 'main'
+            ? 'https://api.whatsonchain.com/v1/bsv/main'
+            : chain === 'test'
+              ? 'https://api.whatsonchain.com/v1/bsv/test'
+              : 'https://api.woc-ttn.bsvblockchain.tech/v1/bsv/test'
         const wocApiKey = serviceOptions.whatsOnChainApiKey
         const chaintracksClient = serviceOptions.chaintracks as any
         const getMerklePathSvc = (services as any).getMerklePathServices
@@ -1219,7 +1219,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         // recoverMnemonicWallet runs pure-JS PBKDF2 + BIP32 EC math (JS-thread).
         const __tMnemonicStart = performance.now()
         const mnemonic = providedMnemonic || (await getMnemonic())
-        if (__DEV__) console.warn(`[perf] getMnemonic (auth/keychain): ${(performance.now() - __tMnemonicStart).toFixed(0)}ms`)
+        if (__DEV__)
+          console.warn(`[perf] getMnemonic (auth/keychain): ${(performance.now() - __tMnemonicStart).toFixed(0)}ms`)
         if (!mnemonic) {
           walletBuildingRef.current = false
           setWalletBuilding(false)
@@ -1228,22 +1229,16 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         const __tRecoverStart = performance.now()
         const { rootKey, primaryKey } = recoverMnemonicWallet(mnemonic)
-        if (__DEV__) console.warn(`[perf] recoverMnemonicWallet (PBKDF2+BIP32): ${(performance.now() - __tRecoverStart).toFixed(0)}ms`)
+        if (__DEV__)
+          console.warn(
+            `[perf] recoverMnemonicWallet (PBKDF2+BIP32): ${(performance.now() - __tRecoverStart).toFixed(0)}ms`
+          )
 
-        // Privileged operations route through the vault when it is enrolled: the
-        // keyGetter runs the YubiKey ceremony and returns the sealed vault key.
-        // When the vault is NOT enrolled this is byte-identical to the previous
-        // behaviour (return the BIP32 root key), so enabling the vault is the
-        // only thing that changes privileged behaviour. See services/vault.
-        const privilegedKeyManager = new PrivilegedKeyManager(
-          makePrivilegedKeyGetter({
-            getLegacyRootKey: () => rootKey,
-            isEnrolled: () => vaultStore.isEnrolled(),
-            requestCeremony
-          }),
-          VAULT_RETENTION_MS
-        )
-        vaultPkmRef.current = privilegedKeyManager
+        // The vault no longer routes through the PKM — the YubiKey signs vault
+        // inputs directly. The toolbox still requires a privileged key manager,
+        // so this returns the plain root key. guardVaultAccess is what keeps
+        // non-admin originators away from it.
+        const privilegedKeyManager = new PrivilegedKeyManager(async () => rootKey, VAULT_RETENTION_MS)
 
         // Create SimpleWalletManager and provide keys for authentication
         const snap = await getSnap()
@@ -1288,17 +1283,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const recoveredKey = PrivateKey.fromWif(wif)
         const primaryKey = recoveredKey.toArray()
 
-        // Same vault-aware privileged getter as the mnemonic path; not enrolled
-        // → returns the recovered key exactly as before.
-        const privilegedKeyManager = new PrivilegedKeyManager(
-          makePrivilegedKeyGetter({
-            getLegacyRootKey: () => recoveredKey,
-            isEnrolled: () => vaultStore.isEnrolled(),
-            requestCeremony
-          }),
-          VAULT_RETENTION_MS
-        )
-        vaultPkmRef.current = privilegedKeyManager
+        // Same plain-root-key manager as the mnemonic path — see the comment
+        // there. guardVaultAccess is what keeps non-admin originators away from it.
+        const privilegedKeyManager = new PrivilegedKeyManager(async () => recoveredKey, VAULT_RETENTION_MS)
 
         const snap = await getSnap()
         const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
@@ -1633,31 +1620,22 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     return () => subscription.remove()
   }, [])
 
-  // Destroy any cached vault key immediately (vault disable / manual relock).
-  const destroyPrivilegedKey = useCallback(() => {
-    try {
-      vaultPkmRef.current?.destroyKey()
-    } catch {
-      /* best-effort — nothing to destroy is fine */
-    }
-  }, [])
-
   // Relock-on-unplug, for PERSISTENT readers only (Android USB). Start discovery
-  // at launch and, when the key is pulled, destroy the cached privileged key and
-  // tell the ceremony (its onRelock fires the close sound/haptic).
+  // at launch and, when the key is pulled, tell the ceremony (its onRelock
+  // fires the close sound/haptic) so an armed or mid-signature vault session
+  // ends with the hardware rather than lingering.
   //
   // Session-based transports (iOS NFC) are skipped here: they have no persistent
   // presence — the scan session is opened per ceremony and closed on arm — so
   // starting discovery at launch would pop the NFC sheet, and a session-end
-  // "detach" is normal, not an unplug. On iOS the vault simply relocks when the
-  // PKM retention window elapses.
+  // "detach" is normal, not an unplug. The ceremony's own session-scoped
+  // listener (see ceremony.ts) handles relock there instead.
   useEffect(() => {
     const driver = getVaultDriver()
     if (!driver || driver.sessionBased) return
     driver.start()
     const off = driver.onKeyEvent(e => {
       if (e.type === 'detached') {
-        try { vaultPkmRef.current?.destroyKey() } catch {}
         vaultCeremony.notifyKeyDetached()
       } else {
         vaultCeremony.notifyKeyAttached()
@@ -1665,14 +1643,18 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     })
     return () => {
       off()
-      try { driver.stop() } catch {}
+      try {
+        driver.stop()
+      } catch {}
     }
   }, [])
 
   // Cleanup monitor on unmount
   useEffect(() => {
     return () => {
-      try { monitorRef.current?.stopTasks() } catch {}
+      try {
+        monitorRef.current?.stopTasks()
+      } catch {}
       monitorRef.current = null
       offlineChaintracksRef.current = undefined
       headerStoreRef.current = undefined
@@ -1714,75 +1696,77 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
    * reaps 'unprocessed'/'unsigned', so a 'sending' transaction whose broadcast
    * silently failed shows "Broadcasting" forever and holds its inputs hostage.
    */
-  const refreshProof = useCallback(async (txid: string): Promise<'confirmed' | 'pending' | 'failed'> => {
-    if (!storage) throw new Error('Storage not available')
+  const refreshProof = useCallback(
+    async (txid: string): Promise<'confirmed' | 'pending' | 'failed'> => {
+      if (!storage) throw new Error('Storage not available')
 
-    const wocBase = selectedNetwork === 'teratest'
-      ? 'https://api.woc-ttn.bsvblockchain.tech'
-      : 'https://api.whatsonchain.com'
-    const chain = selectedNetwork === 'main' ? 'main' : 'test'
+      const wocBase =
+        selectedNetwork === 'teratest' ? 'https://api.woc-ttn.bsvblockchain.tech' : 'https://api.whatsonchain.com'
+      const chain = selectedNetwork === 'main' ? 'main' : 'test'
 
-    const res = await fetch(`${wocBase}/v1/bsv/${chain}/tx/${txid}/proof/bump`)
+      const res = await fetch(`${wocBase}/v1/bsv/${chain}/tx/${txid}/proof/bump`)
 
-    if (res.ok) {
-      const bumpHex = (await res.text()).trim()
-      const merklePath = MerklePath.fromHex(bumpHex)
-      const merkleRoot = merklePath.computeRoot(txid)
-      const leaf = merklePath.path[0].find(l => l.txid === true && l.hash === txid)
-      if (!leaf) throw new Error('txid not found in BUMP path')
+      if (res.ok) {
+        const bumpHex = (await res.text()).trim()
+        const merklePath = MerklePath.fromHex(bumpHex)
+        const merkleRoot = merklePath.computeRoot(txid)
+        const leaf = merklePath.path[0].find(l => l.txid === true && l.hash === txid)
+        if (!leaf) throw new Error('txid not found in BUMP path')
 
-      const reqs = await storage.findProvenTxReqs({ partial: { txid } })
-      if (!reqs.length) throw new Error('No pending record found for this transaction')
+        const reqs = await storage.findProvenTxReqs({ partial: { txid } })
+        if (!reqs.length) throw new Error('No pending record found for this transaction')
 
-      const req = reqs[0]
-      await storage.updateProvenTxReqWithNewProvenTx({
-        provenTxReqId: req.provenTxReqId,
-        status: req.status,
-        txid,
-        attempts: req.attempts,
-        history: req.history,
-        index: leaf.offset,
-        height: merklePath.blockHeight,
-        blockHash: '',
-        merklePath: merklePath.toBinary(),
-        merkleRoot
-      })
+        const req = reqs[0]
+        await storage.updateProvenTxReqWithNewProvenTx({
+          provenTxReqId: req.provenTxReqId,
+          status: req.status,
+          txid,
+          attempts: req.attempts,
+          history: req.history,
+          index: leaf.offset,
+          height: merklePath.blockHeight,
+          blockHash: '',
+          merklePath: merklePath.toBinary(),
+          merkleRoot
+        })
+        setTxStatusVersion(v => v + 1)
+        return 'confirmed'
+      }
+
+      // No proof. Before judging, find out whether the network has the tx at all.
+      // A 404 on the proof endpoint alone is NOT evidence of failure — an
+      // unconfirmed but perfectly healthy tx also has no proof.
+      let onChain = false
+      try {
+        const head = await fetch(`${wocBase}/v1/bsv/${chain}/tx/hash/${txid}`)
+        onChain = head.ok
+      } catch {
+        // Network unreachable — we cannot prove absence, so never fail the tx.
+        return 'pending'
+      }
+      if (onChain) return 'pending'
+
+      // Not on chain. Only repair records that still claim to be in flight, and
+      // only once propagation can no longer be the explanation.
+      const txs = await storage.findTransactions({ partial: { txid }, noRawTx: true })
+      const tx = txs[0]
+      if (!tx || tx.status === 'failed' || tx.status === 'completed') return 'pending'
+
+      const IN_FLIGHT: string[] = ['sending', 'unproven', 'nosend', 'unprocessed', 'unsigned', 'nonfinal']
+      if (!IN_FLIGHT.includes(tx.status)) return 'pending'
+
+      const STUCK_AFTER_MS = 5 * 60 * 1000 // matches the monitor's own abandonedMsecs
+      const updatedAt = tx.updated_at ? new Date(tx.updated_at).getTime() : 0
+      if (updatedAt && Date.now() - updatedAt < STUCK_AFTER_MS) return 'pending'
+
+      // Releases the inputs this transaction had reserved and marks its outputs
+      // unspendable — the same repair the monitor performs for abandoned rows.
+      await storage.updateTransactionStatus('failed', tx.transactionId)
       setTxStatusVersion(v => v + 1)
-      return 'confirmed'
-    }
-
-    // No proof. Before judging, find out whether the network has the tx at all.
-    // A 404 on the proof endpoint alone is NOT evidence of failure — an
-    // unconfirmed but perfectly healthy tx also has no proof.
-    let onChain = false
-    try {
-      const head = await fetch(`${wocBase}/v1/bsv/${chain}/tx/hash/${txid}`)
-      onChain = head.ok
-    } catch {
-      // Network unreachable — we cannot prove absence, so never fail the tx.
-      return 'pending'
-    }
-    if (onChain) return 'pending'
-
-    // Not on chain. Only repair records that still claim to be in flight, and
-    // only once propagation can no longer be the explanation.
-    const txs = await storage.findTransactions({ partial: { txid }, noRawTx: true })
-    const tx = txs[0]
-    if (!tx || tx.status === 'failed' || tx.status === 'completed') return 'pending'
-
-    const IN_FLIGHT: string[] = ['sending', 'unproven', 'nosend', 'unprocessed', 'unsigned', 'nonfinal']
-    if (!IN_FLIGHT.includes(tx.status)) return 'pending'
-
-    const STUCK_AFTER_MS = 5 * 60 * 1000 // matches the monitor's own abandonedMsecs
-    const updatedAt = tx.updated_at ? new Date(tx.updated_at).getTime() : 0
-    if (updatedAt && Date.now() - updatedAt < STUCK_AFTER_MS) return 'pending'
-
-    // Releases the inputs this transaction had reserved and marks its outputs
-    // unspendable — the same repair the monitor performs for abandoned rows.
-    await storage.updateTransactionStatus('failed', tx.transactionId)
-    setTxStatusVersion(v => v + 1)
-    return 'failed'
-  }, [storage, selectedNetwork])
+      return 'failed'
+    },
+    [storage, selectedNetwork]
+  )
 
   const runMonitorTask = useCallback(async (taskName: string): Promise<string> => {
     const monitor = monitorRef.current
@@ -1795,16 +1779,19 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   }, [])
 
   const DIAGNOSTIC_TASKS = new Set([
-    'SendWaiting', 'CheckForProofs', 'CheckNoSends',
-    'ReviewStatus', 'MonitorCallHistory', 'ArcadeSSE', 'UnFail'
+    'SendWaiting',
+    'CheckForProofs',
+    'CheckNoSends',
+    'ReviewStatus',
+    'MonitorCallHistory',
+    'ArcadeSSE',
+    'UnFail'
   ])
 
   const getMonitorTaskNames = useCallback((): string[] => {
     const monitor = monitorRef.current
     if (!monitor) return []
-    return [...monitor._tasks, ...monitor._otherTasks]
-      .map(t => t.name)
-      .filter(n => DIAGNOSTIC_TASKS.has(n))
+    return [...monitor._tasks, ...monitor._otherTasks].map(t => t.name).filter(n => DIAGNOSTIC_TASKS.has(n))
   }, [])
 
   // Fast, targeted repair. A FAILED transaction never confirms, but the toolbox
@@ -1944,7 +1931,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
                     paymentRemittance: {
                       derivationPrefix: co.derivationPrefix,
                       derivationSuffix: co.derivationSuffix,
-                      senderIdentityKey: co.senderIdentityKey || (await wallet.getPublicKey({ identityKey: true }, adminOriginator)).publicKey
+                      senderIdentityKey:
+                        co.senderIdentityKey ||
+                        (await wallet.getPublicKey({ identityKey: true }, adminOriginator)).publicKey
                     }
                   })
                 }
@@ -1952,11 +1941,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
             }
 
             if (outputsToInternalize.length > 0) {
-              await wallet.internalizeAction({
-                tx: atomicBeef,
-                outputs: outputsToInternalize,
-                description: 'Recovered from stale UTXO check'
-              }, adminOriginator)
+              await wallet.internalizeAction(
+                {
+                  tx: atomicBeef,
+                  outputs: outputsToInternalize,
+                  description: 'Recovered from stale UTXO check'
+                },
+                adminOriginator
+              )
               internalizedCount++
               lines.push(`    ↳ INTERNALIZED: ${outputsToInternalize.length} change output(s) recovered`)
             } else {
@@ -1974,7 +1966,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         }
       }
 
-      lines.push(`\nSummary: ${unspentCount} unspent, ${spentCount} spent, ${internalizedCount} internalized, ${errorCount} errors`)
+      lines.push(
+        `\nSummary: ${unspentCount} unspent, ${spentCount} spent, ${internalizedCount} internalized, ${errorCount} errors`
+      )
       if (internalizedCount > 0) {
         lines.push(`✓ ${internalizedCount} spending tx(s) internalized with change outputs`)
       }
@@ -2027,8 +2021,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability,
-      releaseStuckReservations,
-      destroyPrivilegedKey
+      releaseStuckReservations
     }),
     [
       managers,
@@ -2069,8 +2062,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       runMonitorTask,
       getMonitorTaskNames,
       checkUtxoSpendability,
-      releaseStuckReservations,
-      destroyPrivilegedKey
+      releaseStuckReservations
     ]
   )
 

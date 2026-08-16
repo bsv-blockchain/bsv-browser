@@ -203,7 +203,6 @@ describe('generateVaultKey policy', () => {
         return JSON.stringify({ publicKey: '04' + '11'.repeat(64) })
       },
       readVaultPublicKey: async () => '{"publicKey":null}',
-      ecdh: async () => '{}',
       signEcdsa: async () => '{}'
     }
     jest.doMock('react-native-yubikey', () => ({ getYubiKeyPiv: () => native }))

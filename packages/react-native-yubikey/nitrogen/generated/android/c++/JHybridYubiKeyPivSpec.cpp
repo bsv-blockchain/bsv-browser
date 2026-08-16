@@ -150,22 +150,6 @@ namespace margelo::nitro::yubikeypiv {
       return __promise;
     }();
   }
-  std::shared_ptr<Promise<std::string>> JHybridYubiKeyPivSpec::ecdh(double slot, const std::string& pin, const std::string& peerPublicKey) {
-    static const auto method = _javaPart->javaClassStatic()->getMethod<jni::local_ref<JPromise::javaobject>(double /* slot */, jni::alias_ref<jni::JString> /* pin */, jni::alias_ref<jni::JString> /* peerPublicKey */)>("ecdh");
-    auto __result = method(_javaPart, slot, jni::make_jstring(pin), jni::make_jstring(peerPublicKey));
-    return [&]() {
-      auto __promise = Promise<std::string>::create();
-      __result->cthis()->addOnResolvedListener([=](const jni::alias_ref<jni::JObject>& __boxedResult) {
-        auto __result = jni::static_ref_cast<jni::JString>(__boxedResult);
-        __promise->resolve(__result->toStdString());
-      });
-      __result->cthis()->addOnRejectedListener([=](const jni::alias_ref<jni::JThrowable>& __throwable) {
-        jni::JniException __jniError(__throwable);
-        __promise->reject(std::make_exception_ptr(__jniError));
-      });
-      return __promise;
-    }();
-  }
   std::shared_ptr<Promise<std::string>> JHybridYubiKeyPivSpec::signEcdsa(double slot, const std::string& pin, const std::string& digest) {
     static const auto method = _javaPart->javaClassStatic()->getMethod<jni::local_ref<JPromise::javaobject>(double /* slot */, jni::alias_ref<jni::JString> /* pin */, jni::alias_ref<jni::JString> /* digest */)>("signEcdsa");
     auto __result = method(_javaPart, slot, jni::make_jstring(pin), jni::make_jstring(digest));

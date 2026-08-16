@@ -17,7 +17,7 @@ import YubiKit
  * NFC lifecycle: unlike a persistent USB reader, an NFC session is a modal tap
  * — `startNFCConnection()` shows the system scan sheet, the user holds the key
  * to the top of the phone, `didConnectNFC` fires, and the connection stays open
- * (so a whole ceremony — verify PIN then touch-gated ECDH — runs in ONE tap)
+ * (so a whole ceremony — verify PIN then touch-gated signing — runs in ONE tap)
  * until `stopNFCConnection()`. So the JS layer calls start() only when a
  * ceremony begins (never at launch), and stop() when it arms or fails.
  *
@@ -272,35 +272,6 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     return promise
   }
 
-  func ecdh(slot: Double, pin: String, peerPublicKey: String) throws -> Promise<String> {
-    let promise = Promise<String>()
-    guard let pivSlot = YKFPIVSlot(rawValue: UInt(slot)) else {
-      promise.reject(withError: Self.vaultError("no-key", "bad slot"))
-      return promise
-    }
-    guard let peerKey = Self.sec1HexToSecKey(peerPublicKey) else {
-      promise.reject(withError: Self.vaultError("wrong-key", "bad peer public key"))
-      return promise
-    }
-    withSession(promise) { session in
-      // pin-policy ONCE gate: verify before the touch-gated agreement.
-      session.verifyPin(pin) { _, error in
-        if let error { return promise.reject(withError: Self.mapError(error)) }
-        // TOUCH-gated when the key was generated with TouchPolicy.ALWAYS: this
-        // waits for the user to tap the key, and surfaces as touch-timeout if
-        // they never do (see mapError).
-        session.calculateSecretKey(in: pivSlot, peerPublicKey: peerKey) { secret, error in
-          if let error { return promise.reject(withError: Self.mapError(error)) }
-          guard let secret else {
-            return promise.reject(withError: Self.vaultError("touch-timeout", "no shared secret returned"))
-          }
-          promise.resolve(withResult: "{\"secret\":\"\(secret.hexString)\"}")
-        }
-      }
-    }
-    return promise
-  }
-
   // MARK: - Helpers
 
   /// Opens a `YKFPIVSession` on the held connection and hands it to `work`;
@@ -400,18 +371,6 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     var error: Unmanaged<CFError>?
     guard let data = SecKeyCopyExternalRepresentation(key, &error) as Data? else { return nil }
     return data.hexString
-  }
-
-  /// SEC1 uncompressed hex (0x04 || X || Y) -> EC public `SecKey`.
-  private static func sec1HexToSecKey(_ hex: String) -> SecKey? {
-    guard let data = Data(hexString: hex) else { return nil }
-    let attrs: [String: Any] = [
-      kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-      kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
-      kSecAttrKeySizeInBits as String: 256
-    ]
-    var error: Unmanaged<CFError>?
-    return SecKeyCreateWithData(data as CFData, attrs as CFDictionary, &error)
   }
 
   /// Firmware-default PIV management key (0x0102…08 ×3, 24 bytes).

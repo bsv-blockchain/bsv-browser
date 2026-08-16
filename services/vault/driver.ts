@@ -35,7 +35,6 @@ export interface VaultDriver {
   changePin(oldPin: string, newPin: string): Promise<{ ok: boolean; retriesLeft: number }>
   generateVaultKey(slot: number): Promise<{ publicKey: string }>
   readVaultPublicKey(slot: number): Promise<{ publicKey: string } | null>
-  ecdh(slot: number, pin: string, peerPublicKey: string): Promise<{ secret: string }>
   /** Sign a pre-computed 32-byte digest (64 hex chars) with the slot's P-256
    * key. Returns a DER signature as hex. TOUCH-gated, PIN-gated. */
   signEcdsa(slot: number, pin: string, digest: string): Promise<{ signature: string }>
@@ -54,7 +53,6 @@ interface NativeYubiKeyPiv {
   changePin(oldPin: string, newPin: string): Promise<string>
   generateVaultKey(slot: number, touchPolicy: string, pinPolicy: string): Promise<string>
   readVaultPublicKey(slot: number): Promise<string>
-  ecdh(slot: number, pin: string, peerPublicKey: string): Promise<string>
   signEcdsa(slot: number, pin: string, digest: string): Promise<string>
 }
 
@@ -129,7 +127,6 @@ function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
       const r = await parse<{ publicKey: string | null }>(native.readVaultPublicKey(slot))
       return r.publicKey ? { publicKey: r.publicKey } : null
     },
-    ecdh: (slot, pin, peer) => parse(native.ecdh(slot, pin, peer)),
     signEcdsa: (slot, pin, digest) => parse(native.signEcdsa(slot, pin, digest))
   }
 }

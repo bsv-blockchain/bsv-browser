@@ -60,7 +60,6 @@ namespace margelo::nitro::yubikeypiv {
       virtual std::shared_ptr<Promise<std::string>> changePin(const std::string& oldPin, const std::string& newPin) = 0;
       virtual std::shared_ptr<Promise<std::string>> generateVaultKey(double slot, const std::string& touchPolicy, const std::string& pinPolicy) = 0;
       virtual std::shared_ptr<Promise<std::string>> readVaultPublicKey(double slot) = 0;
-      virtual std::shared_ptr<Promise<std::string>> ecdh(double slot, const std::string& pin, const std::string& peerPublicKey) = 0;
       virtual std::shared_ptr<Promise<std::string>> signEcdsa(double slot, const std::string& pin, const std::string& digest) = 0;
 
     protected:

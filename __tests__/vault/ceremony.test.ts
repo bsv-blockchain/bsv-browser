@@ -37,7 +37,7 @@ async function makeCeremony(opts: { retentionMs?: number; sessionBased?: boolean
   const meta = { slot: VAULT_SLOT, yubiSerial: DEFAULT_SERIAL, r1PublicKey: compressP256(publicKey) }
   const ceremony = new CeremonyController({
     getDriver: () => mock,
-    store: { isEnrolled: async () => true, getMeta: async () => meta },
+    store: { getMeta: async () => meta },
     retentionMs: opts.retentionMs ?? RETENTION
   })
   return { ceremony, mock }
@@ -52,7 +52,7 @@ describe('CeremonyController: arming', () => {
   test('driver unavailable rejects with driver-unavailable', async () => {
     const c = new CeremonyController({
       getDriver: () => null,
-      store: { isEnrolled: async () => false, getMeta: async () => null },
+      store: { getMeta: async () => null },
       retentionMs: RETENTION
     })
     await expect(c.requestSigner('x')).rejects.toMatchObject({ code: 'driver-unavailable' })
@@ -63,7 +63,7 @@ describe('CeremonyController: arming', () => {
     mock.insertKey(DEFAULT_SERIAL)
     const c = new CeremonyController({
       getDriver: () => mock,
-      store: { isEnrolled: async () => false, getMeta: async () => null },
+      store: { getMeta: async () => null },
       retentionMs: RETENTION
     })
     await expect(c.requestSigner('x')).rejects.toMatchObject({ code: 'not-enrolled' })
