@@ -3,9 +3,8 @@
  *
  * Implements VaultDriver against an in-memory P-256 keypair, emulating the
  * behaviours the real ceremony must survive: PIN retries and lockout, touch
- * timeouts, and key removal mid-operation. ECDH mirrors the token exactly
- * (32-byte x-coordinate), so a seal produced against the mock's public key
- * unseals through the mock — the whole vault stack runs end-to-end without
+ * timeouts, and key removal mid-operation. signEcdsa emits DER exactly like
+ * both real platforms, so the whole vault stack runs end-to-end without
  * hardware.
  *
  * DEV/test only. Never bundled into a path a production user reaches.
@@ -13,7 +12,6 @@
 import { p256 } from '@noble/curves/nist.js'
 import { Utils } from '@bsv/sdk'
 import { VaultDriver, KeyEvent } from './driver'
-import { softwareEcdh } from './sealing'
 import { VaultError } from './types'
 
 type TouchBehavior = 'instant' | 'timeout'
@@ -138,18 +136,39 @@ export class MockYubiKey implements VaultDriver {
     return this.slotPub ? { publicKey: this.slotPub } : null
   }
 
-  async ecdh(_slot: number, pin: string, peerPublicKey: string): Promise<{ secret: string }> {
+  /** Software stand-in for the card's GENERAL AUTHENTICATE.
+   *
+   * Emits DER, exactly like both real platforms, so a DER-parsing bug cannot
+   * hide behind the mock. Enforces the same 32-byte digest rule the native
+   * modules do — on iOS an unrecognised algorithm constant silently signs 32
+   * ZERO bytes, and on Android an over-long payload is silently truncated, so
+   * this check is load-bearing, not decorative.
+   *
+   * `lowS: false` is passed explicitly: @noble/curves defaults P-256 signing
+   * to low-S normalisation, but real YubiKey PIV hardware does not normalise
+   * — roughly half of real signatures are high-S. A mock that only ever
+   * emitted low-S signatures could not catch downstream code that mishandles
+   * a non-canonical signature; that failure would first appear against real
+   * hardware, exactly the scenario this mock exists to prevent.
+   */
+  async signEcdsa(_slot: number, pin: string, digest: string): Promise<{ signature: string }> {
     this.requirePresent()
-    // pinPolicy=once: a prior verifyPin in this "session" satisfies it; if a PIN
-    // is supplied here and not yet verified, verify it inline.
     if (!this.pinVerified) {
-      if (!pin) throw new VaultError('pin-required', 'PIN required before ECDH')
-      await this.verifyPin(pin)
+      if (!pin) throw new VaultError('pin-required', 'PIN required before signing')
+      const res = await this.verifyPin(pin)
+      if (!res.ok) throw new VaultError('pin-invalid', 'Wrong PIN', res.retriesLeft)
     }
     if (!this.slotPriv) throw new VaultError('no-key', 'No key in slot')
+
+    const bytes = Utils.toArray(digest, 'hex')
+    if (bytes.length !== 32) {
+      throw new VaultError('template-invalid', `Digest must be 32 bytes, got ${bytes.length}`)
+    }
     if (this.touch === 'timeout') throw new VaultError('touch-timeout', 'Touch not detected')
-    const secret = softwareEcdh(Utils.toHex(Array.from(this.slotPriv)), peerPublicKey)
-    return { secret }
+
+    const raw = p256.sign(Uint8Array.from(bytes), this.slotPriv, { prehash: false, lowS: false })
+    const der = p256.Signature.fromBytes(raw).toBytes('der')
+    return { signature: Utils.toHex(Array.from(der)) }
   }
 
   // ---- internals -------------------------------------------------------

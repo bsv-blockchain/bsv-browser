@@ -13,7 +13,6 @@ import com.yubico.yubikit.android.transport.nfc.NfcYubiKeyDevice
 import com.yubico.yubikit.android.transport.usb.UsbConfiguration
 import com.yubico.yubikit.android.transport.usb.UsbYubiKeyDevice
 import com.yubico.yubikit.core.YubiKeyDevice
-import com.yubico.yubikit.core.keys.EllipticCurveValues
 import com.yubico.yubikit.core.keys.PublicKeyValues
 import com.yubico.yubikit.core.smartcard.ApduException
 import com.yubico.yubikit.core.smartcard.SmartCardConnection
@@ -234,19 +233,43 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
     return promise
   }
 
-  override fun ecdh(slot: Double, pin: String, peerPublicKey: String): Promise<String> {
+  override fun signEcdsa(slot: Double, pin: String, digest: String): Promise<String> {
     val promise = Promise<String>()
+    // MUST be exactly 32 bytes: rawSignOrDecrypt silently TRUNCATES an over-long
+    // EC payload (Arrays.copyOf to the key's 32-byte length) and left zero-pads a
+    // short one, so an off-length digest signs the wrong message rather than
+    // failing. Checked BEFORE any card command so a malformed digest never burns
+    // a PIN retry.
+    val digestBytes = try {
+      hexToBytes(digest)
+    } catch (t: Throwable) {
+      // hexToBytes' message distinguishes odd-length from non-hex-content so
+      // this detail doesn't misreport which check actually failed.
+      promise.reject(vaultError("template-invalid", "digest ${t.message ?: "must be hex"}"))
+      return promise
+    }
+    if (digestBytes.size != 32) {
+      promise.reject(vaultError("template-invalid", "digest must be exactly 32 bytes, got ${digestBytes.size}"))
+      return promise
+    }
+
     withPiv(promise) { piv ->
-      piv.verifyPin(pin.toCharArray()) // pin-policy ONCE key gate; throws InvalidPinException on wrong PIN
-      val peerBytes = hexToBytes(peerPublicKey)
-      // 3.2.0: calculateSecret takes PublicKeyValues directly (the ECPublicKey
-      // overload was removed) — do NOT convert to a java.security key.
-      val peer = PublicKeyValues.Ec.fromEncodedPoint(EllipticCurveValues.SECP256R1, peerBytes)
-      // TOUCH-gated when the key was generated with TouchPolicy.ALWAYS: this
-      // blocks until the user taps the key, and surfaces as touch-timeout if
-      // they never do (see mapError).
-      val secret = piv.calculateSecret(Slot.fromValue(slot.toInt()), peer)
-      "{\"secret\":\"${secret.toHex()}\"}"
+      // withPiv opens a FRESH PivSession per call, so the PIN must be verified
+      // inside every operation — this is not redundant with an earlier verify.
+      piv.verifyPin(pin.toCharArray())
+      // TOUCH-gated by the slot's touch policy; a required-but-unmet touch
+      // surfaces as SW 0x6982/0x6985, which mapError folds into touch-timeout.
+      // rawSignOrDecrypt sends the digest verbatim (no local hashing/re-encoding)
+      // and the card returns raw DER (SEQUENCE { r, s }), NOT low-S normalised —
+      // returned here unmodified.
+      val der = piv.rawSignOrDecrypt(Slot.fromValue(slot.toInt()), KeyType.ECCP256, digestBytes)
+      if (der.isEmpty()) {
+        // Mirrors iOS: an empty result without a thrown error should not
+        // resolve as a "signature" — surface it as touch-timeout rather than
+        // silently returning {"signature":""}.
+        throw VaultException("touch-timeout", "no signature returned")
+      }
+      "{\"signature\":\"${der.toHex()}\"}"
     }
     return promise
   }
@@ -334,7 +357,13 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
 
   private fun hexToBytes(hex: String): ByteArray {
     val clean = hex.removePrefix("0x").removePrefix("0X")
-    require(clean.length % 2 == 0) { "odd-length hex" }
+    require(clean.length % 2 == 0) { "must have even length" }
+    // Character.digit(c, 16) returns -1 for a non-hex character rather than
+    // throwing, so without this explicit check a garbage string of the right
+    // length (e.g. "g".repeat(64)) would silently decode to a byte array of
+    // 0xEF instead of failing — exactly the class of bug this function must
+    // not produce for callers that gate on decoded length alone (signEcdsa).
+    require(clean.all { Character.digit(it, 16) != -1 }) { "contains a non-hex character" }
     return ByteArray(clean.length / 2) {
       ((Character.digit(clean[it * 2], 16) shl 4) + Character.digit(clean[it * 2 + 1], 16)).toByte()
     }

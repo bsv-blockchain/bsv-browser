@@ -281,9 +281,9 @@ open class HybridYubiKeyPivSpec_cxx {
   }
   
   @inline(__always)
-  public final func ecdh(slot: Double, pin: std.string, peerPublicKey: std.string) -> bridge.Result_std__shared_ptr_Promise_std__string___ {
+  public final func signEcdsa(slot: Double, pin: std.string, digest: std.string) -> bridge.Result_std__shared_ptr_Promise_std__string___ {
     do {
-      let __result = try self.__implementation.ecdh(slot: slot, pin: String(pin), peerPublicKey: String(peerPublicKey))
+      let __result = try self.__implementation.signEcdsa(slot: slot, pin: String(pin), digest: String(digest))
       let __resultCpp = { () -> bridge.std__shared_ptr_Promise_std__string__ in
         let __promise = bridge.create_std__shared_ptr_Promise_std__string__()
         let __promiseHolder = bridge.wrap_std__shared_ptr_Promise_std__string__(__promise)

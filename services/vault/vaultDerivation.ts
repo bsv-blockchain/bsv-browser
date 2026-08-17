@@ -15,17 +15,12 @@
  * Persisting the xpub plus a single `nextKeyIndex` counter is strictly better
  * than the queue: address n derives on demand, forever, with no YubiKey. The
  * queue failed closed at 64 addresses and required a privileged ceremony to
- * refill (transfers.replenishDepositKeys), so deposits could break until the
- * user produced their key.
+ * refill, so deposits could break until the user produced their key.
  *
  * Recovery paths, and there are exactly two:
- *   1. YubiKey + PIN               — via the sealed seed
+ *   1. YubiKey + PIN               — signs directly, nothing to unseal
  *   2. main mnemonic + passphrase  — via this file
  * There is no third path. Nobody can reset it.
- *
- * NOTE the seal must carry the 64-byte SEED, not a bare 32-byte private key:
- * without the chain code, device+PIN recovery could not deriveChild(n) and the
- * deposit addresses would be unreachable.
  *
  * PRIVACY: the stored xpub lets anyone with device access enumerate every
  * vault address. It cannot spend, but it does link them. The previous design
@@ -124,11 +119,7 @@ export function depositPkhFromXpub(xpub: string, index: number): string {
  * Never throws — the enrollment and recovery UIs call this while the user is
  * still typing.
  */
-export function verifyVaultPassphrase(
-  mnemonic: string,
-  passphrase: string,
-  expectedXpub: string
-): boolean {
+export function verifyVaultPassphrase(mnemonic: string, passphrase: string, expectedXpub: string): boolean {
   try {
     return vaultXpub(deriveVaultHD(mnemonic, passphrase)) === expectedXpub
   } catch {

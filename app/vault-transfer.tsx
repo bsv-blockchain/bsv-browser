@@ -4,9 +4,10 @@
  * Direction comes from the `direction` search param ('deposit' | 'withdraw').
  *
  * Deposit runs immediately and needs no hardware key: addresses are BIP32
- * children of the stored xpub. Withdraw goes through the privileged signature
- * path, so the ceremony sheet takes over for insert/PIN/touch — that one stays
- * a sheet deliberately, because it fires from any screen as a system prompt.
+ * children of the stored xpub. Withdraw signs directly with the YubiKey (the
+ * R1 branch signs the digest on the card — nothing to unwrap), so the
+ * ceremony sheet takes over for insert/PIN/touch — that one stays a sheet
+ * deliberately, because it fires from any screen as a system prompt.
  */
 import React, { useState, useCallback } from 'react'
 import {

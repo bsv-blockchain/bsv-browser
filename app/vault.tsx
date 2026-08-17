@@ -24,7 +24,6 @@ import { useVaultBalance } from '@/hooks/useVaultBalance'
 import { vaultStore, VaultMeta } from '@/services/vault/vaultStore'
 import { getVaultDriver } from '@/services/vault/driver'
 import { disableVault } from '@/services/vault/VaultKeyService'
-import { useWallet } from '@/context/WalletContext'
 import { showAlert } from '@/components/ui/AlertCard'
 import { showToast } from '@/components/ui/Toast'
 import { haptics } from '@/hooks/useHaptics'
@@ -39,7 +38,6 @@ export default function VaultScreen() {
   const [enrolled, setEnrolled] = useState<boolean | null>(null)
   const [meta, setMeta] = useState<VaultMeta | null>(null)
   const [enrolling, setEnrolling] = useState(false)
-  const { managers, adminOriginator, destroyPrivilegedKey } = useWallet()
 
   const supported = getVaultDriver()?.isSupported() ?? false
 
@@ -60,9 +58,10 @@ export default function VaultScreen() {
   }, [reload, refresh])
 
   const confirmDisable = useCallback(async () => {
-    // Refuse to disable while funds remain: disabling removes the key gate and
-    // the seal, and any vault UTXO left behind would be locked to a key with no
-    // in-app signer. Force a withdrawal (or recovery sweep) first.
+    // Refuse to disable while funds remain: disabling removes the key gate —
+    // there is no seal to worry about, the YubiKey signs directly — and any
+    // vault UTXO left behind would be locked to a key with no in-app signer.
+    // Force a withdrawal (or recovery sweep) first.
     if ((balance ?? 0) > 0) {
       await showAlert({
         title: t('vault_disable_blocked_title'),
@@ -81,11 +80,10 @@ export default function VaultScreen() {
     })
     if (choice !== 'confirm') return
     await disableVault()
-    destroyPrivilegedKey() // don't let V linger in the PKM retention window
     haptics.warning()
     showToast(t('vault_disabled_toast'), { type: 'info' })
     await reload()
-  }, [balance, reload, destroyPrivilegedKey])
+  }, [balance, reload])
 
   const Header = (
     <View style={[styles.header, { borderBottomColor: colors.separator }]}>
@@ -187,7 +185,14 @@ export default function VaultScreen() {
           <PressableScale
             haptic="confirm"
             onPress={() => router.push('/vault-transfer?direction=withdraw')}
-            style={[styles.actionBtn, { backgroundColor: colors.backgroundElevated, borderColor: colors.separator, borderWidth: StyleSheet.hairlineWidth }]}
+            style={[
+              styles.actionBtn,
+              {
+                backgroundColor: colors.backgroundElevated,
+                borderColor: colors.separator,
+                borderWidth: StyleSheet.hairlineWidth
+              }
+            ]}
           >
             <Ionicons name="arrow-up" size={18} color={colors.accent} />
             <Text style={[styles.actionLabel, { color: colors.accent }]}>{t('vault_withdraw_cta')}</Text>
@@ -229,14 +234,20 @@ export default function VaultScreen() {
           />
         </GroupedSection>
       </ScrollView>
-
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.sm, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth
+  },
   iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { ...typography.headline },
   centered: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.lg },
@@ -279,6 +290,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.xxl
   },
-  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, borderRadius: radii.md, paddingVertical: spacing.lg },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    paddingVertical: spacing.lg
+  },
   actionLabel: { ...typography.headline }
 })

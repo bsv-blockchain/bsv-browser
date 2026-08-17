@@ -35,7 +35,9 @@ export interface VaultDriver {
   changePin(oldPin: string, newPin: string): Promise<{ ok: boolean; retriesLeft: number }>
   generateVaultKey(slot: number): Promise<{ publicKey: string }>
   readVaultPublicKey(slot: number): Promise<{ publicKey: string } | null>
-  ecdh(slot: number, pin: string, peerPublicKey: string): Promise<{ secret: string }>
+  /** Sign a pre-computed 32-byte digest (64 hex chars) with the slot's P-256
+   * key. Returns a DER signature as hex. TOUCH-gated, PIN-gated. */
+  signEcdsa(slot: number, pin: string, digest: string): Promise<{ signature: string }>
 }
 
 /** Shape of the native Nitro module (JSON-string API). Kept local so a missing
@@ -51,7 +53,7 @@ interface NativeYubiKeyPiv {
   changePin(oldPin: string, newPin: string): Promise<string>
   generateVaultKey(slot: number, touchPolicy: string, pinPolicy: string): Promise<string>
   readVaultPublicKey(slot: number): Promise<string>
-  ecdh(slot: number, pin: string, peerPublicKey: string): Promise<string>
+  signEcdsa(slot: number, pin: string, digest: string): Promise<string>
 }
 
 let injectedMock: VaultDriver | null = null
@@ -117,12 +119,15 @@ function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
     getKeyInfo: () => parse(native.getKeyInfo()),
     verifyPin: pin => parse(native.verifyPin(pin)),
     changePin: (o, n) => parse(native.changePin(o, n)),
-    generateVaultKey: slot => parse(native.generateVaultKey(slot, 'always', 'once')),
+    // 'cached' (not 'always'): R1-K1 needs one signature per input, so 'always'
+    // would demand a separate physical touch for every vault UTXO in a
+    // withdrawal. 'cached' satisfies the touch once per ~15s window.
+    generateVaultKey: slot => parse(native.generateVaultKey(slot, 'cached', 'once')),
     readVaultPublicKey: async slot => {
       const r = await parse<{ publicKey: string | null }>(native.readVaultPublicKey(slot))
       return r.publicKey ? { publicKey: r.publicKey } : null
     },
-    ecdh: (slot, pin, peer) => parse(native.ecdh(slot, pin, peer))
+    signEcdsa: (slot, pin, digest) => parse(native.signEcdsa(slot, pin, digest))
   }
 }
 

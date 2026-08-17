@@ -45,7 +45,6 @@ const ERROR_COPY: Record<string, string> = {
   'driver-unavailable': 'vault_err_unavailable',
   'not-enrolled': 'vault_err_unavailable',
   'mgmt-key-custom': 'vault_err_mgmt_key',
-  'seal-corrupt': 'vault_err_generic',
   'user-cancelled': 'vault_err_generic',
   'unsupported-platform': 'vault_err_unavailable',
   'slot-occupied': 'vault_err_generic',
@@ -67,7 +66,6 @@ const PhaseIcon: Record<CeremonyPhase, keyof typeof Ionicons.glyphMap> = {
   connecting: 'sync-outline',
   'pin-entry': 'keypad-outline',
   'awaiting-touch': 'finger-print-outline',
-  unsealing: 'lock-open-outline',
   armed: 'lock-open',
   error: 'alert-circle-outline'
 }
@@ -86,7 +84,14 @@ export const VaultCeremonySheet: React.FC = () => {
   useEffect(() => {
     const active = phase === 'waiting-for-key' || phase === 'awaiting-touch'
     if (active && !reducedMotion) {
-      pulse.value = withRepeat(withSequence(withTiming(1.12, { duration: 700, easing: Easing.inOut(Easing.quad) }), withTiming(1, { duration: 700, easing: Easing.inOut(Easing.quad) })), -1, false)
+      pulse.value = withRepeat(
+        withSequence(
+          withTiming(1.12, { duration: 700, easing: Easing.inOut(Easing.quad) }),
+          withTiming(1, { duration: 700, easing: Easing.inOut(Easing.quad) })
+        ),
+        -1,
+        false
+      )
     } else {
       cancelAnimation(pulse)
       pulse.value = withTiming(1, { duration: 150 })
@@ -116,10 +121,8 @@ export const VaultCeremonySheet: React.FC = () => {
         return t('vault_enter_pin')
       case 'awaiting-touch':
         return nfc ? t('vault_keep_holding_nfc') : t('vault_touch_contact')
-      case 'unsealing':
-        return t('vault_unlocking')
       case 'error':
-        return t(ERROR_COPY[errCode ?? 'seal-corrupt'] ?? 'vault_err_generic')
+        return t((errCode && ERROR_COPY[errCode]) ?? 'vault_err_generic')
       default:
         return ''
     }
@@ -133,7 +136,7 @@ export const VaultCeremonySheet: React.FC = () => {
         {reason ? <Text style={[styles.reason, { color: colors.textSecondary }]}>{reason}</Text> : null}
 
         <Animated.View style={[styles.iconWrap, { backgroundColor: colors.backgroundSecondary }, pulseStyle]}>
-          {phase === 'connecting' || phase === 'unsealing' ? (
+          {phase === 'connecting' ? (
             <ActivityIndicator color={iconColor} />
           ) : (
             <Ionicons name={PhaseIcon[phase]} size={40} color={iconColor} />
@@ -142,9 +145,7 @@ export const VaultCeremonySheet: React.FC = () => {
 
         <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
 
-        {phase === 'awaiting-touch' && (
-          <TouchCountdown color={colors.accent} trackColor={colors.backgroundSecondary} />
-        )}
+        {phase === 'awaiting-touch' && <TouchCountdown color={colors.accent} trackColor={colors.backgroundSecondary} />}
 
         {phase === 'pin-entry' && (
           <>
@@ -215,7 +216,7 @@ export const VaultCeremonySheet: React.FC = () => {
 }
 
 /** 15-second ring that empties while the key waits for a touch. Purely a UI
- * countdown — the native ECDH enforces the real timeout. */
+ * countdown — the native touch policy enforces the real timeout. */
 const TouchCountdown: React.FC<{ color: string; trackColor: string }> = ({ color, trackColor }) => {
   const reducedMotion = useReducedMotion()
   const progress = useSharedValue(1)
@@ -239,10 +240,24 @@ const TouchCountdown: React.FC<{ color: string; trackColor: string }> = ({ color
 const styles = StyleSheet.create({
   body: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xxl, alignItems: 'center', gap: spacing.lg },
   reason: { ...typography.subhead, textAlign: 'center' },
-  iconWrap: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center', marginTop: spacing.md },
+  iconWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.md
+  },
   title: { ...typography.title3, textAlign: 'center' },
   subtitle: { ...typography.subhead, textAlign: 'center', marginTop: -spacing.sm },
-  pin: { width: '70%', textAlign: 'center', ...typography.title2, letterSpacing: 8, borderRadius: radii.md, paddingVertical: spacing.md },
+  pin: {
+    width: '70%',
+    textAlign: 'center',
+    ...typography.title2,
+    letterSpacing: 8,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md
+  },
   hint: { ...typography.footnote },
   primaryBtn: { width: '100%', borderRadius: radii.md, paddingVertical: spacing.lg, alignItems: 'center' },
   primaryLabel: { ...typography.headline },

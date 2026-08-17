@@ -17,7 +17,7 @@ import YubiKit
  * NFC lifecycle: unlike a persistent USB reader, an NFC session is a modal tap
  * — `startNFCConnection()` shows the system scan sheet, the user holds the key
  * to the top of the phone, `didConnectNFC` fires, and the connection stays open
- * (so a whole ceremony — verify PIN then touch-gated ECDH — runs in ONE tap)
+ * (so a whole ceremony — verify PIN then touch-gated signing — runs in ONE tap)
  * until `stopNFCConnection()`. So the JS layer calls start() only when a
  * ceremony begins (never at launch), and stop() when it arms or fails.
  *
@@ -229,29 +229,43 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     return promise
   }
 
-  func ecdh(slot: Double, pin: String, peerPublicKey: String) throws -> Promise<String> {
+  func signEcdsa(slot: Double, pin: String, digest: String) throws -> Promise<String> {
     let promise = Promise<String>()
     guard let pivSlot = YKFPIVSlot(rawValue: UInt(slot)) else {
       promise.reject(withError: Self.vaultError("no-key", "bad slot"))
       return promise
     }
-    guard let peerKey = Self.sec1HexToSecKey(peerPublicKey) else {
-      promise.reject(withError: Self.vaultError("wrong-key", "bad peer public key"))
+    // MUST be exactly 32 bytes, checked BEFORE any card command. YKFPIVPadding
+    // returns 32 ZERO bytes rather than an error when it does not recognise the
+    // algorithm constant, and pads/truncates anything off-length — either way the
+    // card would happily sign the wrong message.
+    guard let digestData = Data(hexString: digest), digestData.count == 32 else {
+      promise.reject(withError: Self.vaultError("template-invalid", "digest must be exactly 32 bytes"))
       return promise
     }
+
+    // Guards YubiKit 4.4.0's double-callback in signWithKeyInSlot: (see SettleGuard).
+    let settled = SettleGuard()
     withSession(promise) { session in
-      // pin-policy ONCE gate: verify before the touch-gated agreement.
+      // pin-policy ONCE gate: neither YubiKit nor the card verifies for us.
       session.verifyPin(pin) { _, error in
-        if let error { return promise.reject(withError: Self.mapError(error)) }
-        // TOUCH-gated when the key was generated with TouchPolicy.ALWAYS: this
-        // waits for the user to tap the key, and surfaces as touch-timeout if
-        // they never do (see mapError).
-        session.calculateSecretKey(in: pivSlot, peerPublicKey: peerKey) { secret, error in
-          if let error { return promise.reject(withError: Self.mapError(error)) }
-          guard let secret else {
-            return promise.reject(withError: Self.vaultError("touch-timeout", "no shared secret returned"))
+        if let error { return settled.reject(promise, Self.mapError(error)) }
+        // .ecdsaSignatureDigestX962SHA256 is the DIGEST variant — YKFPIVPadding
+        // passes it through unhashed (`hash = [data mutableCopy]`). Never use the
+        // ...MessageX962... variants: those hash locally with CommonCrypto and
+        // would sign the wrong value. Signature is the card's raw DER bytes,
+        // returned unmodified (P-256 signatures here are NOT low-S normalised).
+        session.signWithKey(
+          in: pivSlot,
+          type: .ECCP256,
+          algorithm: .ecdsaSignatureDigestX962SHA256,
+          message: digestData
+        ) { signature, error in
+          if let error { return settled.reject(promise, Self.mapError(error)) }
+          guard let signature, !signature.isEmpty else {
+            return settled.reject(promise, Self.vaultError("touch-timeout", "no signature returned"))
           }
-          promise.resolve(withResult: "{\"secret\":\"\(secret.hexString)\"}")
+          settled.resolve(promise, "{\"signature\":\"\(signature.hexString)\"}")
         }
       }
     }
@@ -359,24 +373,38 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     return data.hexString
   }
 
-  /// SEC1 uncompressed hex (0x04 || X || Y) -> EC public `SecKey`.
-  private static func sec1HexToSecKey(_ hex: String) -> SecKey? {
-    guard let data = Data(hexString: hex) else { return nil }
-    let attrs: [String: Any] = [
-      kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-      kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
-      kSecAttrKeySizeInBits as String: 256
-    ]
-    var error: Unmanaged<CFError>?
-    return SecKeyCreateWithData(data as CFData, attrs as CFDictionary, &error)
-  }
-
   /// Firmware-default PIV management key (0x0102…08 ×3, 24 bytes).
   private static let defaultManagementKey = Data([
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
   ])
+}
+
+// MARK: - Settle guard
+
+/// Guards against YubiKit 4.4.0's double-callback in signWithKeyInSlot:.
+/// On a padding error it invokes the completion block and then falls through
+/// to invoke it AGAIN — a double settle on a Nitro Promise is a crash.
+private final class SettleGuard {
+  private var settled = false
+  private let lock = NSLock()
+
+  private func claim() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    if settled { return false }
+    settled = true
+    return true
+  }
+
+  func resolve(_ promise: Promise<String>, _ value: String) {
+    if claim() { promise.resolve(withResult: value) }
+  }
+
+  func reject(_ promise: Promise<String>, _ error: Error) {
+    if claim() { promise.reject(withError: error) }
+  }
 }
 
 // MARK: - Discovery delegate

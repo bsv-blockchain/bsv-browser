@@ -11,7 +11,7 @@
  * address n on demand with no YubiKey and no replenishment ceremony.
  *
  * Recovery paths, and there are exactly two:
- *   1. YubiKey + PIN               (the sealed seed)
+ *   1. YubiKey + PIN               — signs directly, nothing to unseal
  *   2. main mnemonic + passphrase  (this file)
  *
  * The passphrase has NO checksum, so a typo silently yields a different,
@@ -47,10 +47,11 @@ describe('deriveVaultSeed', () => {
     )
   })
 
-  it('is a 64-byte BIP39 seed, so the HD chain code survives sealing', () => {
-    // The seal must carry the seed rather than a bare 32-byte private key,
-    // otherwise device+PIN recovery loses the chain code and cannot
-    // deriveChild(n) to reach the deposit addresses.
+  it('is a 64-byte BIP39 seed, so the HD chain code supports BIP32 child derivation', () => {
+    // A bare 32-byte private key carries no chain code. deriveVaultHD /
+    // depositPkhFromXpub / depositPrivKey all need to deriveChild(n) — both
+    // for ordinary deposits (derived from the xpub, no YubiKey involved) and
+    // for the K1 recovery sweep — so the seed must be the full 64 bytes.
     expect(deriveVaultSeed(TEST_MNEMONIC, PASSPHRASE)).toHaveLength(64)
   })
 

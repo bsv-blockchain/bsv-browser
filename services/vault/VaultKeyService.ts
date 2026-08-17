@@ -5,57 +5,38 @@
  * domain-separated by a non-empty vault passphrase (BIP39 toSeed). The user
  * therefore backs up ONE phrase, not two. See vaultDerivation.ts.
  *
- * What gets sealed to the YubiKey is the 64-byte BIP39 SEED, not a bare
- * private key: without the chain code, device+PIN recovery could not
- * deriveChild(n) and every deposit address would be unreachable.
+ * The YubiKey is a SIGNING device, not a key-wrapping one: its PIV slot 0x82
+ * holds a P-256 key that never leaves the card. Enrollment's job is just to
+ * generate that key, record its compressed public key, and store v3 meta —
+ * there is nothing to seal.
  *
  * Deposit addresses are BIP32 children of the stored xpub, so deposits never
- * need the YubiKey and never run out. (The previous design cached 64 key
+ * need the YubiKey and never run out. (An earlier design cached 64 key
  * hashes and needed a privileged ceremony to refill them.)
  *
  * Recovery paths, and there are exactly two:
- *   1. YubiKey + PIN               — the sealed seed
+ *   1. YubiKey + PIN               — signs directly, nothing to unseal
  *   2. main mnemonic + passphrase  — deriveVaultHD
  * There is no third path.
  *
  * SECURITY: never log V, the seed, the mnemonic, or the passphrase.
  */
-import { PrivateKey, KeyDeriver, HD, Mnemonic, WalletProtocol } from '@bsv/sdk'
+import { HD } from '@bsv/sdk'
 import { getVaultDriver } from './driver'
 import { withKeySession } from './session'
-import { vaultStore, VaultMeta, VaultMetaV2 } from './vaultStore'
-import { sealVaultKey } from './sealing'
-import { VaultError, SealedBlob } from './types'
+import { vaultStore, VaultMetaV3 } from './vaultStore'
+import { VaultError } from './types'
 import { deriveVaultSeed, deriveVaultHD, vaultXpub } from './vaultDerivation'
 import { checkVaultPassphrase } from './vaultPassphrase'
+import { compressP256 } from './r1k1'
 
+/** An enrollment that has touched the key but not yet disk. */
 export interface PendingEnrollment {
-  seal: SealedBlob
-  meta: VaultMeta
+  meta: VaultMetaV3
 }
 
 export const VAULT_SLOT = 0x82
-export const VAULT_PROTOCOL: WalletProtocol = [2, 'vault']
-const DEPOSIT_QUEUE_SIZE = 64
 const DEFAULT_PIV_PIN = '123456'
-
-/** V = BIP32 master private key of the backup mnemonic's seed. */
-function deriveVaultKey(mnemonic: string): number[] {
-  const seed = Mnemonic.fromString(mnemonic).toSeed('')
-  return HD.fromSeed(seed).privKey.toArray()
-}
-
-/** Derive `count` deposit keys (pubkey hash160) from V, starting at `from`. */
-function deriveDepositKeys(v: number[], from: number, count: number): { keyID: string; pkh: string }[] {
-  const kd = new KeyDeriver(new PrivateKey(v))
-  const out: { keyID: string; pkh: string }[] = []
-  for (let i = from; i < from + count; i++) {
-    const keyID = `vault/${i}`
-    const pub = kd.derivePublicKey(VAULT_PROTOCOL, keyID, 'self', true)
-    out.push({ keyID, pkh: pub.toHash('hex') as string })
-  }
-  return out
-}
 
 export async function enrollVault(args: {
   nickname: string
@@ -64,7 +45,7 @@ export async function enrollVault(args: {
   mnemonic: string
   /** Non-empty vault passphrase. Must pass checkVaultPassphrase. */
   passphrase: string
-  onPhase: (p: 'connecting' | 'pin-check' | 'generating' | 'sealing' | 'done') => void
+  onPhase: (p: 'connecting' | 'pin-check' | 'generating' | 'done') => void
   getPin: () => Promise<string>
   /** Called when the key still has the factory-default PIV PIN; must return a
    * new PIN the user chose. If omitted, enrollment proceeds on the default PIN
@@ -119,63 +100,49 @@ export async function enrollVault(args: {
   )
 
   // The vault seed comes from the user's EXISTING wallet mnemonic plus their
-  // passphrase — no second phrase is generated, and nothing new to write down.
+  // passphrase — no second phrase, nothing new to write down. It never leaves
+  // this function: only the PUBLIC node is persisted. The `finally` below
+  // zeroes it on every exit, including a compressP256 throw on malformed card
+  // key material — the seed must never survive this function on ANY path.
   const seed = deriveVaultSeed(args.mnemonic, args.passphrase)
-  const hd = HD.fromSeed(seed)
-
-  // Seal the serialised HD NODE, not a bare private key: the chain code must
-  // survive, or device+PIN recovery could not deriveChild(n) and every deposit
-  // address would be unreachable.
-  args.onPhase('sealing')
-  const seal = sealVaultKey(hd.toBinary(), publicKey, { slot: VAULT_SLOT, serial: info.serial })
-  const meta: VaultMetaV2 = {
-    v: 2,
-    enrolledAt: Date.now(),
-    yubiSerial: info.serial,
-    nickname: args.nickname,
-    slot: VAULT_SLOT,
-    nextKeyIndex: 0,
-    xpub: vaultXpub(hd)
+  let meta: VaultMetaV3
+  try {
+    const hd = HD.fromSeed(seed)
+    meta = {
+      v: 3,
+      enrolledAt: Date.now(),
+      yubiSerial: info.serial,
+      nickname: args.nickname,
+      slot: VAULT_SLOT,
+      nextKeyIndex: 0,
+      xpub: vaultXpub(hd),
+      // The driver returns a 65-byte uncompressed SEC1 point; the template
+      // needs 33-byte compressed.
+      r1PublicKey: compressP256(publicKey)
+    }
+  } finally {
+    seed.fill(0)
   }
 
-  // Drop the seed.
-  seed.fill(0)
   args.onPhase('done')
-  return { pending: { seal, meta } }
+  return { pending: { meta } }
 }
 
-/** Commit an enrollment produced by enrollVault, after the user has confirmed
- * the backup phrase. Only here does anything reach disk (fix #4). */
-export async function finalizeEnrollment(pending: { seal: SealedBlob; meta: VaultMeta }): Promise<void> {
-  await vaultStore.setSeal(pending.seal)
+/** Commit an enrollment produced by enrollVault. Only here does anything reach
+ * disk. */
+export async function finalizeEnrollment(pending: PendingEnrollment): Promise<void> {
   await vaultStore.setMeta(pending.meta)
 }
 
 /**
- * Recover a LEGACY v1 vault from its separate random backup phrase.
- *
- * Kept so existing enrollments are never stranded. v1 vaults were sealed from
- * a second 24-word mnemonic with an empty passphrase.
- */
-export async function recoverVaultKeyV1(mnemonic: string): Promise<PrivateKey> {
-  const trimmed = mnemonic.trim().replace(/\s+/g, ' ')
-  if (!Mnemonic.isValid(trimmed)) throw new VaultError('seal-corrupt', 'Invalid recovery phrase')
-  return new PrivateKey(deriveVaultKey(trimmed))
-}
-
-/**
- * Recover a v2 vault from the MAIN wallet mnemonic plus the vault passphrase.
+ * Recover a v3 vault from the MAIN wallet mnemonic plus the vault passphrase.
  *
  * `expectedXpub` (from vault meta, when present) catches a mistyped
  * passphrase: BIP39 passphrases have no checksum, so without this check a typo
  * silently derives a different, valid, EMPTY vault and the user concludes
  * their funds are gone.
  */
-export async function recoverVaultHD(
-  mnemonic: string,
-  passphrase: string,
-  expectedXpub?: string
-): Promise<HD> {
+export async function recoverVaultHD(mnemonic: string, passphrase: string, expectedXpub?: string): Promise<HD> {
   const hd = deriveVaultHD(mnemonic, passphrase) // throws on empty/invalid
   if (expectedXpub && vaultXpub(hd) !== expectedXpub) {
     throw new VaultError('bad-passphrase', 'That passphrase does not match this vault')
@@ -183,16 +150,24 @@ export async function recoverVaultHD(
   return hd
 }
 
-/** @deprecated v1 name kept for callers not yet migrated. */
-export const recoverVaultKey = recoverVaultKeyV1
-
-/** Re-seal an existing vault node to a freshly enrolled YubiKey, e.g. after a
- * lost or bricked key. Takes the HD node so the chain code survives. */
-export async function resealHDToNewKey(
-  hd: HD,
-  nickname: string,
-  getPin: () => Promise<string>
-): Promise<void> {
+/** Re-enroll an existing vault to a fresh YubiKey, e.g. after a lost key.
+ *
+ * Preserves nextKeyIndex so deposit indices are never reissued.
+ *
+ * Outputs created under the OLD key do NOT become spendable via the R1
+ * branch again — not with the new key (it never held the old key's private
+ * material) and not with the old physical key either (the ceremony's serial
+ * check in armViaReader/openTapSession, ceremony.ts, rejects any card whose
+ * serial does not match the newly-stored yubiSerial, before any signing is
+ * attempted). Those outputs remain spendable ONLY via the K1 recovery sweep
+ * (transfers.ts's sweepVaultWithHD), which never touches a YubiKey at all.
+ * r1PublicKey is still stored per output rather than read from meta — that is
+ * what lets buildVaultLockingScript reconstruct every output's exact locking
+ * script regardless of which key enrolled it, and what lets the R1 spend path
+ * detect and reject a signer/output key mismatch (transfers.ts's wrong-key
+ * check) before ever attempting to sign.
+ */
+export async function resealHDToNewKey(hd: HD, nickname: string, getPin: () => Promise<string>): Promise<void> {
   const driver = getVaultDriver()
   if (!driver) throw new VaultError('driver-unavailable')
   const info = await driver.getKeyInfo()
@@ -205,59 +180,23 @@ export async function resealHDToNewKey(
   if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)
   const { publicKey } = await driver.generateVaultKey(VAULT_SLOT)
 
-  // Preserve nextKeyIndex across the re-seal so deposit indices are never
-  // reissued to a second address.
+  // Preserve nextKeyIndex across the re-enrollment so deposit indices are
+  // never reissued to a second address.
   const prev = await vaultStore.getMeta()
-  await vaultStore.setSeal(
-    sealVaultKey(hd.toBinary(), publicKey, { slot: VAULT_SLOT, serial: info.serial })
-  )
   await vaultStore.setMeta({
-    v: 2,
+    v: 3,
     enrolledAt: Date.now(),
     yubiSerial: info.serial,
     nickname,
     slot: VAULT_SLOT,
     nextKeyIndex: prev?.nextKeyIndex ?? 0,
-    xpub: vaultXpub(hd)
+    xpub: vaultXpub(hd),
+    r1PublicKey: compressP256(publicKey)
   })
-}
-
-/** @deprecated v1 path. Re-seal a bare V to a freshly enrolled YubiKey. */
-export async function resealToNewKey(
-  v: PrivateKey,
-  nickname: string,
-  getPin: () => Promise<string>
-): Promise<void> {
-  const driver = getVaultDriver()
-  if (!driver) throw new VaultError('driver-unavailable')
-  const info = await driver.getKeyInfo()
-  if (info.pinRetries === 0) throw new VaultError('pin-locked', 'PIN is blocked')
-  // Same non-destructive rule as enrollVault: never overwrite an occupied slot.
-  if (await driver.readVaultPublicKey(VAULT_SLOT)) {
-    throw new VaultError('slot-occupied', `PIV slot ${VAULT_SLOT.toString(16)} already holds a key`)
-  }
-  const pin = await getPin()
-  const verified = await driver.verifyPin(pin)
-  if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)
-  const { publicKey } = await driver.generateVaultKey(VAULT_SLOT)
-  const bytes = v.toArray()
-  const seal = sealVaultKey(bytes, publicKey, { slot: VAULT_SLOT, serial: info.serial })
-  await vaultStore.setSeal(seal)
-  const depositKeys = deriveDepositKeys(bytes, 0, DEPOSIT_QUEUE_SIZE)
-  await vaultStore.setMeta({
-    v: 1,
-    enrolledAt: Date.now(),
-    yubiSerial: info.serial,
-    nickname,
-    slot: VAULT_SLOT,
-    nextKeyIndex: DEPOSIT_QUEUE_SIZE,
-    depositKeys
-  })
-  bytes.fill(0)
 }
 
 /** Remove all vault state. Callers must sweep funds to the default basket
- * BEFORE calling this — see transfers.sweepVaultWithKey. */
+ * BEFORE calling this — see transfers.sweepVaultWithHD. */
 export async function disableVault(): Promise<void> {
   await vaultStore.clear()
 }

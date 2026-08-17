@@ -1,24 +1,29 @@
 /**
  * The process-wide ceremony singleton.
  *
- * Constructed once against the live driver + store so both the wallet
- * (PrivilegedKeyManager keyGetter → requestCeremony) and the React vault
- * context (which subscribes for the sheet UI) drive the SAME ceremony. Kept
- * out of any React module so importing it never pulls in the component graph —
- * WalletContext and VaultContext both depend on this, not on each other.
+ * Constructed once against the live driver + store so the vault transfer flow
+ * and the React vault context drive the SAME ceremony. Kept out of any React
+ * module so importing it never pulls in the component graph.
  */
-import { CeremonyController } from './ceremony'
+import { CeremonyController, VaultR1Signer } from './ceremony'
 import { getVaultDriver } from './driver'
 import { vaultStore } from './vaultStore'
-import { VAULT_RETENTION_MS } from './privileged'
+
+/** How long an armed session stays usable before it relocks. */
+export const VAULT_RETENTION_MS = 120_000
 
 export const ceremony = new CeremonyController({
   getDriver: getVaultDriver,
-  store: { isEnrolled: () => vaultStore.isEnrolled(), getSeal: () => vaultStore.getSeal() },
+  store: {
+    getMeta: async () => {
+      const m = await vaultStore.getMeta()
+      return m ? { slot: m.slot, yubiSerial: m.yubiSerial, r1PublicKey: m.r1PublicKey } : null
+    }
+  },
   retentionMs: VAULT_RETENTION_MS
 })
 
-/** Passed to makePrivilegedKeyGetter as `requestCeremony`. */
-export function requestCeremony(reason: string): Promise<import('@bsv/sdk').PrivateKey> {
-  return ceremony.request(reason)
+/** Arm the YubiKey for a vault spend. Callers MUST release() in a finally. */
+export function requestVaultSigner(reason: string): Promise<VaultR1Signer> {
+  return ceremony.requestSigner(reason)
 }

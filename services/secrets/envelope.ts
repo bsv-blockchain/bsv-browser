@@ -14,7 +14,7 @@
  * SECURITY: never log inputs or outputs of these functions.
  */
 import { SymmetricKey, Random, Utils } from '@bsv/sdk'
-import { hkdfSha256 } from '../vault/sealing'
+import { hkdfSha256 } from './hkdf'
 import { EnvelopeBlob, EnvelopeError, SecretName } from './types'
 
 export const ENVELOPE_INFO = 'bsvb-secret-envelope-v1'

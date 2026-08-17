@@ -76,7 +76,7 @@ abstract class HybridYubiKeyPivSpec: HybridObject() {
   
   @DoNotStrip
   @Keep
-  abstract fun ecdh(slot: Double, pin: String, peerPublicKey: String): Promise<String>
+  abstract fun signEcdsa(slot: Double, pin: String, digest: String): Promise<String>
 
   // Default implementation of `HybridObject.toString()`
   override fun toString(): String {

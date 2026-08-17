@@ -23,7 +23,7 @@ public protocol HybridYubiKeyPivSpec_protocol: HybridObject {
   func changePin(oldPin: String, newPin: String) throws -> Promise<String>
   func generateVaultKey(slot: Double, touchPolicy: String, pinPolicy: String) throws -> Promise<String>
   func readVaultPublicKey(slot: Double) throws -> Promise<String>
-  func ecdh(slot: Double, pin: String, peerPublicKey: String) throws -> Promise<String>
+  func signEcdsa(slot: Double, pin: String, digest: String) throws -> Promise<String>
 }
 
 public extension HybridYubiKeyPivSpec_protocol {
