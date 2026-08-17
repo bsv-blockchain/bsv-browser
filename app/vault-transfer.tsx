@@ -94,6 +94,16 @@ export default function VaultTransferScreen() {
       if (code === 'backup-required') {
         // A blocked deposit needs a route out, not a red footnote. Matches the
         // disable-while-funded pattern on the vault screen.
+        //
+        // The CTA goes to Settings > Wallet, not back to /vault: this refusal
+        // only fires once a vault already exists (deposit is only offered
+        // from the enrolled vault screen), and the enrolled vault screen has
+        // no backup affordance of its own — EnrollWizard, the only other
+        // place that records an attestation, isn't reachable from there.
+        // Printing recovery shares from wallet-config is a real backup and
+        // now records the same attestation (see handlePrintRecoveryShares),
+        // so it satisfies the gate. push (not replace) keeps this screen on
+        // the stack so the user can come back and retry the deposit.
         haptics.error()
         const choice = await showAlert({
           title: t('vault_deposit_blocked_title'),
@@ -103,7 +113,7 @@ export default function VaultTransferScreen() {
             { text: t('vault_deposit_blocked_cta'), key: 'backup' }
           ]
         })
-        if (choice === 'backup') router.replace('/vault')
+        if (choice === 'backup') router.push('/wallet-config')
         return
       }
 

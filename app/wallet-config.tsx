@@ -30,6 +30,7 @@ import { exportAllWalletDatabases } from '@/utils/exportDatabases'
 import { importWalletDatabase } from '@/utils/importDatabases'
 import { PrivateKey } from '@bsv/sdk'
 import { printRecoveryShares } from '@/utils/printRecoveryShares'
+import { backupAttestation } from '@/services/vault/backupAttestation'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 export default function WalletConfigScreen() {
@@ -133,7 +134,17 @@ export default function WalletConfigScreen() {
         mnemonic: await getMnemonic(),
         recoveredKeyWif: await getRecoveredKey()
       })
-      if (!result.ok) {
+      if (result.ok) {
+        // A resolved print sheet from Settings is the same genuine backup
+        // EnrollWizard records — this is the other route to satisfying the
+        // vault's backup prerequisite, so it must record the same
+        // attestation. Guard against an empty key: identityKey is populated
+        // by a mount-time effect that may not have resolved yet, and writing
+        // under an empty scope would attest nothing to nobody.
+        if (identityKey) {
+          await backupAttestation.set(identityKey, 'shares')
+        }
+      } else {
         showToast(
           result.reason === 'unsupported-word-count'
             ? t('vault_shares_word_count')
