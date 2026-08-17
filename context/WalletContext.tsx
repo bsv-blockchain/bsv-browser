@@ -16,6 +16,7 @@ import { makePrivilegedKeyGetter, VAULT_RETENTION_MS } from '@/services/vault/pr
 import { requestCeremony, ceremony as vaultCeremony } from '@/services/vault/ceremonyHost'
 import { getVaultDriver } from '@/services/vault/driver'
 import { vaultStore } from '@/services/vault/vaultStore'
+import { backupAttestation } from '@/services/vault/backupAttestation'
 import {
   DEFAULT_SETTINGS as LIB_DEFAULT_SETTINGS,
   WalletSettings,
@@ -1722,6 +1723,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setWalletUserId(null)
       deleteMnemonic()
       deleteRecoveredKey()
+      // The attestation is per wallet. "Delete Wallet" routes here, so leaving
+      // it behind would let the NEXT wallet on this device inherit a backup it
+      // never made.
+      backupAttestation.clearAll()
 
       router.dismissAll()
       router.push('/')
