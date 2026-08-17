@@ -10,7 +10,7 @@
  * enrollVault() drives the YubiKey (getKeyInfo → PIN → generate). Every prompt
  * is gathered BEFORE the tap, since the NFC sheet covers the app.
  */
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { View, Text, StyleSheet, TextInput, ScrollView, ActivityIndicator } from 'react-native'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import PressableScale from '@/components/ui/PressableScale'
@@ -25,10 +25,13 @@ import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
 import { showToast } from '@/components/ui/Toast'
 import i18n from '@/context/i18n/translations'
+import { PhraseBackupSheet } from './PhraseBackupSheet'
+import { backupAttestation, type BackupMedium } from '@/services/vault/backupAttestation'
+import { useWallet } from '@/context/WalletContext'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 
-type Step = 'intro' | 'passphrase' | 'running' | 'done'
+type Step = 'backup' | 'phrase' | 'intro' | 'passphrase' | 'running' | 'done'
 
 interface PinRequest {
   kind: 'pin' | 'change'
@@ -43,7 +46,9 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
 }) => {
   const { colors } = useTheme()
   const { getMnemonic, getRecoveredKey } = useLocalStorage()
-  const [step, setStep] = useState<Step>('intro')
+  const [step, setStep] = useState<Step>('backup')
+  const [medium, setMedium] = useState<BackupMedium | null>(null)
+  const [revealed, setRevealed] = useState<string | null>(null)
   const [nickname, setNickname] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -54,6 +59,40 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
   const [newPinInput, setNewPinInput] = useState('')
   const [printing, setPrinting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const { managers, adminOriginator } = useWallet()
+
+  /** The wallet identity is the attestation's scope key. */
+  const identity = useCallback(async (): Promise<string | null> => {
+    const r = await managers?.permissionsManager?.getPublicKey(
+      { identityKey: true },
+      adminOriginator
+    )
+    return r?.publicKey ?? null
+  }, [managers, adminOriginator])
+
+  // A user who already backed up on a previous visit should not be asked twice.
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const key = await identity()
+      if (!key) return
+      const existing = await backupAttestation.get(key)
+      if (alive && existing) setMedium(existing.medium)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [identity])
+
+  const attest = useCallback(
+    async (m: BackupMedium) => {
+      const key = await identity()
+      if (key) await backupAttestation.set(key, m)
+      setMedium(m)
+    },
+    [identity]
+  )
 
   const requestPin = useCallback(
     () => new Promise<string>((resolve, reject) => setPinReq({ kind: 'pin', resolve, reject })),
@@ -71,17 +110,38 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
     if (printing) return
     setPrinting(true)
     try {
-      const ok = await printRecoveryShares({
+      const result = await printRecoveryShares({
         mnemonic: await getMnemonic(),
         recoveredKeyWif: await getRecoveredKey?.()
       })
-      if (!ok) showToast(t('vault_shares_unavailable'), { type: 'error' })
+      if (result.ok) {
+        // Only a resolved print sheet counts. A cancelled one produced no paper.
+        await attest('shares')
+      } else if (result.reason === 'unsupported-word-count') {
+        showToast(t('vault_shares_word_count'), { type: 'error' })
+      } else {
+        showToast(t('vault_shares_unavailable'), { type: 'error' })
+      }
     } catch {
       // Print sheet dismissed or unavailable — not an error worth blocking on.
     } finally {
       setPrinting(false)
     }
-  }, [printing, getMnemonic, getRecoveredKey])
+  }, [printing, getMnemonic, getRecoveredKey, attest])
+
+  const onRevealPhrase = useCallback(async () => {
+    setError(null)
+    // getMnemonic() is behind the biometric latch, so the reveal is
+    // re-authenticated without a second prompt of our own.
+    const mnemonic = await getMnemonic()
+    if (!mnemonic) {
+      setError(t('vault_requires_mnemonic'))
+      haptics.error()
+      return
+    }
+    setRevealed(mnemonic)
+    setStep('phrase')
+  }, [getMnemonic])
 
   // Gate: a wallet restored from backup shares has no mnemonic, so it can
   // neither enroll nor ever recover a vault. Refuse rather than create a vault
@@ -142,6 +202,88 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
     setNewPinInput('')
   }, [pinReq, pinInput, newPinInput])
 
+  // ── backup (prerequisite) ───────────────────────────────────────────
+  if (step === 'backup') {
+    return (
+      <ScrollView contentContainerStyle={styles.body}>
+        <Ionicons
+          name="shield-checkmark-outline"
+          size={48}
+          color={colors.textPrimary}
+          style={styles.hero}
+        />
+        <Text style={[styles.h1, { color: colors.textPrimary }]}>{t('vault_backup_title')}</Text>
+        <Text style={[styles.p, { color: colors.textSecondary }]}>{t('vault_backup_intro')}</Text>
+
+        <BackupRow
+          icon="document-text-outline"
+          title={t('vault_backup_phrase_title')}
+          subtitle={t('vault_backup_phrase_sub')}
+          done={medium === 'phrase'}
+          busy={false}
+          onPress={onRevealPhrase}
+        />
+        <BackupRow
+          icon="print-outline"
+          title={t('vault_backup_shares_title')}
+          subtitle={t('vault_backup_shares_sub')}
+          done={medium === 'shares'}
+          busy={printing}
+          onPress={onPrintShares}
+        />
+
+        <Text style={[styles.fine, { color: colors.textTertiary }]}>
+          {t('vault_backup_either_note')}
+        </Text>
+
+        {error && <Text style={[styles.err, { color: colors.error }]}>{error}</Text>}
+        <PressableScale
+          haptic="confirm"
+          onPress={medium ? () => setStep('intro') : undefined}
+          style={[
+            styles.primary,
+            {
+              backgroundColor: medium ? colors.accent : colors.backgroundSecondary,
+              opacity: medium ? 1 : 0.6
+            }
+          ]}
+        >
+          <Text
+            style={[
+              styles.primaryLabel,
+              { color: medium ? colors.textOnAccent : colors.textTertiary }
+            ]}
+          >
+            {t('vault_continue')}
+          </Text>
+        </PressableScale>
+        <PressableScale onPress={onCancel} style={styles.secondary}>
+          <Text style={[styles.secondaryLabel, { color: colors.textSecondary }]}>
+            {t('vault_cancel')}
+          </Text>
+        </PressableScale>
+      </ScrollView>
+    )
+  }
+
+  // ── phrase reveal ───────────────────────────────────────────────────
+  if (step === 'phrase' && revealed) {
+    return (
+      <PhraseBackupSheet
+        mnemonic={revealed}
+        onAttest={async () => {
+          await attest('phrase')
+          setRevealed(null)
+          setStep('backup')
+        }}
+        onCancel={() => {
+          setRevealed(null)
+          setStep('backup')
+        }}
+      />
+    )
+  }
+
   // ── intro ───────────────────────────────────────────────────────────
   if (step === 'intro') {
     return (
@@ -164,23 +306,6 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
 
         <RecoveryPaths />
 
-        <PressableScale
-          onPress={onPrintShares}
-          style={[styles.ghost, { borderColor: colors.separator }]}
-        >
-          {printing ? (
-            <ActivityIndicator color={colors.info} size="small" />
-          ) : (
-            <Ionicons name="print-outline" size={16} color={colors.info} />
-          )}
-          <Text style={[styles.ghostLabel, { color: colors.info }]}>
-            {t('vault_print_shares_cta')}
-          </Text>
-        </PressableScale>
-        <Text style={[styles.fine, { color: colors.textTertiary }]}>
-          {t('vault_print_shares_note')}
-        </Text>
-
         {error && <Text style={[styles.err, { color: colors.error }]}>{error}</Text>}
         <PressableScale
           haptic="confirm"
@@ -191,9 +316,9 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
             {t('vault_continue')}
           </Text>
         </PressableScale>
-        <PressableScale onPress={onCancel} style={styles.secondary}>
+        <PressableScale onPress={() => setStep('backup')} style={styles.secondary}>
           <Text style={[styles.secondaryLabel, { color: colors.textSecondary }]}>
-            {t('vault_cancel')}
+            {t('vault_back')}
           </Text>
         </PressableScale>
       </ScrollView>
@@ -313,7 +438,42 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
   return null
 }
 
-/** The two — and only two — ways to get vault funds back. */
+/** One backup route: tappable, ticks when satisfied, stays tappable after. */
+const BackupRow: React.FC<{
+  icon: React.ComponentProps<typeof Ionicons>['name']
+  title: string
+  subtitle: string
+  done: boolean
+  busy: boolean
+  onPress: () => void
+}> = ({ icon, title, subtitle, done, busy, onPress }) => {
+  const { colors } = useTheme()
+  return (
+    <PressableScale
+      onPress={busy ? undefined : onPress}
+      style={[styles.backupRow, { borderColor: done ? colors.success : colors.separator }]}
+    >
+      {busy ? (
+        <ActivityIndicator color={colors.info} size="small" />
+      ) : (
+        <Ionicons name={icon} size={22} color={done ? colors.success : colors.info} />
+      )}
+      <View style={styles.backupRowText}>
+        <Text style={[styles.backupRowTitle, { color: colors.textPrimary }]}>{title}</Text>
+        <Text style={[styles.backupRowSub, { color: colors.textSecondary }]}>{subtitle}</Text>
+      </View>
+      {done && <Ionicons name="checkmark-circle" size={20} color={colors.success} />}
+    </PressableScale>
+  )
+}
+
+/**
+ * The two ways to get vault funds back.
+ *
+ * Backup shares now split the mnemonic entropy (BRC-157), so paper reaches the
+ * phrase path rather than being a dead end — the copy says "phrase or shares"
+ * for that reason.
+ */
 const RecoveryPaths: React.FC = () => {
   const { colors } = useTheme()
   return (
@@ -377,6 +537,17 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md
   },
   ghostLabel: { ...typography.footnote, fontWeight: '600' },
+  backupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.lg
+  },
+  backupRowText: { flex: 1, gap: spacing.xs },
+  backupRowTitle: { ...typography.headline },
+  backupRowSub: { ...typography.footnote },
   paths: {
     width: '100%',
     gap: spacing.sm,
