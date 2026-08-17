@@ -227,6 +227,14 @@ const resources = {
       vault_insert_key: 'Insert your YubiKey',
       vault_hold_key_nfc: 'Hold your YubiKey to the top of your phone',
       vault_keep_holding_nfc: 'Keep holding — unlocking…',
+      // Busy-phase copy. Says the work is real and asks the user to stay put:
+      // building each R1 unlocking script blocks for seconds, and a user who
+      // force-quits here can leave the vault output reserved.
+      vault_unlocking_funds: 'Unlocking your funds',
+      vault_unlocking_sub: 'This takes a few seconds. Please keep the app open.',
+      vault_sending_to_network: 'Sending to the network',
+      vault_sending_sub: "If it doesn't go through right away, we'll keep trying.",
+      vault_signature_progress: 'Signature {{index}} of {{total}}',
       vault_reading_key: 'Reading key…',
       vault_enter_pin: 'Enter your PIN',
       vault_pin_sub_nfc: 'Then hold your key to the top of your phone to finish.',

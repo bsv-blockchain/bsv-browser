@@ -42,11 +42,31 @@ export type CeremonyPhase =
   | 'connecting'
   | 'pin-entry'
   | 'awaiting-touch'
+  | 'preparing'
+  | 'signing'
+  | 'broadcasting'
   | 'armed'
   | 'error'
 
+/**
+ * Work happening AFTER the key is armed, reported by the spend path so the
+ * sheet can show activity instead of a frozen screen.
+ *
+ * Building one R1 input's ~960 KB unlocking script blocks the JS thread for
+ * seconds; without visible progress users conclude the app has hung and kill
+ * it mid-withdrawal.
+ */
+export type VaultProgress =
+  | { phase: 'preparing' }
+  | { phase: 'signing'; index: number; total: number }
+  | { phase: 'broadcasting' }
+
 export interface CeremonyState {
   phase: CeremonyPhase
+  /** Which signature of how many, while a multi-input spend is in flight.
+   * Kept independent of `phase` so it survives the flip to 'awaiting-touch'
+   * that each signature triggers. */
+  signing?: { index: number; total: number }
   reason?: string
   error?: { code: VaultErrorCode; retriesLeft?: number }
   armedUntil?: number
@@ -180,6 +200,26 @@ export class CeremonyController {
     })
   }
 
+  /**
+   * Report post-arm progress from the spend path.
+   *
+   * Guarded on an armed session: the K1 recovery sweep runs the same
+   * spendVaultOutputs code with no ceremony at all, and must not raise a
+   * YubiKey sheet. Also ignores anything arriving mid-arm, where the arming
+   * phases own the display.
+   *
+   * 'broadcasting' clears the signature counter — every signature is done by
+   * then, and a stale "2 of 2" under "Sending to the network" reads as stuck.
+   */
+  noteProgress(p: VaultProgress): void {
+    if (!this.activeSigner || this.running) return
+    this.set({
+      phase: p.phase,
+      signing: p.phase === 'signing' ? { index: p.index, total: p.total } : undefined,
+      error: undefined
+    })
+  }
+
   submitPin(pin: string): void {
     if (this.pinWaiter) {
       const w = this.pinWaiter
@@ -272,6 +312,12 @@ export class CeremonyController {
 
   private async run(): Promise<void> {
     const driver = this.deps.getDriver()
+    // TEMPORARY DIAGNOSTICS (remove with the others in this file).
+    console.log(
+      '[vault] ceremony run · driver=%s · sessionBased=%s',
+      driver ? 'present' : 'NULL',
+      String(driver?.sessionBased)
+    )
     if (!driver) {
       this.failAll(new VaultError('driver-unavailable'))
       this.running = false
@@ -289,6 +335,18 @@ export class CeremonyController {
     let armed = false
     try {
       const meta = await this.deps.store.getMeta()
+      // TEMPORARY DIAGNOSTICS (remove with the others in this file). The v3
+      // fields are what the R1-K1 signer needs; a pre-v3 enrollment would show
+      // r1PublicKey=undefined here.
+      console.log(
+        '[vault] meta · present=%s · v=%s · slot=%s · serial=%s · hasR1PublicKey=%s · hasXpub=%s',
+        String(!!meta),
+        String((meta as any)?.v),
+        String(meta?.slot),
+        String(meta?.yubiSerial),
+        String(!!(meta as any)?.r1PublicKey),
+        String(!!(meta as any)?.xpub)
+      )
       if (!meta) throw new VaultError('not-enrolled')
 
       // NFC (session-based) collects the PIN BEFORE the tap and verifies it in
@@ -311,6 +369,21 @@ export class CeremonyController {
       // Session-based transports keep listening: see the method doc above.
       if (!driver.sessionBased) this.unsubscribeKeyEvents(session)
     } catch (e) {
+      // TEMPORARY DIAGNOSTICS (remove once the arm failure is identified).
+      // Everything that is not a VaultError is relabelled 'driver-unavailable'
+      // below, which renders as "YubiKey support is unavailable on this
+      // device" — so a completely unrelated failure is indistinguishable from
+      // a genuinely absent driver. Log the real thing before it is masked.
+      if (!(e instanceof VaultError)) {
+        console.log(
+          '[vault] arm failed with a NON-VaultError, masking as driver-unavailable · name=%s · message=%s',
+          (e as Error)?.name ?? typeof e,
+          (e as Error)?.message ?? String(e)
+        )
+        console.log('[vault] stack:', (e as Error)?.stack ?? '(none)')
+      } else {
+        console.log('[vault] arm failed · code=%s · %s', e.code, e.message ?? '')
+      }
       const err = e instanceof VaultError ? e : new VaultError('driver-unavailable', String(e))
       if (err.code === 'user-cancelled') {
         this.set({ phase: 'idle' })
@@ -413,11 +486,20 @@ export class CeremonyController {
     this.subscribeKeyEvents(driver, session)
     this.set({ phase: 'waiting-for-key' })
     const waiter = (this.attachWaiter = defer<void>())
+    // TEMPORARY DIAGNOSTICS (remove with the others in this file).
+    console.log('[vault] openTapSession · driver.start(), waiting for attach')
     driver.start()
     await waiter.promise
     this.throwIfCancelled()
+    console.log('[vault] key attached · calling getKeyInfo')
     this.set({ phase: 'connecting' })
     const info = await driver.getKeyInfo()
+    console.log(
+      '[vault] getKeyInfo ok · serial=%s · expected=%s · fw=%s',
+      info.serial,
+      meta.yubiSerial,
+      info.firmwareVersion
+    )
     if (info.serial !== meta.yubiSerial) {
       throw new VaultError('serial-mismatch', `Expected key ${meta.yubiSerial}`)
     }

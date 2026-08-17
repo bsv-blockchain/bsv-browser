@@ -34,7 +34,7 @@ import { vaultStore } from './vaultStore'
 import { VaultError } from './types'
 import { backupAttestation } from './backupAttestation'
 import { VaultR1Signer } from './ceremony'
-import { requestVaultSigner } from './ceremonyHost'
+import { noteVaultProgress, requestVaultSigner } from './ceremonyHost'
 import { randomBytes } from './random'
 import { bip32KeyID, indexFromKeyID, depositPkhFromXpub, depositPrivKey, vaultXpub } from './vaultDerivation'
 import {
@@ -255,6 +255,14 @@ async function spendVaultOutputs(
   spend: SpendPath,
   opts: { revaultRemainder: boolean }
 ): Promise<{ txid: string }> {
+  // Announce work BEFORE starting it, then hand the JS thread back once so
+  // React can actually paint the sheet. Everything below — a ~1.83 MB
+  // listOutputs, then createAction over a ~960 KB-per-input transaction —
+  // blocks the thread for seconds; without this yield the phase change is
+  // queued behind that work and the user stares at a frozen screen anyway.
+  noteVaultProgress({ phase: 'preparing' })
+  await new Promise<void>(resolve => setTimeout(resolve, 0))
+
   // `include: 'entire transactions'` IS required, despite costing ~1.83 MB per
   // vault input: every input here carries unlockingScriptLength but no
   // unlockingScript, so @bsv/sdk's validateCreateActionArgs sets
@@ -359,6 +367,7 @@ async function spendVaultOutputs(
   }
 
   const { tx: atomic, reference } = created.signableTransaction
+  let builtSpends: Record<number, { unlockingScript: string }>
   try {
     const tx = Transaction.fromAtomicBEEF(atomic)
     const template = new R1K1Wallet()
@@ -387,6 +396,12 @@ async function spendVaultOutputs(
     // directly and assigning spends[i] keeps every sign() call strictly
     // one-at-a-time.
     for (let i = 0; i < selected.length; i++) {
+      // Yield before each input as well as reporting it: building this input's
+      // unlocking script is the blocking part, so the count only reaches the
+      // screen if React gets a frame first.
+      noteVaultProgress({ phase: 'signing', index: i + 1, total: selected.length })
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+
       const o = selected[i]
       const index = indexFromKeyID(o.ci.keyID)
       if (index == null) throw new VaultError('bad-derivation-index', `Not a BIP32 vault output: ${o.ci.keyID}`)
@@ -433,17 +448,36 @@ async function spendVaultOutputs(
       spends[i] = { unlockingScript: (await unlocker.sign(tx, i)).toHex() }
     }
 
-    const signed = await w.signAction(
-      { reference, spends, options: { acceptDelayedBroadcast: false } },
-      adminOriginator
-    )
-    const txid = signed.txid ?? (signed.tx ? Transaction.fromAtomicBEEF(signed.tx).id('hex') : undefined)
-    if (!txid) throw new VaultError('no-transaction', 'Withdrawal was not broadcast')
-    return { txid }
+    builtSpends = spends
   } catch (e) {
+    // Nothing was signed, so the reservation is worthless — release it, or the
+    // vault UTXO stays spendable=false and the next withdrawal is refused
+    // outright.
     await w.abortAction({ reference }, adminOriginator).catch(() => {})
     throw e
   }
+
+  // PAST THE POINT OF NO ABORT.
+  //
+  // acceptDelayedBroadcast: true hands the signed transaction to storage and
+  // lets the monitor's SendWaiting task carry it to the network. A slow or
+  // timing-out broadcaster therefore cannot cost the user a signed
+  // transaction, and this call no longer waits on the network before the UI
+  // can move on.
+  //
+  // Deliberately OUTSIDE the try above: once a transaction is signed, aborting
+  // it is the dangerous move, not the safe one — the network may already have
+  // accepted it, and abandoning it locally would leave the wallet blind to
+  // funds that really moved. A failure here is reported as "we will try
+  // again", never as a cancellation.
+  noteVaultProgress({ phase: 'broadcasting' })
+  const signed = await w.signAction(
+    { reference, spends: builtSpends, options: { acceptDelayedBroadcast: true } },
+    adminOriginator
+  )
+  const txid = signed.txid ?? (signed.tx ? Transaction.fromAtomicBEEF(signed.tx).id('hex') : undefined)
+  if (!txid) throw new VaultError('no-transaction', 'Withdrawal produced no transaction')
+  return { txid }
 }
 
 /** Withdraw via the YubiKey (R1 branch). Arms one signing session for the whole

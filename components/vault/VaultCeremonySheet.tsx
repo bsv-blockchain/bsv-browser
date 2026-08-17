@@ -60,12 +60,19 @@ const ERROR_COPY: Record<string, string> = {
  * loop doesn't cover (waiting-for-key), where retry would be a dead button. */
 const RETRYABLE_ERRORS = new Set<string>(['touch-timeout', 'nfc-lost'])
 
+/** Swallows the sheet's dismiss while work is in flight — `Sheet` requires an
+ * onClose, and cancelling mid-signature is the thing we are preventing. */
+const noop = (): void => {}
+
 const PhaseIcon: Record<CeremonyPhase, keyof typeof Ionicons.glyphMap> = {
   idle: 'lock-closed',
   'waiting-for-key': 'hardware-chip-outline',
   connecting: 'sync-outline',
   'pin-entry': 'keypad-outline',
   'awaiting-touch': 'finger-print-outline',
+  preparing: 'lock-open-outline',
+  signing: 'create-outline',
+  broadcasting: 'paper-plane-outline',
   armed: 'lock-open',
   error: 'alert-circle-outline'
 }
@@ -77,12 +84,30 @@ export const VaultCeremonySheet: React.FC = () => {
   const [pin, setPin] = useState('')
 
   const phase = state.phase
+  // 'armed' stays hidden: it persists for the whole retention window, so
+  // showing it would leave the sheet up for minutes after a withdrawal is done.
   const visible = phase !== 'idle' && phase !== 'armed'
+
+  /**
+   * Work is under way and there is nothing for the user to do but wait.
+   *
+   * The sheet is deliberately NOT dismissable here. A backdrop tap runs
+   * cancel(), which mid-signature is the abandonment this progress display
+   * exists to prevent — and a cancelled withdrawal can leave the vault UTXO
+   * reserved. Cancel stays available while we are waiting on the user
+   * (waiting-for-key, pin-entry).
+   */
+  const busy = phase === 'preparing' || phase === 'signing' || phase === 'broadcasting'
 
   // Pulse the icon while waiting for the user to act (insert / touch).
   const pulse = useSharedValue(1)
   useEffect(() => {
-    const active = phase === 'waiting-for-key' || phase === 'awaiting-touch'
+    const active =
+      phase === 'waiting-for-key' ||
+      phase === 'awaiting-touch' ||
+      phase === 'preparing' ||
+      phase === 'signing' ||
+      phase === 'broadcasting'
     if (active && !reducedMotion) {
       pulse.value = withRepeat(
         withSequence(
@@ -121,6 +146,12 @@ export const VaultCeremonySheet: React.FC = () => {
         return t('vault_enter_pin')
       case 'awaiting-touch':
         return nfc ? t('vault_keep_holding_nfc') : t('vault_touch_contact')
+      case 'preparing':
+        return t('vault_unlocking_funds')
+      case 'signing':
+        return t('vault_unlocking_funds')
+      case 'broadcasting':
+        return t('vault_sending_to_network')
       case 'error':
         return t((errCode && ERROR_COPY[errCode]) ?? 'vault_err_generic')
       default:
@@ -131,12 +162,12 @@ export const VaultCeremonySheet: React.FC = () => {
   const iconColor = phase === 'error' ? colors.error : colors.accent
 
   return (
-    <Sheet visible={visible} onClose={cancel} title={t('vault_title')} fitContent>
+    <Sheet visible={visible} onClose={busy ? noop : cancel} title={t('vault_title')} fitContent>
       <View style={styles.body}>
         {reason ? <Text style={[styles.reason, { color: colors.textSecondary }]}>{reason}</Text> : null}
 
         <Animated.View style={[styles.iconWrap, { backgroundColor: colors.backgroundSecondary }, pulseStyle]}>
-          {phase === 'connecting' ? (
+          {phase === 'connecting' || busy ? (
             <ActivityIndicator color={iconColor} />
           ) : (
             <Ionicons name={PhaseIcon[phase]} size={40} color={iconColor} />
@@ -144,6 +175,24 @@ export const VaultCeremonySheet: React.FC = () => {
         </Animated.View>
 
         <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
+
+        {/* The whole point of the busy phases: say the work is real, say not to
+            leave, and — when there is more than one signature — say how far
+            along it is, so a long wait reads as progress rather than a hang. */}
+        {busy && (
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            {phase === 'broadcasting' ? t('vault_sending_sub') : t('vault_unlocking_sub')}
+          </Text>
+        )}
+
+        {state.signing && state.signing.total > 1 && phase !== 'broadcasting' && (
+          <Text style={[styles.subtitle, { color: colors.textTertiary }]}>
+            {t('vault_signature_progress', {
+              index: state.signing.index,
+              total: state.signing.total
+            })}
+          </Text>
+        )}
 
         {phase === 'awaiting-touch' && <TouchCountdown color={colors.accent} trackColor={colors.backgroundSecondary} />}
 

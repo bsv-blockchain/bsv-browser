@@ -37,14 +37,15 @@ jest.mock('expo-secure-store', () => ({
 // module-scope consts declared later in the file — avoids TDZ issues with
 // jest's hoisting of jest.mock() above imports.
 jest.mock('@/services/vault/ceremonyHost', () => ({
-  requestVaultSigner: jest.fn()
+  requestVaultSigner: jest.fn(),
+  noteVaultProgress: jest.fn()
 }))
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { vaultStore } from '@/services/vault/vaultStore'
 import { backupAttestation } from '@/services/vault/backupAttestation'
 import { bip32KeyID, depositPkhFromXpub } from '@/services/vault/vaultDerivation'
-import { requestVaultSigner } from '@/services/vault/ceremonyHost'
+import { requestVaultSigner, noteVaultProgress } from '@/services/vault/ceremonyHost'
 import { VaultError } from '@/services/vault/types'
 import {
   VAULT_BASKET,
@@ -212,6 +213,7 @@ beforeEach(async () => {
     }),
     release: signerRelease
   }
+  ;(noteVaultProgress as jest.Mock).mockClear()
   ;(requestVaultSigner as jest.Mock).mockClear()
   ;(requestVaultSigner as jest.Mock).mockImplementation(async () => mockSigner)
 })
@@ -398,13 +400,16 @@ describe('withdrawFromVault', () => {
     })
   })
 
-  it('releases the signer even when signing throws', async () => {
+  it('releases the signer even when signAction throws', async () => {
     await seedVaultOutputs(1)
     wallet.signAction.mockRejectedValueOnce(new Error('boom'))
     await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toThrow('boom')
 
     expect(signerRelease).toHaveBeenCalled()
-    expect(wallet.abortAction).toHaveBeenCalled()
+    // NOT aborted: by signAction the transaction is already signed, and the
+    // network may have it. See "does NOT abort the action when the broadcast
+    // itself fails" below — abort now covers only pre-signature failures.
+    expect(wallet.abortAction).not.toHaveBeenCalled()
   })
 
   it('releases the signer even when the vault is empty (no ceremony needed to fail)', async () => {
@@ -456,6 +461,72 @@ describe('withdrawFromVault', () => {
     expect(caArgs.outputs).toHaveLength(1)
     expect(caArgs.outputs[0].basket).toBe(VAULT_BASKET)
     expect(caArgs.outputs[0].satoshis).toBe(400_000)
+  })
+
+  // ── broadcast durability ───────────────────────────────────────────────
+  //
+  // A slow broadcaster must never cost the user a signed transaction. The
+  // signed tx is handed to storage and the monitor's SendWaiting task retries
+  // it, rather than being broadcast inline and aborted when the network is
+  // slow to answer.
+  it('hands the signed transaction to the monitor instead of broadcasting inline', async () => {
+    await seedVaultOutputs(1, 250_000)
+    await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')
+
+    const [saArgs] = wallet.signAction.mock.calls[0]
+    expect(saArgs.options.acceptDelayedBroadcast).toBe(true)
+  })
+
+  it('does NOT abort the action when the broadcast itself fails', async () => {
+    // The transaction is signed by this point. Aborting it would discard a tx
+    // the network may already have accepted, so a broadcast-stage failure has
+    // to leave the action alone for the monitor to retry.
+    await seedVaultOutputs(1, 250_000)
+    wallet.signAction.mockRejectedValueOnce(new Error('ETIMEDOUT posting to ARC'))
+
+    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toThrow()
+    expect(wallet.abortAction).not.toHaveBeenCalled()
+  })
+
+  it('still aborts when the failure happens BEFORE the transaction is signed', async () => {
+    // The reservation must not be left dangling when nothing was ever signed —
+    // that is what wedges the vault UTXO as unspendable.
+    await seedVaultOutputs(1, 250_000)
+    mockSigner.sign.mockRejectedValueOnce(new VaultError('key-removed-mid-op', 'gone'))
+
+    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toMatchObject({
+      code: 'key-removed-mid-op'
+    })
+    expect(wallet.abortAction).toHaveBeenCalled()
+    expect(wallet.signAction).not.toHaveBeenCalled()
+  })
+
+  // ── progress reporting ─────────────────────────────────────────────────
+  //
+  // The user is looking at a frozen-looking screen for seconds while a ~960 KB
+  // script is built per input. Without visible activity they kill the app
+  // mid-withdrawal, so each stage has to be announced.
+  it('reports preparing → signing → broadcasting as it goes', async () => {
+    await seedVaultOutputs(2, 500_000)
+    await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')
+
+    const phases = (noteVaultProgress as jest.Mock).mock.calls.map(([p]) => p.phase)
+    expect(phases.indexOf('preparing')).toBeGreaterThanOrEqual(0)
+    expect(phases.indexOf('preparing')).toBeLessThan(phases.indexOf('signing'))
+    expect(phases.indexOf('signing')).toBeLessThan(phases.indexOf('broadcasting'))
+  })
+
+  it('counts the signatures so the sheet can say which one it is on', async () => {
+    await seedVaultOutputs(2, 500_000)
+    await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')
+
+    const signing = (noteVaultProgress as jest.Mock).mock.calls
+      .map(([p]) => p)
+      .filter(p => p.phase === 'signing')
+    expect(signing).toEqual([
+      { phase: 'signing', index: 1, total: 2 },
+      { phase: 'signing', index: 2, total: 2 }
+    ])
   })
 })
 
