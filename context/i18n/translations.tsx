@@ -296,17 +296,19 @@ const resources = {
       vault_backup_intro:
         'The vault protects your funds from someone holding your phone. It cannot protect them from losing it. Do one of these first.',
       vault_backup_phrase_title: 'Write down your recovery phrase',
-      vault_backup_phrase_sub: 'Twelve words, on paper, somewhere only you can reach.',
+      vault_backup_phrase_sub: '{{count}} words, on paper, somewhere only you can reach.',
       vault_backup_shares_title: 'Print recovery shares',
       vault_backup_shares_sub: 'Three pages. Any two recover everything — store them apart.',
       vault_backup_either_note:
         'Either one is enough. Both restore your whole wallet, vault included.',
       vault_shares_word_count:
         'Recovery shares support twelve-word phrases only. Write your phrase down instead.',
+      vault_backup_attest_failed:
+        'Could not record your backup. Check your connection and try again.',
 
       // Phrase reveal
       vault_phrase_title: 'Your recovery phrase',
-      vault_phrase_intro: 'Write these twelve words down in order. Do not photograph them.',
+      vault_phrase_intro: 'Write these {{count}} words down in order. Do not photograph them.',
       vault_phrase_copy: 'Copy to clipboard',
       vault_phrase_copied: 'Copied',
       vault_phrase_warning:

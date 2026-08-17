@@ -34,7 +34,9 @@ export const PhraseBackupSheet: React.FC<{
   return (
     <ScrollView contentContainerStyle={styles.body}>
       <Text style={[styles.h1, { color: colors.textPrimary }]}>{t('vault_phrase_title')}</Text>
-      <Text style={[styles.p, { color: colors.textSecondary }]}>{t('vault_phrase_intro')}</Text>
+      <Text style={[styles.p, { color: colors.textSecondary }]}>
+        {t('vault_phrase_intro', { count: words.length })}
+      </Text>
 
       <View style={[styles.grid, { borderColor: colors.separator }]}>
         {words.map((word, i) => (

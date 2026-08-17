@@ -48,6 +48,7 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
   const { getMnemonic, getRecoveredKey } = useLocalStorage()
   const [step, setStep] = useState<Step>('backup')
   const [medium, setMedium] = useState<BackupMedium | null>(null)
+  const [wordCount, setWordCount] = useState<number | null>(null)
   const [revealed, setRevealed] = useState<string | null>(null)
   const [nickname, setNickname] = useState('')
   const [passphrase, setPassphrase] = useState('')
@@ -62,13 +63,24 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
 
   const { managers, adminOriginator } = useWallet()
 
-  /** The wallet identity is the attestation's scope key. */
+  /**
+   * The wallet identity is the attestation's scope key. Guarded: a rejecting
+   * getPublicKey (managers not ready, permission denied) must resolve to
+   * "no key" rather than propagate, since callers treat null as "cannot
+   * attest right now" and otherwise the rejection would surface as an
+   * unhandled promise instead of the inline error state.
+   */
   const identity = useCallback(async (): Promise<string | null> => {
-    const r = await managers?.permissionsManager?.getPublicKey(
-      { identityKey: true },
-      adminOriginator
-    )
-    return r?.publicKey ?? null
+    try {
+      const r = await managers?.permissionsManager?.getPublicKey(
+        { identityKey: true },
+        adminOriginator
+      )
+      return r?.publicKey ?? null
+    } catch (err) {
+      console.warn('[EnrollWizard] identity lookup failed:', err)
+      return null
+    }
   }, [managers, adminOriginator])
 
   // A user who already backed up on a previous visit should not be asked twice.
@@ -85,11 +97,28 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
     }
   }, [identity])
 
+  /**
+   * Only a persisted attestation may unlock Continue. A wallet that ticks the
+   * row without a written flag would enrol into a vault the deposit gate then
+   * refuses forever, since backupAttestation.get() would find nothing.
+   */
   const attest = useCallback(
-    async (m: BackupMedium) => {
+    async (m: BackupMedium): Promise<boolean> => {
       const key = await identity()
-      if (key) await backupAttestation.set(key, m)
+      if (!key) {
+        setError(t('vault_backup_attest_failed'))
+        return false
+      }
+      try {
+        await backupAttestation.set(key, m)
+      } catch (err) {
+        console.warn('[EnrollWizard] backupAttestation.set failed:', err)
+        setError(t('vault_backup_attest_failed'))
+        return false
+      }
+      setError(null)
       setMedium(m)
+      return true
     },
     [identity]
   )
@@ -139,6 +168,7 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
       haptics.error()
       return
     }
+    setWordCount(mnemonic.trim().split(/\s+/).length)
     setRevealed(mnemonic)
     setStep('phrase')
   }, [getMnemonic])
@@ -218,7 +248,12 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
         <BackupRow
           icon="document-text-outline"
           title={t('vault_backup_phrase_title')}
-          subtitle={t('vault_backup_phrase_sub')}
+          // The actual count is only known once the phrase has been
+          // revealed (getMnemonic() is biometric-gated, so it isn't read
+          // just to label this row). 12 is the count for every wallet this
+          // app generates; imported 24-word wallets get the correct number
+          // here as soon as they reveal once.
+          subtitle={t('vault_backup_phrase_sub', { count: wordCount ?? 12 })}
           done={medium === 'phrase'}
           busy={false}
           onPress={onRevealPhrase}
@@ -272,6 +307,10 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
       <PhraseBackupSheet
         mnemonic={revealed}
         onAttest={async () => {
+          // Whatever attest() decides, the phrase should not linger on
+          // screen: on success the row ticks; on failure the backup step's
+          // inline error tells the user to retry rather than stranding them
+          // here with no feedback.
           await attest('phrase')
           setRevealed(null)
           setStep('backup')
