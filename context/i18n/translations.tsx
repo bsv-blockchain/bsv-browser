@@ -223,13 +223,6 @@ const resources = {
       vault_default_pin_warning: 'Your key still has the default PIN. Choose a new one (6–8 digits).',
       vault_touch_when_blinks: 'Touch the gold contact when the key blinks.',
       vault_continue: 'Continue',
-      vault_backup_title: 'Your recovery phrase',
-      vault_backup_warning: 'Write these 24 words down and keep them offline. If you lose your YubiKey AND this phrase, the vault funds are gone forever.',
-      vault_backup_saved: 'I have written it down',
-      vault_backup_confirm_title: 'Confirm your phrase',
-      vault_backup_confirm_sub: 'Enter the requested words to confirm you saved them.',
-      vault_backup_quiz_wrong: 'That does not match. Check your written phrase.',
-      vault_word_n: 'Word {{n}}',
       vault_finish: 'Finish',
       vault_enrolled_toast: 'Vault ready',
       // ceremony
