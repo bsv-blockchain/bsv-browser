@@ -357,6 +357,22 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // reconnect effect sync one chain's store against another chain's tracker.
   const offlineChaintracksRef = useRef<OfflineFirstChaintracks | undefined>(undefined)
   const headerStoreRef = useRef<HeaderStore | undefined>(undefined)
+  /**
+   * "The transaction tables just changed" — one coalescing bump of
+   * `txStatusVersion`, which every balance and activity view keys off. A single
+   * user action can touch storage more than once (createAction then signAction
+   * for a signable transaction), and each of those should not cost its own
+   * round of listOutputs/listActions across three screens, so the bump lands on
+   * a short trailing timer instead of per call.
+   */
+  const ledgerBumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const noteLedgerChanged = useCallback(() => {
+    if (ledgerBumpTimerRef.current) return
+    ledgerBumpTimerRef.current = setTimeout(() => {
+      ledgerBumpTimerRef.current = null
+      setTxStatusVersion(v => v + 1)
+    }, 120)
+  }, [])
   // Serializes syncHeaders calls against a single store. The init sync and
   // the reconnect top-up both target the same instance; HeaderStore.append
   // checks `firstHeight === tipHeight + 1` synchronously but only advances
@@ -791,6 +807,27 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         }
 
         const wallet = new Wallet(signer, services, undefined, privilegedKeyManager)
+
+        // Every write to the transaction/output tables refreshes the money on
+        // screen immediately. The monitor's onTransactionStatusChanged only
+        // fires for transitions it OBSERVES (SSE events, proof checks), so a
+        // payment we just signed or funds we just internalized would otherwise
+        // sit behind a 30s cache TTL until the network told us about it.
+        //
+        // Wrapped on the Wallet itself — below the permissions manager and
+        // below every originator — so one hook covers in-app payments, vault
+        // transfers, and BRC-100 calls coming out of a page's WebView alike.
+        for (const method of ['createAction', 'signAction', 'internalizeAction', 'abortAction', 'relinquishOutput'] as const) {
+          const original = (wallet as any)[method]
+          if (typeof original !== 'function') continue
+          const bound = original.bind(wallet)
+          ;(wallet as any)[method] = async (...callArgs: any[]) => {
+            const result = await bound(...callArgs)
+            noteLedgerChanged()
+            return result
+          }
+        }
+
         // Set default settings including "Who I Am" certifier before first get().
         // config is private in the type declarations but settable at runtime.
         ;(wallet.settingsManager as any).config = { defaultSettings: DEFAULT_SETTINGS }
@@ -1199,7 +1236,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       spendingAuthorizationCallback,
       certificateAccessCallback,
       btmsPromptHandler,
-      runHeaderSync
+      runHeaderSync,
+      noteLedgerChanged
     ]
   )
 
@@ -1696,6 +1734,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   useEffect(() => {
     return () => {
       try { monitorRef.current?.stopTasks() } catch {}
+      if (ledgerBumpTimerRef.current) {
+        clearTimeout(ledgerBumpTimerRef.current)
+        ledgerBumpTimerRef.current = null
+      }
       monitorRef.current = null
       offlineChaintracksRef.current = undefined
       headerStoreRef.current = undefined

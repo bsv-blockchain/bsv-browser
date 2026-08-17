@@ -4,7 +4,7 @@
  * excludes vault funds). Refreshes on txStatusVersion bumps and on demand
  * after a transfer.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useWallet } from '@/context/WalletContext'
 import { getVaultBalance, VaultWallet } from '@/services/vault/transfers'
 
@@ -12,18 +12,23 @@ export function useVaultBalance(): { balance: number | null; loading: boolean; r
   const { managers, adminOriginator, txStatusVersion } = useWallet()
   const [balance, setBalance] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
+  // Kept in a ref so `refresh` has a stable identity. With `balance` in its deps
+  // every callers' effect that lists `refresh` (app/vault.tsx does) re-ran and
+  // refetched each time the figure changed.
+  const balanceRef = useRef<number | null>(null)
+  balanceRef.current = balance
 
   const refresh = useCallback(() => {
     const pm = managers?.permissionsManager
     if (!pm) return
-    setLoading(prev => (balance === null ? true : prev))
+    setLoading(prev => (balanceRef.current === null ? true : prev))
     getVaultBalance(pm as unknown as VaultWallet, adminOriginator)
       .then(setBalance)
       .catch(() => {
         /* leave the last known balance in place on a transient failure */
       })
       .finally(() => setLoading(false))
-  }, [managers?.permissionsManager, adminOriginator, balance])
+  }, [managers?.permissionsManager, adminOriginator])
 
   useEffect(() => {
     refresh()

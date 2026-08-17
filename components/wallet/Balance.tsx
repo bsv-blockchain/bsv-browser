@@ -16,6 +16,11 @@ export default function Balance() {
   const { managers, adminOriginator, txStatusVersion } = useWallet()
   const [accountBalance, setAccountBalance] = React.useState<number | null>(null)
   const [balanceLoading, setBalanceLoading] = React.useState(false)
+  // Read through a ref, not the state value: `accountBalance` in this callback's
+  // deps would give it a new identity on every fetch, re-running both effects
+  // below and firing a second, pointless fetch each time the figure changes.
+  const accountBalanceRef = React.useRef<number | null>(null)
+  accountBalanceRef.current = accountBalance
 
   const refreshBalance = useCallback(async () => {
     try {
@@ -25,7 +30,7 @@ export default function Balance() {
       }
 
       // Only show loading if we don't have cached data
-      if (accountBalance === null) {
+      if (accountBalanceRef.current === null) {
         setBalanceLoading(true)
       }
 
@@ -49,7 +54,7 @@ export default function Balance() {
       console.error('Error refreshing balance:', e)
       setBalanceLoading(false)
     }
-  }, [managers, adminOriginator, accountBalance])
+  }, [managers, adminOriginator])
 
   // Load cached balance immediately on mount
   useEffect(() => {
