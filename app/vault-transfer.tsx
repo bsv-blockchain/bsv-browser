@@ -32,9 +32,22 @@ import { VaultError } from '@/services/vault/types'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
 import { showToast } from '@/components/ui/Toast'
+import { showAlert } from '@/components/ui/AlertCard'
 import i18n from '@/context/i18n/translations'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
+
+/**
+ * i18next returns the KEY itself when a string is missing, and a key is
+ * truthy — so the old `t(...) || t('vault_err_generic')` fallback never fired
+ * and shipped raw keys like `vault_err_backup_required` to the screen.
+ */
+function translateVaultError(code: string | undefined): string {
+  if (!code) return t('vault_err_generic')
+  const key = `vault_err_${code.replace(/-/g, '_')}`
+  const translated = t(key)
+  return translated === key ? t('vault_err_generic') : translated
+}
 
 export default function VaultTransferScreen() {
   const { colors } = useTheme()
@@ -77,9 +90,24 @@ export default function VaultTransferScreen() {
     } catch (e) {
       console.error('[vault] transfer failed:', e instanceof Error ? e.message : e, e)
       const code = e instanceof VaultError ? e.code : undefined
-      setError(
-        code ? t(`vault_err_${code.replace(/-/g, '_')}`, {}) || t('vault_err_generic') : t('vault_err_generic')
-      )
+
+      if (code === 'backup-required') {
+        // A blocked deposit needs a route out, not a red footnote. Matches the
+        // disable-while-funded pattern on the vault screen.
+        haptics.error()
+        const choice = await showAlert({
+          title: t('vault_deposit_blocked_title'),
+          message: t('vault_deposit_blocked_message'),
+          buttons: [
+            { text: t('vault_deposit_blocked_dismiss'), style: 'cancel', key: 'cancel' },
+            { text: t('vault_deposit_blocked_cta'), key: 'backup' }
+          ]
+        })
+        if (choice === 'backup') router.replace('/vault')
+        return
+      }
+
+      setError(translateVaultError(code))
       haptics.error()
     } finally {
       setBusy(false)
