@@ -162,6 +162,18 @@ export default function WalletScreen() {
     }
   }, [refreshBalance, balanceCacheKey])
 
+  // Re-read the figure whenever the transaction tables move — a payment sent, a
+  // deposit internalized, a status change from the monitor. Skips the first pass,
+  // which the mount effect above already covers.
+  const balanceMountedRef = useRef(false)
+  useEffect(() => {
+    if (!balanceMountedRef.current) {
+      balanceMountedRef.current = true
+      return
+    }
+    void refreshBalance()
+  }, [txStatusVersion, refreshBalance])
+
   // ── activity ────────────────────────────────────────────────────────
   const fetchActions = useCallback(
     async (offset: number) => {
