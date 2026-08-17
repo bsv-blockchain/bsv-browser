@@ -28,7 +28,7 @@ import {
   type ListRenderItem
 } from 'react-native'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
-import { router } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -162,6 +162,34 @@ export default function WalletScreen() {
     }
   }, [refreshBalance, balanceCacheKey])
 
+  /**
+   * Returning to this screen refetches the balance and the activity list once.
+   *
+   * This screen stays mounted while /pay and /get-paid sit on top of it in the
+   * stack, so neither the mount effect above nor the activity effect below runs
+   * again on the way back. `txStatusVersion` covers writes that go through the
+   * wallet, but relying on it alone leaves the user's own money looking stale
+   * for any path that does not — an offline row queued while the network was
+   * down, say — and "did that payment go through?" is the exact question this
+   * screen exists to answer.
+   *
+   * A counter rather than a direct call: both effects below already know how to
+   * fetch, so this reuses them instead of duplicating the fetch logic. Fires
+   * once per return, not on a timer. The first focus is skipped — that is the
+   * mount, which the effects already cover.
+   */
+  const [focusVersion, setFocusVersion] = useState(0)
+  const firstFocusRef = useRef(true)
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocusRef.current) {
+        firstFocusRef.current = false
+        return
+      }
+      setFocusVersion(v => v + 1)
+    }, [])
+  )
+
   // Re-read the figure whenever the transaction tables move — a payment sent, a
   // deposit internalized, a status change from the monitor. Skips the first pass,
   // which the mount effect above already covers.
@@ -172,7 +200,7 @@ export default function WalletScreen() {
       return
     }
     void refreshBalance()
-  }, [txStatusVersion, refreshBalance])
+  }, [txStatusVersion, focusVersion, refreshBalance])
 
   // ── activity ────────────────────────────────────────────────────────
   const fetchActions = useCallback(
@@ -218,7 +246,7 @@ export default function WalletScreen() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchActions, txStatusVersion, fetchOfflineRows])
+  }, [fetchActions, txStatusVersion, focusVersion, fetchOfflineRows])
 
   const loadMore = useCallback(async () => {
     // Three guards, all load-bearing:
