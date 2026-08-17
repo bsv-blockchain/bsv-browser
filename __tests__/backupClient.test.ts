@@ -1,5 +1,5 @@
 import { PrivateKey } from '@bsv/sdk'
-import { BackupClient, BackupHttpError, BACKUP_REQUEST_TIMEOUT_MS, ERR_SEQ_CONFLICT } from '@/utils/backup/client'
+import { BackupClient, BackupHttpError, BACKUP_REQUEST_TIMEOUT_MS, ERR_BLOB_TOO_LARGE, ERR_SEQ_CONFLICT } from '@/utils/backup/client'
 import type { BackupRequestInit } from '@/utils/backup/client'
 
 const KEY = new PrivateKey(9).toArray('be', 32)
@@ -136,5 +136,44 @@ describe('BackupClient request timeout', () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+// AuthFetch never returns a Response for an oversize rejection: the server's size guard
+// runs BEFORE the auth middleware and refuses to read the body, so the 413 it sends cannot
+// be signed. AuthFetch therefore THROWS, and its message blames missing auth headers even
+// though authentication was never the problem. Branch on the status and envelope code it
+// carries in `details`, never on that message text.
+describe('BackupClient oversize rejection', () => {
+  const authFetchStyleError = (): Error =>
+    Object.assign(
+      new Error(
+        'Received HTTP 413 Request Entity Too Large from https://backup.test/v1/log/x ' +
+          'without valid BSV authentication (missing headers: x-bsv-auth-version, ' +
+          'x-bsv-auth-identity-key, x-bsv-auth-signature)'
+      ),
+      {
+        details: {
+          status: 413,
+          bodyPreview:
+            '{"status":"error","code":"ERR_BLOB_TOO_LARGE","description":"Blob exceeds the ' +
+            'maximum permitted size of 104857600 bytes. GET /v1/limits reports the current cap."}'
+        }
+      }
+    )
+
+  it('reports an oversize rejection as such, not as an auth failure', async () => {
+    const client = new BackupClient(BASE, KEY, async () => { throw authFetchStyleError() })
+
+    await expect(client.manifest()).rejects.toMatchObject({
+      name: 'BackupHttpError',
+      status: 413,
+      code: ERR_BLOB_TOO_LARGE
+    })
+  })
+
+  it('leaves unrelated transport failures alone', async () => {
+    const client = new BackupClient(BASE, KEY, async () => { throw new Error('socket hang up') })
+    await expect(client.manifest()).rejects.toThrow('socket hang up')
   })
 })

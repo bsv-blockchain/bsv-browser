@@ -37,6 +37,9 @@ export class BackupHttpError extends Error {
 /** The server's sequence-conflict code. Callers resynchronise rather than retrying. */
 export const ERR_SEQ_CONFLICT = 'ERR_SEQ_CONFLICT'
 
+/** The server's oversize code, from a 413 the size guard sends before auth runs. */
+export const ERR_BLOB_TOO_LARGE = 'ERR_BLOB_TOO_LARGE'
+
 /**
  * Transport shape.
  *
@@ -85,7 +88,7 @@ export class BackupClient {
     // Every request, injected transport included, is bounded. AuthFetch performs its own
     // handshake round-trip before the real call, so "no response" can occur at two points;
     // this covers both.
-    this.fetcher = async (url, init) => await withTimeout(transport(url, init), url)
+    this.fetcher = async (url, init) => await withTimeout(asBackupError(transport(url, init)), url)
   }
 
   /**
@@ -195,5 +198,36 @@ async function withTimeout<T> (p: Promise<T>, url: string): Promise<T> {
     ])
   } finally {
     if (timer != null) clearTimeout(timer)
+  }
+}
+
+/**
+ * Translate AuthFetch's throw into a BackupHttpError when the server rejected on size.
+ *
+ * The size guard runs BEFORE the auth middleware and deliberately refuses to read the body,
+ * so its 413 cannot be signed — and AuthFetch reports every unsigned response as an
+ * authentication failure ("missing headers: x-bsv-auth-version, ..."). That message is
+ * misleading and MUST NOT be matched on; the real cause is carried in `details.status` and
+ * the ERR_ code in `details.bodyPreview`.
+ *
+ * Anything else is rethrown untouched: a socket failure is not an HTTP status.
+ */
+async function asBackupError<T> (p: Promise<T>): Promise<T> {
+  try {
+    return await p
+  } catch (e) {
+    const details = (e as { details?: { status?: number, bodyPreview?: string } })?.details
+    if (details?.status == null) throw e
+
+    let code = 'ERR_UNKNOWN'
+    let description = (e as Error).message
+    try {
+      const body = JSON.parse(details.bodyPreview ?? '{}') as { code?: string, description?: string }
+      if (body.code != null) code = body.code
+      if (body.description != null) description = body.description
+    } catch {
+      // Body preview is truncated or absent; the status alone still beats an auth message.
+    }
+    throw new BackupHttpError(details.status, code, description)
   }
 }
