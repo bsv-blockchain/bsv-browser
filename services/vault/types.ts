@@ -49,6 +49,9 @@ export type VaultErrorCode =
   | 'bad-mnemonic'
   /** Deposit index outside the non-hardened BIP32 range. */
   | 'bad-derivation-index'
+  /** No backup attestation for this wallet — depositing would create funds
+   *  with no recovery path. Advisory gate, not a security control. */
+  | 'backup-required'
 
 export class VaultError extends Error {
   code: VaultErrorCode

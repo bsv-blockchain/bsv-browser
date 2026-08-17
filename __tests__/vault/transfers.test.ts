@@ -37,6 +37,7 @@ jest.mock('expo-secure-store', () => ({
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { vaultStore, type VaultMetaV1 } from '../../services/vault/vaultStore'
+import { backupAttestation } from '../../services/vault/backupAttestation'
 import {
   buildVaultUnlockingScript,
   depositToVault,
@@ -50,6 +51,7 @@ import {
 } from '../../services/vault/transfers'
 
 const ADMIN = 'admin.com'
+const IDENTITY_KEY = '02' + 'f'.repeat(62)
 const V = Array.from(new PrivateKey(123456789).toArray())
 const kd = new KeyDeriver(new PrivateKey(V))
 
@@ -181,6 +183,7 @@ function makeFakeWallet(overrides: Partial<VaultWallet> = {}): VaultWallet & { c
       return { outputs: [] }
     },
     async getPublicKey(args: any) {
+      if (args.identityKey) return { publicKey: IDENTITY_KEY }
       return { publicKey: derivedPubHex(args.keyID) }
     },
     async createSignature(args: any) {
@@ -228,6 +231,7 @@ async function enrollFakeMeta(keys = 64) {
 describe('depositToVault', () => {
   test('builds a P2PKH output in the admin vault basket and drains the queue', async () => {
     await enrollFakeMeta()
+    await backupAttestation.set(IDENTITY_KEY, 'phrase')
     const w = makeFakeWallet()
     const { txid } = await depositToVault(w, ADMIN, 5000)
     expect(txid).toBeDefined()
@@ -242,7 +246,39 @@ describe('depositToVault', () => {
 
   test('rejects a below-dust deposit', async () => {
     await enrollFakeMeta()
-    await expect(depositToVault(makeFakeWallet(), ADMIN, 100)).rejects.toMatchObject({ code: 'below-dust' })
+    await backupAttestation.set(IDENTITY_KEY, 'phrase')
+    await expect(depositToVault(makeFakeWallet(), ADMIN, 100)).rejects.toMatchObject({
+      code: 'below-dust'
+    })
+  })
+
+  test('refuses to deposit when the wallet has no backup attestation', async () => {
+    await enrollFakeMeta()
+    const w = makeFakeWallet()
+
+    await expect(depositToVault(w, ADMIN, 5000)).rejects.toMatchObject({
+      code: 'backup-required'
+    })
+    expect(w.calls.createAction).toBeUndefined()
+  })
+
+  test('checks the backup before spending the deposit index', async () => {
+    // A refused deposit must not burn a deposit key: the index is monotonic and
+    // never reused, so a gate that ran late would leak addresses on every
+    // blocked attempt.
+    await enrollFakeMeta()
+    await expect(depositToVault(makeFakeWallet(), ADMIN, 5000)).rejects.toMatchObject({
+      code: 'backup-required'
+    })
+    expect(((await vaultStore.getMeta()) as VaultMetaV1).depositKeys[0].keyID).toBe('vault/0')
+  })
+
+  test('an attestation for a different wallet does not unlock this one', async () => {
+    await enrollFakeMeta()
+    await backupAttestation.set('02' + '9'.repeat(62), 'phrase')
+    await expect(depositToVault(makeFakeWallet(), ADMIN, 5000)).rejects.toMatchObject({
+      code: 'backup-required'
+    })
   })
 })
 
@@ -344,6 +380,36 @@ describe('withdrawFromVault', () => {
     await enrollFakeMeta()
     const w = makeFakeWallet({ async listOutputs() { return { outputs: [] } } })
     await expect(withdrawFromVault(w, ADMIN, 'all', 'x')).rejects.toMatchObject({ code: 'vault-empty' })
+  })
+
+  test('a partial withdrawal still re-vaults its remainder with no attestation', async () => {
+    // Regression guard: nextDepositKey is the funnel for the re-vaulted
+    // remainder as well as for deposits. Gating there would block most
+    // WITHDRAWALS — locking users out of their own money is the exact failure
+    // this feature exists to prevent. Note the absent backupAttestation.set.
+    await enrollFakeMeta()
+    const fx = vaultOutputsFixture() // two 6000-sat outputs = 12000
+    const w = makeFakeWallet({
+      async listOutputs() {
+        return { outputs: fx.map(({ src: _s, ...o }) => o), BEEF: stitchBeef(fx) }
+      },
+      async createAction(args: any) {
+        const tx = new Transaction()
+        for (const inp of args.inputs) {
+          const f = fx.find(x => x.outpoint === inp.outpoint)!
+          tx.addInput({ sourceTransaction: f.src, sourceOutputIndex: 0, sequence: 0xffffffff, unlockingScript: new UnlockingScript([]) })
+        }
+        for (const out of args.outputs) tx.addOutput({ satoshis: out.satoshis, lockingScript: P2PKH.prototype.lock.call(new P2PKH(), Utils.toArray(derivedPkh('vault/50'), 'hex')) })
+        return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-gate' } }
+      }
+    })
+
+    await withdrawFromVault(w, ADMIN, 5000, 'Withdraw 5000')
+
+    const ca = w.calls.createAction[0] as any
+    expect(ca.outputs).toHaveLength(1)
+    expect(ca.outputs[0].basket).toBe(VAULT_BASKET)
+    expect(ca.outputs[0].satoshis).toBe(1000)
   })
 })
 
