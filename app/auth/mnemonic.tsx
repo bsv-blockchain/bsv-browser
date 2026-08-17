@@ -17,10 +17,9 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useTranslation } from 'react-i18next'
 import { useWallet } from '@/context/WalletContext'
 import { PrivateKey } from '@bsv/sdk'
-import { generateMnemonicWallet, validateMnemonic, recoverMnemonicWallet } from '@/utils/mnemonicWallet'
-import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
+import { generateMnemonicWallet, validateMnemonic } from '@/utils/mnemonicWallet'
+import { printRecoveryShares } from '@/utils/printRecoveryShares'
 import * as Clipboard from 'expo-clipboard'
-import * as Print from 'expo-print'
 import { Paths, File as ExpoFile } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
@@ -125,11 +124,15 @@ export default function MnemonicScreen() {
     if (isPrinting) return
     setIsPrinting(true)
     try {
-      const { primaryKey } = recoverMnemonicWallet(mnemonic)
-      const shares = generateBackupShares(primaryKey)
-      const html = await generatePrintHTML(shares, identityKey)
-      await Print.printAsync({ html })
-      setHasAcknowledged(true)
+      const result = await printRecoveryShares({ mnemonic, recoveredKeyWif: null })
+      if (!result.ok) {
+        showToast(
+          result.reason === 'unsupported-word-count'
+            ? t('vault_shares_word_count')
+            : t('vault_shares_unavailable'),
+          { type: 'error' }
+        )
+      }
     } catch (error: any) {
       console.info('[Mnemonic] Print recovery shares did not complete:', error?.message)
     } finally {

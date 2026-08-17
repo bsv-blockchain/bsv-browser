@@ -29,9 +29,7 @@ import Clipboard from '@react-native-clipboard/clipboard'
 import { exportAllWalletDatabases } from '@/utils/exportDatabases'
 import { importWalletDatabase } from '@/utils/importDatabases'
 import { PrivateKey } from '@bsv/sdk'
-import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
-import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
-import * as Print from 'expo-print'
+import { printRecoveryShares } from '@/utils/printRecoveryShares'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 export default function WalletConfigScreen() {
@@ -131,29 +129,18 @@ export default function WalletConfigScreen() {
     if (isPrinting) return
     setIsPrinting(true)
     try {
-      let primaryKeyBytes: number[] | null = null
-
-      // Try mnemonic-based key first
-      const mnemonic = await getMnemonic()
-      if (mnemonic) {
-        const { primaryKey } = recoverMnemonicWallet(mnemonic)
-        primaryKeyBytes = primaryKey
-      } else {
-        // Fall back to recovered key
-        const wif = await getRecoveredKey()
-        if (wif) {
-          primaryKeyBytes = PrivateKey.fromWif(wif).toArray()
-        }
+      const result = await printRecoveryShares({
+        mnemonic: await getMnemonic(),
+        recoveredKeyWif: await getRecoveredKey()
+      })
+      if (!result.ok) {
+        showToast(
+          result.reason === 'unsupported-word-count'
+            ? t('vault_shares_word_count')
+            : 'Unable to access wallet key. Please authenticate and try again.',
+          { type: 'error' }
+        )
       }
-
-      if (!primaryKeyBytes) {
-        showToast('Unable to access wallet key. Please authenticate and try again.', { type: 'error' })
-        return
-      }
-
-      const shares = generateBackupShares(primaryKeyBytes)
-      const html = await generatePrintHTML(shares, identityKey)
-      await Print.printAsync({ html })
     } catch (error: any) {
       console.info('[WalletConfig] Print recovery shares did not complete:', error?.message)
     } finally {
