@@ -679,21 +679,15 @@ Replace lines 83-125 with:
       if (secret.kind === 'entropy') {
         const mnemonic = Mnemonic.fromEntropy(secret.entropy).toString()
 
-        const stored = await setMnemonic(mnemonic)
-        if (!stored) {
-          if (await retryOrReset(shareStrings)) return
-          return
-        }
+        if (!(await setMnemonic(mnemonic))) return await retryOrReset(shareStrings)
+        // Only after the phrase is safely stored: a refusal between the two
+        // writes would otherwise leave the wallet with neither secret.
         await deleteRecoveredKey()
         await buildWalletFromMnemonic(mnemonic)
       } else {
         const wif = new PrivateKey(secret.primaryKey).toWif()
 
-        const stored = await setRecoveredKey(wif)
-        if (!stored) {
-          if (await retryOrReset(shareStrings)) return
-          return
-        }
+        if (!(await setRecoveredKey(wif))) return await retryOrReset(shareStrings)
         await buildWalletFromRecoveredKey(wif)
 
         await showAlert({
@@ -720,11 +714,11 @@ Replace lines 83-125 with:
   }
 
   /**
-   * Shared biometric-refusal handling for both formats.
-   * @returns true when the caller should stop (the user cancelled or a retry
-   * took over), false never — it always handles the outcome itself.
+   * Both formats store their secret behind the biometric latch, and both have
+   * to survive a refusal the same way: offer a retry, or reset the scanner so
+   * the user can start over.
    */
-  const retryOrReset = async (shareStrings: string[]): Promise<boolean> => {
+  const retryOrReset = async (shareStrings: string[]): Promise<void> => {
     const choice = await showAlert({
       title: 'Biometric Access Required',
       message: 'Biometric access is needed to protect your wallet keys. Please try again.',
@@ -740,7 +734,6 @@ Replace lines 83-125 with:
     } else {
       await handleRecovery(shareStrings)
     }
-    return true
   }
 ```
 
