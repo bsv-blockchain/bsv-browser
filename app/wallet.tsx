@@ -444,7 +444,7 @@ export default function WalletScreen() {
           accessibilityLabel={t('wallet_balance_refresh')}
         >
           <Text style={[styles.balanceLabel, { color: colors.textTertiary }]}>
-            {t('wallet_total_balance')}
+            {t('wallet_balance_you_have')}
           </Text>
           {balanceParts === null ? (
             <ActivityIndicator color={colors.textSecondary} style={styles.balanceSpinner} />
@@ -646,11 +646,13 @@ const styles = StyleSheet.create({
   },
   // Uppercase + wide tracking: this is a column heading over a figure, not a
   // phrase leading into it. Scripts without case ignore the transform.
+  // Sentence case, not the uppercase eyebrow treatment: "You have" is a phrase
+  // leading into the figure, and caps would read as shouting rather than as a
+  // label.
   balanceLabel: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '600',
-    letterSpacing: 1.6,
-    textTransform: 'uppercase'
+    letterSpacing: 0.2
   },
   balanceSpinner: { marginTop: spacing.md },
   // tabular-nums keeps the figure from jittering as digits change.

@@ -393,7 +393,9 @@ const resources = {
       // The full-screen wallet: balance, three destinations, inline activity.
       // ('wallet' itself is already defined above.)
       wallet_balance_label: 'Balance',
-      wallet_total_balance: 'Total balance',
+      // Deliberately not "Total balance": this figure is the spendable wallet
+      // balance only and excludes the vault basket.
+      wallet_balance_you_have: 'You have',
       wallet_balance_refresh: 'Refresh balance',
       wallet_group_today: 'Today',
       wallet_group_yesterday: 'Yesterday',
