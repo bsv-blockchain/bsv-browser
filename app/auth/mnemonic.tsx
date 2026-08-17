@@ -405,11 +405,16 @@ export default function MnemonicScreen() {
             </PressableScale>
           </View>
 
-          {/* Biometric protection note */}
+          {/* Biometric protection note. Keep this claim accurate: the phrase is
+              encrypted on this device under a key the OS releases only after a
+              biometric match — and if those biometrics change, the OS destroys
+              that key, which is why the written copy matters. */}
           <View style={[s.biometricNote, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}>
             <Ionicons name="finger-print" size={32} color={colors.textSecondary} style={s.biometricIcon} />
             <Text style={[s.biometricText, { color: colors.textSecondary }]}>
-              Your recovery phrase is protected by Face ID / device biometrics.
+              On this device your recovery phrase is encrypted with a key that Face ID or your
+              fingerprint unlocks. Write the phrase down anyway — if your biometrics change, the
+              key is destroyed and the phrase is the only way back in.
             </Text>
           </View>
 

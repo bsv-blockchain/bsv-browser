@@ -120,7 +120,6 @@ export interface WalletContextValue {
   // Logout
   logout: () => void
   adminOriginator: string
-  snapshotLoaded: boolean
   basketRequests: BasketAccessRequest[]
   certificateRequests: CertificateAccessRequest[]
   protocolRequests: ProtocolAccessRequest[]
@@ -181,7 +180,6 @@ export const WalletContext = createContext<WalletContextValue>({
   updateSettings: async () => {},
   logout: () => {},
   adminOriginator: ADMIN_ORIGINATOR,
-  snapshotLoaded: false,
   basketRequests: [],
   certificateRequests: [],
   protocolRequests: [],
@@ -419,16 +417,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   }, [])
 
   const {
-    getSnap,
-    deleteSnap,
     getItem,
     setItem,
-    setMnemonic,
     getMnemonic,
-    deleteMnemonic,
-    setRecoveredKey,
     getRecoveredKey,
-    deleteRecoveredKey
+    deleteAllWalletKeys,
+    secretsReady
   } = useLocalStorage()
 
   const {
@@ -624,8 +618,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // Flag that indicates configuration is complete. For returning users,
   // if a snapshot exists we auto-mark configComplete.
   const [configStatus, setConfigStatus] = useState<ConfigStatus>('initial')
-  // Used to trigger a re-render after snapshot load completes.
-  const [snapshotLoaded, setSnapshotLoaded] = useState<boolean>(false)
 
   const finalizeConfig = useCallback((wabConfig: WABConfig): boolean => {
     const { method, network, storageUrl } = wabConfig
@@ -1211,17 +1203,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     ]
   )
 
-  // Watch for wallet authentication state
-  useEffect(() => {
-    ;(async () => {
-      const snap = await getSnap()
-      if (managers?.walletManager?.authenticated && snap) {
-        setSnapshotLoaded(true)
-      } else if (!snap && snapshotLoaded) {
-        setSnapshotLoaded(false)
-      }
-    })()
-  }, [managers?.walletManager?.authenticated, snapshotLoaded, getSnap])
+  // NOTE: SimpleWalletManager snapshots are deliberately not persisted. Its
+  // snapshot format prepends the encryption key to the ciphertext, so the blob
+  // is plaintext-equivalent for anyone who can read it — storing one would hand
+  // out the primary key and undo the biometric protection on the mnemonic.
 
   // TODO: Re-add WAB (WalletAuthenticationManager) support in future version
 
@@ -1274,9 +1259,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         vaultPkmRef.current = privilegedKeyManager
 
         // Create SimpleWalletManager and provide keys for authentication
-        const snap = await getSnap()
-
-        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
+        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet)
 
         // Provide the primary key and privileged key manager to authenticate the wallet
         await swm.providePrimaryKey(primaryKey)
@@ -1291,7 +1274,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         walletBuildingRef.current = false
         setWalletBuilding(false)
 
-        await setMnemonic(mnemonic)
         logWithTimestamp(F, 'Mnemonic wallet build completed')
       } catch (error: any) {
         walletBuildingRef.current = false
@@ -1299,7 +1281,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         console.error('[WalletContext] Error building mnemonic wallet:', error)
       }
     },
-    [walletBuilt, configStatus, getMnemonic, getSnap, setMnemonic, buildWallet]
+    [walletBuilt, configStatus, getMnemonic, buildWallet]
   )
 
   // Build wallet from a recovered PrivateKey (WIF) obtained via backup share scanning
@@ -1328,8 +1310,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         )
         vaultPkmRef.current = privilegedKeyManager
 
-        const snap = await getSnap()
-        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet, snap || undefined)
+        const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet)
 
         await swm.providePrimaryKey(primaryKey)
 
@@ -1343,7 +1324,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         walletBuildingRef.current = false
         setWalletBuilding(false)
 
-        await setRecoveredKey(wif)
         logWithTimestamp(F, 'Recovered key wallet build completed')
       } catch (error: any) {
         walletBuildingRef.current = false
@@ -1351,7 +1331,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         console.error('[WalletContext] Error building wallet from recovered key:', error)
       }
     },
-    [walletBuilt, configStatus, getSnap, setRecoveredKey, buildWallet]
+    [walletBuilt, configStatus, buildWallet]
   )
 
   // Tear down the current wallet and re-trigger auto-build.
@@ -1388,7 +1368,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     setWalletBuilt(false)
     walletBuildingRef.current = false
     setWalletBuilding(false)
-    setSnapshotLoaded(false)
 
     // Re-finalize with current config — triggers auto-build effect
     const config = { wabUrl: 'noWAB', method: 'mnemonic', network: selectedNetwork, storageUrl: 'local' }
@@ -1429,7 +1408,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setWalletBuilt(false)
       walletBuildingRef.current = false
       setWalletBuilding(false)
-      setSnapshotLoaded(false)
 
       // Persist new config
       const newConfig = { wabUrl: 'noWAB', method: 'mnemonic', network, storageUrl: 'local' }
@@ -1449,7 +1427,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     if (configStatus !== 'configured' || walletBuilt) return
     // Signal that a build attempt is starting. buildWalletFromMnemonic /
     // buildWalletFromRecoveredKey will clear this flag on completion or error.
+    // Set before the secretsReady gate below, so the migration window is not
+    // mistaken by the rest of the app for "this user has no wallet".
     setWalletBuilding(true)
+    // Wait for the legacy-secret migration to settle. Reading a secret before
+    // it does would report "no wallet" to an existing user on the first launch
+    // after upgrading, and this effect would not re-fire to correct it.
+    if (!secretsReady) return
     ;(async () => {
       // Try mnemonic-based build first (calls getMnemonic internally)
       await buildWalletFromMnemonic()
@@ -1469,7 +1453,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         }
       }
     })()
-  }, [configStatus, walletBuilt, buildWalletFromMnemonic, buildWalletFromRecoveredKey, getRecoveredKey])
+  }, [
+    configStatus,
+    walletBuilt,
+    secretsReady,
+    buildWalletFromMnemonic,
+    buildWalletFromRecoveredKey,
+    getRecoveredKey
+  ])
 
   // Settings are AsyncStorage-only — no on-chain sync needed
 
@@ -1713,27 +1704,31 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   const logout = useCallback(() => {
     logWithTimestamp(F, 'Logout')
-    deleteSnap().then(async () => {
+    ;(async () => {
       setManagers({})
       setConfigStatus('initial')
-      setSnapshotLoaded(false)
       setWalletBuilt(false)
       walletBuildingRef.current = false
       setWalletBuilding(false)
       setWalletUserId(null)
-      deleteMnemonic()
-      deleteRecoveredKey()
+
+      // Awaited, and it removes the KEK along with the ciphertexts: leaving the
+      // key behind would make the next cold start prompt for a wallet that no
+      // longer exists. Works while locked, since deleting needs no key.
+      await deleteAllWalletKeys()
+
       // The attestation is per wallet. "Delete Wallet" routes here, so leaving
       // it behind would let the NEXT wallet on this device inherit a backup it
-      // never made.
+      // never made. Deliberately not awaited: a storage failure must not strand
+      // the user mid-logout with no navigation.
       backupAttestation.clearAll().catch(err => {
         console.warn('[backupAttestation.clearAll]', err)
       })
 
       router.dismissAll()
       router.push('/')
-    })
-  }, [deleteSnap, deleteMnemonic, deleteRecoveredKey])
+    })()
+  }, [deleteAllWalletKeys])
 
   /**
    * Reconcile ONE transaction against the network, and repair it if the local
@@ -2032,7 +2027,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       updateSettings,
       logout,
       adminOriginator,
-      snapshotLoaded,
       basketRequests: basketQueue.requests,
       certificateRequests: certificateQueue.requests,
       protocolRequests: protocolQueue.requests,
@@ -2074,7 +2068,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       updateSettings,
       logout,
       adminOriginator,
-      snapshotLoaded,
       basketQueue.requests,
       certificateQueue.requests,
       protocolQueue.requests,
@@ -2153,7 +2146,6 @@ export const useWallet = () => useContext(WalletContext)
 export interface WalletStatusSlice {
   walletBuilt: boolean
   walletBuilding: boolean
-  snapshotLoaded: boolean
   configStatus: ConfigStatus
   selectedNetwork: AppChain
 }
@@ -2163,11 +2155,10 @@ export const useWalletStatus = (): WalletStatusSlice => {
     () => ({
       walletBuilt: ctx.walletBuilt,
       walletBuilding: ctx.walletBuilding,
-      snapshotLoaded: ctx.snapshotLoaded,
       configStatus: ctx.configStatus,
       selectedNetwork: ctx.selectedNetwork
     }),
-    [ctx.walletBuilt, ctx.walletBuilding, ctx.snapshotLoaded, ctx.configStatus, ctx.selectedNetwork]
+    [ctx.walletBuilt, ctx.walletBuilding, ctx.configStatus, ctx.selectedNetwork]
   )
 }
 
