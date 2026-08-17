@@ -489,6 +489,7 @@ const resources = {
       // Amount input
       send_max: 'Send Max',
       entire_wallet_balance: 'Entire wallet balance',
+      entire_vault_balance: 'Entire vault balance',
       export_wallet_data: 'Export Wallet Data',
       import_wallet_data: 'Import Wallet Data',
       import_conflict_title: 'Database Already Exists',

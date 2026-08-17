@@ -22,7 +22,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import PressableScale from '@/components/ui/PressableScale'
-import { AmountInput } from '@/components/wallet/AmountInput'
+import { AmountInput, SEND_MAX_VALUE } from '@/components/wallet/AmountInput'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
@@ -62,10 +62,17 @@ export default function VaultTransferScreen() {
 
   const isDeposit = direction !== 'withdraw'
 
+  // Send max is a sentinel value, not a number: the withdraw path takes 'all'
+  // and lets the toolbox work out the fee, which is the only way to empty the
+  // vault exactly. Pre-computing "balance minus fee" here cannot work — the R1
+  // spend's fee depends on the input count and its ~960 KB unlocking script.
+  const isMax = amount === SEND_MAX_VALUE
+
   const run = useCallback(async () => {
     const pm = managers?.permissionsManager
     const sats = parseInt(amount, 10)
-    if (!pm || !Number.isFinite(sats) || sats <= 0) return
+    if (!pm) return
+    if (!isMax && (!Number.isFinite(sats) || sats <= 0)) return
     setBusy(true)
     setError(null)
     try {
@@ -79,8 +86,8 @@ export default function VaultTransferScreen() {
         await withdrawFromVault(
           w,
           adminOriginator,
-          sats,
-          t('vault_withdraw_reason', { amount: sats })
+          isMax ? 'all' : sats,
+          t('vault_withdraw_reason', { amount: isMax ? (balance ?? 0) : sats })
         )
         // vaultOpen/haptic already fired by the ceremony's onArmed
         showToast(t('vault_withdraw_done'), { type: 'success' })
@@ -123,10 +130,10 @@ export default function VaultTransferScreen() {
     } finally {
       setBusy(false)
     }
-  }, [amount, isDeposit, managers?.permissionsManager, adminOriginator, refresh])
+  }, [amount, isMax, balance, isDeposit, managers?.permissionsManager, adminOriginator, refresh])
 
   const sats = parseInt(amount, 10)
-  const valid = Number.isFinite(sats) && sats > 0
+  const valid = isMax || (Number.isFinite(sats) && sats > 0)
 
   return (
     <View
@@ -159,7 +166,12 @@ export default function VaultTransferScreen() {
           {isDeposit ? t('vault_deposit_sub') : t('vault_withdraw_sub')}
         </Text>
 
-        <AmountInput value={amount} onChangeText={setAmount} showMax={false} />
+        <AmountInput
+          value={amount}
+          onChangeText={setAmount}
+          showMax={!isDeposit}
+          maxLabelKey="entire_vault_balance"
+        />
 
         {error && <Text style={[styles.err, { color: colors.error }]}>{error}</Text>}
 

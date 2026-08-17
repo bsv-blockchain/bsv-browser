@@ -19,6 +19,12 @@ interface AmountInputProps {
    * requester's own balance, which is meaningless to the payer.
    */
   showMax?: boolean
+  /**
+   * i18n key for the label shown once max is chosen. Defaults to the wallet
+   * wording; the vault passes its own, since "entire wallet balance" would be
+   * plainly wrong on a screen moving only the vault basket.
+   */
+  maxLabelKey?: string
   value: string
   onChangeText: (text: string) => void
 }
@@ -33,7 +39,12 @@ interface AmountInputProps {
  * The `onChangeText` callback always emits satoshi integer strings.
  * The `value` prop is always satoshi integer strings.
  */
-export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText, showMax = true }) => {
+export const AmountInput: React.FC<AmountInputProps> = ({
+  value,
+  onChangeText,
+  showMax = true,
+  maxLabelKey = 'entire_wallet_balance'
+}) => {
   const { t } = useTranslation()
   const { colors } = useTheme()
   const { settings } = useWallet()
@@ -90,7 +101,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({ value, onChangeText, s
       <View style={[styles.row, { backgroundColor: colors.backgroundSecondary, borderColor: colors.accent }]}>
         <View style={styles.sendMaxDisplay}>
           <Ionicons name="wallet-outline" size={18} color={colors.accent} />
-          <Text style={[styles.sendMaxLabel, { color: colors.accent }]}>{t('entire_wallet_balance')}</Text>
+          <Text style={[styles.sendMaxLabel, { color: colors.accent }]}>{t(maxLabelKey)}</Text>
         </View>
         <TouchableOpacity
           onPress={() => {
