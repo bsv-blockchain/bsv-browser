@@ -1,5 +1,5 @@
 import { PrivateKey } from '@bsv/sdk'
-import { BackupClient, BackupHttpError, ERR_SEQ_CONFLICT } from '@/utils/backup/client'
+import { BackupClient, BackupHttpError, BACKUP_REQUEST_TIMEOUT_MS, ERR_SEQ_CONFLICT } from '@/utils/backup/client'
 import type { BackupRequestInit } from '@/utils/backup/client'
 
 const KEY = new PrivateKey(9).toArray('be', 32)
@@ -119,5 +119,22 @@ describe('BackupClient', () => {
   it('handles a non-JSON error body without masking the status', async () => {
     const { client } = clientWith(() => new Response('<html>502</html>', { status: 502 }))
     await expect(client.manifest()).rejects.toMatchObject({ status: 502 })
+  })
+})
+
+describe('BackupClient request timeout', () => {
+  it('gives up on a request that never answers, instead of hanging the task forever', async () => {
+    // A monitor task awaiting a dead socket stays pending indefinitely, holding its slot
+    // and never rescheduling. Observed on device as BackupPush passes running past 100s.
+    jest.useFakeTimers()
+    try {
+      const client = new BackupClient(BASE, KEY, async () => await new Promise<Response>(() => {}))
+      const pending = client.manifest()
+      const assertion = expect(pending).rejects.toThrow(/timed out/i)
+      await jest.advanceTimersByTimeAsync(BACKUP_REQUEST_TIMEOUT_MS + 1_000)
+      await assertion
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

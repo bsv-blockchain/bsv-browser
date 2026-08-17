@@ -236,3 +236,59 @@ describe('pushOnce', () => {
     })).rejects.toThrow(/client or a baseUrl/)
   })
 })
+
+// ── oversize guard ────────────────────────────────────────────────────────
+//
+// A single R1-K1 vault transaction is ~960 KB of rawTx, which base64-encodes to
+// ~1.28 MB — over the server's 1 MiB blob cap on its own. maxRoughSize bounds
+// how much the toolbox ACCUMULATES, never the size of one record, so no tuning
+// makes such a chunk fit.
+//
+// Left unguarded this is not merely a failed push: encrypting and then
+// BRC-31-signing that payload blocked the JS thread for ~50s on device, every
+// retry, freezing the whole app.
+describe('pushOnce oversize guard', () => {
+  function chunkWithBigTx (rawTxBytes: number): SyncChunk {
+    const c = emptyChunk('a', 'b', IDENTITY) as unknown as Record<string, unknown[]>
+    c.provenTxs = [{
+      provenTxId: 1,
+      rawTx: Array.from({ length: rawTxBytes }, () => 7),
+      updated_at: '2026-08-01T00:00:00.000Z'
+    }]
+    return c as unknown as SyncChunk
+  }
+
+  it('never encrypts or uploads a chunk that cannot fit the server cap', async () => {
+    const client = fakeClient()
+    const r = await pushOnce({
+      storage: fakeStorage(chunkWithBigTx(959_836)) as any,
+      primaryKey: PRIMARY, identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+
+    expect(client.append).not.toHaveBeenCalled()
+    expect(r.pushed).toBe(0)
+    expect(r.oversized).toBe(true)
+  })
+
+  it('leaves the cursor untouched so an oversized chunk is never silently skipped', async () => {
+    const before = await loadCursor(PSEUDONYM, DEVICE)
+    await pushOnce({
+      storage: fakeStorage(chunkWithBigTx(959_836)) as any,
+      primaryKey: PRIMARY, identityKey: IDENTITY, client: fakeClient(), deviceId: DEVICE
+    })
+
+    expect(await loadCursor(PSEUDONYM, DEVICE)).toEqual(before)
+  })
+
+  it('still pushes a chunk that fits', async () => {
+    const client = fakeClient()
+    const r = await pushOnce({
+      storage: fakeStorage(chunkWithBigTx(1000)) as any,
+      primaryKey: PRIMARY, identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+
+    expect(client.append).toHaveBeenCalled()
+    expect(r.pushed).toBe(1)
+    expect(r.oversized).toBeFalsy()
+  })
+})

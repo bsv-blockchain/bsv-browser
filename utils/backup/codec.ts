@@ -60,6 +60,38 @@ function packBytes (value: unknown): unknown {
   return value
 }
 
+/**
+ * Cheap lower bound on a chunk's encoded size, in bytes.
+ *
+ * Walks the chunk applying packBytes' own byte-array rule and sums what those arrays cost
+ * once base64-encoded, which is what dominates a chunk (see this file's header). Everything
+ * else — keys, timestamps, numbers — is ignored, so the answer is an UNDERESTIMATE: a chunk
+ * this says is too big definitely is.
+ *
+ * Exists to be run BEFORE encodeChunk. Encrypting and then BRC-31-signing an oversized
+ * payload blocked the JS thread for ~50s per attempt on device; the point is to never do
+ * that work, not merely to avoid the failed upload at the end of it.
+ */
+export function estimateEncodedBytes (chunk: SyncChunk): number {
+  let bytes = 0
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      const isByteArray =
+        value.length >= PACK_MIN_LENGTH &&
+        value.every(v => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 255)
+      // base64 is 4 characters per 3 bytes.
+      if (isByteArray) bytes += Math.ceil(value.length / 3) * 4
+      else value.forEach(walk)
+      return
+    }
+    if (value != null && typeof value === 'object' && !(value instanceof Date)) {
+      for (const v of Object.values(value as Record<string, unknown>)) walk(v)
+    }
+  }
+  walk(chunk)
+  return bytes
+}
+
 /** Inverse of packBytes: every Uint8Array becomes the `number[]` the toolbox expects. */
 function unpackBytes (value: unknown): unknown {
   if (value instanceof Uint8Array) return Array.from(value)

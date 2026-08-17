@@ -18,8 +18,8 @@
 import type { StorageExpoSQLite } from '@/storage'
 import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
 import { BackupClient, BackupHttpError, ERR_SEQ_CONFLICT } from './client'
-import { encodeChunk, isEmptyChunk } from './codec'
-import { GENERATION_CHUNK_THRESHOLD, MAX_ITEMS, MAX_ROUGH_SIZE } from './constants'
+import { encodeChunk, estimateEncodedBytes, isEmptyChunk } from './codec'
+import { GENERATION_CHUNK_THRESHOLD, MAX_BLOB_BYTES, MAX_ITEMS, MAX_ROUGH_SIZE } from './constants'
 import {
   ENTITY_NAMES,
   ENTITY_TO_CHUNK_ARRAY,
@@ -54,6 +54,8 @@ export interface PushResult {
   windowClosed: boolean
   /** True when a new generation was started. */
   rotated: boolean
+  /** True when the chunk was too large for the server and nothing was sent. */
+  oversized?: boolean
 }
 
 /**
@@ -94,6 +96,33 @@ export async function pushOnce (deps: PushDeps): Promise<PushResult> {
     const next = rotated ? rotate(advanced) : advanced
     await saveCursor(pseudonym, deviceId, next)
     return { pushed: 0, bytes: 0, windowClosed: true, rotated }
+  }
+
+  // Bail BEFORE the expensive part when the chunk cannot possibly be accepted.
+  //
+  // maxRoughSize bounds what the toolbox accumulates across records; it cannot bound ONE
+  // record. A single R1-K1 vault transaction is ~960 KB of rawTx — ~1.28 MB once
+  // base64-encoded — so it exceeds the server's 1 MiB cap on its own and no sizing tweak
+  // will ever make it fit.
+  //
+  // Ordering is the whole point. Encrypting and BRC-31-signing that payload is synchronous
+  // CPU work that blocked the JS thread for ~50s per attempt on device, freezing the app
+  // every retry, and the upload then failed anyway with a 400 whose message blamed missing
+  // auth headers (the server could not read the body to build the signature payload).
+  // Checking here makes a doomed pass nearly free instead of nearly a minute.
+  const estimate = estimateEncodedBytes(chunk)
+  if (estimate > MAX_BLOB_BYTES) {
+    console.log(
+      '[backup] chunk too large for the server, skipping push · estimate=%d bytes · cap=%d · ' +
+        'nothing was encrypted or uploaded. This wallet cannot back up until the oversized ' +
+        'record is handled.',
+      estimate,
+      MAX_BLOB_BYTES
+    )
+    // Cursor deliberately untouched: advancing past this chunk would silently drop records
+    // from the backup, which is worse than not backing up. The pass is now cheap, so the
+    // monitor retrying costs nothing until the underlying limit is addressed.
+    return { pushed: 0, bytes: 0, windowClosed: false, rotated: false, oversized: true }
   }
 
   const wallet = deriveBackupWallet(deps.primaryKey)

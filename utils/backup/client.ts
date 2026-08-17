@@ -51,6 +51,16 @@ export interface BackupRequestInit {
 
 type FetchLike = (url: string, init: BackupRequestInit) => Promise<Response>
 
+/**
+ * Ceiling on any single backup request.
+ *
+ * The monitor awaits its tasks, so a request that never answers holds the task pending
+ * indefinitely — observed on device as BackupPush passes running past 100 seconds. A
+ * backup is never urgent: giving up and retrying on the next pass is strictly better than
+ * occupying the monitor.
+ */
+export const BACKUP_REQUEST_TIMEOUT_MS = 30_000
+
 export class BackupClient {
   private readonly fetcher: FetchLike
 
@@ -65,12 +75,17 @@ export class BackupClient {
     primaryKey: number[],
     fetcher?: FetchLike
   ) {
-    if (fetcher != null) {
-      this.fetcher = fetcher
-    } else {
-      const auth = new AuthFetch(deriveBackupWallet(primaryKey))
-      this.fetcher = async (url, init) => await auth.fetch(url, init)
-    }
+    const transport: FetchLike =
+      fetcher ??
+      (() => {
+        const auth = new AuthFetch(deriveBackupWallet(primaryKey))
+        return async (url, init) => await auth.fetch(url, init)
+      })()
+
+    // Every request, injected transport included, is bounded. AuthFetch performs its own
+    // handshake round-trip before the real call, so "no response" can occur at two points;
+    // this covers both.
+    this.fetcher = async (url, init) => await withTimeout(transport(url, init), url)
   }
 
   /**
@@ -153,5 +168,32 @@ export class BackupClient {
       // Non-JSON error body; the status alone has to carry the meaning.
     }
     throw new BackupHttpError(res.status, code, description)
+  }
+}
+
+/**
+ * Reject if a request outlives BACKUP_REQUEST_TIMEOUT_MS.
+ *
+ * Deliberately a race rather than an AbortController: the transport is injectable and
+ * AuthFetch does not thread a signal through to its handshake, so aborting is not
+ * reliably available. Losing the race abandons the in-flight promise — acceptable here
+ * because the caller retries the whole pass and nothing downstream depends on the
+ * abandoned result.
+ */
+async function withTimeout<T> (p: Promise<T>, url: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Backup request timed out after ${BACKUP_REQUEST_TIMEOUT_MS}ms: ${url}`)),
+          BACKUP_REQUEST_TIMEOUT_MS
+        )
+        ;(timer as { unref?: () => void }).unref?.()
+      })
+    ])
+  } finally {
+    if (timer != null) clearTimeout(timer)
   }
 }
