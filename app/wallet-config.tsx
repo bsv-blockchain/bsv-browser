@@ -271,7 +271,7 @@ export default function WalletConfigScreen() {
       {/* Header */}
       <View style={[localStyles.header, { borderBottomColor: colors.separator }]}>
         <TouchableOpacity onPress={() => router.back()} style={localStyles.headerBack}>
-          <Ionicons name="chevron-back" size={24} color={colors.accent} />
+          <Ionicons name="chevron-back" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
         <Text style={[localStyles.headerTitle, { color: colors.textPrimary }]}>{t('settings')}</Text>
         <View style={localStyles.headerBack} />

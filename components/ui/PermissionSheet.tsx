@@ -10,7 +10,7 @@ import { WalletContext } from '@/context/WalletContext'
 import { UserContext } from '@/context/UserContext'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { ExchangeRateContext } from '@/context/ExchangeRateContext'
-import { formatAmount } from '@/utils/amountFormatHelpers'
+import { formatAmountParts } from '@/utils/amountFormatHelpers'
 import { haptics } from '@/hooks/useHaptics'
 
 // ---------------------------------------------------------------------------
@@ -57,7 +57,9 @@ interface ActivePermission {
   originator: string
   title: string
   description: string
-  details: { label: string; value: string }[]
+  /** `unit` is split out so amounts can set the figure and its unit at
+   * different sizes; rows whose value is not an amount simply omit it. */
+  details: { label: string; value: string; unit?: string }[]
   /** Certificate-specific list of required fields. */
   fields?: string[]
   /** Spending-specific authorization amount (satoshis). */
@@ -88,7 +90,7 @@ function deriveActive(
     certificateAccessModalOpen: boolean
     spendingAuthorizationModalOpen: boolean
   },
-  formatSats: (satoshis: number) => string
+  formatSats: (satoshis: number) => { value: string; unit: string }
 ): ActivePermission | null {
   // Dev preview — override ctx with real captured data so the description
   // logic below is exercised exactly as it would be in production.
@@ -118,10 +120,10 @@ function deriveActive(
   if (ctx.spendingAuthorizationModalOpen && ctx.spendingRequests.length > 0) {
     const r = ctx.spendingRequests[0]
     // Map lineItems [{type, satoshis, description}] to detail rows
-    const lineItemDetails: { label: string; value: string }[] = (r.lineItems ?? []).map(
+    const lineItemDetails: { label: string; value: string; unit?: string }[] = (r.lineItems ?? []).map(
       (item: { description?: string; satoshis: number }) => ({
         label: item.description || 'Payment',
-        value: formatSats(item.satoshis)
+        ...formatSats(item.satoshis)
       })
     )
     return {
@@ -272,7 +274,7 @@ const PermissionSheet: React.FC = () => {
   const { satoshisPerUSD } = useContext(ExchangeRateContext)
   const currency = settings?.currency || 'BSV'
   const formatSats = useCallback(
-    (satoshis: number) => formatAmount(satoshis, currency, satoshisPerUSD),
+    (satoshis: number) => formatAmountParts(satoshis, currency, satoshisPerUSD, { abbreviate: true }),
     [currency, satoshisPerUSD]
   )
 
@@ -340,6 +342,16 @@ const PermissionSheet: React.FC = () => {
   )
 
   const visible = active !== null
+
+  // Figure and unit are set at different sizes, so they have to be formatted
+  // apart — same treatment as the wallet balance.
+  const amountParts = useMemo(
+    () =>
+      active?.kind === 'spending' && active.amount != null
+        ? formatAmountParts(active.amount, currency, satoshisPerUSD, { abbreviate: true })
+        : { value: '', unit: '' },
+    [active, currency, satoshisPerUSD]
+  )
 
   // Reset granted morph whenever a new permission request arrives.
   // Keyed on requestID so repeated requests (even same kind) each start fresh.
@@ -486,8 +498,13 @@ const PermissionSheet: React.FC = () => {
           <View style={[styles.content, active.kind === 'group' && { flex: 1 }]}>
             {/* -------- Originator / domain -------- */}
             <View style={styles.originatorRow}>
-              <View style={[styles.faviconPlaceholder, { backgroundColor: colors.buttonBackgroundDisabled }]}>
-                <Text style={[styles.faviconLetter, { color: colors.protocolApproval }]}>
+              <View
+                style={[
+                  styles.faviconPlaceholder,
+                  { backgroundColor: colors.surfaceSunken, borderColor: colors.surfaceSunkenBorder }
+                ]}
+              >
+                <Text style={[styles.faviconLetter, { color: colors.successStrong }]}>
                   {(active.originator[0] ?? '?').toUpperCase()}
                 </Text>
               </View>
@@ -588,18 +605,30 @@ const PermissionSheet: React.FC = () => {
                   <Text style={[styles.detailsToggleText, { color: colors.textSecondary }]}>
                     {detailsExpanded ? t('hide_details') : t('details')}
                   </Text>
-                  <Text style={[styles.chevron, { color: colors.textTertiary }]}>
-                    {detailsExpanded ? '\u25B2' : '\u25BC'}
-                  </Text>
+                  <Ionicons
+                    name={detailsExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={12}
+                    color={colors.textSecondary}
+                    style={styles.chevron}
+                  />
                 </TouchableOpacity>
 
                 {detailsExpanded && (
-                  <ScrollView style={[styles.detailsCard, { backgroundColor: colors.fillTertiary }]} bounces={false}>
+                  <ScrollView
+                    style={[
+                      styles.detailsCard,
+                      { backgroundColor: colors.surfaceRowExpanded, borderColor: colors.surfaceRaisedBorder }
+                    ]}
+                    bounces={false}
+                  >
                     {active.details.map((d, i) => (
                       <View key={i} style={styles.detailRow}>
                         <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{d.label}</Text>
                         <Text style={[styles.detailValue, { color: colors.textPrimary }]} numberOfLines={1}>
                           {d.value}
+                          {d.unit ? (
+                            <Text style={[styles.detailUnit, { color: colors.textSecondary }]}> {d.unit}</Text>
+                          ) : null}
                         </Text>
                       </View>
                     ))}
@@ -620,37 +649,46 @@ const PermissionSheet: React.FC = () => {
               </View>
             )}
 
-            {/* -------- Plain-English description -------- */}
-            <Text style={[styles.description, { color: colors.primary }]}>{active.description}</Text>
+            {/* -------- The ask, then the figure. The sentence is the quiet
+                     half: it says what for, the amount says how much. -------- */}
+            <View style={styles.askBlock}>
+              <Text style={[styles.description, { color: colors.textSecondary }]}>{active.description}</Text>
 
-            {/* -------- Spending: prominent amount -------- */}
-            {active.kind === 'spending' && active.amount != null && (
-              <View style={styles.amountBlock}>
+              {active.kind === 'spending' && active.amount != null && (
                 <Text style={[styles.amountValue, { color: colors.textPrimary }]}>
-                  <AmountDisplay>{active.amount}</AmountDisplay>
+                  {amountParts.value}
+                  {amountParts.unit ? (
+                    <Text style={[styles.amountUnit, { color: colors.textSecondary }]}> {amountParts.unit}</Text>
+                  ) : null}
                 </Text>
-              </View>
-            )}
+              )}
+            </View>
           </View>
 
           {/* -------- Action buttons — pinned at bottom, never move -------- */}
-          <View style={[styles.buttonRow, { borderTopColor: colors.separator }]}>
+          <View style={styles.buttonRow}>
             <PressableScale
-              style={[styles.buttonDeny, { borderColor: colors.separator }]}
+              style={[
+                styles.buttonDeny,
+                { backgroundColor: colors.surfaceRaised, borderColor: colors.surfaceRaisedBorder }
+              ]}
               onPress={handleDeny}
               disabled={granted}
             >
-              <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>{t('reject')}</Text>
+              <Text style={[styles.buttonDenyText, { color: colors.textPrimary }]}>{t('reject')}</Text>
             </PressableScale>
 
+            {/* Accent-filled and the only shadowed element in the drawer, so the
+                confirming action is unmistakable without being coloured green —
+                chroma here would read as "safe" before the user has read it. */}
             <PressableScale
-              style={[styles.buttonAllow, { backgroundColor: colors.protocolApproval }]}
+              style={[styles.buttonAllow, { backgroundColor: colors.accent }]}
               onPress={handleGrant}
               disabled={granted}
             >
               {granted
-                ? <Ionicons name="checkmark" size={22} color="#FFFFFF" />
-                : <Text style={[styles.buttonAllowText, { color: '#FFFFFF' }]}>{t('authorize')}</Text>
+                ? <Ionicons name="checkmark" size={22} color={colors.textOnAccent} />
+                : <Text style={[styles.buttonAllowText, { color: colors.textOnAccent }]}>{t('authorize')}</Text>
               }
             </PressableScale>
           </View>
@@ -671,29 +709,33 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.lg
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm
   },
 
   // Originator
   originatorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md
+    marginBottom: spacing.lg
   },
   faviconPlaceholder: {
     width: 40,
     height: 40,
-    borderRadius: radii.md,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md
   },
   faviconLetter: {
-    ...typography.title3,
+    fontSize: 17,
     fontWeight: '700'
   },
   originator: {
-    ...typography.headline,
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: -0.1,
     flex: 1
   },
 
@@ -710,60 +752,75 @@ const styles = StyleSheet.create({
     fontWeight: '600'
   },
 
-  // Description
-  description: {
-    ...typography.body,
-    textAlign: 'center',
-    marginBottom: spacing.lg
-  },
-
-  // Spending amount
-  amountBlock: {
+  // The ask
+  askBlock: {
     alignItems: 'center',
-    marginBottom: spacing.xl
+    paddingTop: spacing.xxl
+  },
+  description: {
+    fontSize: 13.5,
+    lineHeight: 18,
+    textAlign: 'center'
   },
   amountValue: {
-    ...typography.largeTitle
+    fontSize: 42,
+    fontWeight: '700',
+    lineHeight: 44,
+    letterSpacing: -1.1,
+    marginTop: 9,
+    fontVariant: ['tabular-nums']
+  },
+  amountUnit: {
+    fontSize: 19,
+    fontWeight: '600',
+    letterSpacing: 0
   },
 
   // Details
   detailsSection: {
-    marginBottom: spacing.lg
+    marginBottom: 0
   },
   detailsToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.sm
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.xs
   },
   detailsToggleText: {
-    ...typography.subhead,
-    fontWeight: '500'
+    fontSize: 12.5,
+    fontWeight: '600'
   },
   chevron: {
-    ...typography.caption1,
-    marginLeft: spacing.xs
+    marginLeft: 6
   },
   detailsCard: {
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginTop: spacing.sm,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 5,
+    marginTop: spacing.md,
     maxHeight: 180
   },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginVertical: spacing.xs
+    gap: spacing.md,
+    paddingVertical: 10
   },
   detailLabel: {
-    ...typography.footnote,
-    flex: 1
+    fontSize: 13,
+    flexShrink: 1
   },
   detailValue: {
-    ...typography.footnote,
-    fontWeight: '500',
-    flex: 1,
-    textAlign: 'right'
+    fontSize: 13.5,
+    fontWeight: '600',
+    textAlign: 'right',
+    fontVariant: ['tabular-nums']
+  },
+  detailUnit: {
+    fontSize: 11.5,
+    fontWeight: '500'
   },
   fieldItem: {
     ...typography.footnote,
@@ -799,35 +856,43 @@ const styles = StyleSheet.create({
     marginTop: 1
   },
 
-  // Buttons — pinned outside ScrollView so they never move
+  // Buttons — pinned outside ScrollView so they never move. No rule above them:
+  // the whitespace under the amount already separates reading from acting, and
+  // a hairline there boxed the figure in.
   buttonRow: {
     flexDirection: 'row',
-    gap: spacing.md,
+    gap: 10,
     paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxxl,
-    borderTopWidth: StyleSheet.hairlineWidth
+    paddingTop: 22,
+    paddingBottom: 40
   },
   buttonDeny: {
     flex: 1,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
+    height: 52,
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center'
   },
   buttonDenyText: {
-    ...typography.headline
+    fontSize: 15,
+    fontWeight: '600'
   },
   buttonAllow: {
     flex: 1,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
+    height: 52,
+    borderRadius: 14,
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4
   },
   buttonAllowText: {
-    ...typography.headline
+    fontSize: 15,
+    fontWeight: '700'
   }
 })
 

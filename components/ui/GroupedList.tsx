@@ -26,7 +26,7 @@ export const GroupedList: React.FC<GroupedListProps> = ({ sections }) => {
       {sections.map((section, idx) => (
         <View key={idx} style={styles.section}>
           {section.header && (
-            <Text style={[styles.header, { color: colors.textSecondary }]}>
+            <Text style={[styles.header, { color: colors.textTertiary }]}>
               {section.header.toUpperCase()}
             </Text>
           )}
@@ -65,7 +65,7 @@ export const GroupedSection: React.FC<GroupedListSection> = ({
   return (
     <View style={styles.section}>
       {header && (
-        <Text style={[styles.header, { color: colors.textSecondary }]}>
+        <Text style={[styles.header, { color: colors.textTertiary }]}>
           {header.toUpperCase()}
         </Text>
       )}
@@ -96,17 +96,27 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: spacing.xxl,
   },
+  // Tracked small caps, matching the day headings in the activity list — a
+  // section header is a label for the block under it, not a line of prose.
   header: {
-    ...typography.footnote,
-    fontWeight: '400',
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 1.3,
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.sm,
   },
+  // A card lifted off the canvas: the border does the work in dark, the shadow
+  // in light, and the radius says "object" in both.
   group: {
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     marginHorizontal: spacing.lg,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   footer: {
     ...typography.footnote,

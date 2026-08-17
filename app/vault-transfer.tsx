@@ -98,7 +98,7 @@ export default function VaultTransferScreen() {
     >
       <View style={[styles.header, { borderBottomColor: colors.separator }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.info} />
+          <Ionicons name="chevron-back" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
           {isDeposit ? t('vault_deposit_title') : t('vault_withdraw_title')}

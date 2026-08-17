@@ -393,7 +393,7 @@ export default function MnemonicScreen() {
             </View>
 
             <PressableScale
-              style={[s.primaryButton, { backgroundColor: colors.info }]}
+              style={[s.primaryButton, { backgroundColor: colors.accent }]}
               onPress={handlePrintRecoveryShares}
               disabled={isPrinting}
               haptic="confirm"

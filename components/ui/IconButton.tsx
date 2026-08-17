@@ -50,7 +50,9 @@ export const IconButton: React.FC<IconButtonProps> = ({
       <Ionicons name={name} size={size} color={iconColor} />
       {badge !== undefined && (
         <View style={[styles.badge, { backgroundColor: colors.accent }]}>
-          <Text style={styles.badgeText}>
+          {/* The accent inverts between themes, so the count has to ride on
+              textOnAccent — a fixed white here is white-on-white in dark. */}
+          <Text style={[styles.badgeText, { color: colors.textOnAccent }]}>
             {typeof badge === 'number' && badge > 99 ? '99+' : badge}
           </Text>
         </View>
@@ -81,7 +83,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   badgeText: {
-    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '700',
   },

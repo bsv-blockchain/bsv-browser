@@ -113,7 +113,9 @@ function LocalPayNotificationBridge() {
 
 export default function RootLayout() {
   const isDark = useColorScheme() === 'dark'
-  const backgroundColor = isDark ? '#000000' : '#FFFFFF'
+  // Root canvas — the colour every screen's own background sits on during
+  // transitions, so it has to be the theme's canvas, not pure black/white.
+  const backgroundColor = isDark ? '#0C0E12' : '#FFFFFF'
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

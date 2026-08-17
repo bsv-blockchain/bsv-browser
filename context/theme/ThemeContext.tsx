@@ -47,6 +47,22 @@ export interface ThemeColors {
   warning: string
   info: string
 
+  // Money surfaces
+  canvasTop: string
+  canvasBase: string
+  surfaceRaised: string
+  surfaceRaisedBorder: string
+  surfaceRaisedPressed: string
+  surfaceSunken: string
+  surfaceSunkenBorder: string
+  surfaceRowExpanded: string
+  hairline: string
+  successStrong: string
+  successAmount: string
+  sheetTop: string
+  sheetBase: string
+  scrim: string
+
   // Permission approval
   permissionProtocol: string
   permissionBasket: string

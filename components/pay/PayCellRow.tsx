@@ -37,7 +37,12 @@ export default function PayCellRow({ title, subtitle, icon, onPress, disabled = 
       accessibilityState={{ disabled }}
       accessibilityLabel={`${title}. ${subtitle}`}
     >
-      <View style={[styles.iconWrap, { backgroundColor: colors.fillTertiary }]}>
+      <View
+        style={[
+          styles.iconWrap,
+          { backgroundColor: colors.surfaceSunken, borderColor: colors.surfaceSunkenBorder }
+        ]}
+      >
         <Ionicons name={icon} size={20} color={colors.textSecondary} />
       </View>
       <View style={styles.text}>
@@ -63,7 +68,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderWidth: StyleSheet.hairlineWidth
   },
-  iconWrap: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  // Rounded square, not a circle: every glyph well in this system is a squircle
+  // of the same family, and a lone circle here reads as a different component.
+  iconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
   disabled: { opacity: 0.4 },
   text: { flex: 1 },
   title: { ...typography.headline, fontWeight: '600' },

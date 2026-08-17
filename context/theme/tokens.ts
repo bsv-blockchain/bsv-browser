@@ -31,11 +31,17 @@ export const spacing = {
 
 /* --------------------------------- Radii --------------------------------- */
 
+/**
+ * Corner radii. The scale is softer than iOS's: `md` is the glyph-tile radius,
+ * `lg` the card/button radius, `xl` the radius a bottom sheet meets the screen
+ * edge with. Rounder corners are the loudest single cue that a surface is a
+ * distinct object rather than a region of the page.
+ */
 export const radii = {
-  sm: 6,
-  md: 10,
+  sm: 8,
+  md: 12,
   lg: 14,
-  xl: 20,
+  xl: 24,
   pill: 999,
 } as const
 
@@ -73,38 +79,73 @@ export const lightColors = {
   accent: 'black',
   accentSecondary: '#222222',
 
-  // Backgrounds
+  // Backgrounds — the cool neutral ramp. Canvas is a step under the cards that
+  // sit on it; without that step, a white card on a white page has to be drawn
+  // with a border to exist at all.
   background: '#FFFFFF',
-  backgroundSecondary: '#F2F2F7',
+  backgroundSecondary: '#F5F6F9',
   backgroundTertiary: '#FFFFFF',
   backgroundElevated: '#FFFFFF',
 
   // Translucent chrome (for toolbars, sheets)
-  chromeBackground: 'rgba(249, 249, 249, 0.94)',
+  chromeBackground: 'rgba(251, 252, 253, 0.94)',
   chromeBackgroundBlur: 'rgba(255, 255, 255, 0.72)',
-  sheetBackground: 'rgba(242, 242, 247, 0.97)',
+  sheetBackground: 'rgba(244, 245, 248, 0.97)',
 
-  // Text
-  textPrimary: '#000000',
-  textSecondary: 'rgba(60, 60, 67, 0.6)',
-  textTertiary: 'rgba(60, 60, 67, 0.3)',
-  textQuaternary: 'rgba(60, 60, 67, 0.18)',
+  // Text — one ink, stepped down by alpha. Pure black on white is harsher than
+  // anything else in this system, so the darkest text is a near-black.
+  textPrimary: '#15181E',
+  textSecondary: 'rgba(21, 24, 30, 0.55)',
+  textTertiary: 'rgba(21, 24, 30, 0.38)',
+  textQuaternary: 'rgba(21, 24, 30, 0.2)',
   textOnAccent: '#FFFFFF',
 
   // Separators
-  separator: 'rgba(60, 60, 67, 0.29)',
-  separatorOpaque: '#C6C6C8',
+  separator: 'rgba(21, 24, 30, 0.12)',
+  separatorOpaque: '#E2E5EB',
 
   // Fills
-  fill: 'rgba(120, 120, 128, 0.2)',
-  fillSecondary: 'rgba(120, 120, 128, 0.16)',
-  fillTertiary: 'rgba(118, 118, 128, 0.12)',
+  fill: 'rgba(21, 24, 30, 0.09)',
+  fillSecondary: 'rgba(21, 24, 30, 0.07)',
+  fillTertiary: 'rgba(21, 24, 30, 0.05)',
 
   // Status
-  success: '#34C759',
+  success: '#1E9E62',
   error: '#FF3B30',
   warning: '#FF9500',
   info: '#007AFF',
+
+  // Money surfaces — a cool, slightly-blue neutral ramp used by the wallet and
+  // pay screens. Deliberately NOT the iOS grays above: the canvas is a shallow
+  // gradient the raised cards sit on, so it has to be a touch darker than the
+  // cards themselves or the cards stop reading as raised at all.
+  canvasTop: '#EAECF1',
+  canvasBase: '#F5F6F9',
+  surfaceRaised: '#FFFFFF',
+  surfaceRaisedBorder: '#E2E5EB',
+  surfaceRaisedPressed: '#F0F2F6',
+  // Sunken = an inset well (row glyph tiles), the opposite of raised.
+  surfaceSunken: 'rgba(21, 24, 30, 0.045)',
+  surfaceSunkenBorder: 'rgba(21, 24, 30, 0.06)',
+  // The surface a list row is lifted onto while it is open. In light that means
+  // white against the gray canvas; in dark, a hair of light added to the canvas.
+  surfaceRowExpanded: '#FFFFFF',
+  // Hairline is quieter than `separator`: it divides rows that already share a
+  // surface, where a full-strength rule would look like a fence.
+  hairline: 'rgba(21, 24, 30, 0.06)',
+  // Status green at two weights: the dot/glyph reads at small size, the amount
+  // has to survive being set in 14.5pt semibold next to plain body text.
+  successStrong: '#1E9E62',
+  successAmount: '#178A5C',
+
+  // Bottom sheets. A drawer is lit from its own top edge, so it gets its own
+  // two-stop ramp rather than reusing the canvas — the sheet has to separate
+  // from whatever is behind it even when that is the same colour.
+  sheetTop: '#FBFCFD',
+  sheetBase: '#F4F5F8',
+  // Scrim over the page behind a sheet. Lighter in light mode: the page is
+  // already bright, so it needs less dimming to fall behind the drawer.
+  scrim: 'rgba(24, 28, 36, 0.38)',
 
   // Permission approval
   permissionProtocol: '#34C759',
@@ -120,39 +161,62 @@ export const darkColors = {
   accent: 'white',
   accentSecondary: '#e8e8e8',
 
-  // Backgrounds
-  background: '#000000',
-  backgroundSecondary: '#1C1C1E',
-  backgroundTertiary: '#2C2C2E',
-  backgroundElevated: '#1C1C1E',
+  // Backgrounds — the same ramp inverted: canvas is the darkest thing on
+  // screen and surfaces are lifted out of it, never painted onto it.
+  background: '#0C0E12',
+  backgroundSecondary: '#10141B',
+  backgroundTertiary: '#1D222B',
+  backgroundElevated: '#171B22',
 
   // Translucent chrome
-  chromeBackground: 'rgba(29, 29, 31, 0.94)',
-  chromeBackgroundBlur: 'rgba(29, 29, 31, 0.72)',
-  sheetBackground: 'rgba(28, 28, 30, 0.97)',
+  chromeBackground: 'rgba(18, 22, 29, 0.94)',
+  chromeBackgroundBlur: 'rgba(18, 22, 29, 0.72)',
+  sheetBackground: 'rgba(14, 17, 22, 0.97)',
 
-  // Text
-  textPrimary: '#FFFFFF',
-  textSecondary: 'rgba(235, 235, 245, 0.6)',
-  textTertiary: 'rgba(235, 235, 245, 0.3)',
-  textQuaternary: 'rgba(235, 235, 245, 0.18)',
+  // Text — a cool near-white rather than pure white, which glares against a
+  // blue-black canvas at body size.
+  textPrimary: '#F2F4F8',
+  textSecondary: 'rgba(235, 240, 248, 0.55)',
+  textTertiary: 'rgba(235, 240, 248, 0.38)',
+  textQuaternary: 'rgba(235, 240, 248, 0.2)',
   // textOnAccent contrasts with the white accent — must stay dark in dark mode.
-  textOnAccent: '#000000',
+  textOnAccent: '#0C0E12',
 
   // Separators
-  separator: 'rgba(84, 84, 88, 0.6)',
-  separatorOpaque: '#38383A',
+  separator: 'rgba(255, 255, 255, 0.11)',
+  separatorOpaque: '#232833',
 
   // Fills
-  fill: 'rgba(120, 120, 128, 0.36)',
-  fillSecondary: 'rgba(120, 120, 128, 0.32)',
-  fillTertiary: 'rgba(118, 118, 128, 0.24)',
+  fill: 'rgba(255, 255, 255, 0.1)',
+  fillSecondary: 'rgba(255, 255, 255, 0.08)',
+  fillTertiary: 'rgba(255, 255, 255, 0.06)',
 
   // Status
-  success: '#30D158',
+  success: '#34C77B',
   error: '#FF453A',
   warning: '#FF9F0A',
   info: '#0A84FF',
+
+  // Money surfaces — see the light theme for the reasoning. In dark the ramp
+  // runs the other way: the canvas is the darkest thing on screen and raised
+  // cards are lifted OUT of it, so `surfaceRaised` is lighter, not whiter.
+  canvasTop: '#10141B',
+  canvasBase: '#0C0E12',
+  surfaceRaised: '#171B22',
+  surfaceRaisedBorder: 'rgba(255, 255, 255, 0.08)',
+  surfaceRaisedPressed: '#1D222B',
+  surfaceSunken: 'rgba(255, 255, 255, 0.05)',
+  surfaceSunkenBorder: 'rgba(255, 255, 255, 0.07)',
+  surfaceRowExpanded: 'rgba(255, 255, 255, 0.035)',
+  hairline: 'rgba(255, 255, 255, 0.06)',
+  successStrong: '#34C77B',
+  successAmount: '#4BD592',
+
+  // Bottom sheets — see the light theme. Sits a step above the canvas so the
+  // drawer reads as lifted off the dimmed page behind it.
+  sheetTop: '#12161D',
+  sheetBase: '#0E1116',
+  scrim: 'rgba(10, 12, 16, 0.62)',
 
   // Permission approval
   permissionProtocol: '#1fae4378',

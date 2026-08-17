@@ -344,9 +344,13 @@ const resources = {
       tx_still_pending: 'Still pending — not confirmed yet',
       tx_beef_copied: 'BEEF copied',
       tx_beef_not_available: 'BEEF not available for this transaction yet',
+      tx_txid_copied: 'Transaction ID copied',
       tx_action_explorer: 'View on block explorer',
       tx_action_copy_beef: 'Copy BEEF as hex',
+      tx_action_copy_txid: 'Copy transaction ID',
       tx_action_refresh: 'Refresh status',
+      // Chip label — sits next to BEEF / WoC / TXID, so it has to be one word.
+      tx_action_refresh_short: 'Status',
       tx_action_abort: 'Cancel transaction',
       tx_export_success: 'Exported {{count}} transactions',
       tx_export_failed: 'Failed to export transactions',
@@ -354,7 +358,11 @@ const resources = {
       // The full-screen wallet: balance, three destinations, inline activity.
       // ('wallet' itself is already defined above.)
       wallet_balance_label: 'Balance',
+      wallet_total_balance: 'Total balance',
       wallet_balance_refresh: 'Refresh balance',
+      wallet_group_today: 'Today',
+      wallet_group_yesterday: 'Yesterday',
+      back: 'Back',
       wallet_payments: 'Payments',
       wallet_vault: 'Vault',
       wallet_settings: 'Settings',
