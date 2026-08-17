@@ -3,6 +3,26 @@ const path = require('path')
 
 const config = getDefaultConfig(__dirname)
 
+// Git worktrees live INSIDE the project root (.claude/worktrees/<branch>/ and
+// .worktrees/<branch>/), each with its own full node_modules. Metro crawls the
+// project root, so without this it walks every worktree's dependency tree —
+// which both bloats the file map and hard-fails the bundler ("TreeFS: Could not
+// add directory ... already exists in the file map as a file") when two crawled
+// copies of a package disagree about whether a path is a file or a directory.
+//
+// Keep this a blockList rather than trimming watchFolders: the worktrees are
+// under the project root itself, so they are not separate watch folders to drop.
+const existingBlockList = config.resolver.blockList
+config.resolver.blockList = [
+  ...(Array.isArray(existingBlockList)
+    ? existingBlockList
+    : existingBlockList
+      ? [existingBlockList]
+      : []),
+  /\/\.claude\/worktrees\/.*/,
+  /\/\.worktrees\/.*/
+]
+
 // Crypto polyfills
 config.resolver.extraNodeModules = {
   crypto: require.resolve('react-native-quick-crypto'),
