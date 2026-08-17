@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mnemonic, entropy, primaryKey, and backup shares</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #020617;
+      --bg-elev: #0f172a;
+      --line: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --dim: #64748b;
+      --entropy: #a78bfa;
+      --entropy-fill: rgba(76, 29, 149, 0.4);
+      --mnemonic: #22d3ee;
+      --mnemonic-fill: rgba(8, 51, 68, 0.45);
+      --shares: #fbbf24;
+      --shares-fill: rgba(120, 53, 15, 0.35);
+      --key: #34d399;
+      --key-fill: rgba(6, 78, 59, 0.4);
+      --warn: #fb7185;
+      --warn-fill: rgba(136, 19, 55, 0.4);
+      --carrier: #fb923c;
+      --carrier-fill: rgba(251, 146, 60, 0.18);
+      --ok: #34d399;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; max-width: 100%; }
+
+    body {
+      font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    code, .mono, kbd {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+    }
+
+    a { color: var(--mnemonic); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .wrap {
+      max-width: 1180px;
+      width: 100%;
+      min-width: 0;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+
+    header.hero {
+      margin-bottom: 2rem;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      color: var(--muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 0.75rem;
+    }
+
+    .pulse {
+      width: 10px;
+      height: 10px;
+      background: var(--mnemonic);
+      border-radius: 50%;
+      box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.6);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.55); }
+      70% { box-shadow: 0 0 0 10px rgba(34, 211, 238, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); }
+    }
+
+    h1 {
+      font-size: clamp(1.6rem, 3vw, 2.25rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      margin-bottom: 0.75rem;
+    }
+
+    .lede {
+      font-size: 1.05rem;
+      color: var(--muted);
+      max-width: 72ch;
+    }
+
+    .lede strong { color: var(--text); font-weight: 600; }
+
+    nav.toc {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 1.5rem 0 2rem;
+    }
+
+    nav.toc a {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+    }
+
+    nav.toc a:hover {
+      color: var(--text);
+      border-color: #334155;
+      text-decoration: none;
+    }
+
+    section {
+      margin: 3rem 0;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.75rem;
+    }
+
+    h3 {
+      font-size: 1.05rem;
+      margin: 1.5rem 0 0.6rem;
+    }
+
+    p { margin: 0.75rem 0; color: #cbd5e1; }
+
+    .callout {
+      border: 1px solid var(--line);
+      background: rgba(15, 23, 42, 0.55);
+      border-radius: 0.85rem;
+      padding: 1rem 1.15rem;
+      margin: 1.1rem 0;
+    }
+
+    .callout.thesis {
+      border-color: rgba(167, 139, 250, 0.35);
+      background: linear-gradient(180deg, rgba(76, 29, 149, 0.22), rgba(15, 23, 42, 0.55));
+    }
+
+    .callout.warn {
+      border-color: rgba(251, 113, 133, 0.35);
+      background: linear-gradient(180deg, rgba(136, 19, 55, 0.22), rgba(15, 23, 42, 0.55));
+    }
+
+    .callout.ok {
+      border-color: rgba(52, 211, 153, 0.3);
+      background: linear-gradient(180deg, rgba(6, 78, 59, 0.25), rgba(15, 23, 42, 0.55));
+    }
+
+    .callout .kicker {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 0.85rem;
+      margin: 1.25rem 0;
+    }
+
+    .card {
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px solid var(--line);
+      border-radius: 0.85rem;
+      padding: 1rem 1.1rem;
+    }
+
+    .card-h {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.45rem;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex: none;
+    }
+
+    .dot.violet { background: var(--entropy); }
+    .dot.cyan { background: var(--mnemonic); }
+    .dot.amber { background: var(--shares); }
+    .dot.emerald { background: var(--key); }
+    .dot.rose { background: var(--warn); }
+    .dot.orange { background: var(--carrier); }
+
+    .card h3 {
+      margin: 0;
+      font-size: 0.95rem;
+    }
+
+    .card p, .card li {
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    .card ul {
+      margin: 0.45rem 0 0 1rem;
+    }
+
+    .card li { margin: 0.2rem 0; }
+
+    .diagram {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      padding: 1rem;
+      overflow-x: auto;
+      margin: 1.1rem 0;
+      max-width: 100%;
+      min-width: 0;
+    }
+
+    svg { display: block; width: 100%; height: auto; max-width: 100%; }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin: 1rem 0;
+      -webkit-overflow-scrolling: touch;
+      max-width: 100%;
+      min-width: 0;
+    }
+
+    table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    td.yes { color: var(--ok); }
+    td.no { color: var(--warn); }
+    td.partial { color: var(--shares); }
+
+    .bytes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      margin: 0.85rem 0;
+    }
+
+    .byte-block {
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--line);
+    }
+
+    .byte-block.ent {
+      background: var(--entropy-fill);
+      border-color: rgba(167, 139, 250, 0.45);
+      border-radius: 0.6rem 0 0 0.6rem;
+    }
+
+    .byte-block.tag {
+      background: var(--shares-fill);
+      border-color: rgba(251, 191, 36, 0.45);
+      border-radius: 0 0.6rem 0.6rem 0;
+    }
+
+    .byte-block .lbl {
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.3rem;
+    }
+
+    .byte-block .hex {
+      word-break: break-all;
+      color: var(--text);
+    }
+
+    pre {
+      background: #020617;
+      border: 1px solid var(--line);
+      border-radius: 0.7rem;
+      padding: 0.95rem 1rem;
+      overflow-x: auto;
+      font-size: 0.78rem;
+      line-height: 1.55;
+      color: #cbd5e1;
+      margin: 0.85rem 0;
+    }
+
+    code {
+      word-break: break-word;
+    }
+
+    .share-anatomy {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: clamp(0.62rem, 1.6vw, 0.82rem);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.15rem 0;
+      background: #020617;
+      border: 1px solid var(--line);
+      border-radius: 0.7rem;
+      padding: 0.9rem 1rem;
+      word-break: break-all;
+    }
+
+    .share-anatomy .x { color: var(--mnemonic); }
+    .share-anatomy .y { color: var(--key); }
+    .share-anatomy .t { color: var(--shares); }
+    .share-anatomy .i { color: var(--entropy); }
+    .share-anatomy .dotsep { color: var(--dim); }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      margin-top: 0.65rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+
+    .legend.stack {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .flow {
+      display: grid;
+      gap: 0.55rem;
+      margin: 1rem 0;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.8rem;
+      align-items: start;
+    }
+
+    .n {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      width: 1.7rem;
+      height: 1.7rem;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      margin-top: 0.15rem;
+    }
+
+    .step p { margin: 0; }
+
+    footer {
+      margin-top: 3.5rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--line);
+      color: var(--dim);
+      font-size: 0.78rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    @media (max-width: 720px) {
+      .bytes { grid-template-columns: 1fr; }
+      .byte-block.ent, .byte-block.tag { border-radius: 0.6rem; }
+      .diagram svg {
+        min-width: 780px;
+        max-width: none;
+        width: 780px;
+      }
+      pre { white-space: pre-wrap; word-break: break-word; }
+      h1, .lede, p, .card p, .card li { overflow-wrap: break-word; }
+    }
+
+    @media print {
+      body { background: #fff; color: #111; }
+      p, .lede, th, td, .card p, .card li { color: #222; }
+      .diagram, .card, .callout, pre, .share-anatomy { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="eyebrow">
+        <span class="pulse"></span>
+        BSV Browser · wallet recovery · current paper format
+      </div>
+      <h1>How the mnemonic and backup shares encode the same secret</h1>
+      <p class="lede">
+        The thing being backed up is <strong>entropy</strong>, not the everyday spend key.
+        The twelve-word phrase and the current 2-of-3 paper shares are two encodings of those 16 bytes.
+        <code>primaryKey</code> at <code>m/0'/0'</code> is derived from them and cannot be inverted.
+      </p>
+    </header>
+
+    <nav class="toc">
+      <a href="#objects">The four objects</a>
+      <a href="#graph">Derivation graph</a>
+      <a href="#mnemonic">Mnemonic ↔ entropy</a>
+      <a href="#v2">Current share format</a>
+      <a href="#recover">Recovery</a>
+      <a href="#unlocks">What each unlocks</a>
+      <a href="#legacy">Legacy paper</a>
+      <a href="#vault">Vault</a>
+      <a href="#example">Worked example</a>
+      <a href="#sources">Source</a>
+    </nav>
+
+    <div class="callout thesis">
+      <div class="kicker">The one-sentence model</div>
+      <p style="margin:0;color:var(--text)">
+        Entropy is the master secret. The mnemonic is BIP-39 of that entropy.
+        Current backup shares are Shamir of a <em>tagged</em> 32-byte wrapping of that entropy.
+        <code>primaryKey</code> is a hardened child of the seed built from the mnemonic, so it is a consequence — never a backup of the phrase.
+      </p>
+    </div>
+
+    <section id="objects">
+      <h2>The four objects</h2>
+      <p>
+        Names in this page are the names in the app
+        (<code>utils/mnemonicWallet.ts</code>, <code>utils/backupShares.ts</code>).
+        BRC-157 calls <code>m/0'/0'</code> the “root key”; here that child is <code>primaryKey</code>,
+        and <code>rootKey</code> is the BIP-32 master above it.
+      </p>
+      <div class="cards">
+        <article class="card">
+          <div class="card-h"><span class="dot violet"></span><h3>entropy</h3></div>
+          <p>16 bytes / 128 bits. The only secret that both backup media reconstruct.</p>
+          <ul>
+            <li>Produced by <code>Mnemonic.fromRandom()</code></li>
+            <li>Read back with <code>toEntropy()</code></li>
+            <li>v2 paper only supports this width</li>
+          </ul>
+        </article>
+        <article class="card">
+          <div class="card-h"><span class="dot cyan"></span><h3>mnemonic</h3></div>
+          <p>12 English BIP-39 words. A lossless, checksummed spelling of entropy.</p>
+          <ul>
+            <li><code>fromEntropy</code> / <code>toEntropy</code> are inverses</li>
+            <li>Checksum is 4 bits of SHA-256(entropy)</li>
+            <li>This is what vault recovery also needs</li>
+          </ul>
+        </article>
+        <article class="card">
+          <div class="card-h"><span class="dot amber"></span><h3>backup shares</h3></div>
+          <p>Three BRC-140 strings, any two recover. They do <em>not</em> split <code>primaryKey</code>.</p>
+          <ul>
+            <li>Split subject: framed entropy, 32 bytes</li>
+            <li>Format: <code>x.y.threshold.integrity</code></li>
+            <li>Default: 2-of-3, non-deterministic points</li>
+          </ul>
+        </article>
+        <article class="card">
+          <div class="card-h"><span class="dot emerald"></span><h3>primaryKey</h3></div>
+          <p>The wallet’s everyday private key, at hardened path <code>m/0'/0'</code>.</p>
+          <ul>
+            <li>Identity key is its compressed public key</li>
+            <li>Fed to <code>SimpleWalletManager</code></li>
+            <li>Cannot rebuild entropy or the phrase</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="graph">
+      <h2>Derivation graph</h2>
+      <p>
+        Solid arrows are reversible encodings. Dashed rose arrows are one-way.
+        That one-way stretch is why splitting <code>primaryKey</code> could never reopen a vault.
+      </p>
+      <div class="diagram">
+        <svg viewBox="0 0 1000 640" role="img" aria-label="Derivation graph from entropy to mnemonic, shares, and primaryKey">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+            </marker>
+            <marker id="arrow-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee"/>
+            </marker>
+            <marker id="arrow-cyan-start" markerWidth="10" markerHeight="7" refX="1" refY="3.5" orient="auto">
+              <polygon points="10 0, 0 3.5, 10 7" fill="#22d3ee"/>
+            </marker>
+            <marker id="arrow-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24"/>
+            </marker>
+            <marker id="arrow-amber-start" markerWidth="10" markerHeight="7" refX="1" refY="3.5" orient="auto">
+              <polygon points="10 0, 0 3.5, 10 7" fill="#fbbf24"/>
+            </marker>
+            <marker id="arrow-rose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185"/>
+            </marker>
+            <marker id="arrow-em" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#34d399"/>
+            </marker>
+            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+            </pattern>
+          </defs>
+
+          <rect width="1000" height="640" fill="url(#grid)"/>
+
+          <!-- reversible encodings (double-headed; no reverse stroke through the boxes) -->
+          <line x1="390" y1="90" x2="250" y2="198" stroke="#22d3ee" stroke-width="1.6" marker-start="url(#arrow-cyan-start)" marker-end="url(#arrow-cyan)"/>
+          <line x1="610" y1="90" x2="750" y2="198" stroke="#fbbf24" stroke-width="1.6" marker-start="url(#arrow-amber-start)" marker-end="url(#arrow-amber)"/>
+
+          <!-- one-way derivation down the left -->
+          <line x1="230" y1="268" x2="230" y2="330" stroke="#fb7185" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrow-rose)"/>
+          <line x1="230" y1="398" x2="230" y2="454" stroke="#fb7185" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrow-rose)"/>
+          <line x1="230" y1="522" x2="230" y2="560" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-em)"/>
+
+          <!-- entropy -->
+          <rect x="370" y="36" width="260" height="82" rx="6" fill="#0f172a"/>
+          <rect x="370" y="36" width="260" height="82" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="500" y="68" fill="#fff" font-size="13" font-weight="600" text-anchor="middle" font-family="JetBrains Mono, monospace">ENTROPY</text>
+          <text x="500" y="88" fill="#c4b5fd" font-size="9" text-anchor="middle" font-family="JetBrains Mono, monospace">16 bytes · 128 bits</text>
+          <text x="500" y="104" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">the only backed-up secret</text>
+
+          <!-- mnemonic -->
+          <rect x="70" y="200" width="320" height="68" rx="6" fill="#0f172a"/>
+          <rect x="70" y="200" width="320" height="68" rx="6" fill="rgba(8,51,68,0.45)" stroke="#22d3ee" stroke-width="1.5"/>
+          <text x="230" y="226" fill="#fff" font-size="12" font-weight="600" text-anchor="middle" font-family="JetBrains Mono, monospace">mnemonic · 12 words</text>
+          <text x="230" y="246" fill="#67e8f9" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">BIP-39 encode / decode · reversible</text>
+
+          <!-- shares cluster -->
+          <rect x="610" y="200" width="320" height="108" rx="6" fill="#0f172a"/>
+          <rect x="610" y="200" width="320" height="108" rx="6" fill="rgba(120,53,15,0.28)" stroke="#fbbf24" stroke-width="1.5"/>
+          <text x="770" y="224" fill="#fff" font-size="12" font-weight="600" text-anchor="middle" font-family="JetBrains Mono, monospace">v2 backup shares</text>
+          <text x="770" y="242" fill="#fcd34d" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">frameEntropy → PrivateKey.toBackupShares(2,3)</text>
+          <text x="770" y="262" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">payload = entropy ‖ sha256(entropy)[0..16]</text>
+          <text x="770" y="280" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">any 2 of 3 rebuild the payload, then entropy</text>
+          <text x="770" y="296" fill="#fbbf24" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">reversible through the tag</text>
+
+          <!-- seed -->
+          <rect x="90" y="330" width="280" height="68" rx="6" fill="#0f172a"/>
+          <rect x="90" y="330" width="280" height="68" rx="6" fill="rgba(136,19,55,0.28)" stroke="#fb7185" stroke-width="1.5"/>
+          <text x="230" y="356" fill="#fff" font-size="12" font-weight="600" text-anchor="middle" font-family="JetBrains Mono, monospace">seed · 64 bytes</text>
+          <text x="230" y="376" fill="#fda4af" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">PBKDF2-HMAC-SHA512 · toSeed('')</text>
+
+          <!-- rootKey -->
+          <rect x="90" y="454" width="280" height="68" rx="6" fill="#0f172a"/>
+          <rect x="90" y="454" width="280" height="68" rx="6" fill="rgba(6,78,59,0.35)" stroke="#34d399" stroke-width="1.5"/>
+          <text x="230" y="480" fill="#fff" font-size="12" font-weight="600" text-anchor="middle" font-family="JetBrains Mono, monospace">rootKey</text>
+          <text x="230" y="500" fill="#6ee7b7" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">HD.fromSeed(seed).privKey · BIP-32 master</text>
+
+          <!-- primaryKey -->
+          <rect x="70" y="560" width="320" height="62" rx="6" fill="#0f172a"/>
+          <rect x="70" y="560" width="320" height="62" rx="6" fill="rgba(6,78,59,0.45)" stroke="#34d399" stroke-width="1.5"/>
+          <text x="230" y="584" fill="#fff" font-size="12" font-weight="600" text-anchor="middle" font-family="JetBrains Mono, monospace">primaryKey · m/0'/0'</text>
+          <text x="230" y="604" fill="#6ee7b7" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">hardened · identityKey = its public key</text>
+
+          <!-- labels on arrows -->
+          <text x="250" y="156" fill="#22d3ee" font-size="8" font-family="JetBrains Mono, monospace">fromEntropy ↔ toEntropy</text>
+          <text x="690" y="156" fill="#fbbf24" font-size="8" font-family="JetBrains Mono, monospace">frame + Shamir</text>
+          <text x="250" y="312" fill="#fb7185" font-size="8" font-family="JetBrains Mono, monospace">one-way</text>
+          <text x="250" y="436" fill="#fb7185" font-size="8" font-family="JetBrains Mono, monospace">one-way</text>
+          <text x="250" y="550" fill="#34d399" font-size="8" font-family="JetBrains Mono, monospace">derive("m/0'/0'")  HARDENED</text>
+
+          <!-- vault note -->
+          <rect x="520" y="430" width="410" height="168" rx="12" fill="none" stroke="#fb7185" stroke-width="1.2" stroke-dasharray="6 4"/>
+          <text x="540" y="454" fill="#fb7185" font-size="9" font-weight="600" font-family="JetBrains Mono, monospace">VAULT (separate seed)</text>
+          <text x="540" y="476" fill="#fda4af" font-size="9" font-family="JetBrains Mono, monospace">mnemonic + vault passphrase</text>
+          <text x="540" y="494" fill="#94a3b8" font-size="8" font-family="JetBrains Mono, monospace">toSeed(passphrase)  —  empty passphrase is refused</text>
+          <text x="540" y="512" fill="#94a3b8" font-size="8" font-family="JetBrains Mono, monospace">Needs the phrase, not primaryKey.</text>
+          <text x="540" y="530" fill="#94a3b8" font-size="8" font-family="JetBrains Mono, monospace">v2 shares rebuild the phrase, so they open the vault</text>
+          <text x="540" y="548" fill="#94a3b8" font-size="8" font-family="JetBrains Mono, monospace">once the passphrase is known.</text>
+          <text x="540" y="572" fill="#64748b" font-size="8" font-family="JetBrains Mono, monospace">legacy shares stop at primaryKey and cannot.</text>
+        </svg>
+      </div>
+      <div class="legend">
+        <span><span class="dot cyan" style="display:inline-block;margin-right:6px"></span>reversible encoding</span>
+        <span><span class="dot rose" style="display:inline-block;margin-right:6px"></span>one-way KDF / hardened path</span>
+        <span><span class="dot emerald" style="display:inline-block;margin-right:6px"></span>spend / identity material</span>
+      </div>
+    </section>
+
+    <section id="mnemonic">
+      <h2>Mnemonic and entropy are the same 128 bits</h2>
+      <p>
+        A new wallet calls <code>Mnemonic.fromRandom()</code>, which draws 128 bits.
+        BIP-39 appends a 4-bit checksum (the first bits of <code>SHA-256(entropy)</code>),
+        splits the 132 bits into twelve 11-bit word indexes, and looks them up in the English wordlist.
+      </p>
+      <pre>entropy          = 16 bytes
+checksum         = first 4 bits of SHA-256(entropy)
+mnemonic         = 12 words  (132 bits = 128 + 4)
+Mnemonic.toEntropy()     → those 16 bytes
+Mnemonic.fromEntropy(e)  → the same 12 words</pre>
+      <div class="callout warn">
+        <div class="kicker">Do not use fromEntropy as a classifier</div>
+        <p style="margin:0">
+          <code>Mnemonic.fromEntropy</code> <em>computes</em> the checksum. It accepts any 16 bytes
+          and emits a valid-looking phrase. That is why recovery does not “rebuild a mnemonic and
+          see if the checksum works” to decide whether paper is v2 or legacy — the check can never fail.
+          Classification is the SHA-256 tag on the 32-byte payload, below.
+        </p>
+      </div>
+      <p>
+        From the phrase, the everyday key is derived exactly as BRC-157 specifies for the spend root.
+        The app already did this before the paper format changed; only the share <em>payload</em> changed.
+      </p>
+      <pre>seed       = mnemonic.toSeed('')                          // PBKDF2-HMAC-SHA512, 2048 rounds
+hd         = HD.fromSeed(seed)
+rootKey    = hd.privKey                                   // BIP-32 master
+primaryKey = hd.derive("m/0'/0'").privKey.toArray()       // hardened
+identityKey = that key’s compressed public key</pre>
+    </section>
+
+    <section id="v2">
+      <h2>Current paper: tagged entropy, then Shamir</h2>
+      <p>
+        BRC-157 says: split the entropy, not an operational key. The app does that, with one
+        extra wrap that the printed page never has to mention.
+      </p>
+      <p>
+        <code>toBackupShares</code> always splits a 32-byte secp256k1 scalar. Raw 16-byte entropy
+        is the wrong width. Left-padding it to 32 bytes (the BRC-157 import recipe) would look
+        like sixteen leading zero bytes — distinguishable from a random <code>primaryKey</code>
+        <em>until</em> someone imports a 24-word phrase, whose entropy is already 32 bytes and
+        byte-identical in length to a legacy key. Length cannot decide.
+      </p>
+      <p>So the current format, in <code>frameEntropy</code>, is always exactly:</p>
+      <div class="bytes">
+        <div class="byte-block ent">
+          <div class="lbl">bytes 0–15 · entropy</div>
+          <div class="hex">the 16-byte secret from toEntropy()</div>
+        </div>
+        <div class="byte-block tag">
+          <div class="lbl">bytes 16–31 · tag</div>
+          <div class="hex">SHA-256(entropy)[0..16]</div>
+        </div>
+      </div>
+      <pre>payload = entropy(16)  ||  sha256(entropy).slice(0, 16)     // always 32 bytes
+shares  = new PrivateKey(payload).toBackupShares(2, 3)</pre>
+      <p>
+        That <code>PrivateKey</code> is a <em>carrier</em>. It is not <code>primaryKey</code>,
+        it is not used to sign, and it must not appear on-chain. It exists so BRC-140 can
+        treat the tagged payload as a field element and split it.
+      </p>
+      <h3>Share string</h3>
+      <p>Each printed / QR’d share is four dot-separated fields (BRC-140):</p>
+      <div class="share-anatomy" aria-label="Share string anatomy">
+        <span class="x">base58(x)</span><span class="dotsep">.</span>
+        <span class="y">base58(y)</span><span class="dotsep">.</span>
+        <span class="t">2</span><span class="dotsep">.</span>
+        <span class="i">a1b2c3d4</span>
+      </div>
+      <div class="legend stack">
+        <span><span class="x" style="color:var(--mnemonic)">x · y</span> — Shamir point over the secp256k1 field prime</span>
+        <span><span class="t" style="color:var(--shares)">2</span> — threshold (any two recover)</span>
+        <span><span class="i" style="color:var(--entropy)">integrity</span> — first 8 hex chars of HASH160(compressed pubkey of the carrier)</span>
+      </div>
+      <p>
+        All three shares share the same integrity tag. The scanner rejects a share whose tag
+        disagrees — that is what stops someone mixing a v2 page with a leftover v1 page of
+        the same wallet. The two formats split different 32-byte values, so their tags never match.
+      </p>
+      <p>
+        24-word imports are refused at print time. Their entropy is 32 bytes, which fills the
+        carrier and leaves no room for the tag. Those wallets keep the phrase as their only
+        paper path. The app has never generated anything but 12 words.
+      </p>
+    </section>
+
+    <section id="recover">
+      <h2>Recovery: recombine, pad, then classify</h2>
+      <div class="flow">
+        <div class="step">
+          <div class="n">1</div>
+          <p><strong>Scan any two shares.</strong> Parse <code>x.y.threshold.integrity</code>. Same threshold, same integrity, not a duplicate point.</p>
+        </div>
+        <div class="step">
+          <div class="n">2</div>
+          <p><strong>Recombine</strong> with <code>PrivateKey.fromBackupShares</code>. Lagrange interpolation at <code>x = 0</code> yields the 32-byte carrier as a BigNumber.</p>
+        </div>
+        <div class="step">
+          <div class="n">3</div>
+          <p><strong>Pad.</strong> <code>toArray()</code> drops leading <code>0x00</code> bytes (~1 in 256 payloads). <code>padPayload</code> left-pads back to 32. Without this, both formats mis-decode.</p>
+        </div>
+        <div class="step">
+          <div class="n">4</div>
+          <p><strong>Classify.</strong> If bytes 16–31 equal <code>sha256(bytes 0–15)[0..16]</code>, this is v2 entropy. Otherwise it is a legacy <code>primaryKey</code>.</p>
+        </div>
+        <div class="step">
+          <div class="n">5</div>
+          <p>
+            <strong>v2:</strong> <code>Mnemonic.fromEntropy(entropy)</code> → <code>setMnemonic</code> → <code>buildWalletFromMnemonic</code>.
+            The wallet is identical to one that never left the phone. Any stale <code>recoveredKey</code> is deleted only after the mnemonic write succeeds.
+          </p>
+        </div>
+        <div class="step">
+          <div class="n">6</div>
+          <p>
+            <strong>Legacy:</strong> treat the 32 bytes as <code>primaryKey</code>, store WIF, <code>buildWalletFromRecoveredKey</code>,
+            and tell the user these pages cannot open a vault.
+          </p>
+        </div>
+      </div>
+      <pre>function classifyPayload(raw) {
+  const payload = padPayload(raw)          // left-pad to 32
+  const entropy = payload.slice(0, 16)
+  const tag     = payload.slice(16)
+  const expect  = sha256(entropy).slice(0, 16)
+  return tag matches expect
+    ? { kind: 'entropy', entropy }
+    : { kind: 'legacy',  primaryKey: payload }
+}</pre>
+      <p>
+        A corrupted tag is classified as legacy rather than as a wrong phrase.
+        Collision chance for a random 32-byte key against the tag is 2<sup>−128</sup>.
+      </p>
+    </section>
+
+    <section id="unlocks">
+      <h2>What each artifact unlocks</h2>
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th>12-word mnemonic</th>
+            <th>v2 shares (current)</th>
+            <th>v1 shares (legacy)</th>
+            <th>primaryKey / WIF alone</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Reconstructs entropy</td>
+            <td class="yes">yes · toEntropy()</td>
+            <td class="yes">yes · unframe after Shamir</td>
+            <td class="no">no</td>
+            <td class="no">no</td>
+          </tr>
+          <tr>
+            <td>Rebuilds the phrase</td>
+            <td class="yes">it is the phrase</td>
+            <td class="yes">fromEntropy(entropy)</td>
+            <td class="no">hardened wall</td>
+            <td class="no">hardened wall</td>
+          </tr>
+          <tr>
+            <td>Everyday spend (primaryKey)</td>
+            <td class="yes">derive m/0'/0'</td>
+            <td class="yes">via the rebuilt phrase</td>
+            <td class="yes">the split subject was primaryKey</td>
+            <td class="yes">it is the key</td>
+          </tr>
+          <tr>
+            <td>Identity key continuity</td>
+            <td class="yes">same</td>
+            <td class="yes">same</td>
+            <td class="yes">same address, no phrase</td>
+            <td class="yes">same address, no phrase</td>
+          </tr>
+          <tr>
+            <td>Vault (mnemonic + passphrase)</td>
+            <td class="yes">yes</td>
+            <td class="yes">yes, after rebuild</td>
+            <td class="no">permanently shut</td>
+            <td class="no">permanently shut</td>
+          </tr>
+          <tr>
+            <td>Can emit the other medium</td>
+            <td class="yes">print v2 shares from entropy</td>
+            <td class="yes">show the same 12 words</td>
+            <td class="partial">can reprint v1 only</td>
+            <td class="partial">can reprint v1 only</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <p>
+        Phrase and current paper are interchangeable. That is the whole point of moving the
+        split subject from <code>primaryKey</code> to entropy.
+      </p>
+    </section>
+
+    <section id="legacy">
+      <h2>Legacy paper still works, and stays legacy</h2>
+      <p>
+        Older sheets split the raw <code>primaryKey</code> bytes — the hardened child itself.
+        Recovery still accepts them: the tag check fails, so <code>classifyPayload</code> returns
+        <code>{ kind: 'legacy', primaryKey }</code>.
+      </p>
+      <p>
+        A wallet that was itself restored from those sheets has no mnemonic in storage.
+        It can only print more legacy shares, via <code>generateLegacyKeyShares</code>.
+        There is no in-place upgrade: you cannot invert <code>m/0'/0'</code> back to entropy.
+        The remedy, if the phrase is truly gone, is sweep to a fresh 12-word wallet and print v2 paper.
+      </p>
+      <div class="callout">
+        <div class="kicker">Why the printed page has no version field</div>
+        <p style="margin:0">
+          Sheets already in drawers cannot grow a version marker. The 16-byte SHA-256 tag is
+          the version, living inside the secret so old and new paper stay the same string shape
+          and the same QR scanner.
+        </p>
+      </div>
+    </section>
+
+    <section id="vault">
+      <h2>Why the vault forced this change</h2>
+      <p>
+        The v2 vault key is not a second phrase. It is the <em>same</em> mnemonic pushed through
+        BIP-39 with a non-empty passphrase:
+      </p>
+      <pre>main wallet : HD.fromSeed(mnemonic.toSeed(''))
+vault HD    : HD.fromSeed(mnemonic.toSeed(passphrase))   // empty passphrase refused</pre>
+      <p>
+        Deposit addresses are ordinary BIP-32 children of that vault node.
+        Recovery is therefore either YubiKey+PIN, or <strong>mnemonic + passphrase</strong>.
+        There is no third path. A backup that only returns <code>primaryKey</code> restores
+        the hot wallet and bricks the vault.
+      </p>
+      <div class="callout ok">
+        <div class="kicker">Current paper is seed-equivalent</div>
+        <p style="margin:0">
+          Any two v2 pages rebuild the twelve words. Treat two pages together the way you
+          treat the phrase. A single page still reveals nothing (Shamir below threshold).
+        </p>
+      </div>
+    </section>
+
+    <section id="example">
+      <h2>Worked example (BIP-39 test vector)</h2>
+      <p>Public vector, not a real wallet. Same numbers as BRC-157’s 12-word example.</p>
+      <pre>mnemonic  = legal winner thank year wave sausage worth useful legal winner thank yellow
+entropy   = 7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f          // 16 bytes
+tag       = 87dcde7fa6df23e15fa7ba9b2a1f3140          // sha256(entropy)[0..16]
+payload   = 7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f
+            87dcde7fa6df23e15fa7ba9b2a1f3140          // 32-byte carrier
+
+// After any 2 shares are recombined and padded:
+classifyPayload(payload) → { kind: 'entropy', entropy: 7f7f…7f }
+Mnemonic.fromEntropy(entropy) → the same 12 words
+
+// Everyday key, from the phrase, not from the carrier:
+primaryKey @ m/0'/0'
+          = 27e442c8015fc055789d6628f3b30461e8b2598aff74dc87ceef00dd8e670e55</pre>
+      <p>
+        Notice the carrier and <code>primaryKey</code> are different 32-byte strings.
+        Feeding the carrier to <code>buildWalletFromRecoveredKey</code> would open a
+        valid-looking empty wallet. Classification exists to make that mistake impossible
+        without a 2<sup>−128</sup> tag collision.
+      </p>
+      <p>
+        If this same phrase had been backed up the old way, the split subject would have been
+        <code>27e442…0e55</code> itself. Any two of those pages still spend, and none of them
+        can ever emit <code>legal winner … yellow</code>.
+      </p>
+    </section>
+
+    <section id="sources">
+      <h2>Where this lives in the repo</h2>
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Concern</th><th>File</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Frame, pad, classify, split, recombine</td><td><code>utils/backupShares.ts</code></td></tr>
+          <tr><td>Print path: mnemonic → entropy → v2, or WIF → v1</td><td><code>utils/printRecoveryShares.ts</code></td></tr>
+          <tr><td>entropy → seed → rootKey → primaryKey</td><td><code>utils/mnemonicWallet.ts</code></td></tr>
+          <tr><td>Scan, classify, persist mnemonic or WIF</td><td><code>app/auth/scan-shares.tsx</code></td></tr>
+          <tr><td>Build from phrase vs from recovered key</td><td><code>context/WalletContext.tsx</code></td></tr>
+          <tr><td>Vault seed from same phrase + passphrase</td><td><code>services/vault/vaultDerivation.ts</code></td></tr>
+          <tr><td>Format tests, including leading-zero pad</td><td><code>__tests__/backupShares.test.ts</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p>
+        Specs in the background:
+        <a href="https://bsv.brc.dev/key-derivation/0157">BRC-157</a> (entropy as the backup subject),
+        <a href="https://bsv.brc.dev/key-derivation/0140">BRC-140</a> (share arithmetic and string format),
+        BIP-39 (words), BIP-32 / BRC-32 (the hardened path).
+        The SHA-256 tag is an app-level discriminator on top of BRC-157, so already-printed
+        pages do not need a version field.
+      </p>
+    </section>
+
+    <footer>
+      BSV Browser · documents the implementation on feat/wallet-backup-log · not a substitute for the printed recovery sheet
+    </footer>
+  </div>
+</body>
+</html>

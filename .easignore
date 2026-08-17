@@ -97,6 +97,10 @@ credentials.json
 
 # --- from ios/.gitignore (path-prefixed) ---
 ios/build/
+# `-derivedDataPath ios/build-release` output from a local archive build. Not
+# covered by `ios/build/` or `DerivedData`, and ~800 MB, so without this it
+# rides along in every local build's project archive. Mirrored in .gitignore.
+ios/build-release/
 *.pbxuser
 !default.pbxuser
 *.mode1v3

@@ -69,3 +69,6 @@ Dev Builds.zip
 .opencode
 credentials.json
 .superpowers/
+
+# Local archive build derived data (see .easignore — keep the two in sync)
+ios/build-release/
