@@ -191,15 +191,13 @@ const resources = {
       vault_recovery_paths_title: 'Two ways to recover this vault',
       vault_recovery_path_device: 'Your hardware key, plus its PIN.',
       vault_recovery_path_phrase:
-        'Your wallet recovery phrase, plus the vault passphrase you are about to choose.',
+        'Your wallet recovery phrase — or your backup shares, which rebuild it — plus the vault passphrase you are about to choose.',
       vault_recovery_no_other:
         'There is no other way in. Nobody, including us, can reset your passphrase or open the vault for you.',
-      // Backup shares cover the everyday balance ONLY. They are Shamir shares of
-      // the primary key at m/0'/0' — a hardened, one-way derivation — so they can
-      // never rebuild the recovery phrase the vault key needs.
+      // Backup shares split the mnemonic ENTROPY (BRC-157), so any two rebuild
+      // the phrase — and therefore the vault. The printed sheet is
+      // seed-equivalent paper.
       vault_print_shares_cta: 'Print recovery shares',
-      vault_print_shares_note:
-        'Recovery shares restore your everyday balance only. They cannot open the vault — that needs your recovery phrase and passphrase.',
       vault_shares_unavailable: 'No key material available to print.',
       vault_requires_mnemonic:
         'This wallet was restored from recovery shares, so it has no recovery phrase. The vault key is derived from that phrase, so a vault cannot be set up on this wallet.',
@@ -298,6 +296,45 @@ const resources = {
       vault_mock_toggle: 'Use mock YubiKey (dev)',
       vault_on: 'On',
       vault_off: 'Off',
+
+      // Backup prerequisite — a vault with no recovery path is worse than no
+      // vault, so this step gates enrollment and deposits.
+      vault_backup_title: 'Back up before you lock anything away',
+      vault_backup_intro:
+        'The vault protects your funds from someone holding your phone. It cannot protect them from losing it. Do one of these first.',
+      vault_backup_phrase_title: 'Write down your recovery phrase',
+      vault_backup_phrase_sub: 'Twelve words, on paper, somewhere only you can reach.',
+      vault_backup_shares_title: 'Print recovery shares',
+      vault_backup_shares_sub: 'Three pages. Any two recover everything — store them apart.',
+      vault_backup_either_note:
+        'Either one is enough. Both restore your whole wallet, vault included.',
+      vault_shares_word_count:
+        'Recovery shares support twelve-word phrases only. Write your phrase down instead.',
+
+      // Phrase reveal
+      vault_phrase_title: 'Your recovery phrase',
+      vault_phrase_intro: 'Write these twelve words down in order. Do not photograph them.',
+      vault_phrase_copy: 'Copy to clipboard',
+      vault_phrase_copied: 'Copied',
+      vault_phrase_warning:
+        'Anyone with these words owns everything in this wallet, including the vault. Nobody can reset them for you.',
+      vault_phrase_attest: 'I have written these down and stored them safely.',
+      vault_phrase_done: 'Done',
+
+      // Deposit gate
+      vault_err_backup_required:
+        'Back up this wallet before moving funds into the vault.',
+      vault_deposit_blocked_title: 'Back up first',
+      vault_deposit_blocked_message:
+        'This wallet has no recovery backup. If you lost this phone right now, the funds in the vault would be gone for good.',
+      vault_deposit_blocked_cta: 'Back up now',
+      vault_deposit_blocked_dismiss: 'Not now',
+
+      // Legacy backup shares
+      scan_shares_legacy_title: 'Older backup format',
+      scan_shares_legacy_message:
+        'These shares are an older format that restores your everyday balance but cannot open a vault. If you still have your twelve-word recovery phrase, restore from that instead — it recovers everything — and print fresh shares afterwards. If the phrase is gone, send your funds to a new wallet and start again.',
+      scan_shares_legacy_ack: 'I understand',
 
       // Account
       delete_wallet: 'Delete Wallet',
