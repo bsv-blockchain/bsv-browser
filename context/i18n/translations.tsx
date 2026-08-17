@@ -303,8 +303,13 @@ const resources = {
         'Either one is enough. Both restore your whole wallet, vault included.',
       vault_shares_word_count:
         'Recovery shares support twelve-word phrases only. Write your phrase down instead.',
-      vault_backup_attest_failed:
-        'Could not record your backup. Check your connection and try again.',
+      // Recording the attestation is entirely local — a key derivation and a
+      // storage write — so neither message may blame the network.
+      vault_backup_attest_failed: 'Could not record your backup. Please try again.',
+      // The paper is real and correct here; only the record is missing. Say so,
+      // or the user reprints shares they already have.
+      vault_backup_attest_failed_printed:
+        'Your shares printed, but we could not record the backup. Tap Print recovery shares again to finish.',
 
       // Phrase reveal
       vault_phrase_title: 'Your recovery phrase',

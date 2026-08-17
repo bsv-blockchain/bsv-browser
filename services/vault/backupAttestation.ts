@@ -59,3 +59,78 @@ export const backupAttestation = {
     if (mine.length > 0) await AsyncStorage.multiRemove(mine)
   }
 }
+
+/**
+ * The wallet surface needed to scope an attestation. Structural on purpose:
+ * both call sites hold a WalletPermissionsManager, but this module only ever
+ * needs the identity key.
+ */
+export interface AttestationIdentitySource {
+  getPublicKey(args: unknown, originator: string): Promise<{ publicKey: string }>
+}
+
+/**
+ * Resolve the wallet identity that scopes an attestation, on demand.
+ *
+ * On demand rather than from cached state: a screen that reads a key populated
+ * by a mount effect can act before that effect resolves, and would then skip
+ * the write silently.
+ *
+ * Guarded — a rejecting getPublicKey (managers not ready, permission denied)
+ * resolves to null rather than propagating. Callers treat null as "cannot
+ * attest right now"; an unguarded rejection would surface as an unhandled
+ * promise instead of something the user can see.
+ */
+export async function resolveAttestationIdentity(
+  wallet: AttestationIdentitySource | null | undefined,
+  adminOriginator: string
+): Promise<string | null> {
+  try {
+    const r = await wallet?.getPublicKey({ identityKey: true }, adminOriginator)
+    return r?.publicKey || null
+  } catch (err) {
+    console.warn('[backupAttestation] identity lookup failed:', err)
+    return null
+  }
+}
+
+/** This wallet's attestation, or null when there is none — or no identity yet. */
+export async function readBackupAttestation(
+  wallet: AttestationIdentitySource | null | undefined,
+  adminOriginator: string
+): Promise<BackupAttestation | null> {
+  const identityKey = await resolveAttestationIdentity(wallet, adminOriginator)
+  if (!identityKey) return null
+  try {
+    return await backupAttestation.get(identityKey)
+  } catch (err) {
+    console.warn('[backupAttestation] read failed:', err)
+    return null
+  }
+}
+
+/**
+ * Record that the user backed up. The single writer — every surface that can
+ * satisfy the vault's backup prerequisite goes through here, so the guard
+ * against an unresolved identity cannot drift between them.
+ *
+ * Returns false when nothing was persisted, and NEVER throws. Callers must
+ * surface a false: treating it as success tells the user they are backed up
+ * while the deposit gate still refuses them, with nothing on screen to explain
+ * why.
+ */
+export async function recordBackupAttestation(
+  wallet: AttestationIdentitySource | null | undefined,
+  adminOriginator: string,
+  medium: BackupMedium
+): Promise<boolean> {
+  const identityKey = await resolveAttestationIdentity(wallet, adminOriginator)
+  if (!identityKey) return false
+  try {
+    await backupAttestation.set(identityKey, medium)
+    return true
+  } catch (err) {
+    console.warn('[backupAttestation] write failed:', err)
+    return false
+  }
+}

@@ -30,7 +30,7 @@ import { exportAllWalletDatabases } from '@/utils/exportDatabases'
 import { importWalletDatabase } from '@/utils/importDatabases'
 import { PrivateKey } from '@bsv/sdk'
 import { printRecoveryShares } from '@/utils/printRecoveryShares'
-import { backupAttestation } from '@/services/vault/backupAttestation'
+import { recordBackupAttestation } from '@/services/vault/backupAttestation'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 export default function WalletConfigScreen() {
@@ -51,7 +51,6 @@ export default function WalletConfigScreen() {
   const { getMnemonic, getRecoveredKey } = useLocalStorage()
   const insets = useSafeAreaInsets()
 
-  const [identityKey, setIdentityKey] = useState('')
   const [isPrinting, setIsPrinting] = useState(false)
   const [copiedMnemonic, setCopiedMnemonic] = useState(false)
   const [switchingNetwork, setSwitchingNetwork] = useState(false)
@@ -101,13 +100,6 @@ export default function WalletConfigScreen() {
     }, 600)
   }, [currentCurrency, satoshisPerUSD])
 
-  // Fetch identity key (needed for print recovery shares)
-  useEffect(() => {
-    managers?.permissionsManager
-      ?.getPublicKey({ identityKey: true }, adminOriginator)
-      .then(r => r && setIdentityKey(r.publicKey))
-  }, [managers, adminOriginator])
-
   const handleCopyMnemonic = async () => {
     try {
       // Copy mnemonic if available, otherwise fall back to primary key hex
@@ -136,13 +128,16 @@ export default function WalletConfigScreen() {
       })
       if (result.ok) {
         // A resolved print sheet from Settings is the same genuine backup
-        // EnrollWizard records — this is the other route to satisfying the
-        // vault's backup prerequisite, so it must record the same
-        // attestation. Guard against an empty key: identityKey is populated
-        // by a mount-time effect that may not have resolved yet, and writing
-        // under an empty scope would attest nothing to nobody.
-        if (identityKey) {
-          await backupAttestation.set(identityKey, 'shares')
+        // EnrollWizard records — the other route to satisfying the vault's
+        // backup prerequisite — so it records the same attestation, through
+        // the same writer.
+        //
+        // A failure here must be visible. The paper is real and correct; only
+        // the record is missing. Staying silent would send the user away
+        // believing they are covered, and the vault would refuse every deposit
+        // later with nothing on screen connecting the two.
+        if (!(await recordBackupAttestation(managers?.permissionsManager, adminOriginator, 'shares'))) {
+          showToast(t('vault_backup_attest_failed_printed'), { type: 'error' })
         }
       } else {
         showToast(
