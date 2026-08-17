@@ -1726,7 +1726,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       // The attestation is per wallet. "Delete Wallet" routes here, so leaving
       // it behind would let the NEXT wallet on this device inherit a backup it
       // never made.
-      backupAttestation.clearAll()
+      backupAttestation.clearAll().catch(err => {
+        console.warn('[backupAttestation.clearAll]', err)
+      })
 
       router.dismissAll()
       router.push('/')
