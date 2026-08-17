@@ -509,6 +509,12 @@ const resources = {
       scan_shares_remaining: '{{count}} more share needed',
       scan_shares_complete: 'All shares collected!',
       scan_shares_recovery_failed: 'Recovery failed. Please try scanning again.',
+      // Shown when the biometric prompt guarding the keychain is refused, so
+      // the recovered secret could not be stored. The buttons reuse the generic
+      // `cancel` / `retry` keys, which are already translated everywhere.
+      scan_shares_biometric_title: 'Biometric Access Required',
+      scan_shares_biometric_message:
+        'Biometric access is needed to protect your wallet keys. Please try again.',
       invalid_bsv_address: 'Invalid BSV address',
       scan_bsv_address_hint: 'Point the camera at a BSV address QR code',
       scan_identity_key_hint: 'Point the camera at an identity key QR code',

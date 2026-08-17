@@ -143,11 +143,11 @@ export default function ScanSharesScreen() {
    */
   const retryOrReset = async (shareStrings: string[]): Promise<void> => {
     const choice = await showAlert({
-      title: 'Biometric Access Required',
-      message: 'Biometric access is needed to protect your wallet keys. Please try again.',
+      title: t('scan_shares_biometric_title'),
+      message: t('scan_shares_biometric_message'),
       buttons: [
-        { text: 'Cancel', style: 'cancel', key: 'cancel' },
-        { text: 'Try Again', key: 'retry' },
+        { text: t('cancel'), style: 'cancel', key: 'cancel' },
+        { text: t('retry'), key: 'retry' },
       ],
     })
     if (choice === 'cancel') {

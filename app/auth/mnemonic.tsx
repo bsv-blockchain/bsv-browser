@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import {
   View,
   Text,
@@ -33,7 +33,7 @@ type MnemonicMode = 'choose' | 'generate' | 'import'
 export default function MnemonicScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
-  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey, managers, adminOriginator } = useWallet()
+  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey } = useWallet()
   const { setMnemonic: storeMnemonic, setRecoveredKey } = useLocalStorage()
 
   const [mode, setMode] = useState<MnemonicMode>('choose')
@@ -44,15 +44,7 @@ export default function MnemonicScreen() {
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
-  const [identityKey, setIdentityKey] = useState('')
   const [celebrating, setCelebrating] = useState(false)
-
-  // Fetch identity key (needed for print recovery shares)
-  useEffect(() => {
-    managers?.permissionsManager
-      ?.getPublicKey({ identityKey: true }, adminOriginator)
-      .then(r => r && setIdentityKey(r.publicKey))
-  }, [managers, adminOriginator])
 
   // Generate a new mnemonic and immediately build the wallet
   const handleGenerateNew = async () => {
@@ -61,8 +53,9 @@ export default function MnemonicScreen() {
       setMnemonic(wallet.mnemonic)
       setMode('generate')
 
-      // Store and build the wallet immediately so that managers/identityKey
-      // are available for Print Recovery Shares on the save screen.
+      // Store and build the wallet immediately so it is ready by the time the
+      // user finishes the save screen. (Print Recovery Shares no longer needs
+      // this — it derives the identity key from the mnemonic itself.)
       console.log('[Mnemonic] Building wallet eagerly after mnemonic generation')
       const stored = await storeMnemonic(wallet.mnemonic)
       if (!stored) {
