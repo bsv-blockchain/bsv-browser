@@ -190,7 +190,11 @@ async function generateQRCodeSVG(data: string, size: number = 180): Promise<stri
  *
  * Pages are separated by CSS page-break-after for print dialogue.
  */
-export async function generatePrintHTML(shares: string[], identityKey: string): Promise<string> {
+export async function generatePrintHTML(
+  shares: string[],
+  identityKey: string,
+  format: 'entropy' | 'legacy' = 'entropy'
+): Promise<string> {
   const now = new Date()
   const date = now.toISOString().split('T')[0]
   const time = now.toISOString().split('T')[1].split('.')[0]
@@ -231,8 +235,13 @@ export async function generatePrintHTML(shares: string[], identityKey: string): 
 
       <div class="instructions">
         <strong>Recovery Instructions</strong>
-        <p>This is 1 of ${shares.length} backup shares. You need any ${shares[0].split('.')[2]} shares to recover your wallet key.</p>
+        <p>This is 1 of ${shares.length} backup shares. You need any ${shares[0].split('.')[2]} shares to recover your wallet.</p>
         <p>Store each share in a separate, secure location. Do not store shares together.</p>
+        <p>${
+          format === 'entropy'
+            ? 'Any two of these pages rebuild your twelve-word recovery phrase, and therefore your entire wallet — everyday balance and vault alike. Treat two pages together as you would the phrase itself.'
+            : 'These shares are an older format. They restore your everyday balance but cannot open a vault.'
+        }</p>
         <p>To recover: In BSV Browser, go to Enable Web3 &rarr; Import Existing Wallet &rarr; Scan Backup Shares.</p>
       </div>
     </div>
