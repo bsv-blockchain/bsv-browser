@@ -24,6 +24,17 @@ export class TaskBackupPush extends WalletMonitorTask {
   static readonly BASE_BACKOFF_MS = 30_000
   static readonly MAX_BACKOFF_MS = 900_000
 
+  /**
+   * Re-check even when nothing has announced a change.
+   *
+   * `noteChanged` is wired to the paths we know about, but the wallet database can be
+   * written by paths that do not announce themselves — a dApp creating an action produces
+   * no status *transition*, so the Monitor's onTransactionStatusChanged never fires for it.
+   * Rather than depend on having found every writer, this floor guarantees the log
+   * converges: the cost of a needless check is one local getSyncChunk that returns empty.
+   */
+  static readonly IDLE_RECHECK_MS = 300_000
+
   /** Last observation from the app's online listener. Gates the trigger entirely. */
   static onlineNow = false
   /** The database may hold un-pushed changes. Set pessimistically; a clean pass clears it. */
@@ -32,6 +43,8 @@ export class TaskBackupPush extends WalletMonitorTask {
   static checkNow = false
   /** Earliest time the next pass may run. */
   static nextDueAt = 0
+  /** When the last pass started, for the idle re-check floor. */
+  static lastRunAt = 0
   static backoffMs = TaskBackupPush.BASE_BACKOFF_MS
   /** Last error, kept so settings can show why backups are not progressing. */
   static lastError: string | undefined
@@ -61,6 +74,7 @@ export class TaskBackupPush extends WalletMonitorTask {
 
   static noteRan (at: number): void {
     TaskBackupPush.nextDueAt = at + MIN_PUSH_INTERVAL_MS
+    TaskBackupPush.lastRunAt = at
   }
 
   static noteFailure (at: number): void {
@@ -77,6 +91,7 @@ export class TaskBackupPush extends WalletMonitorTask {
     TaskBackupPush.hasChanges = false
     TaskBackupPush.checkNow = false
     TaskBackupPush.nextDueAt = 0
+    TaskBackupPush.lastRunAt = 0
     TaskBackupPush.backoffMs = TaskBackupPush.BASE_BACKOFF_MS
     TaskBackupPush.lastError = undefined
     TaskBackupPush.lastSuccessAt = undefined
@@ -92,8 +107,11 @@ export class TaskBackupPush extends WalletMonitorTask {
   trigger (nowMsecsSinceEpoch: number): { run: boolean } {
     if (!TaskBackupPush.onlineNow) return { run: false }
     if (TaskBackupPush.checkNow) return { run: true }
-    if (!TaskBackupPush.hasChanges) return { run: false }
-    return { run: nowMsecsSinceEpoch >= TaskBackupPush.nextDueAt }
+    if (TaskBackupPush.hasChanges) {
+      return { run: nowMsecsSinceEpoch >= TaskBackupPush.nextDueAt }
+    }
+    // Safety net for writers that never announced themselves.
+    return { run: nowMsecsSinceEpoch >= TaskBackupPush.lastRunAt + TaskBackupPush.IDLE_RECHECK_MS }
   }
 
   async runTask (): Promise<string> {

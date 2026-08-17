@@ -12,14 +12,16 @@
         "simulator": true
       },
       "env": {
-        "RCT_USE_PREBUILT_RNCORE": "0"
+        "RCT_USE_PREBUILT_RNCORE": "0",
+        "EXPO_PUBLIC_BACKUP_URL": "https://backup.bsvblockchain.tech"
       }
     },
     "dev-physical": {
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "RCT_USE_PREBUILT_RNCORE": "0"
+        "RCT_USE_PREBUILT_RNCORE": "0",
+        "EXPO_PUBLIC_BACKUP_URL": "https://backup.bsvblockchain.tech"
       }
     },
     "preview-apk": {
@@ -52,7 +54,8 @@
         "EXPO_PUBLIC_TEST_WOC_API_KEY": "testnet_8a709373c94c6e372b90458fee766b04",
         "EXPO_PUBLIC_TERATEST_ARC_URL": "https://arcade-v2-ttn-us-1.bsvblockchain.tech",
         "EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL": "https://arcade-v2-ttn-us-1.bsvblockchain.tech/chaintracks/v1",
-        "EXPO_PUBLIC_TERATEST_WOC_API_KEY": "testnet_8a709373c94c6e372b90458fee766b04"
+        "EXPO_PUBLIC_TERATEST_WOC_API_KEY": "testnet_8a709373c94c6e372b90458fee766b04",
+        "EXPO_PUBLIC_BACKUP_URL": "https://backup.bsvblockchain.tech"
       }
     },
     "production-apk": {

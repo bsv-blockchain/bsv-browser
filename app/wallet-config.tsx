@@ -29,9 +29,8 @@ import Clipboard from '@react-native-clipboard/clipboard'
 import { exportAllWalletDatabases } from '@/utils/exportDatabases'
 import { importWalletDatabase } from '@/utils/importDatabases'
 import { PrivateKey } from '@bsv/sdk'
-import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
-import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
-import * as Print from 'expo-print'
+import { printRecoveryShares } from '@/utils/printRecoveryShares'
+import { recordBackupAttestation } from '@/services/vault/backupAttestation'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 export default function WalletConfigScreen() {
@@ -52,7 +51,6 @@ export default function WalletConfigScreen() {
   const { getMnemonic, getRecoveredKey } = useLocalStorage()
   const insets = useSafeAreaInsets()
 
-  const [identityKey, setIdentityKey] = useState('')
   const [isPrinting, setIsPrinting] = useState(false)
   const [copiedMnemonic, setCopiedMnemonic] = useState(false)
   const [switchingNetwork, setSwitchingNetwork] = useState(false)
@@ -102,13 +100,6 @@ export default function WalletConfigScreen() {
     }, 600)
   }, [currentCurrency, satoshisPerUSD])
 
-  // Fetch identity key (needed for print recovery shares)
-  useEffect(() => {
-    managers?.permissionsManager
-      ?.getPublicKey({ identityKey: true }, adminOriginator)
-      .then(r => r && setIdentityKey(r.publicKey))
-  }, [managers, adminOriginator])
-
   const handleCopyMnemonic = async () => {
     try {
       // Copy mnemonic if available, otherwise fall back to primary key hex
@@ -131,29 +122,31 @@ export default function WalletConfigScreen() {
     if (isPrinting) return
     setIsPrinting(true)
     try {
-      let primaryKeyBytes: number[] | null = null
-
-      // Try mnemonic-based key first
-      const mnemonic = await getMnemonic()
-      if (mnemonic) {
-        const { primaryKey } = recoverMnemonicWallet(mnemonic)
-        primaryKeyBytes = primaryKey
-      } else {
-        // Fall back to recovered key
-        const wif = await getRecoveredKey()
-        if (wif) {
-          primaryKeyBytes = PrivateKey.fromWif(wif).toArray()
+      const result = await printRecoveryShares({
+        mnemonic: await getMnemonic(),
+        recoveredKeyWif: await getRecoveredKey()
+      })
+      if (result.ok) {
+        // A resolved print sheet from Settings is the same genuine backup
+        // EnrollWizard records — the other route to satisfying the vault's
+        // backup prerequisite — so it records the same attestation, through
+        // the same writer.
+        //
+        // A failure here must be visible. The paper is real and correct; only
+        // the record is missing. Staying silent would send the user away
+        // believing they are covered, and the vault would refuse every deposit
+        // later with nothing on screen connecting the two.
+        if (!(await recordBackupAttestation(managers?.permissionsManager, adminOriginator, 'shares'))) {
+          showToast(t('vault_backup_attest_failed_printed'), { type: 'error' })
         }
+      } else {
+        showToast(
+          result.reason === 'unsupported-word-count'
+            ? t('vault_shares_word_count')
+            : 'Unable to access wallet key. Please authenticate and try again.',
+          { type: 'error' }
+        )
       }
-
-      if (!primaryKeyBytes) {
-        showToast('Unable to access wallet key. Please authenticate and try again.', { type: 'error' })
-        return
-      }
-
-      const shares = generateBackupShares(primaryKeyBytes)
-      const html = await generatePrintHTML(shares, identityKey)
-      await Print.printAsync({ html })
     } catch (error: any) {
       console.info('[WalletConfig] Print recovery shares did not complete:', error?.message)
     } finally {

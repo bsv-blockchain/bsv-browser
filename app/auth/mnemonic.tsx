@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import {
   View,
   Text,
@@ -17,10 +17,9 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useTranslation } from 'react-i18next'
 import { useWallet } from '@/context/WalletContext'
 import { PrivateKey } from '@bsv/sdk'
-import { generateMnemonicWallet, validateMnemonic, recoverMnemonicWallet } from '@/utils/mnemonicWallet'
-import { generateBackupShares, generatePrintHTML } from '@/utils/backupShares'
+import { generateMnemonicWallet, validateMnemonic } from '@/utils/mnemonicWallet'
+import { printRecoveryShares } from '@/utils/printRecoveryShares'
 import * as Clipboard from 'expo-clipboard'
-import * as Print from 'expo-print'
 import { Paths, File as ExpoFile } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
@@ -34,7 +33,7 @@ type MnemonicMode = 'choose' | 'generate' | 'import'
 export default function MnemonicScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
-  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey, managers, adminOriginator } = useWallet()
+  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey } = useWallet()
   const { setMnemonic: storeMnemonic, setRecoveredKey } = useLocalStorage()
 
   const [mode, setMode] = useState<MnemonicMode>('choose')
@@ -45,15 +44,7 @@ export default function MnemonicScreen() {
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
-  const [identityKey, setIdentityKey] = useState('')
   const [celebrating, setCelebrating] = useState(false)
-
-  // Fetch identity key (needed for print recovery shares)
-  useEffect(() => {
-    managers?.permissionsManager
-      ?.getPublicKey({ identityKey: true }, adminOriginator)
-      .then(r => r && setIdentityKey(r.publicKey))
-  }, [managers, adminOriginator])
 
   // Generate a new mnemonic and immediately build the wallet
   const handleGenerateNew = async () => {
@@ -62,8 +53,9 @@ export default function MnemonicScreen() {
       setMnemonic(wallet.mnemonic)
       setMode('generate')
 
-      // Store and build the wallet immediately so that managers/identityKey
-      // are available for Print Recovery Shares on the save screen.
+      // Store and build the wallet immediately so it is ready by the time the
+      // user finishes the save screen. (Print Recovery Shares no longer needs
+      // this — it derives the identity key from the mnemonic itself.)
       console.log('[Mnemonic] Building wallet eagerly after mnemonic generation')
       const stored = await storeMnemonic(wallet.mnemonic)
       if (!stored) {
@@ -125,11 +117,17 @@ export default function MnemonicScreen() {
     if (isPrinting) return
     setIsPrinting(true)
     try {
-      const { primaryKey } = recoverMnemonicWallet(mnemonic)
-      const shares = generateBackupShares(primaryKey)
-      const html = await generatePrintHTML(shares, identityKey)
-      await Print.printAsync({ html })
-      setHasAcknowledged(true)
+      const result = await printRecoveryShares({ mnemonic, recoveredKeyWif: null })
+      if (!result.ok) {
+        showToast(
+          result.reason === 'unsupported-word-count'
+            ? t('vault_shares_word_count')
+            : t('vault_shares_unavailable'),
+          { type: 'error' }
+        )
+      } else {
+        setHasAcknowledged(true)
+      }
     } catch (error: any) {
       console.info('[Mnemonic] Print recovery shares did not complete:', error?.message)
     } finally {

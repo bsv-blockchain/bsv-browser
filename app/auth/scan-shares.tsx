@@ -8,7 +8,8 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useTranslation } from 'react-i18next'
 import { useWallet } from '@/context/WalletContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
-import { parseShare, validateShareCompatibility, recoverKeyFromShares, ParsedShare } from '@/utils/backupShares'
+import { parseShare, validateShareCompatibility, recoverSecretFromShares, ParsedShare } from '@/utils/backupShares'
+import { Mnemonic, PrivateKey } from '@bsv/sdk'
 import { showAlert } from '@/components/ui/AlertCard'
 import { haptics } from '@/hooks/useHaptics'
 import QRScanner from '@/components/QRScanner'
@@ -17,8 +18,8 @@ import Celebration from '@/components/ui/Celebration'
 export default function ScanSharesScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
-  const { buildWalletFromRecoveredKey } = useWallet()
-  const { setRecoveredKey } = useLocalStorage()
+  const { buildWalletFromRecoveredKey, buildWalletFromMnemonic } = useWallet()
+  const { setRecoveredKey, setMnemonic, deleteRecoveredKey } = useLocalStorage()
 
   const [scannedShares, setScannedShares] = useState<ParsedShare[]>([])
   const [threshold, setThreshold] = useState<number | null>(null)
@@ -80,34 +81,45 @@ export default function ScanSharesScreen() {
     [scannedShares, threshold, recovered, t]
   )
 
+  /**
+   * Two formats reach this point.
+   *
+   * Entropy shares (current) rebuild the phrase, so the wallet is stored as a
+   * mnemonic wallet — identical to one that never lost its phone. Any stale
+   * recoveredKey is removed afterwards so two secrets cannot coexist and
+   * disagree; it is removed only AFTER the mnemonic write succeeds, because
+   * setMnemonic sits behind a biometric prompt and a refusal between the two
+   * would leave no wallet at all.
+   *
+   * Legacy shares carry the hardened primary key and cannot rebuild the
+   * phrase, so they keep the old WIF path and the user is told what that costs.
+   */
   const handleRecovery = async (shareStrings: string[]) => {
     setRecovering(true)
     try {
-      const recoveredKey = recoverKeyFromShares(shareStrings)
-      const wif = recoveredKey.toWif()
+      const secret = recoverSecretFromShares(shareStrings)
 
-      // Store the recovered key and build the wallet
-      const stored = await setRecoveredKey(wif)
-      if (!stored) {
-        const choice = await showAlert({
-          title: 'Biometric Access Required',
-          message: 'Biometric access is needed to protect your wallet keys. Please try again.',
-          buttons: [
-            { text: 'Cancel', style: 'cancel', key: 'cancel' },
-            { text: 'Try Again', key: 'retry' },
-          ],
+      if (secret.kind === 'entropy') {
+        const mnemonic = Mnemonic.fromEntropy(secret.entropy).toString()
+
+        if (!(await setMnemonic(mnemonic))) return await retryOrReset(shareStrings)
+        // Only after the phrase is safely stored: a refusal between the two
+        // writes would otherwise leave the wallet with neither secret.
+        await deleteRecoveredKey()
+        await buildWalletFromMnemonic(mnemonic)
+      } else {
+        const wif = new PrivateKey(secret.primaryKey).toWif()
+
+        if (!(await setRecoveredKey(wif))) return await retryOrReset(shareStrings)
+        await buildWalletFromRecoveredKey(wif)
+
+        await showAlert({
+          title: t('scan_shares_legacy_title'),
+          message: t('scan_shares_legacy_message'),
+          buttons: [{ text: t('scan_shares_legacy_ack'), key: 'ok' }]
         })
-        if (choice === 'cancel') {
-          setScannedShares([])
-          setThreshold(null)
-          lastScannedRef.current = ''
-        } else {
-          await handleRecovery(shareStrings)
-        }
-        return
       }
 
-      await buildWalletFromRecoveredKey(wif)
       setRecovered(true)
       setCelebrating(true)
     } catch (err: any) {
@@ -121,6 +133,29 @@ export default function ScanSharesScreen() {
       lastScannedRef.current = ''
     } finally {
       setRecovering(false)
+    }
+  }
+
+  /**
+   * Both formats store their secret behind the biometric latch, and both have
+   * to survive a refusal the same way: offer a retry, or reset the scanner so
+   * the user can start over.
+   */
+  const retryOrReset = async (shareStrings: string[]): Promise<void> => {
+    const choice = await showAlert({
+      title: t('scan_shares_biometric_title'),
+      message: t('scan_shares_biometric_message'),
+      buttons: [
+        { text: t('cancel'), style: 'cancel', key: 'cancel' },
+        { text: t('retry'), key: 'retry' },
+      ],
+    })
+    if (choice === 'cancel') {
+      setScannedShares([])
+      setThreshold(null)
+      lastScannedRef.current = ''
+    } else {
+      await handleRecovery(shareStrings)
     }
   }
 

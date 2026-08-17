@@ -38,6 +38,7 @@ import {
 import { vaultStore } from './vaultStore'
 import { VaultError } from './types'
 import { bip32KeyID, indexFromKeyID, depositPkhFromXpub, depositPrivKey } from './vaultDerivation'
+import { backupAttestation } from './backupAttestation'
 
 export const VAULT_BASKET = 'admin vault'
 export const VAULT_PROTOCOL: WalletProtocol = [2, 'vault']
@@ -228,6 +229,21 @@ export async function depositToVault(
   satoshis: number
 ): Promise<{ txid: string }> {
   if (satoshis < DUST_LIMIT) throw new VaultError('below-dust', 'Deposit below dust limit')
+
+  // Depositing into a wallet with no recovery path would hide funds behind a
+  // hardware key the user cannot get past. Advisory — the wizard is the real
+  // gate — but it also covers the deep link straight to the transfer screen.
+  //
+  // DELIBERATELY NOT in nextDepositKey, even though that is the single funnel
+  // for every vault-basket output: partial withdrawals re-vault their
+  // remainder through it, so a check there would block withdrawals.
+  //
+  // Checked BEFORE nextDepositKey so a refusal does not burn a deposit index.
+  const { publicKey: identityKey } = await w.getPublicKey({ identityKey: true }, adminOriginator)
+  if (!(await backupAttestation.get(identityKey))) {
+    throw new VaultError('backup-required', 'Back up this wallet before depositing')
+  }
+
   const key = await nextDepositKey()
   const lockingScript = new P2PKH().lock(Utils.toArray(key.pkh, 'hex')).toHex()
   const res = await w.createAction(

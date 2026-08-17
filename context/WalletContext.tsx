@@ -16,6 +16,7 @@ import { makePrivilegedKeyGetter, VAULT_RETENTION_MS } from '@/services/vault/pr
 import { requestCeremony, ceremony as vaultCeremony } from '@/services/vault/ceremonyHost'
 import { getVaultDriver } from '@/services/vault/driver'
 import { vaultStore } from '@/services/vault/vaultStore'
+import { backupAttestation } from '@/services/vault/backupAttestation'
 import {
   DEFAULT_SETTINGS as LIB_DEFAULT_SETTINGS,
   WalletSettings,
@@ -1715,6 +1716,14 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       // key behind would make the next cold start prompt for a wallet that no
       // longer exists. Works while locked, since deleting needs no key.
       await deleteAllWalletKeys()
+
+      // The attestation is per wallet. "Delete Wallet" routes here, so leaving
+      // it behind would let the NEXT wallet on this device inherit a backup it
+      // never made. Deliberately not awaited: a storage failure must not strand
+      // the user mid-logout with no navigation.
+      backupAttestation.clearAll().catch(err => {
+        console.warn('[backupAttestation.clearAll]', err)
+      })
 
       router.dismissAll()
       router.push('/')

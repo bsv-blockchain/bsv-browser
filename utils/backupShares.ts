@@ -1,29 +1,105 @@
 /**
- * Backup shares utilities for Shamir's Secret Sharing based wallet backup.
+ * Backup shares — Shamir 2-of-3 recovery paper.
  *
- * Splits the wallet's primary key (m/0'/0') into 2-of-3 backup shares and
- * generates printable HTML with QR codes for each share page.
+ * The secret being split is the MNEMONIC ENTROPY, per BRC-157, not the primary
+ * key at m/0'/0'. That derivation is hardened and one-way, so shares of it can
+ * restore spending authority but can never rebuild the phrase — and the vault
+ * key needs the phrase. Splitting the entropy makes paper and phrase two
+ * encodings of one secret.
+ *
+ * The split payload is always exactly 32 bytes:
+ *
+ *     entropy(16) || sha256(entropy)[0..16]
+ *
+ * The tag exists so recovery can tell new paper from old WITHOUT a version
+ * marker on the printed page, which would break every sheet already in a
+ * drawer. Length cannot do that job: PrivateKey is a BigNumber and drops
+ * leading zero bytes (~1 payload in 256), and an imported 24-word phrase
+ * yields 32 bytes of entropy — the exact width of a legacy primary key.
+ *
+ * Do NOT try to validate the entropy branch by rebuilding a mnemonic and
+ * checking its BIP39 checksum. Mnemonic.fromEntropy COMPUTES that checksum, so
+ * it accepts any 16 bytes and can never reject a misclassification.
  */
 
-import { PrivateKey } from '@bsv/sdk'
+import { PrivateKey, Hash } from '@bsv/sdk'
 import QRCode from 'qrcode'
+
+// ── Payload framing ──────────────────────────────────────────────────────────
+
+/** Entropy of a 12-word BIP39 phrase. The only width v2 shares support. */
+export const ENTROPY_BYTES = 16
+/** Fixed width of the split secret. Never varies, never inferred. */
+export const PAYLOAD_BYTES = 32
+
+/** What a recombined payload turned out to be. */
+export type RecoveredSecret =
+  | { kind: 'entropy'; entropy: number[] }
+  | { kind: 'legacy'; primaryKey: number[] }
+
+/** Wrap 16 bytes of entropy in the tagged 32-byte payload. */
+export function frameEntropy(entropy: number[]): number[] {
+  if (entropy.length !== ENTROPY_BYTES) {
+    throw new Error(`frameEntropy: expected ${ENTROPY_BYTES} bytes, got ${entropy.length}`)
+  }
+  return [...entropy, ...Hash.sha256(entropy).slice(0, PAYLOAD_BYTES - ENTROPY_BYTES)]
+}
+
+/**
+ * Restore a recombined payload to full width.
+ *
+ * Shamir recombination yields a PrivateKey, whose toArray() drops leading zero
+ * bytes. Without this pad, roughly one payload in 256 decodes short and fails
+ * to match anything.
+ */
+export function padPayload(bytes: number[]): number[] {
+  if (bytes.length > PAYLOAD_BYTES) {
+    throw new Error(`padPayload: payload exceeds ${PAYLOAD_BYTES} bytes`)
+  }
+  return [...new Array(PAYLOAD_BYTES - bytes.length).fill(0), ...bytes]
+}
+
+/** Decide whether a recombined payload is framed entropy or a legacy key. */
+export function classifyPayload(raw: number[]): RecoveredSecret {
+  const payload = padPayload(raw)
+  const entropy = payload.slice(0, ENTROPY_BYTES)
+  const tag = payload.slice(ENTROPY_BYTES)
+  const expected = Hash.sha256(entropy).slice(0, PAYLOAD_BYTES - ENTROPY_BYTES)
+
+  return tag.every((b, i) => b === expected[i])
+    ? { kind: 'entropy', entropy }
+    : { kind: 'legacy', primaryKey: payload }
+}
 
 // ── Share generation ─────────────────────────────────────────────────────────
 
 /**
- * Split a primary key into backup shares using Shamir's Secret Sharing.
- * @param primaryKeyBytes The primary key as a number[] (from m/0'/0' derivation)
- * @param threshold Minimum shares required to recover (default 2)
- * @param totalShares Total number of shares to generate (default 3)
- * @returns Array of share strings in format: base58(x).base58(y).threshold.integrity
+ * Split mnemonic entropy into backup shares (the current format).
+ * @param entropy 16 bytes, from Mnemonic.toEntropy()
+ * @returns Share strings in the format base58(x).base58(y).threshold.integrity
  */
-export function generateBackupShares(
-  primaryKeyBytes: number[],
+export function generateEntropyShares(
+  entropy: number[],
   threshold: number = 2,
   totalShares: number = 3
 ): string[] {
-  const key = new PrivateKey(primaryKeyBytes)
-  return key.toBackupShares(threshold, totalShares)
+  return new PrivateKey(frameEntropy(entropy)).toBackupShares(threshold, totalShares)
+}
+
+/**
+ * Split a raw private key (the legacy format).
+ *
+ * Still reachable for wallets that were themselves restored from legacy paper
+ * and therefore have no mnemonic to frame. Removing it would leave that cohort
+ * with no way to back up at all; the tag check routes their shares back to the
+ * legacy branch on recovery, so this stays self-consistent.
+ */
+export function generateLegacyKeyShares(
+  privateKeyBytes: number[],
+  threshold: number = 2,
+  totalShares: number = 3
+): string[] {
+  return new PrivateKey(privateKeyBytes).toBackupShares(threshold, totalShares)
 }
 
 // ── Share validation ─────────────────────────────────────────────────────────
@@ -79,13 +155,12 @@ export function validateShareCompatibility(newShare: ParsedShare, existingShares
 }
 
 /**
- * Recover a PrivateKey from collected backup shares.
- * @param shareStrings Raw share strings (must have at least `threshold` shares)
- * @returns The recovered PrivateKey
- * @throws If shares are invalid or integrity check fails
+ * Recombine shares and say what came out.
+ * @param shareStrings At least `threshold` raw share strings
+ * @throws If the shares are invalid or their integrity hashes disagree
  */
-export function recoverKeyFromShares(shareStrings: string[]): PrivateKey {
-  return PrivateKey.fromBackupShares(shareStrings)
+export function recoverSecretFromShares(shareStrings: string[]): RecoveredSecret {
+  return classifyPayload(Array.from(PrivateKey.fromBackupShares(shareStrings).toArray()))
 }
 
 // ── Print HTML generation ────────────────────────────────────────────────────
@@ -115,7 +190,11 @@ async function generateQRCodeSVG(data: string, size: number = 180): Promise<stri
  *
  * Pages are separated by CSS page-break-after for print dialogue.
  */
-export async function generatePrintHTML(shares: string[], identityKey: string): Promise<string> {
+export async function generatePrintHTML(
+  shares: string[],
+  identityKey: string,
+  format: 'entropy' | 'legacy' = 'entropy'
+): Promise<string> {
   const now = new Date()
   const date = now.toISOString().split('T')[0]
   const time = now.toISOString().split('T')[1].split('.')[0]
@@ -156,8 +235,13 @@ export async function generatePrintHTML(shares: string[], identityKey: string): 
 
       <div class="instructions">
         <strong>Recovery Instructions</strong>
-        <p>This is 1 of ${shares.length} backup shares. You need any ${shares[0].split('.')[2]} shares to recover your wallet key.</p>
+        <p>This is 1 of ${shares.length} backup shares. You need any ${shares[0].split('.')[2]} shares to recover your wallet.</p>
         <p>Store each share in a separate, secure location. Do not store shares together.</p>
+        <p>${
+          format === 'entropy'
+            ? 'Any two of these pages rebuild your twelve-word recovery phrase, and therefore your entire wallet — everyday balance and vault alike. Treat two pages together as you would the phrase itself.'
+            : 'These shares are an older format. They restore your everyday balance but cannot open a vault.'
+        }</p>
         <p>To recover: In BSV Browser, go to Enable Web3 &rarr; Import Existing Wallet &rarr; Scan Backup Shares.</p>
       </div>
     </div>
