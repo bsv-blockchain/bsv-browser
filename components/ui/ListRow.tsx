@@ -46,15 +46,26 @@ export const ListRow: React.FC<ListRowProps> = ({
   const content = (
     <View style={[styles.container, !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }]}>
       {icon && (
-        <View style={[styles.iconContainer, { backgroundColor: iconColor || colors.accent }]}>
+        <View
+          style={[
+            styles.iconContainer,
+            iconColor
+              ? { backgroundColor: iconColor + '1A', borderColor: iconColor + '2E' }
+              : { backgroundColor: colors.surfaceSunken, borderColor: colors.surfaceSunkenBorder }
+          ]}
+        >
           {iconFamily === 'material-community' ? (
             <MaterialCommunityIcons
               name={icon as keyof typeof MaterialCommunityIcons.glyphMap}
-              size={18}
-              color="#FFFFFF"
+              size={17}
+              color={iconColor || colors.textSecondary}
             />
           ) : (
-            <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={18} color="#FFFFFF" />
+            <Ionicons
+              name={icon as keyof typeof Ionicons.glyphMap}
+              size={17}
+              color={iconColor || colors.textSecondary}
+            />
           )}
         </View>
       )}
@@ -109,10 +120,15 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
   },
+  // A well the glyph sits in, tinted by the row's own colour rather than
+  // flooded with it. A grid of saturated tiles reads as decoration and makes
+  // every row shout equally; the tint keeps the category cue and drops the
+  // shouting.
   iconContainer: {
     width: 28,
     height: 28,
-    borderRadius: 6,
+    borderRadius: 9,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,

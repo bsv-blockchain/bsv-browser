@@ -2,7 +2,7 @@
  * The Wallet screen — full screen, not a drawer.
  *
  * Structure, top to bottom:
- *   balance  →  Payments / Vault / Settings  →  recent activity (inline)
+ *   balance  →  Pay / Get paid / Vault  →  activity, grouped by day
  *
  * This replaces a bottom-sheet settings menu plus a separate Transactions
  * route. Activity now sits on the screen the user already opens to check their
@@ -10,10 +10,14 @@
  *
  * Colour discipline: `colors.accent` is achromatic (black/white) in this token
  * set, so it only reads as emphasis when used as a FILL. Exactly one element
- * here is accent-filled — Payments — and chroma elsewhere is reserved for
+ * here is accent-filled — Pay — and chroma elsewhere is reserved for
  * transaction status, never for decoration.
+ *
+ * Surfaces come from the `canvas*`/`surface*` tokens rather than the iOS grays:
+ * the screen is a shallow gradient with cards lifted off it, which is what makes
+ * the balance read as the focal point in both appearances.
  */
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo, useContext } from 'react'
 import {
   View,
   Text,
@@ -29,27 +33,67 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Clipboard from '@react-native-clipboard/clipboard'
-import { Utils, type WalletAction } from '@bsv/sdk'
+import { Utils } from '@bsv/sdk'
 import { sdk } from '@bsv/wallet-toolbox-mobile'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import AmountDisplay from '@/components/wallet/AmountDisplay'
+import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import {
+  formatAmountParts,
+  formatAmount,
+  formatSatoshisAsBsvDecimal
+} from '@/utils/amountFormatHelpers'
 import PressableScale from '@/components/ui/PressableScale'
+import ScreenGradient from '@/components/ui/ScreenGradient'
+import ActivityRow, { type ActivityAction } from '@/components/wallet/ActivityRow'
 import { showToast } from '@/components/ui/Toast'
 import { exportTransactionsAsCsv } from '@/utils/exportTransactions'
 import { findOfflineActions, type OfflineActionRow } from '@/storage/methods/offlineActions'
-import { txStatusView, toneColor, tonePill } from '@/utils/txStatus'
 import tabStore from '@/stores/TabStore'
 import WalletLockNotice from '@/components/security/WalletLockNotice'
 
 const PAGE_SIZE = 30
 
-/** Statuses whose transaction is still local and therefore abortable: nothing
- * has been (successfully) broadcast, so releasing it is safe and frees the
- * inputs it reserved. `failed` is included because a failed action still holds
- * its input reservations until it is cleared. */
-const ABORTABLE_STATUSES = new Set(['unsigned', 'nosend', 'nonfinal', 'failed'])
+/** A day heading injected between rows. Kept in the same list as the rows so
+ * the whole thing stays one FlatList — a SectionList would re-measure every
+ * section on each status poll. */
+type DayHeader = { kind: 'day'; id: string; label: string }
+type Row = DayHeader | (ActivityAction & { kind?: undefined })
+
+const DAY_MS = 86_400_000
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+
+/** Group rows under Today / Yesterday / an absolute date. Rows with no
+ * timestamp fall through ungrouped rather than being dated wrongly. */
+function withDayHeaders(actions: ActivityAction[], t: (k: string) => string): Row[] {
+  const today = startOfDay(new Date())
+  const out: Row[] = []
+  let currentDay: number | null = null
+  for (const action of actions) {
+    const raw = action.created_at
+    const ts = raw === undefined || raw === null ? NaN : new Date(raw as string).getTime()
+    if (!Number.isNaN(ts)) {
+      const day = startOfDay(new Date(ts))
+      if (day !== currentDay) {
+        currentDay = day
+        const label =
+          day === today
+            ? t('wallet_group_today')
+            : day === today - DAY_MS
+              ? t('wallet_group_yesterday')
+              : new Date(day).toLocaleDateString(undefined, {
+                  day: 'numeric',
+                  month: 'short',
+                  year: day < today - 300 * DAY_MS ? 'numeric' : undefined
+                })
+        out.push({ kind: 'day', id: `day-${day}`, label })
+      }
+    }
+    out.push(action)
+  }
+  return out
+}
 
 export default function WalletScreen() {
   const { t } = useTranslation()
@@ -62,12 +106,15 @@ export default function WalletScreen() {
     storage,
     txStatusVersion,
     walletUserId,
-    refreshProof
+    refreshProof,
+    settings
   } = useWallet()
+  const { satoshisPerUSD } = useContext(ExchangeRateContext)
+  const currency = settings?.currency || 'BSV'
 
   const balanceCacheKey = `cached_wallet_balance_${selectedNetwork}`
   const [balance, setBalance] = useState<number | null>(null)
-  const [actions, setActions] = useState<WalletAction[]>([])
+  const [actions, setActions] = useState<ActivityAction[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -76,6 +123,9 @@ export default function WalletScreen() {
   // Per-row in-flight action, keyed by txid (or reference for abort) so only
   // the tapped row shows a spinner rather than the whole list.
   const [busyRow, setBusyRow] = useState<string | null>(null)
+  /** The one row whose utility chips are open. One at a time: two open rows and
+   * the chips stop obviously belonging to a transaction. */
+  const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const offsetRef = useRef(0)
   /** Set once the server has no more rows, so onEndReached stops re-querying at
    * the bottom of the list. Cleared whenever the list is refetched from 0. */
@@ -144,7 +194,7 @@ export default function WalletScreen() {
       if (actions.length === 0) setLoading(true)
       const result = await fetchActions(0)
       if (cancelled || !result) return
-      setActions(result.actions)
+      setActions(result.actions as ActivityAction[])
       offsetRef.current = result.actions.length
       // A fresh first page may have more behind it again.
       exhaustedRef.current =
@@ -172,7 +222,7 @@ export default function WalletScreen() {
     setLoadingMore(true)
     try {
       const result = await fetchActions(offsetRef.current)
-      const page = result?.actions ?? []
+      const page = (result?.actions ?? []) as ActivityAction[]
       if (page.length) {
         setActions(prev => [...prev, ...page])
         offsetRef.current += page.length
@@ -192,7 +242,7 @@ export default function WalletScreen() {
     try {
       const [result] = await Promise.all([fetchActions(0), refreshBalance(), fetchOfflineRows()])
       if (result) {
-        setActions(result.actions)
+        setActions(result.actions as ActivityAction[])
         offsetRef.current = result.actions.length
         exhaustedRef.current =
           result.actions.length < PAGE_SIZE || result.actions.length >= (result.totalActions ?? 0)
@@ -263,6 +313,16 @@ export default function WalletScreen() {
     [storage, busyRow, t]
   )
 
+  /** The bare txid — what you paste into someone else's explorer or a support
+   * thread, where a full BEEF would be unusable. */
+  const onCopyTxid = useCallback(
+    (txid: string) => {
+      Clipboard.setString(txid)
+      showToast(t('tx_txid_copied'), { type: 'success' })
+    },
+    [t]
+  )
+
   /** Reconcile this one transaction against the network now, rather than
    * waiting for the background monitor's next sweep. It either confirms it,
    * leaves it alone as genuinely in-flight, or — when the network does not have
@@ -305,111 +365,75 @@ export default function WalletScreen() {
     [managers.permissionsManager, adminOriginator, busyRow, onRefresh, t]
   )
 
-  // ── rows ────────────────────────────────────────────────────────────
-  const renderItem: ListRenderItem<WalletAction> = useCallback(
-    ({ item }) => {
-      const offline = item.txid ? offlineByTxid.get(item.txid) : undefined
-      const view = txStatusView(item.status, offline?.status)
-      const color = toneColor(view.tone, colors as unknown as Record<string, string>)
-      const boxed = tonePill(view.tone)
+  const toggleRow = useCallback((key: string) => {
+    setExpandedRow(prev => (prev === key ? null : key))
+  }, [])
 
-      // `reference` is what abortAction takes; the SDK's WalletAction type does
-      // not declare it, but storage returns it.
-      const reference = (item as unknown as { reference?: string }).reference
-      const canAbort = ABORTABLE_STATUSES.has(item.status) && !!reference
-      const busy = busyRow === item.txid || (!!reference && busyRow === reference)
+  // ── rows ────────────────────────────────────────────────────────────
+  const rows = useMemo(() => withDayHeaders(actions, t), [actions, t])
+
+  const renderItem: ListRenderItem<Row> = useCallback(
+    ({ item, index }) => {
+      if (item.kind === 'day') {
+        return (
+          <Text style={[styles.dayHeader, { color: colors.textTertiary }]}>{item.label}</Text>
+        )
+      }
+      const key = item.txid || item.reference || `row-${index}`
+      const offline = item.txid ? offlineByTxid.get(item.txid) : undefined
+      const busy =
+        busyRow === item.txid || (!!item.reference && busyRow === item.reference)
 
       return (
-        <View style={[styles.row, { borderBottomColor: colors.separator }]}>
-          {/* Line 1: what it was, and how much. */}
-          <View style={styles.rowTop}>
-            <Text
-              style={[styles.description, { color: colors.textPrimary }]}
-              numberOfLines={1}
-            >
-              {item.description || t('transactions')}
-            </Text>
-            <Text
-              style={[
-                styles.amount,
-                { color: item.satoshis < 0 ? colors.textPrimary : colors.success }
-              ]}
-            >
-              <AmountDisplay>{item.satoshis}</AmountDisplay>
-            </Text>
-          </View>
-
-          {/* Line 2: status on the left, actions right-justified under the
-              amount. Icon-only and low-chroma so they never compete with the
-              status colour, which is the one signal that matters. */}
-          <View style={styles.rowBottom}>
-            {boxed ? (
-              <View style={[styles.pill, { backgroundColor: color + '20' }]}>
-                <Text style={[styles.pillText, { color }]}>{t(view.key)}</Text>
-              </View>
-            ) : (
-              <Text style={[styles.quietStatus, { color }]}>{t(view.key)}</Text>
-            )}
-            <View style={styles.rowActions}>
-            {busy ? (
-              <ActivityIndicator size="small" color={colors.textSecondary} style={styles.rowAction} />
-            ) : (
-              <>
-                {item.txid && (
-                  <TouchableOpacity
-                    onPress={() => onExplorer(item.txid)}
-                    style={styles.rowAction}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('tx_action_explorer')}
-                  >
-                    <Ionicons name="link-outline" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                )}
-                {item.txid && (
-                  <TouchableOpacity
-                    onPress={() => onCopyBeef(item.txid)}
-                    style={styles.rowAction}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('tx_action_copy_beef')}
-                  >
-                    <Ionicons name="copy-outline" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                )}
-                {item.txid && (
-                  <TouchableOpacity
-                    onPress={() => onRefreshTx(item.txid)}
-                    style={styles.rowAction}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('tx_action_refresh')}
-                  >
-                    <Ionicons name="refresh-outline" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                )}
-                {canAbort && (
-                  <TouchableOpacity
-                    onPress={() => onAbort(reference)}
-                    style={styles.rowAction}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('tx_action_abort')}
-                  >
-                    <Ionicons name="close-circle-outline" size={18} color={colors.error} />
-                  </TouchableOpacity>
-                )}
-              </>
-            )}
-            </View>
-          </View>
-        </View>
+        <ActivityRow
+          action={item}
+          rowKey={key}
+          offlineStatus={offline?.status}
+          expanded={expandedRow === key}
+          busy={busy}
+          onToggle={toggleRow}
+          onExplorer={onExplorer}
+          onCopyBeef={onCopyBeef}
+          onCopyTxid={onCopyTxid}
+          onRefreshTx={onRefreshTx}
+          onAbort={onAbort}
+        />
       )
     },
-    [colors, offlineByTxid, t, busyRow, onExplorer, onCopyBeef, onRefreshTx, onAbort]
+    [
+      colors,
+      offlineByTxid,
+      busyRow,
+      expandedRow,
+      toggleRow,
+      onExplorer,
+      onCopyBeef,
+      onCopyTxid,
+      onRefreshTx,
+      onAbort
+    ]
   )
 
   // ── header (balance + the three destinations + activity heading) ─────
+  const balanceParts = useMemo(
+    () =>
+      balance === null
+        ? null
+        : formatAmountParts(balance, currency, satoshisPerUSD, { abbreviate: true }),
+    [balance, currency, satoshisPerUSD]
+  )
+
+  /** The line under the figure: the same money in the denominations the figure
+   * is not using, so the user never has to convert in their head. */
+  const balanceContext = useMemo(() => {
+    if (balance === null) return ''
+    const bsv = `${formatSatoshisAsBsvDecimal(balance)} BSV`
+    const other = formatAmount(balance, currency === 'USD' ? 'BSV' : 'USD', satoshisPerUSD, {
+      abbreviate: true
+    })
+    return `${bsv}   ·   ${other}`
+  }, [balance, currency, satoshisPerUSD])
+
   const listHeader = useMemo(
     () => (
       <View>
@@ -419,28 +443,39 @@ export default function WalletScreen() {
           style={styles.balanceBlock}
           accessibilityLabel={t('wallet_balance_refresh')}
         >
-          <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>
-            {t('you_have')}
+          <Text style={[styles.balanceLabel, { color: colors.textTertiary }]}>
+            {t('wallet_total_balance')}
           </Text>
-          {balance === null ? (
-            <ActivityIndicator color={colors.textSecondary} />
+          {balanceParts === null ? (
+            <ActivityIndicator color={colors.textSecondary} style={styles.balanceSpinner} />
           ) : (
-            <Text style={[styles.balance, { color: colors.textPrimary }]}>
-              <AmountDisplay>{balance}</AmountDisplay>
-            </Text>
+            <>
+              <Text style={[styles.balance, { color: colors.textPrimary }]}>
+                {balanceParts.value}
+                {balanceParts.unit ? (
+                  <Text style={[styles.balanceUnit, { color: colors.textSecondary }]}>
+                    {' '}
+                    {balanceParts.unit}
+                  </Text>
+                ) : null}
+              </Text>
+              <Text style={[styles.balanceContext, { color: colors.textSecondary }]}>
+                {balanceContext}
+              </Text>
+            </>
           )}
         </TouchableOpacity>
 
-        {/* The three destinations. Payments is the only accent-filled element
-            on this screen, so the eye lands on it first. */}
+        {/* The three destinations. Pay is the only accent-filled element on this
+            screen, so the eye lands on it first. */}
         <View style={styles.destinations}>
           <PressableScale
             haptic="confirm"
             onPress={() => router.push('/pay')}
             style={[styles.dest, styles.destPrimary, { backgroundColor: colors.accent }]}
           >
-            <MaterialCommunityIcons name="arrow-top-right" size={22} color={colors.textOnAccent} />
-            <Text style={[styles.destLabel, { color: colors.textOnAccent }]}>
+            <MaterialCommunityIcons name="arrow-top-right" size={19} color={colors.textOnAccent} />
+            <Text style={[styles.destLabel, styles.destLabelPrimary, { color: colors.textOnAccent }]}>
               {t('pay_direction_pay')}
             </Text>
           </PressableScale>
@@ -450,10 +485,10 @@ export default function WalletScreen() {
             onPress={() => router.push('/pay?direction=get')}
             style={[
               styles.dest,
-              { backgroundColor: colors.backgroundElevated, borderColor: colors.separator }
+              { backgroundColor: colors.surfaceRaised, borderColor: colors.surfaceRaisedBorder }
             ]}
           >
-            <MaterialCommunityIcons name="arrow-bottom-right" size={22} color={colors.textPrimary} />
+            <MaterialCommunityIcons name="arrow-bottom-left" size={19} color={colors.textPrimary} />
             <Text style={[styles.destLabel, { color: colors.textPrimary }]}>
               {t('pay_direction_receive')}
             </Text>
@@ -463,15 +498,14 @@ export default function WalletScreen() {
             onPress={() => router.push('/vault')}
             style={[
               styles.dest,
-              { backgroundColor: colors.backgroundElevated, borderColor: colors.separator }
+              { backgroundColor: colors.surfaceRaised, borderColor: colors.surfaceRaisedBorder }
             ]}
           >
-            <MaterialCommunityIcons name="safe" size={22} color={colors.textPrimary} />
+            <MaterialCommunityIcons name="safe" size={19} color={colors.textPrimary} />
             <Text style={[styles.destLabel, { color: colors.textPrimary }]}>
               {t('wallet_vault')}
             </Text>
           </PressableScale>
-
         </View>
 
         <View style={styles.activityHead}>
@@ -482,22 +516,23 @@ export default function WalletScreen() {
             onPress={onExport}
             disabled={exporting || actions.length === 0}
             hitSlop={8}
-            style={styles.exportBtn}
+            style={[styles.exportBtn, { borderColor: colors.surfaceRaisedBorder }]}
+            accessibilityRole="button"
             accessibilityLabel={t('tx_export_csv')}
           >
             {exporting ? (
-              <ActivityIndicator size="small" color={colors.info} />
+              <ActivityIndicator size="small" color={colors.textSecondary} />
             ) : (
               <Ionicons
                 name="download-outline"
-                size={18}
-                color={actions.length === 0 ? colors.textTertiary : colors.info}
+                size={12}
+                color={actions.length === 0 ? colors.textTertiary : colors.textSecondary}
               />
             )}
             <Text
               style={[
                 styles.exportLabel,
-                { color: actions.length === 0 ? colors.textTertiary : colors.info }
+                { color: actions.length === 0 ? colors.textTertiary : colors.textSecondary }
               ]}
             >
               {t('tx_export_csv')}
@@ -506,31 +541,39 @@ export default function WalletScreen() {
         </View>
       </View>
     ),
-    [balance, colors, t, refreshBalance, onExport, exporting, actions.length]
+    [balanceParts, balanceContext, colors, t, refreshBalance, onExport, exporting, actions.length]
   )
 
   return (
-    <View
-      style={[
-        styles.container,
-        { backgroundColor: colors.backgroundSecondary, paddingTop: insets.top }
-      ]}
-    >
-      <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.info} />
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <ScreenGradient from={colors.canvasTop} to={colors.canvasBase} height={360} />
+
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={[
+            styles.iconBtn,
+            { backgroundColor: colors.surfaceRaised, borderColor: colors.surfaceRaisedBorder }
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={t('back')}
+        >
+          <Ionicons name="chevron-back" size={18} color={colors.textSecondary} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('wallet')}</Text>
         {/* Settings lives here rather than among the destinations below: it is
             navigation chrome, not a money action, so it should not compete with
-            Payments and Vault for the eye. */}
+            Pay and Vault for the eye. */}
         <TouchableOpacity
           onPress={() => router.push('/wallet-config')}
-          style={styles.iconBtn}
+          style={[
+            styles.iconBtn,
+            { backgroundColor: colors.surfaceRaised, borderColor: colors.surfaceRaisedBorder }
+          ]}
           accessibilityRole="button"
           accessibilityLabel={t('wallet_settings')}
         >
-          <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
+          <Ionicons name="options-outline" size={17} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
@@ -540,8 +583,10 @@ export default function WalletScreen() {
       <WalletLockNotice />
 
       <FlatList
-        data={actions}
-        keyExtractor={(item, index) => `${item.txid || index}-${index}`}
+        data={rows}
+        keyExtractor={(item, index) =>
+          item.kind === 'day' ? item.id : `${item.txid || index}-${index}`
+        }
         renderItem={renderItem}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
@@ -573,97 +618,110 @@ export default function WalletScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  // No bottom rule: the gradient already separates the chrome from the balance,
+  // and a hairline there cut the screen in half above the focal figure.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs
   },
-  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { ...typography.headline },
+  iconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  headerTitle: { ...typography.headline, letterSpacing: -0.2 },
 
   balanceBlock: {
     alignItems: 'center',
-    gap: spacing.xs,
     paddingTop: spacing.xxl,
     paddingBottom: spacing.xl,
-    paddingHorizontal: spacing.lg
+    paddingHorizontal: spacing.xl
   },
-  // No textTransform: "You have" is a phrase leading into the amount, not a
-  // column heading — and casing is the translation's business, not the CSS's
-  // (uppercasing mangles scripts that have no case, and title-casing English).
-  balanceLabel: { ...typography.footnote },
+  // Uppercase + wide tracking: this is a column heading over a figure, not a
+  // phrase leading into it. Scripts without case ignore the transform.
+  balanceLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase'
+  },
+  balanceSpinner: { marginTop: spacing.md },
   // tabular-nums keeps the figure from jittering as digits change.
-  balance: { ...typography.display, fontVariant: ['tabular-nums'] },
+  balance: {
+    ...typography.display,
+    lineHeight: 46,
+    letterSpacing: -1.2,
+    marginTop: 10,
+    fontVariant: ['tabular-nums']
+  },
+  balanceUnit: { fontSize: 19, fontWeight: '600', letterSpacing: 0 },
+  balanceContext: { fontSize: 13, lineHeight: 18, marginTop: 10, fontVariant: ['tabular-nums'] },
 
   destinations: {
     flexDirection: 'row',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.xxl
+    gap: 10,
+    paddingHorizontal: spacing.xl
   },
   dest: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs,
-    borderRadius: radii.md,
-    paddingVertical: spacing.lg,
+    gap: spacing.sm,
+    borderRadius: 16,
+    paddingTop: 15,
+    paddingBottom: 13,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'transparent'
   },
-  destPrimary: { borderColor: 'transparent' },
-  destLabel: { ...typography.footnote, fontWeight: '600' },
+  // The one accent-filled control on the screen, so it also gets the only
+  // shadow — the two cues have to agree about what is primary.
+  destPrimary: {
+    borderColor: 'transparent',
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4
+  },
+  destLabel: { fontSize: 13, fontWeight: '600' },
+  destLabelPrimary: { fontWeight: '700' },
 
   activityHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm
+    paddingHorizontal: spacing.xl,
+    paddingTop: 28,
+    paddingBottom: 10
   },
-  activityTitle: { ...typography.footnote, textTransform: 'uppercase' },
-  exportBtn: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  exportLabel: { ...typography.footnote, fontWeight: '600' },
+  activityTitle: { fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth
+  },
+  exportLabel: { fontSize: 12, fontWeight: '600' },
 
-  row: {
-    gap: spacing.xs,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth
+  dayHeader: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 1.3,
+    textTransform: 'uppercase',
+    paddingHorizontal: spacing.xl,
+    paddingTop: 14,
+    paddingBottom: 4
   },
-  rowTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md
-  },
-  // Status sits left, actions right — so the icons land under the amount.
-  rowBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    minHeight: 28 // reserve the icon row's height so rows don't jump on busy
-  },
-  rowActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginRight: -spacing.xs // optical: last glyph's padding aligns to the amount's right edge
-  },
-  rowAction: { padding: spacing.xs },
-  description: { ...typography.body, flex: 1 },
-  pill: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radii.sm
-  },
-  pillText: { ...typography.caption2, fontWeight: '600' },
-  quietStatus: { ...typography.caption2 },
-  amount: { ...typography.body, fontVariant: ['tabular-nums'] },
 
   pad: { padding: spacing.xl },
   footer: { alignItems: 'center', justifyContent: 'center' },

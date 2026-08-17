@@ -142,7 +142,7 @@ export default function MonitorLogsScreen() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.separator }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.accent} />
+          <Ionicons name="chevron-back" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Debugging</Text>
         <View style={styles.headerActions}>
@@ -254,7 +254,7 @@ export default function MonitorLogsScreen() {
       {/* Log output */}
       <ScrollView
         ref={scrollRef}
-        style={[styles.terminal, { backgroundColor: '#1a1a1a' }]}
+        style={[styles.terminal, { backgroundColor: '#12161D' }]}
         contentContainerStyle={styles.terminalContent}
       >
         {logs.length === 0 && (
@@ -267,7 +267,7 @@ export default function MonitorLogsScreen() {
               key={entry.id}
               onPress={() => copyEntry(entry)}
               activeOpacity={0.7}
-              style={[styles.logEntry, { borderBottomColor: '#333' }]}
+              style={[styles.logEntry, { borderBottomColor: 'rgba(255,255,255,0.08)' }]}
             >
               <View style={styles.logHeader}>
                 <Text style={styles.logTaskName}>{entry.taskName}</Text>
@@ -277,7 +277,7 @@ export default function MonitorLogsScreen() {
                 <Ionicons
                   name={isCopied ? 'checkmark' : 'copy-outline'}
                   size={14}
-                  color={isCopied ? '#30D158' : '#666'}
+                  color={isCopied ? '#34C77B' : 'rgba(235,240,248,0.38)'}
                   style={{ marginLeft: 6 }}
                 />
               </View>
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
     padding: spacing.md
   },
   emptyText: {
-    color: '#666',
+    color: 'rgba(235,240,248,0.38)',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontSize: 13,
     textAlign: 'center',
@@ -369,13 +369,13 @@ const styles = StyleSheet.create({
     fontWeight: '700'
   },
   logTimestamp: {
-    color: '#666',
+    color: 'rgba(235,240,248,0.38)',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontSize: 11,
     marginLeft: 'auto'
   },
   logOutput: {
-    color: '#E0E0E0',
+    color: '#E4E8EF',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontSize: 12,
     lineHeight: 18

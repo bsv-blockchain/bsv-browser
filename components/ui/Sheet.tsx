@@ -5,7 +5,8 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { radii, spacing, typography } from '@/context/theme/tokens'
+import { spacing, typography } from '@/context/theme/tokens'
+import ScreenGradient from '@/components/ui/ScreenGradient'
 
 interface SheetProps {
   visible: boolean
@@ -148,7 +149,7 @@ const Sheet: React.FC<SheetProps> = ({
         <View style={[styles.fullPageHeader, { borderBottomColor: colors.separator }]}>
           {onBack ? (
             <TouchableOpacity style={styles.fullPageBack} onPress={onBack} activeOpacity={0.6}>
-              <Ionicons name="chevron-back" size={24} color={colors.accent} />
+              <Ionicons name="chevron-back" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           ) : (
             <View style={styles.fullPageBack} />
@@ -173,7 +174,7 @@ const Sheet: React.FC<SheetProps> = ({
     <View style={[StyleSheet.absoluteFill, { zIndex: 50 }]}>
       {isVisible && (
         <Pressable
-          style={styles.backdrop}
+          style={[styles.backdrop, { backgroundColor: colors.scrim }]}
           onPress={onClose}
           accessible={true}
           accessibilityRole="button"
@@ -185,7 +186,8 @@ const Sheet: React.FC<SheetProps> = ({
         style={[
           styles.sheet,
           {
-            backgroundColor: colors.backgroundSecondary,
+            backgroundColor: colors.sheetBase,
+            borderTopColor: colors.surfaceRaisedBorder,
             ...(fitContent ? { maxHeight: maxSheetHeight } : { height: sheetHeight })
           },
           animatedStyle
@@ -199,6 +201,10 @@ const Sheet: React.FC<SheetProps> = ({
             : undefined
         }
       >
+        {/* The drawer is lit from its own top edge — a shallow ramp down to
+            `sheetBase`, which the View's own background already paints below. */}
+        <ScreenGradient from={colors.sheetTop} to={colors.sheetBase} height={480} />
+
         {/* Draggable handle + header */}
         <GestureDetector gesture={panGesture}>
           <View style={styles.handleArea}>
@@ -207,7 +213,7 @@ const Sheet: React.FC<SheetProps> = ({
               <View style={styles.headerRow}>
                 {onBack ? (
                   <TouchableOpacity style={styles.backButton} onPress={onBack} activeOpacity={0.6}>
-                    <Ionicons name="chevron-back" size={22} color={colors.accent} />
+                    <Ionicons name="chevron-back" size={22} color={colors.textSecondary} />
                   </TouchableOpacity>
                 ) : (
                   <View style={styles.backButton} />
@@ -269,19 +275,21 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
     zIndex: 20,
     elevation: 12,
+    // Deep and soft rather than tight: the drawer has to sit clearly in front of
+    // a dimmed page, and a small shadow reads as a seam instead of a lift.
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10
+    shadowOffset: { width: 0, height: -12 },
+    shadowOpacity: 0.45,
+    shadowRadius: 30
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)',
     zIndex: 10
   },
   handleArea: {
@@ -291,8 +299,8 @@ const styles = StyleSheet.create({
   },
   handleBar: {
     width: 36,
-    height: 5,
-    borderRadius: 2.5
+    height: 4,
+    borderRadius: 2
   },
   headerRow: {
     flexDirection: 'row',

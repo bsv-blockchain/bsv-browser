@@ -119,7 +119,12 @@ export async function listActionsSql(
       description: tx.description || '',
       version: tx.version || 0,
       lockTime: tx.lockTime || 0,
-      reference: tx.reference
+      reference: tx.reference,
+      // Not part of the SDK's WalletAction, but the activity list groups rows by
+      // day and prints a time next to the status — neither is derivable from the
+      // fields the interface does declare. Carried as an extra property, the way
+      // `reference` already is.
+      created_at: tx.created_at
     }
     r.actions.push(wtx)
   }

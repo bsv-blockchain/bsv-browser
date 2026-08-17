@@ -188,7 +188,7 @@ export default observer(function ConnectionsScreen() {
       {/* Header — matches settings/payments pattern */}
       <View style={[styles.header, { borderBottomColor: colors.separator }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
-          <Ionicons name="chevron-back" size={24} color={colors.accent} />
+          <Ionicons name="chevron-back" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{t('connections')}</Text>
         <View style={styles.headerButton} />
@@ -270,7 +270,7 @@ export default observer(function ConnectionsScreen() {
       </ScrollView>
 
       <View style={[styles.footer, { borderTopColor: colors.separator }]}>
-        <TouchableOpacity style={[styles.scanBtn, { backgroundColor: colors.info }]} onPress={() => setScanning(true)}>
+        <TouchableOpacity style={[styles.scanBtn, { backgroundColor: colors.accent }]} onPress={() => setScanning(true)}>
           <Ionicons name="qr-code-outline" size={20} color={colors.textOnAccent} style={{ marginRight: spacing.sm }} />
           <Text style={[styles.scanBtnText, { color: colors.textOnAccent }]}>{t('scan_qr_code')}</Text>
         </TouchableOpacity>

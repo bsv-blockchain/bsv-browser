@@ -169,6 +169,33 @@ export const formatAmount = (
 }
 
 /**
+ * Format satoshis as a plain BSV decimal, with no unit appended.
+ * E.g. 729948 -> "0.00729948". For the context line under a balance, where the
+ * unit is written out separately.
+ */
+export const formatSatoshisAsBsvDecimal = (satoshis: number): string =>
+  formatBsvLocale(Math.abs(Number(satoshis)) / SATS_PER_BSV)
+
+/**
+ * Split a formatted amount into its figure and its unit, so the two can be set
+ * at different sizes — the figure is the thing being read, the unit is a label
+ * hanging off it. In USD mode the symbol is part of the figure, so `unit` is
+ * empty rather than fabricated.
+ */
+export const formatAmountParts = (
+  satoshis: number,
+  currency: string = 'BSV',
+  satoshisPerUSD: number = 0,
+  options: { showPlus?: boolean; abbreviate?: boolean; showFiatAsInteger?: boolean } = {}
+): { value: string; unit: string } => {
+  const text = formatAmount(satoshis, currency, satoshisPerUSD, options)
+  if (currency === 'USD') return { value: text, unit: '' }
+  const split = text.lastIndexOf(' ')
+  if (split < 0) return { value: text, unit: '' }
+  return { value: text.slice(0, split), unit: text.slice(split + 1) }
+}
+
+/**
  * Convert a user-entered display value back to integer satoshis.
  * - BSV mode: input is satoshi integers, passthrough
  * - USD mode: input is dollar amount, multiply by satoshisPerUSD

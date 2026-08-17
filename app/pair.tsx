@@ -239,7 +239,7 @@ function makeStyles(colors: ReturnType<typeof import('@/context/theme/ThemeConte
       backgroundColor: colors.fillSecondary, alignItems: 'center',
     },
     rejectBtnText:  { ...typography.callout, fontWeight: '500', color: colors.textPrimary },
-    approveBtn:     { flex: 1, paddingVertical: spacing.md + 2, borderRadius: radii.lg, backgroundColor: colors.info, alignItems: 'center' },
+    approveBtn:     { flex: 1, paddingVertical: spacing.md + 2, borderRadius: radii.lg, backgroundColor: colors.accent, alignItems: 'center' },
     approveBtnText: { ...typography.callout, fontWeight: '600', color: colors.textOnAccent },
     secondaryBtn: {
       marginTop: spacing.xxl, paddingVertical: spacing.md, paddingHorizontal: spacing.xxl,

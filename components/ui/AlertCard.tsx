@@ -133,7 +133,7 @@ export function AlertHost() {
       statusBarTranslucent={Platform.OS === 'android'}
       navigationBarTranslucent={Platform.OS === 'android'}
     >
-      <Animated.View style={[styles.backdrop, backdropStyle]}>
+      <Animated.View style={[styles.backdrop, { backgroundColor: colors.scrim }, backdropStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={() => dismiss('cancel')} />
         <Animated.View
           style={[
@@ -182,7 +182,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   card: {
     width: 280,
