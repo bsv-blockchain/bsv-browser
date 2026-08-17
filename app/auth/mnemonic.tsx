@@ -132,6 +132,8 @@ export default function MnemonicScreen() {
             : t('vault_shares_unavailable'),
           { type: 'error' }
         )
+      } else {
+        setHasAcknowledged(true)
       }
     } catch (error: any) {
       console.info('[Mnemonic] Print recovery shares did not complete:', error?.message)
