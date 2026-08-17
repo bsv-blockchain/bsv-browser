@@ -95,6 +95,16 @@ Dev Builds.zip
 credentials.json
 .superpowers/
 
+# Git worktrees, which live INSIDE the project root and each carry a full
+# node_modules — 13.7 GB between them as of 2026-08-17. They are excluded from
+# git via .git/info/exclude, but .easignore REPLACES .gitignore (and info/exclude)
+# for the build archive, so without these two lines every local build compresses
+# and fingerprints the lot. That is what made "Computing project fingerprint"
+# hang. Also a correctness hazard: the archive would contain stale copies of the
+# whole app, including other branches' native code.
+.claude/worktrees/
+.worktrees/
+
 # --- from ios/.gitignore (path-prefixed) ---
 ios/build/
 # `-derivedDataPath ios/build-release` output from a local archive build. Not
