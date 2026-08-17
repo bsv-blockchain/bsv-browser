@@ -120,6 +120,20 @@ export class TaskBackupPush extends WalletMonitorTask {
 
     try {
       const r = await this.push()
+
+      // An oversized chunk is a standing condition, not a transient hiccup: it will be
+      // oversized on every pass until the offending record is dealt with. It must NOT take
+      // the success path — that resets the backoff and, because the window has not closed,
+      // sets checkNow and re-runs on the very next monitor tick, which is a hot loop. Back
+      // off exactly as for a failure, and leave hasChanges set: those records are still not
+      // backed up, and nothing here should imply otherwise.
+      if (r.oversized === true) {
+        TaskBackupPush.checkNow = false
+        TaskBackupPush.lastError = 'backup chunk too large for the server'
+        TaskBackupPush.noteFailure(startedAt)
+        return 'backup: chunk too large for the server, skipped'
+      }
+
       TaskBackupPush.noteRan(startedAt)
       TaskBackupPush.backoffMs = TaskBackupPush.BASE_BACKOFF_MS
       TaskBackupPush.lastError = undefined

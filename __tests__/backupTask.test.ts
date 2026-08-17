@@ -111,6 +111,31 @@ describe('TaskBackupPush runTask', () => {
     expect(TaskBackupPush.checkNow).toBe(true)
   })
 
+  // An oversized chunk is a standing condition, not a transient failure: it will be
+  // oversized on every pass until the underlying record is dealt with. Treating it as
+  // "more to drain" turned it into a hot loop that re-ran on every monitor tick.
+  it('backs off on an oversized chunk instead of retrying immediately', async () => {
+    TaskBackupPush.noteChanged()
+    const t = task(async () => ok({ pushed: 0, bytes: 0, windowClosed: false, oversized: true }))
+
+    await t.runTask()
+
+    expect(TaskBackupPush.checkNow).toBe(false)
+    const first = TaskBackupPush.backoffMs
+    await t.runTask()
+    expect(TaskBackupPush.backoffMs).toBeGreaterThan(first)
+  })
+
+  it('says why it is not backing up when a chunk is oversized', async () => {
+    TaskBackupPush.noteChanged()
+    await task(async () => ok({ pushed: 0, bytes: 0, windowClosed: false, oversized: true })).runTask()
+
+    expect(TaskBackupPush.lastError).toMatch(/too large/i)
+    // Still pending: the records have NOT been backed up and must not look done.
+    expect(TaskBackupPush.hasChanges).toBe(true)
+    expect(TaskBackupPush.lastSuccessAt).toBeUndefined()
+  })
+
   it('backs off exponentially on failure and records why', async () => {
     const failing = task(async () => { throw new Error('server unreachable') })
 

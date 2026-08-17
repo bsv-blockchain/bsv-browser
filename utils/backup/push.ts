@@ -112,12 +112,12 @@ export async function pushOnce (deps: PushDeps): Promise<PushResult> {
   // Checking here makes a doomed pass nearly free instead of nearly a minute.
   const estimate = estimateEncodedBytes(chunk)
   if (estimate > MAX_BLOB_BYTES) {
+    // Interpolated, not printf-style: React Native's console does not substitute %d, so a
+    // format string prints its own placeholders and pushes the numbers to the end.
     console.log(
-      '[backup] chunk too large for the server, skipping push · estimate=%d bytes · cap=%d · ' +
-        'nothing was encrypted or uploaded. This wallet cannot back up until the oversized ' +
-        'record is handled.',
-      estimate,
-      MAX_BLOB_BYTES
+      `[backup] chunk too large for the server, skipping push · estimate=${estimate} bytes · ` +
+        `cap=${MAX_BLOB_BYTES} · nothing was encrypted or uploaded. This wallet cannot back ` +
+        'up until the oversized record is handled.'
     )
     // Cursor deliberately untouched: advancing past this chunk would silently drop records
     // from the backup, which is worse than not backing up. The pass is now cheap, so the
