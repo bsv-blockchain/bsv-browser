@@ -94,6 +94,36 @@ describe('r1k1 script module', () => {
     expect(script.toBinary().length).toBe(R1K1_R1_UNLOCK_LEN)
   })
 
+  it('estimateLength pins R1K1_R1_UNLOCK_LEN without ever invoking signDigest', async () => {
+    // Closes a real gap: templateCodec.ts and this test file each hardcode
+    // the 60-byte scriptCode offset independently of @bsv/templates' own
+    // `lockingBytes.subarray(60)` inside unlockR1 (see R1K1Wallet.js) — a
+    // typo between our two copies would be caught by cross-checking them
+    // against each other, but a genuine upstream change to THAT offset, with
+    // the locking script's bytes otherwise unchanged, would not: it would
+    // silently produce a wrong scriptCode, hence a wrong preimage, hence a
+    // wrong signature digest, for a real already-mined output — and nothing
+    // above would notice. estimateLength builds that same preimage (so it
+    // depends on the same offset) without ever calling signDigest, so a stub
+    // signer pins its length against R1K1_R1_UNLOCK_LEN; an offset drift
+    // changes the scriptCode length, which changes the preimage length,
+    // which changes this number — so it fails loudly here instead of
+    // surfacing as an unspendable output.
+    const s = await scenario()
+    const u = new R1K1Wallet().unlockR1({
+      publicKey: s.r1PublicKey,
+      salt: s.salt,
+      sourceSatoshis: 500_000,
+      lockingScript: s.lockingScript,
+      signDigest: async () => []
+    })
+
+    const length = await u.estimateLength(s.spend, 0)
+
+    expect(length).toBe(R1K1_R1_UNLOCK_LEN)
+    expect(R1K1_R1_UNLOCK_LEN).toBe(959_871)
+  })
+
   it('accepts a high-S R1 signature without normalisation', async () => {
     const s = await scenario()
     const N = p256.Point.Fn.ORDER
