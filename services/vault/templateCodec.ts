@@ -1,6 +1,6 @@
 /**
  * Template descriptor and byte-exact recognition for the R1-K1 vault locking
- * script (and, in later tasks, its preimage scriptCode).
+ * script and its sighash preimage's scriptCode.
  *
  * The vault's locking script is 99.996% a fixed template: only a handful of
  * bytes vary between outputs (the R1 commitment and the K1 public-key hash).
@@ -8,6 +8,12 @@
  * system; this module gives the rest of the codec a byte-exact description
  * of "the constant part" so it can be recompressed to a few dozen bytes and
  * reconstructed exactly.
+ *
+ * As of region 0x02, this module also describes the R1-K1 sighash preimage's
+ * `scriptCode` — the piece that makes SPENDING transactions huge, since
+ * `R1K1Wallet.unlockR1` pushes the whole preimage (commitment locking script
+ * included) into the unlocking script. Its descriptor is derived from the
+ * region-0x01 one, not built independently — see `describeVaultTemplate`.
  *
  * The descriptor is DERIVED from `buildVaultLockingScript`, not transcribed
  * from the plan's pinned constants. Building the same template twice with
@@ -150,6 +156,39 @@ function constantHashOf(bytes: number[], runs: { offset: number; length: number 
  */
 const PINNED_CONSTANT_HASH_V1 = '41f6fcbbc46fe0eeb64a176fd66709694331b2327b1a63086105529e34a7493b'
 
+/**
+ * Number of bytes `R1K1Wallet.unlockR1` drops from the FRONT of the locking
+ * script before committing the remainder into the sighash preimage's
+ * `scriptCode`:
+ *
+ *   formatPreimage(tx, inputIndex, source, new Script([], lockingBytes.subarray(60), void 0, false))
+ *
+ * (verified against the `@bsv/templates` source — see R1K1Wallet.js's
+ * `unlockR1`). This is the one load-bearing constant region 0x02 is built
+ * from: `describeVaultTemplate` derives the ENTIRE region-0x02 descriptor by
+ * slicing this many bytes off the region-0x01 samples it already built,
+ * rather than hardcoding 959,572 (959,632 − 60) or re-deriving the
+ * commitment/k1PublicKeyHash offsets independently. If `@bsv/templates` ever
+ * changes how many bytes `unlockR1` drops, this is the one constant to
+ * update — everything else in region 0x02 (its length, its variable run, its
+ * pinned constant hash) recomputes from it automatically and any drift shows
+ * up as a `template-unknown` throw below, not a silent wrong reconstruction.
+ */
+const PREIMAGE_SCRIPT_CODE_OFFSET = 60
+
+/**
+ * The version-1/region-0x02 (preimage scriptCode) template's `constantHash`,
+ * pinned the same way as `PINNED_CONSTANT_HASH_V1` above: computed once from
+ * the CURRENT `@bsv/templates` output (region-0x01 samples sliced by
+ * `PREIMAGE_SCRIPT_CODE_OFFSET`) and hardcoded here deliberately, so a
+ * same-length drift in the scriptCode's constant bytes fails loudly instead
+ * of silently reconstructing wrong bytes for a real spend. Changing this
+ * literal is a deliberate act tied to minting a new version, never a silent
+ * "make the assertion pass again" edit — see `PINNED_CONSTANT_HASH_V1`'s
+ * fuller doc comment, which this mirrors.
+ */
+const PINNED_CONSTANT_HASH_V1_SCRIPT_CODE = 'f759656aadfcdbd531531c9806b8bce89f7ed4363c7d3f07578455fb1b96a990'
+
 let cachedDescriptors: TemplateVersion[] | undefined
 
 /**
@@ -197,7 +236,43 @@ export async function describeVaultTemplate(): Promise<TemplateVersion[]> {
   const region: TemplateRegion = 0x01
   referenceBytesByKey.set(versionKey(version, region), samples[0])
 
-  cachedDescriptors = [{ version, region, totalLength, variableRuns, constantHash }]
+  // Region 0x02: the sighash preimage's scriptCode. DERIVED from the same
+  // region-0x01 samples above by dropping their first
+  // `PREIMAGE_SCRIPT_CODE_OFFSET` bytes — never built independently and never
+  // hardcoded — so the two descriptors can never disagree about where the
+  // scriptCode starts or how long it is. Because the R1 commitment's variable
+  // run (offset 17, length 20) lies entirely below the offset, it drops out
+  // of `scriptCodeSamples` altogether; only the k1PublicKeyHash run survives,
+  // shifted down by the same offset. That is why region 0x02's payload ends
+  // up 20 bytes (k1PublicKeyHash only), not the 40-byte commitment +
+  // k1PublicKeyHash pair region 0x01 carries.
+  const scriptCodeSamples = samples.map((s) => s.slice(PREIMAGE_SCRIPT_CODE_OFFSET))
+  const scriptCodeLength = scriptCodeSamples[0].length
+  const scriptCodeVariableRuns = findVariableRuns(scriptCodeSamples)
+  const scriptCodeConstantHash = constantHashOf(scriptCodeSamples[0], scriptCodeVariableRuns)
+
+  if (scriptCodeConstantHash !== PINNED_CONSTANT_HASH_V1_SCRIPT_CODE) {
+    throw new VaultError(
+      'template-unknown',
+      `live R1-K1 preimage scriptCode disagrees with the pinned reference (constantHash ${scriptCodeConstantHash} ` +
+        `vs ${PINNED_CONSTANT_HASH_V1_SCRIPT_CODE} expected) — an @bsv/templates upgrade changed the template; ` +
+        'this requires a new pinned version, not a silent reconstruction against stale bytes'
+    )
+  }
+
+  const scriptCodeRegion: TemplateRegion = 0x02
+  referenceBytesByKey.set(versionKey(version, scriptCodeRegion), scriptCodeSamples[0])
+
+  cachedDescriptors = [
+    { version, region, totalLength, variableRuns, constantHash },
+    {
+      version,
+      region: scriptCodeRegion,
+      totalLength: scriptCodeLength,
+      variableRuns: scriptCodeVariableRuns,
+      constantHash: scriptCodeConstantHash
+    }
+  ]
   return cachedDescriptors
 }
 
@@ -260,12 +335,15 @@ export function matchesTemplate(bytes: number[], v: TemplateVersion): boolean {
  * plan's Global Constraints for this decision.
  *
  * The payload is just the bytes of each variable run, concatenated in
- * ascending offset order — for the current region-0x01 version that is
- * commitment(20) ‖ k1PublicKeyHash(20), 40 bytes, making a compressed
- * locking script exactly 7 + 40 = 47 bytes. Nothing here hardcodes that
- * shape though: both directions walk `TemplateVersion.variableRuns`, so a
- * version with different/more runs (e.g. Task 3's region 0x02) is handled
- * by the same code without change.
+ * ascending offset order — for region 0x01 that is commitment(20) ‖
+ * k1PublicKeyHash(20), 40 bytes, making a compressed locking script exactly
+ * 7 + 40 = 47 bytes; for region 0x02 (the preimage scriptCode) that is
+ * k1PublicKeyHash(20) alone — the commitment run doesn't survive the
+ * scriptCode's leading 60-byte cut, see `describeVaultTemplate` — making a
+ * compressed scriptCode exactly 7 + 20 = 27 bytes. Nothing here hardcodes
+ * either shape though: both directions walk `TemplateVersion.variableRuns`,
+ * so a version with different/more runs is handled by the same code without
+ * change.
  * ---------------------------------------------------------------------------
  */
 
@@ -297,23 +375,24 @@ export function isCompressed(bytes: number[]): boolean {
 }
 
 /**
- * Compress a recognised region-0x01 (R1-K1 locking script) template instance
- * down to its 7-byte header plus the concatenated variable-run bytes. A
- * script that does not match any known template — including one that is
- * merely near-miss, per `matchesTemplate`'s exactness — is returned
- * unchanged (a fresh copy, not the header format): this function must never
- * turn an unrecognised script into something that looks compressed.
+ * Compress a recognised template instance of `region` down to its 7-byte
+ * header plus the concatenated variable-run bytes. Bytes that don't match any
+ * known version of `region` — including a merely near-miss, per
+ * `matchesTemplate`'s exactness — are returned unchanged (a fresh copy, not
+ * the header format): this must never turn unrecognised bytes into something
+ * that looks compressed.
  *
  * Awaits `describeVaultTemplate()` itself before consulting `matchesTemplate`
  * so the normal path can never hit that function's "no cached reference"
  * throw — this is always called with the descriptors it just (re)populated
- * the cache for, in the same tick.
+ * the cache for, in the same tick. Shared by `compressScript` (region 0x01)
+ * and `compressScriptCode` (region 0x02) so the two never fork behaviour.
  */
-export async function compressScript(bytes: number[]): Promise<number[]> {
+async function compressForRegion(bytes: number[], region: TemplateRegion): Promise<number[]> {
   const descriptors = await describeVaultTemplate()
 
   for (const v of descriptors) {
-    if (v.region !== 0x01) continue // only the locking-script region compresses here; see compressScriptCode for 0x02
+    if (v.region !== region) continue
     if (!matchesTemplate(bytes, v)) continue
 
     const runs = [...v.variableRuns].sort((a, b) => a.offset - b.offset)
@@ -329,10 +408,33 @@ export async function compressScript(bytes: number[]): Promise<number[]> {
 }
 
 /**
- * Reverse of `compressScript` (and, from Task 3, of `compressScriptCode`):
- * detects the `0xff` header, resolves it against a known template version,
- * and rebuilds the exact original bytes by splicing the header's payload
- * back into a copy of that version's cached reference template.
+ * Compress a recognised region-0x01 (R1-K1 locking script) template
+ * instance. See `compressForRegion` for the shared behaviour and exactness
+ * guarantees.
+ */
+export async function compressScript(bytes: number[]): Promise<number[]> {
+  return compressForRegion(bytes, 0x01)
+}
+
+/**
+ * Compress a recognised region-0x02 (R1-K1 sighash preimage `scriptCode`)
+ * template instance — the piece that makes a SPENDING transaction huge,
+ * since `R1K1Wallet.unlockR1` pushes the whole preimage into the unlocking
+ * script. See `compressForRegion` for the shared behaviour and exactness
+ * guarantees; `expandScript` reverses this the same way it reverses
+ * `compressScript`, dispatching on the header's region byte.
+ */
+export async function compressScriptCode(bytes: number[]): Promise<number[]> {
+  return compressForRegion(bytes, 0x02)
+}
+
+/**
+ * Reverse of both `compressScript` (region 0x01) and `compressScriptCode`
+ * (region 0x02) — one expander for every region, dispatching purely on the
+ * header's region byte: detects the `0xff` header, resolves it against a
+ * known template version, and rebuilds the exact original bytes by splicing
+ * the header's payload back into a copy of that version's cached reference
+ * template.
  *
  * Fails closed in every direction — never returns bytes that are merely
  * approximately right:

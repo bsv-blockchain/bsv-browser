@@ -1,9 +1,15 @@
 import { Hash, P2PKH, PrivateKey, Utils } from '@bsv/sdk'
 import { p256 } from '@noble/curves/nist.js'
-import { buildMainnetFixtureScript } from './fixtures/r1k1MainnetFixture'
+import {
+  buildMainnetFixtureScript,
+  MAINNET_K1_PUBLIC_KEY_HASH_HEX,
+  MAINNET_SCRIPT_CODE_LENGTH,
+  MAINNET_SCRIPT_CODE_SHA256
+} from './fixtures/r1k1MainnetFixture'
 import { R1K1_LOCK_LEN, buildVaultLockingScript } from '@/services/vault/r1k1'
 import {
   compressScript,
+  compressScriptCode,
   describeVaultTemplate,
   expandScript,
   isCompressed,
@@ -207,6 +213,97 @@ describe('vault template codec: compress + expand', () => {
       caught = e
     }
     expect(caught).toMatchObject({ code: 'template-invalid' })
+  })
+})
+
+describe('vault template codec: region 0x02 (preimage scriptCode)', () => {
+  // Building the ~960 KB locking script (and diffing it inside
+  // describeVaultTemplate) is not free — build once for this whole block.
+  let scriptCodeDescriptor: TemplateVersion
+  let scriptBytes: number[]
+  let scriptCodeBytes: number[]
+
+  beforeAll(async () => {
+    const descriptors = await describeVaultTemplate()
+    const found = descriptors.find((d) => d.region === 0x02)
+    if (!found) throw new Error('describeVaultTemplate did not return a region 0x02 descriptor')
+    scriptCodeDescriptor = found
+
+    scriptBytes = (await buildVaultLockingScript(fixture())).toBinary()
+    scriptCodeBytes = scriptBytes.slice(60)
+  })
+
+  it("derives scriptCode by dropping the locking script's first 60 bytes — R1K1Wallet.unlockR1 builds the preimage as lockingBytes.subarray(60)", () => {
+    // This is the test that fails and names the reason if @bsv/templates ever
+    // changes that relationship: it re-derives 959572 straight from a
+    // freshly built script (via the library's own 60-byte cut) rather than
+    // trusting a hardcoded number, and separately confirms the codec's own
+    // region-0x02 descriptor was derived the same way.
+    expect(scriptCodeBytes.length).toBe(959572)
+    expect(scriptCodeBytes.length).toBe(R1K1_LOCK_LEN - 60)
+    expect(scriptCodeDescriptor.totalLength).toBe(R1K1_LOCK_LEN - 60)
+    expect(matchesTemplate(scriptCodeBytes, scriptCodeDescriptor)).toBe(true)
+  })
+
+  it('the 0x02 variable run is k1PublicKeyHash only (20 bytes), not the 40-byte 0x01 payload', () => {
+    // The R1 commitment run (offset 17, length 20 in the locking script) sits
+    // entirely below the 60-byte cut, so it drops out of the scriptCode
+    // altogether; only k1PublicKeyHash (originally at offset 959609) shifts
+    // into view, at 959609 - 60 = 959549.
+    expect(scriptCodeDescriptor.variableRuns).toEqual([{ offset: 959549, length: 20 }])
+  })
+
+  it('scriptCode constantHash matches the pinned reference recorded for version 1 region 0x02', () => {
+    // Pinned literal, independently re-declared here (not imported) so a
+    // one-sided edit to the implementation's pinned value can't silently
+    // pass — mirrors the region-0x01 constantHash test above.
+    expect(scriptCodeDescriptor.constantHash).toBe(
+      'f759656aadfcdbd531531c9806b8bce89f7ed4363c7d3f07578455fb1b96a990'
+    )
+  })
+
+  it('round-trips a freshly built scriptCode byte-for-byte', async () => {
+    const compressed = await compressScriptCode(scriptCodeBytes)
+    const expanded = await expandScript(compressed)
+    expect(expanded).toEqual(scriptCodeBytes)
+  })
+
+  it('round-trips the REAL mined mainnet scriptCode byte-for-byte, and its compressed payload is k1PublicKeyHash ONLY', async () => {
+    // The fixture holds the actual k1PublicKeyHash mined on-chain for txid
+    // 6c947ae3..., vout 0 — this proves compress+expand reproduces a real,
+    // already-mined scriptCode exactly, not just a freshly-built one.
+    const mainnetScript = await buildMainnetFixtureScript()
+    const mainnetScriptCode = mainnetScript.slice(60)
+    expect(mainnetScriptCode.length).toBe(MAINNET_SCRIPT_CODE_LENGTH)
+    expect(Utils.toHex(Hash.sha256(mainnetScriptCode))).toBe(MAINNET_SCRIPT_CODE_SHA256)
+
+    const compressed = await compressScriptCode(mainnetScriptCode)
+    const expanded = await expandScript(compressed)
+    expect(expanded).toEqual(mainnetScriptCode)
+
+    // Region 0x02's payload is 20 bytes (k1PublicKeyHash), not 40: the R1
+    // commitment cannot survive the 60-byte cut, so it is not — and cannot
+    // be — part of this payload. The commitment stays recoverable elsewhere:
+    // the unlocking script pushes publicKey and salt verbatim, and
+    // commitment = hash160(publicKey ‖ salt).
+    const payload = compressed.slice(7) // HEADER_LENGTH: marker(1)+version(1)+region(1)+originalLength(4)
+    expect(payload.length).toBe(20)
+    expect(Utils.toHex(payload)).toBe(MAINNET_K1_PUBLIC_KEY_HASH_HEX)
+  })
+
+  it('produces a 27-byte compressed scriptCode starting with the 0xff marker (7-byte header + 20-byte payload)', async () => {
+    const compressed = await compressScriptCode(scriptCodeBytes)
+    expect(compressed[0]).toBe(TEMPLATE_MARKER)
+    expect(compressed.length).toBe(27)
+    expect(isCompressed(compressed)).toBe(true)
+  })
+
+  it('leaves non-matching bytes unchanged and does not allocate a header', async () => {
+    const wrongLength = scriptCodeBytes.slice(0, 1000)
+    const compressed = await compressScriptCode(wrongLength)
+    expect(compressed).toEqual(wrongLength)
+    expect(compressed[0]).not.toBe(TEMPLATE_MARKER)
+    expect(isCompressed(compressed)).toBe(false)
   })
 })
 
