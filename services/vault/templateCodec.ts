@@ -17,7 +17,13 @@
  * changes the DERIVED descriptor too — callers that additionally assert the
  * derived values against the plan's pinned constants (see
  * templateCodec.test.ts) will see that as a test failure, never a silent
- * drift.
+ * drift. A layout change that DOESN'T shift the length or the variable-run
+ * offsets — i.e. one that keeps 959,632 bytes but alters some of the fixed
+ * bytes in between — would NOT show up in `totalLength`/`variableRuns` at
+ * all, which is why `describeVaultTemplate` additionally checks the live
+ * template's `constantHash` against a pinned literal at runtime (see
+ * `PINNED_CONSTANT_HASH_V1`) and throws rather than silently reconstructing
+ * against stale bytes. That check runs on every process, not just CI.
  *
  * SECURITY: nothing secret passes through this module. `describeVaultTemplate`
  * generates its own throwaway keys/salts purely to build sample scripts for
@@ -25,7 +31,7 @@
  */
 import { Hash, Utils } from '@bsv/sdk'
 import { p256 } from '@noble/curves/nist.js'
-import { buildVaultLockingScript } from './r1k1'
+import { R1K1_LOCK_LEN, buildVaultLockingScript } from './r1k1'
 import { randomBytes } from './random'
 import { VaultError } from './types'
 
@@ -118,6 +124,32 @@ function constantHashOf(bytes: number[], runs: { offset: number; length: number 
   return Utils.toHex(Hash.sha256(masked))
 }
 
+/**
+ * The version-1/region-0x01 template's `constantHash` (see `constantHashOf`),
+ * pinned as a literal — computed once from the CURRENT `@bsv/templates`
+ * R1K1Wallet output and hardcoded here deliberately, per the design spec:
+ * versions are pinned "by the constant bytes they describe, not by an
+ * `@bsv/templates` semver range."
+ *
+ * This is what makes a same-length constant-byte drift fail loudly instead
+ * of silently: `originalLength`/`totalLength` alone cannot catch a library
+ * upgrade that keeps 959,632 bytes but changes some of the fixed template
+ * bytes (e.g. a reordered OP_CHECKSIG branch) — `expandScript` would splice
+ * a real compressed payload into a WRONG reference template and hand back
+ * confidently wrong bytes for a real, already-mined, real-money output, with
+ * no error at all. Comparing the live template's freshly-computed
+ * `constantHash` against this pinned value at `describeVaultTemplate` time
+ * closes that gap: any drift in the constant bytes changes the hash, and
+ * `describeVaultTemplate` throws `template-unknown` rather than accepting a
+ * template it was never verified against.
+ *
+ * Changing this literal is a deliberate act, not routine maintenance: it
+ * must happen together with minting a NEW version number (and, if the
+ * variable-run shape also changed, updating the compress/expand code that
+ * assumes it) — never as a silent "make the assertion pass again" edit.
+ */
+const PINNED_CONSTANT_HASH_V1 = '41f6fcbbc46fe0eeb64a176fd66709694331b2327b1a63086105529e34a7493b'
+
 let cachedDescriptors: TemplateVersion[] | undefined
 
 /**
@@ -127,6 +159,17 @@ let cachedDescriptors: TemplateVersion[] | undefined
  * process, and rebuilding a ~960 KB script several times per call would be
  * wasteful for callers (e.g. the compress/expand path) that call this on
  * every backup or restore.
+ *
+ * Throws `VaultError('template-unknown')` if the live template disagrees
+ * with the pinned reference in ANY way this codec was verified against —
+ * `totalLength !== R1K1_LOCK_LEN` (an `@bsv/templates` upgrade that changed
+ * the script's length; also caught downstream by `originalLength` checks,
+ * but checked here too so the failure surfaces at the earliest possible
+ * point) or `constantHash !== PINNED_CONSTANT_HASH_V1` (a same-length drift
+ * in the constant bytes, which nothing else in this module would ever
+ * detect — see `PINNED_CONSTANT_HASH_V1`'s doc comment). This is the check
+ * that makes a library upgrade fail loudly on a real device rather than
+ * merely fail this repo's CI.
  */
 export async function describeVaultTemplate(): Promise<TemplateVersion[]> {
   if (cachedDescriptors) return cachedDescriptors
@@ -140,6 +183,15 @@ export async function describeVaultTemplate(): Promise<TemplateVersion[]> {
   const totalLength = samples[0].length
   const variableRuns = findVariableRuns(samples)
   const constantHash = constantHashOf(samples[0], variableRuns)
+
+  if (totalLength !== R1K1_LOCK_LEN || constantHash !== PINNED_CONSTANT_HASH_V1) {
+    throw new VaultError(
+      'template-unknown',
+      `live R1-K1 template disagrees with the pinned reference (length ${totalLength} vs ${R1K1_LOCK_LEN} expected` +
+        `, constantHash ${constantHash} vs ${PINNED_CONSTANT_HASH_V1} expected) — an @bsv/templates upgrade changed ` +
+        'the template; this requires a new pinned version, not a silent reconstruction against stale bytes'
+    )
+  }
 
   const version = 1
   const region: TemplateRegion = 0x01
@@ -357,5 +409,19 @@ export async function expandScript(bytes: number[]): Promise<number[]> {
     for (let i = 0; i < r.length; i++) result[r.offset + i] = payload[payloadOffset + i]
     payloadOffset += r.length
   }
+
+  // Last-line check before handing reconstructed bytes back: unreachable
+  // today (result is a copy of `reference`, which is exactly `match.totalLength`
+  // long, and `originalLength` was already checked against that same value
+  // above) but the cheapest possible guard against ever returning a
+  // wrong-length reconstruction if that invariant is ever violated by a
+  // future change.
+  if (result.length !== originalLength) {
+    throw new VaultError(
+      'template-invalid',
+      `reconstructed ${result.length} bytes but originalLength was ${originalLength} for version ${version} region ${region}`
+    )
+  }
+
   return result
 }

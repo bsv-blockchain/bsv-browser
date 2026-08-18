@@ -51,6 +51,22 @@ describe('vault template codec: descriptor + exact recognition', () => {
     expect(descriptor.constantHash).toMatch(/^[0-9a-f]{64}$/)
   })
 
+  it('constantHash matches the pinned reference recorded for version 1', () => {
+    // Pinned literal, computed once from the CURRENT @bsv/templates
+    // R1K1Wallet output — mirrors PINNED_CONSTANT_HASH_V1 in
+    // templateCodec.ts (kept as a separately-recorded literal here, not an
+    // import, so this test can't be made to pass by silently changing the
+    // implementation's pinned value). totalLength/variableRuns alone cannot
+    // catch an @bsv/templates upgrade that keeps 959,632 bytes but alters a
+    // constant byte in between — this is the assertion that closes that
+    // gap. describeVaultTemplate() itself would already have thrown
+    // 'template-unknown' by the time this runs if the live template ever
+    // disagreed with this value (see the next describe block for that
+    // throwing behaviour); this test additionally pins the exact expected
+    // value so a change shows up here too, by name.
+    expect(descriptor.constantHash).toBe('41f6fcbbc46fe0eeb64a176fd66709694331b2327b1a63086105529e34a7493b')
+  })
+
   it('rejects a script with one byte flipped outside a variable run', () => {
     const mutated = scriptBytes.slice()
     mutated[0] ^= 0xff // well outside both runs, and XOR-0xff always flips
@@ -191,5 +207,52 @@ describe('vault template codec: compress + expand', () => {
       caught = e
     }
     expect(caught).toMatchObject({ code: 'template-invalid' })
+  })
+})
+
+describe('vault template codec: same-length constant-byte drift is caught', () => {
+  // The failure mode this guards against: an @bsv/templates upgrade that
+  // keeps R1K1_LOCK_LEN (959632) bytes but alters one of the FIXED bytes in
+  // between. totalLength and originalLength checks can't see this — only
+  // comparing the live template's constantHash against a pinned reference
+  // can. This is exercised end-to-end (a real describeVaultTemplate() call,
+  // not a duplicated/extracted comparison helper), against a mocked
+  // buildVaultLockingScript that flips one constant byte the SAME way on
+  // every sample it builds — so the diffing logic still treats it as
+  // constant, not variable, and only its value has drifted.
+  //
+  // Runs inside jest.isolateModulesAsync so the mocked drift gets its own,
+  // separate `templateCodec` module instance (own `cachedDescriptors`,
+  // untouched by whatever the other describe blocks in this file already
+  // cached) rather than contaminating the real one the rest of this suite
+  // relies on.
+  it('describeVaultTemplate throws template-unknown when a constant byte drifts at the same length', async () => {
+    let freshDescribe: (() => Promise<unknown>) | undefined
+
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock('@/services/vault/r1k1', () => {
+        const actual = jest.requireActual('@/services/vault/r1k1')
+        return {
+          ...actual,
+          buildVaultLockingScript: async (a: { r1PublicKey: string; salt: string; k1PublicKeyHash: number[] }) => {
+            const script = await actual.buildVaultLockingScript(a)
+            const bytes: number[] = script.toBinary()
+            bytes[0] ^= 0xff // outside both variable runs; same on every sample, so it reads as "constant" — just the wrong constant
+            return { toBinary: () => bytes }
+          }
+        }
+      })
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- isolated module registry needs a fresh require, not the file's top-level import
+      const mod = require('@/services/vault/templateCodec')
+      freshDescribe = mod.describeVaultTemplate
+    })
+
+    let caught: unknown
+    try {
+      await freshDescribe!()
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toMatchObject({ code: 'template-unknown' })
   })
 })
