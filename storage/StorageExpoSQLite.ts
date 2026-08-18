@@ -329,11 +329,13 @@ export class StorageExpoSQLite extends StorageProvider {
       trx?: TrxToken
     },
     pkCol: string,
-    extraClauses?: { conditions: string[]; params: any[] }
+    extraClauses?: { conditions: string[]; params: any[] },
+    columns?: string[]
   ): Promise<T[]> {
     const db = this.getDB()
     const { sql: whereSql, params } = this.buildWhere(args.partial)
-    let query = `SELECT * FROM "${table}" ${whereSql}`
+    const projection = columns ? columns.map(c => `"${c}"`).join(', ') : '*'
+    let query = `SELECT ${projection} FROM "${table}" ${whereSql}`
 
     if (args.since) {
       query += `${whereSql ? ' AND' : ' WHERE'} updated_at >= ?`
@@ -376,6 +378,52 @@ export class StorageExpoSQLite extends StorageProvider {
     }
     const result = (await db.getFirstAsync(query, params)) as any
     return result?.count || 0
+  }
+
+  /**
+   * The same shape as sqlCount, for a SUM over one column — so a total can be
+   * computed by SQLite instead of by marshalling every row into JS to add it up.
+   * `column` is never caller-supplied; it names a schema column literally.
+   */
+  private async sqlSum(
+    table: string,
+    column: string,
+    args: { partial: Record<string, any>; since?: Date; trx?: TrxToken },
+    extraClauses?: { conditions: string[]; params: any[] }
+  ): Promise<{ count: number; total: number }> {
+    const db = this.getDB()
+    const { sql: whereSql, params } = this.buildWhere(args.partial)
+    let query = `SELECT COUNT(*) as count, COALESCE(SUM("${column}"), 0) as total FROM "${table}" ${whereSql}`
+
+    if (args.since) {
+      query += `${whereSql ? ' AND' : ' WHERE'} updated_at >= ?`
+      params.push(this.validateDateForWhere(args.since))
+    }
+    if (extraClauses) {
+      for (const c of extraClauses.conditions) {
+        query += `${whereSql || args.since ? ' AND' : ' WHERE'} ${c}`
+      }
+      params.push(...extraClauses.params)
+    }
+    const result = (await db.getFirstAsync(query, params)) as any
+    return { count: result?.count || 0, total: result?.total || 0 }
+  }
+
+  /**
+   * Column names of a table, cached for the life of this connection.
+   *
+   * Read from the database rather than hardcoded so that a column added by a
+   * later migration cannot silently disappear from reads that project columns
+   * explicitly (see findOutputs' noScript path).
+   */
+  private tableColumnsCache = new Map<string, string[]>()
+  private async tableColumns(table: string): Promise<string[]> {
+    const cached = this.tableColumnsCache.get(table)
+    if (cached) return cached
+    const rows = (await this.getDB().getAllAsync(`PRAGMA table_info("${table}")`, [])) as { name: string }[]
+    const names = rows.map(r => r.name)
+    this.tableColumnsCache.set(table, names)
+    return names
   }
 
   private async sqlInsert(table: string, entity: Record<string, any>, pkCol: string): Promise<number> {
@@ -733,13 +781,13 @@ export class StorageExpoSQLite extends StorageProvider {
     return this.validateEntities(rows, undefined, ['isDeleted'])
   }
 
-  async findOutputs(args: FindOutputsArgs, tagIds?: number[], isQueryModeAll?: boolean): Promise<TableOutput[]> {
-    if ((args.partial as any).lockingScript) {
-      throw new Error('Outputs may not be found by lockingScript value.')
-    }
-    const partial = { ...args.partial } as any
-
-    // Build base query
+  /** The txStatus and tag filters shared by every outputs query — one
+   * definition so a find, a count and a sum can never drift apart. */
+  private outputExtraClauses(
+    args: FindOutputsArgs,
+    tagIds?: number[],
+    isQueryModeAll?: boolean
+  ): { conditions: string[]; params: any[] } | undefined {
     const extraConditions: string[] = []
     const extraParams: any[] = []
 
@@ -772,11 +820,29 @@ export class StorageExpoSQLite extends StorageProvider {
       extraParams.push(...tagIds)
     }
 
+    return extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+  }
+
+  async findOutputs(args: FindOutputsArgs, tagIds?: number[], isQueryModeAll?: boolean): Promise<TableOutput[]> {
+    if ((args.partial as any).lockingScript) {
+      throw new Error('Outputs may not be found by lockingScript value.')
+    }
+    const partial = { ...args.partial } as any
+
+    // `noScript` callers throw the script away the moment it arrives, so do not
+    // fetch it at all: an R1-K1 vault output's lockingScript is 959,632 bytes,
+    // and `SELECT *` copies every one of them out of SQLite and across the
+    // bridge into JS — on the JS thread — only to be discarded below.
+    const columns = args.noScript
+      ? (await this.tableColumns('outputs')).filter(c => c !== 'lockingScript')
+      : undefined
+
     const rows = await this.sqlFind<any>(
       'outputs',
       { ...args, partial },
       'outputId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+      this.outputExtraClauses(args, tagIds, isQueryModeAll),
+      columns
     )
 
     const results = this.validateEntities(rows, undefined, ['spendable', 'change'])
@@ -789,6 +855,27 @@ export class StorageExpoSQLite extends StorageProvider {
       }
     }
     return results
+  }
+
+  /**
+   * Count and total the satoshis of the outputs a findOutputs with these same
+   * args would return, without materialising a single row.
+   *
+   * This is the wallet balance: summing it in SQLite rather than pulling every
+   * output into JS is the difference between one number crossing the bridge and
+   * a few hundred full rows crossing it.
+   */
+  async sumOutputSatoshis(
+    args: FindOutputsArgs,
+    tagIds?: number[],
+    isQueryModeAll?: boolean
+  ): Promise<{ count: number; total: number }> {
+    return await this.sqlSum(
+      'outputs',
+      'satoshis',
+      args as any,
+      this.outputExtraClauses(args, tagIds, isQueryModeAll)
+    )
   }
 
   async findOutputTags(args: FindOutputTagsArgs): Promise<TableOutputTag[]> {
@@ -979,34 +1066,7 @@ export class StorageExpoSQLite extends StorageProvider {
   }
 
   async countOutputs(args: FindOutputsArgs, tagIds?: number[], isQueryModeAll?: boolean): Promise<number> {
-    const extraConditions: string[] = []
-    const extraParams: any[] = []
-    if (args.txStatus && args.txStatus.length > 0) {
-      const placeholders = args.txStatus.map(() => '?').join(',')
-      extraConditions.push(
-        `transactionId IN (SELECT transactionId FROM transactions WHERE status IN (${placeholders}))`
-      )
-      extraParams.push(...args.txStatus)
-    }
-    if (tagIds && tagIds.length > 0) {
-      const tagPlaceholders = tagIds.map(() => '?').join(',')
-      if (isQueryModeAll) {
-        extraConditions.push(`outputId IN (
-          SELECT outputId FROM output_tags_map WHERE outputTagId IN (${tagPlaceholders}) AND isDeleted = 0
-          GROUP BY outputId HAVING COUNT(DISTINCT outputTagId) = ${tagIds.length}
-        )`)
-      } else {
-        extraConditions.push(`outputId IN (
-          SELECT outputId FROM output_tags_map WHERE outputTagId IN (${tagPlaceholders}) AND isDeleted = 0
-        )`)
-      }
-      extraParams.push(...tagIds)
-    }
-    return this.sqlCount(
-      'outputs',
-      args,
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
-    )
+    return this.sqlCount('outputs', args, this.outputExtraClauses(args, tagIds, isQueryModeAll))
   }
 
   async countOutputTags(args: FindOutputTagsArgs): Promise<number> {

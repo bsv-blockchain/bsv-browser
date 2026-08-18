@@ -7,7 +7,7 @@ import type { ListOutputsResult, Validation } from '@bsv/sdk'
 import type { AuthId } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
 import type { StorageExpoSQLite } from '../StorageExpoSQLite'
 import { getListOutputsSpecOp } from '@bsv/wallet-toolbox-mobile/out/src/storage/methods/ListOutputsSpecOp'
-import { devLog } from '../../utils/logging'
+import { devLog, isLoggingEnabled } from '../../utils/logging'
 
 export async function listOutputsSql(
   storage: StorageExpoSQLite,
@@ -90,13 +90,30 @@ export async function listOutputsSql(
     findArgs.paged = { limit, offset }
   }
 
+  // The wallet-balance specOp wants ONE NUMBER: the sum of the satoshis of the
+  // outputs this query would return. Let SQLite add them up rather than reading
+  // every row into JS to do it here — for a wallet with a few hundred change
+  // outputs that is a few hundred full rows crossing the bridge, on the JS
+  // thread, to produce a single integer. Same filter, same answer; the row path
+  // below still serves every other specOp.
+  if (specOp?.totalOutputsIsSumOfSatoshis && !specOp.filterOutputs) {
+    const { total } = await storage.sumOutputSatoshis(
+      findArgs,
+      tagIds.length > 0 ? tagIds : undefined,
+      isQueryModeAll
+    )
+    return { totalOutputs: total, outputs: [] }
+  }
+
   let outputs = await storage.findOutputs(
     findArgs,
     tagIds.length > 0 ? tagIds : undefined,
     isQueryModeAll
   )
-  if (outputs.length === 0 && basketId !== undefined) {
-    // Debug: check what's in the basket without filters
+  if (outputs.length === 0 && basketId !== undefined && isLoggingEnabled()) {
+    // Debug aid for an empty basket: what IS in there, before the filters. The
+    // query is gated with the log — running it unconditionally cost a second
+    // full-basket read on every empty result, in production too.
     const db = (storage as any).getDB()
     const raw = await db.getAllAsync(
       `SELECT o.outputId, o.spendable, o.satoshis, t.status as txStatus

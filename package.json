@@ -175,7 +175,8 @@
     "moduleNameMapper": {
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
       "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js",
-      "^expo-audio$": "<rootDir>/__tests__/__mocks__/expo-audio.js"
+      "^expo-audio$": "<rootDir>/__tests__/__mocks__/expo-audio.js",
+      "^expo-sqlite$": "<rootDir>/__tests__/__mocks__/expo-sqlite.js"
     },
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes)/)",
