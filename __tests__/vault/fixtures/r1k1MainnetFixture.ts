@@ -43,29 +43,48 @@ export const MAINNET_COMMITMENT_HEX = '93d0d2a2a0e1f6411498d53c4fd9db0e543171b1'
 /** k1PublicKeyHash actually mined at offsets 959609..959628 of the real output. */
 export const MAINNET_K1_PUBLIC_KEY_HASH_HEX = '4c63d12b6237ddd07db2e8a08c984d7667b487d0'
 
-let cachedScript: number[] | undefined
-
 /**
- * Rebuild the real mainnet locking script from the CURRENT R1K1Wallet
- * template, using the real commitment/k1PublicKeyHash mined on-chain (above).
+ * Build the real mainnet locking script from the CURRENT R1K1Wallet template,
+ * using the real commitment/k1PublicKeyHash mined on-chain (above). ALWAYS
+ * invokes `R1K1Wallet().lock()` — no memoization.
  *
  * Built via the underlying template directly — `R1K1Wallet().lock(commitment,
  * k1PublicKeyHash)` — rather than `buildVaultLockingScript`, because this
  * fixture holds the commitment itself, not the r1PublicKey/salt preimage
  * `buildVaultLockingScript` would hash160 to derive it.
  *
- * Memoized: building the ~960 KB script is not free, and both this fixture's
- * own test and later tasks' round-trip tests call this. Returns a fresh copy
- * each call so callers are free to mutate their result (as e.g.
+ * Exists so a genuine determinism check can force two independent builds
+ * instead of reading a memo twice (see `buildMainnetFixtureScript` below,
+ * and r1k1MainnetFixture.test.ts's "stable across two independent builds"
+ * test, which calls this — not the memoized wrapper — precisely so that a
+ * regression in `@bsv/templates` determinism has somewhere to show up).
+ * Ordinary callers should use `buildMainnetFixtureScript` instead.
+ */
+export async function rebuildMainnetFixtureScriptUncached(): Promise<number[]> {
+  const commitment = hexToBytes(MAINNET_COMMITMENT_HEX)
+  const k1PublicKeyHash = hexToBytes(MAINNET_K1_PUBLIC_KEY_HASH_HEX)
+  const script = await new R1K1Wallet().lock(commitment, k1PublicKeyHash)
+  return script.toBinary()
+}
+
+let cachedScript: number[] | undefined
+
+/**
+ * Memoized wrapper around `rebuildMainnetFixtureScriptUncached`: building the
+ * ~960 KB script is not free, and both this fixture's own test and later
+ * tasks' round-trip tests call this repeatedly. Returns a fresh copy each
+ * call so callers are free to mutate their result (as e.g.
  * templateCodec.test.ts's byte-flip tests do) without corrupting the cache
  * for the next caller.
+ *
+ * Because this memoizes after the first call, it must NOT be used to test
+ * that the underlying build is deterministic — a second call here proves
+ * only that `.slice()` copies correctly. Use
+ * `rebuildMainnetFixtureScriptUncached` for that.
  */
 export async function buildMainnetFixtureScript(): Promise<number[]> {
   if (!cachedScript) {
-    const commitment = hexToBytes(MAINNET_COMMITMENT_HEX)
-    const k1PublicKeyHash = hexToBytes(MAINNET_K1_PUBLIC_KEY_HASH_HEX)
-    const script = await new R1K1Wallet().lock(commitment, k1PublicKeyHash)
-    cachedScript = script.toBinary()
+    cachedScript = await rebuildMainnetFixtureScriptUncached()
   }
   return cachedScript.slice()
 }

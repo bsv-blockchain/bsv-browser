@@ -4,13 +4,16 @@ import {
   MAINNET_LOCKING_SCRIPT_SHA256,
   MAINNET_SCRIPT_CODE_LENGTH,
   MAINNET_SCRIPT_CODE_SHA256,
-  buildMainnetFixtureScript
+  buildMainnetFixtureScript,
+  rebuildMainnetFixtureScriptUncached
 } from './fixtures/r1k1MainnetFixture'
 
 describe('vault template codec: real mainnet fixture', () => {
   // Rebuilding the ~960 KB script is not free — build it once for the whole
-  // suite rather than per test (the "stability across two builds" test below
-  // calls the helper again deliberately, but that is its whole point).
+  // suite via the memoized helper rather than per test. The "stable across
+  // two independent builds" test below deliberately bypasses that memo (see
+  // its own comment) so it is a genuine second build, not a second read of
+  // the same cached result.
   let scriptBytes: number[]
 
   beforeAll(async () => {
@@ -31,9 +34,17 @@ describe('vault template codec: real mainnet fixture', () => {
   })
 
   it('the recorded digest is stable across two independent builds', async () => {
-    const rebuilt = await buildMainnetFixtureScript()
-    expect(rebuilt).toEqual(scriptBytes)
-    expect(Utils.toHex(Hash.sha256(rebuilt))).toBe(MAINNET_LOCKING_SCRIPT_SHA256)
+    // Uses rebuildMainnetFixtureScriptUncached, NOT buildMainnetFixtureScript
+    // — the latter is memoized, so a second call would just return a copy of
+    // the same cached array and this test would be unable to fail no matter
+    // what R1K1Wallet().lock() did. Calling the unmemoized builder twice
+    // forces two real, independent invocations of R1K1Wallet().lock(), so a
+    // genuine nondeterminism in the template would show up as a mismatch here.
+    const first = await rebuildMainnetFixtureScriptUncached()
+    const second = await rebuildMainnetFixtureScriptUncached()
+    expect(second).toEqual(first)
+    expect(Utils.toHex(Hash.sha256(first))).toBe(MAINNET_LOCKING_SCRIPT_SHA256)
+    expect(Utils.toHex(Hash.sha256(second))).toBe(MAINNET_LOCKING_SCRIPT_SHA256)
   })
 
   it('scriptCode (lockingScript.subarray(60)) hashes to the recorded digest', () => {
