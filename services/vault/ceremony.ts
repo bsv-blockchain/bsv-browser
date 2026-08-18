@@ -312,12 +312,6 @@ export class CeremonyController {
 
   private async run(): Promise<void> {
     const driver = this.deps.getDriver()
-    // TEMPORARY DIAGNOSTICS (remove with the others in this file).
-    console.log(
-      '[vault] ceremony run · driver=%s · sessionBased=%s',
-      driver ? 'present' : 'NULL',
-      String(driver?.sessionBased)
-    )
     if (!driver) {
       this.failAll(new VaultError('driver-unavailable'))
       this.running = false
@@ -335,18 +329,6 @@ export class CeremonyController {
     let armed = false
     try {
       const meta = await this.deps.store.getMeta()
-      // TEMPORARY DIAGNOSTICS (remove with the others in this file). The v3
-      // fields are what the R1-K1 signer needs; a pre-v3 enrollment would show
-      // r1PublicKey=undefined here.
-      console.log(
-        '[vault] meta · present=%s · v=%s · slot=%s · serial=%s · hasR1PublicKey=%s · hasXpub=%s',
-        String(!!meta),
-        String((meta as any)?.v),
-        String(meta?.slot),
-        String(meta?.yubiSerial),
-        String(!!(meta as any)?.r1PublicKey),
-        String(!!(meta as any)?.xpub)
-      )
       if (!meta) throw new VaultError('not-enrolled')
 
       // NFC (session-based) collects the PIN BEFORE the tap and verifies it in
@@ -369,21 +351,11 @@ export class CeremonyController {
       // Session-based transports keep listening: see the method doc above.
       if (!driver.sessionBased) this.unsubscribeKeyEvents(session)
     } catch (e) {
-      // TEMPORARY DIAGNOSTICS (remove once the arm failure is identified).
-      // Everything that is not a VaultError is relabelled 'driver-unavailable'
-      // below, which renders as "YubiKey support is unavailable on this
-      // device" — so a completely unrelated failure is indistinguishable from
-      // a genuinely absent driver. Log the real thing before it is masked.
-      if (!(e instanceof VaultError)) {
-        console.log(
-          '[vault] arm failed with a NON-VaultError, masking as driver-unavailable · name=%s · message=%s',
-          (e as Error)?.name ?? typeof e,
-          (e as Error)?.message ?? String(e)
-        )
-        console.log('[vault] stack:', (e as Error)?.stack ?? '(none)')
-      } else {
-        console.log('[vault] arm failed · code=%s · %s', e.code, e.message ?? '')
-      }
+      // Anything that is not a VaultError gets relabelled 'driver-unavailable',
+      // which renders as "YubiKey support is unavailable on this device" — so
+      // the original message is carried across as the detail rather than being
+      // dropped, otherwise an unrelated failure is indistinguishable from a
+      // genuinely absent driver.
       const err = e instanceof VaultError ? e : new VaultError('driver-unavailable', String(e))
       if (err.code === 'user-cancelled') {
         this.set({ phase: 'idle' })
@@ -486,20 +458,11 @@ export class CeremonyController {
     this.subscribeKeyEvents(driver, session)
     this.set({ phase: 'waiting-for-key' })
     const waiter = (this.attachWaiter = defer<void>())
-    // TEMPORARY DIAGNOSTICS (remove with the others in this file).
-    console.log('[vault] openTapSession · driver.start(), waiting for attach')
     driver.start()
     await waiter.promise
     this.throwIfCancelled()
-    console.log('[vault] key attached · calling getKeyInfo')
     this.set({ phase: 'connecting' })
     const info = await driver.getKeyInfo()
-    console.log(
-      '[vault] getKeyInfo ok · serial=%s · expected=%s · fw=%s',
-      info.serial,
-      meta.yubiSerial,
-      info.firmwareVersion
-    )
     if (info.serial !== meta.yubiSerial) {
       throw new VaultError('serial-mismatch', `Expected key ${meta.yubiSerial}`)
     }

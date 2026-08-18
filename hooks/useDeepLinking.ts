@@ -44,10 +44,13 @@ export function useDeepLinking() {
         }
       }
 
-      // Navigate to browser if not already there. Use navigate() (reuses the
-      // existing /index route) NOT push() — +native-intent already routes http
-      // launches to '/', so push() here mounts a SECOND Browser on top (duplicate
-      // that re-renders forever on every WalletContext/SSE tick = the storm).
+      // Navigate to browser if not already there. navigate() NOT push():
+      // +native-intent already routes http launches to '/', so push() here would
+      // mount a SECOND Browser on top (a duplicate that re-renders forever on
+      // every WalletContext/SSE tick = the storm). navigate() alone is not
+      // enough either — a bare NAVIGATE appends a route it cannot see as "the
+      // same one", so /index is declared `dangerouslySingular` in app/_layout to
+      // make this reuse the Browser that is already mounted.
       if (pathnameRef.current !== '/') {
         router.navigate('/')
       }

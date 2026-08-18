@@ -134,64 +134,81 @@ export default function WalletScreen() {
   const inFlightRef = useRef(false)
 
   // ── balance ─────────────────────────────────────────────────────────
-  // TEMPORARY DIAGNOSTICS (remove once the stale-balance cause is confirmed).
-  // Deliberately outside render — a per-render log flood has starved the JS
-  // thread in this app before.
-  const refreshBalance = useCallback(
-    async (source = 'unknown') => {
-      if (!managers.permissionsManager) {
-        console.log('[balance] skipped, no permissionsManager · source=%s', source)
-        return
-      }
-      const startedAt = Date.now()
+  /**
+   * One balance read at a time, shared by every caller.
+   *
+   * `listOutputs({ basket: specOpWalletBalance })` is a serialised SQL scan —
+   * seconds on a real wallet — so two overlapping reads do not merely duplicate
+   * work, they QUEUE, and the second returns the figure the first already had.
+   * Mount, invalidation and pull-to-refresh all funnel through this latch, so a
+   * caller arriving mid-read awaits that read instead of starting another.
+   */
+  const inFlightBalanceRef = useRef<Promise<void> | null>(null)
+  const refreshBalance = useCallback(async () => {
+    const pm = managers.permissionsManager
+    if (!pm) return
+    if (inFlightBalanceRef.current) return await inFlightBalanceRef.current
+    const read = (async () => {
       try {
-        const { totalOutputs } = await managers.permissionsManager.listOutputs(
+        const { totalOutputs } = await pm.listOutputs(
           { basket: sdk.specOpWalletBalance },
           adminOriginator
         )
         const total = totalOutputs ?? 0
-        console.log(
-          '[balance] read ok · source=%s · total=%s · rawTotalOutputs=%s · ms=%d',
-          source,
-          total,
-          String(totalOutputs),
-          Date.now() - startedAt
-        )
         setBalance(total)
         await AsyncStorage.setItem(balanceCacheKey, String(total))
-      } catch (e) {
-        // Keep the last known balance on screen rather than blanking it. The
-        // error was silently swallowed before, which is indistinguishable from
-        // a successful read that returned the same figure.
-        console.log(
-          '[balance] read FAILED · source=%s · ms=%d · %s',
-          source,
-          Date.now() - startedAt,
-          (e as Error)?.message ?? String(e)
-        )
+      } catch {
+        // Keep the last known balance on screen rather than blanking it: a
+        // failed read is not "zero satoshis".
       }
-    },
-    [managers.permissionsManager, adminOriginator, balanceCacheKey]
-  )
+    })()
+    inFlightBalanceRef.current = read
+    // Cleared here rather than in a `finally` inside the body: a synchronous
+    // throw from listOutputs would run that finally BEFORE the assignment
+    // above, leaving a settled promise latched forever.
+    void read.finally(() => {
+      if (inFlightBalanceRef.current === read) inFlightBalanceRef.current = null
+    })
+    return await read
+  }, [managers.permissionsManager, adminOriginator, balanceCacheKey])
+
+  /**
+   * The effects below key off DATA changes, never off `refreshBalance`'s
+   * identity.
+   *
+   * `refreshBalance` is rebuilt whenever the wallet context rebuilds, because
+   * `managers.permissionsManager` is one of its deps. With that callback in an
+   * effect's dependency list, a mid-session rebuild made every live instance of
+   * this screen fire a fresh multi-second balance read — the "mount" effect was
+   * never mount-only. What the effects actually need is *whether* a wallet
+   * exists, so they depend on that instead.
+   */
+  const refreshBalanceRef = useRef(refreshBalance)
+  useEffect(() => {
+    refreshBalanceRef.current = refreshBalance
+  }, [refreshBalance])
+  const hasWallet = managers.permissionsManager != null
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       // Show the cached figure immediately so the screen never opens empty.
       const cached = await AsyncStorage.getItem(balanceCacheKey)
-      if (!cancelled && cached != null) setBalance(Number(cached))
-      console.log('[balance] mount effect · cached=%s', String(cached))
-      await refreshBalance('mount')
+      if (cancelled) return
+      if (cached != null) setBalance(Number(cached))
+      await refreshBalanceRef.current()
     })()
     return () => {
       cancelled = true
     }
-  }, [refreshBalance, balanceCacheKey])
+    // `hasWallet` covers the cold start where this screen mounts before the
+    // wallet finishes building; `balanceCacheKey` covers a network switch.
+  }, [balanceCacheKey, hasWallet])
 
   /**
    * Returning to this screen refetches the balance and the activity list once.
    *
-   * This screen stays mounted while /pay and /get-paid sit on top of it in the
+   * This screen stays mounted while /pay and /vault sit on top of it in the
    * stack, so neither the mount effect above nor the activity effect below runs
    * again on the way back. `txStatusVersion` covers writes that go through the
    * wallet, but relying on it alone leaves the user's own money looking stale
@@ -208,7 +225,6 @@ export default function WalletScreen() {
   const firstFocusRef = useRef(true)
   useFocusEffect(
     useCallback(() => {
-      console.log('[balance] FOCUS fired · first=%s', String(firstFocusRef.current))
       if (firstFocusRef.current) {
         firstFocusRef.current = false
         return
@@ -222,18 +238,12 @@ export default function WalletScreen() {
   // which the mount effect above already covers.
   const balanceMountedRef = useRef(false)
   useEffect(() => {
-    console.log(
-      '[balance] invalidation effect · txStatusVersion=%d · focusVersion=%d · firstRun=%s',
-      txStatusVersion,
-      focusVersion,
-      String(!balanceMountedRef.current)
-    )
     if (!balanceMountedRef.current) {
       balanceMountedRef.current = true
       return
     }
-    void refreshBalance('invalidation')
-  }, [txStatusVersion, focusVersion, refreshBalance])
+    void refreshBalanceRef.current()
+  }, [txStatusVersion, focusVersion])
 
   // ── activity ────────────────────────────────────────────────────────
   const fetchActions = useCallback(
@@ -313,7 +323,7 @@ export default function WalletScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      const [result] = await Promise.all([fetchActions(0), refreshBalance('pull-to-refresh'), fetchOfflineRows()])
+      const [result] = await Promise.all([fetchActions(0), refreshBalance(), fetchOfflineRows()])
       if (result) {
         setActions(result.actions as ActivityAction[])
         offsetRef.current = result.actions.length
@@ -511,7 +521,7 @@ export default function WalletScreen() {
     () => (
       <View>
         <TouchableOpacity
-          onPress={() => void refreshBalance('tap')}
+          onPress={() => void refreshBalance()}
           activeOpacity={0.7}
           style={styles.balanceBlock}
           accessibilityLabel={t('wallet_balance_refresh')}

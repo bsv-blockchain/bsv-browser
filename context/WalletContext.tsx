@@ -359,16 +359,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
    * a short trailing timer instead of per call.
    */
   const ledgerBumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const noteLedgerChanged = useCallback((source = 'unknown') => {
-    // TEMPORARY DIAGNOSTICS (remove once the stale-balance cause is confirmed).
-    if (ledgerBumpTimerRef.current) {
-      console.log('[ledger] write coalesced into pending bump · source=%s', source)
-      return
-    }
-    console.log('[ledger] write · source=%s · bump in 120ms', source)
+  const noteLedgerChanged = useCallback(() => {
+    if (ledgerBumpTimerRef.current) return
     ledgerBumpTimerRef.current = setTimeout(() => {
       ledgerBumpTimerRef.current = null
-      console.log('[ledger] BUMP txStatusVersion')
       setTxStatusVersion(v => v + 1)
     }, 120)
   }, [])
@@ -829,7 +823,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           const bound = original.bind(wallet)
           ;(wallet as any)[method] = async (...callArgs: any[]) => {
             const result = await bound(...callArgs)
-            noteLedgerChanged(method)
+            noteLedgerChanged()
             return result
           }
         }
@@ -1755,8 +1749,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         console.warn('[backupAttestation.clearAll]', err)
       })
 
+      // dismissAll() leaves exactly one screen on the stack, so this has to
+      // REPLACE it: push() would add a second /index on top of the one already
+      // there and leave two Browsers mounted.
       router.dismissAll()
-      router.push('/')
+      router.replace('/')
     })()
   }, [deleteAllWalletKeys])
 
