@@ -67,7 +67,18 @@ export interface VaultWallet {
   listOutputs(args: unknown, originator: string): Promise<ListOutputsResult>
   getPublicKey(args: unknown, originator: string): Promise<{ publicKey: string }>
   abortAction(args: unknown, originator: string): Promise<unknown>
-  listActions?(args: unknown, originator: string): Promise<{ actions: { txid?: string; status: string; reference?: string }[] }>
+  listActions?(args: unknown, originator: string): Promise<{ actions: VaultActionRow[] }>
+}
+
+/** The fields of a listActions row the reservation heal needs. `inputs` arrives
+ * only when the call asked for `includeInputs`, and a transaction that never
+ * reached signing has no `txid` — which is exactly the case the outpoint match
+ * exists to cover. */
+export interface VaultActionRow {
+  txid?: string
+  status: string
+  reference?: string
+  inputs?: { sourceOutpoint?: string }[]
 }
 
 interface CreateActionResult {
@@ -125,7 +136,7 @@ async function nextDepositTarget(): Promise<{
 
 /** True for the toolbox's WERR_REVIEW_ACTIONS — an undelayed action that needs
  * review, in our case a double-spend against a vault UTXO still reserved by a
- * stuck prior attempt. */
+ * stuck prior attempt whose reserving transaction DOES have a txid. */
 function isReviewActionsError(e: unknown): boolean {
   if (!e || typeof e !== 'object') return false
   const anyE = e as { code?: unknown; message?: string; reviewActionResults?: unknown }
@@ -145,45 +156,137 @@ function competingTxids(e: unknown): string[] {
   return out
 }
 
-/** Abort the specific orphaned transactions still reserving the vault UTXO
- * (identified by txid from the review error). The reserving tx may carry no
- * vault label, so we page ALL actions and match by txid — then abort only those
- * exact txids, which resets their inputs' `spentBy` and frees the coin.
- * Best-effort — returns how many were aborted. */
-async function abortReservingTxids(w: VaultWallet, adminOriginator: string, txids: string[]): Promise<number> {
-  if (!w.listActions || txids.length === 0) return 0
-  const want = new Set(txids)
-  // A locally-held reservation is never in a terminal on-chain state; these are
-  // the states abortAction accepts, plus 'failed' which also holds inputs.
-  const ABORTABLE = new Set(['unsigned', 'nosend', 'nonfinal', 'failed'])
-  let aborted = 0
+/** One outpoint spelling. The toolbox writes `txid:vout` into error text and
+ * `txid.vout` into outpoint fields; both mean the same coin. */
+const sameOutpoint = (outpoint: string): string => outpoint.trim().toLowerCase().replace(':', '.')
+
+/**
+ * The outpoints named by the toolbox's OTHER reservation refusal:
+ *
+ *   The inputs[0] parameter must be spendable output. output <txid>:0 appears
+ *   to have been spent (spendable=false). [WERR_INVALID_PARAMETER]
+ *
+ * This is the shape a failed withdrawal actually leaves behind. createAction
+ * reports a double-spend review only when the output's `spentBy` transaction
+ * has a txid; an attempt that died before signing never got one, so the same
+ * check falls through to this plain WERR_INVALID_PARAMETER instead (see
+ * storage/methods/createAction.js). It names the OUTPOINT and no txid, which
+ * is why the review-actions heal below cannot see it.
+ *
+ * Matched on the message shape, deliberately narrowly: WERR_INVALID_PARAMETER
+ * covers most argument mistakes, and mistaking one for a stuck reservation
+ * would abort transactions over an unrelated bug.
+ */
+function unspendableInputOutpoints(e: unknown): string[] {
+  if (!e || typeof e !== 'object') return []
+  const msg = (e as { message?: string }).message ?? ''
+  if (!/must be spendable output/i.test(msg)) return []
+  return [...msg.matchAll(/\b([0-9a-fA-F]{64})[.:](\d+)\b/g)].map(m => sameOutpoint(`${m[1]}.${m[2]}`))
+}
+
+/** A locally-held reservation is never in a terminal on-chain state; these are
+ * the states abortAction accepts, plus 'failed' which also holds inputs. */
+const ABORTABLE = new Set(['unsigned', 'nosend', 'nonfinal', 'failed'])
+
+/**
+ * Page ALL actions and abort every one `matches` picks out, which resets its
+ * inputs' `spentBy` and frees the coin. Best-effort — returns how many were
+ * aborted.
+ *
+ * Pages everything rather than filtering by label: the transaction reserving a
+ * vault UTXO may carry no vault label of its own.
+ */
+async function abortActions(
+  w: VaultWallet,
+  adminOriginator: string,
+  matches: (a: VaultActionRow) => boolean,
+  opts: { includeInputs?: boolean; stopAfter: number }
+): Promise<number> {
+  if (!w.listActions) return 0
   let scanned = 0
-  const matches: string[] = []
+  const seen: string[] = []
+  // By reference, so the same orphan is never aborted twice — a second
+  // abortAction on it would be rejected, and counting it again would report a
+  // heal that did not happen.
+  const aborted = new Set<string>()
   try {
     let offset = 0
-    for (let page = 0; page < 25 && aborted < want.size; page++) {
-      const res = await w.listActions({ labels: [], limit: 200, offset }, adminOriginator)
+    for (let page = 0; page < 25 && aborted.size < opts.stopAfter; page++) {
+      const res = await w.listActions(
+        { labels: [], limit: 200, offset, ...(opts.includeInputs ? { includeInputs: true } : {}) },
+        adminOriginator
+      )
       const actions = res.actions ?? []
       if (actions.length === 0) break
       scanned += actions.length
       for (const a of actions) {
-        if (a.txid && want.has(a.txid)) {
-          matches.push(`${a.status}${a.reference ? '' : '/no-ref'}`)
-          if (a.reference && ABORTABLE.has(a.status)) {
-            await w.abortAction({ reference: a.reference }, adminOriginator).catch(err =>
-              console.log('[vault] abortAction rejected:', (err as Error)?.message)
-            )
-            aborted++
-          }
+        if (!matches(a)) continue
+        seen.push(`${a.status}${a.reference ? '' : '/no-ref'}`)
+        if (a.reference && ABORTABLE.has(a.status) && !aborted.has(a.reference)) {
+          aborted.add(a.reference)
+          await w.abortAction({ reference: a.reference }, adminOriginator).catch(err =>
+            console.log('[vault] abortAction rejected:', (err as Error)?.message)
+          )
         }
       }
       offset += actions.length
     }
-    console.log('[vault] abort scan · scanned=%d · matches=[%s] · aborted=%d', scanned, matches.join(', ') || 'NONE', aborted)
+    console.log(
+      '[vault] abort scan · scanned=%d · matches=[%s] · aborted=%d',
+      scanned,
+      seen.join(', ') || 'NONE',
+      aborted.size
+    )
   } catch (e) {
     console.log('[vault] abort scan error:', (e as Error)?.message)
   }
-  return aborted
+  return aborted.size
+}
+
+/** Abort the orphaned transactions the review error blames, by txid. */
+async function abortReservingTxids(w: VaultWallet, adminOriginator: string, txids: string[]): Promise<number> {
+  if (txids.length === 0) return 0
+  const want = new Set(txids)
+  return await abortActions(w, adminOriginator, a => a.txid != null && want.has(a.txid), { stopAfter: want.size })
+}
+
+/** Abort the orphaned transactions holding these outpoints, matched on each
+ * action's own input list — the only handle available when the reservation has
+ * no txid to blame. */
+async function abortReservingOutpoints(w: VaultWallet, adminOriginator: string, outpoints: string[]): Promise<number> {
+  if (outpoints.length === 0) return 0
+  const want = new Set(outpoints.map(sameOutpoint))
+  return await abortActions(
+    w,
+    adminOriginator,
+    a => (a.inputs ?? []).some(i => i.sourceOutpoint != null && want.has(sameOutpoint(i.sourceOutpoint))),
+    // No count to stop at: one orphan can hold several of our outpoints, and
+    // several orphans can each hold one. The 25-page cap is the bound.
+    { includeInputs: true, stopAfter: Number.POSITIVE_INFINITY }
+  )
+}
+
+/**
+ * Free a vault UTXO that a previous failed attempt left reserved, so the caller
+ * can retry once. Returns how many orphaned transactions were aborted — zero
+ * means "not a reservation failure, or nothing could be freed", and the caller
+ * must rethrow the original error rather than retry.
+ *
+ * `ours` bounds the damage: only a reservation on an outpoint THIS withdrawal
+ * is trying to spend justifies aborting somebody else's transaction.
+ */
+async function freeReservedInputs(
+  w: VaultWallet,
+  adminOriginator: string,
+  e: unknown,
+  ours: string[]
+): Promise<number> {
+  if (isReviewActionsError(e)) {
+    return await abortReservingTxids(w, adminOriginator, competingTxids(e))
+  }
+  const mine = new Set(ours.map(sameOutpoint))
+  const wedged = unspendableInputOutpoints(e).filter(o => mine.has(o))
+  return await abortReservingOutpoints(w, adminOriginator, wedged)
 }
 
 // ── balance ─────────────────────────────────────────────────────────────
@@ -350,12 +453,12 @@ async function spendVaultOutputs(
   try {
     created = await w.createAction(caArgs, adminOriginator)
   } catch (e) {
-    // A prior failed attempt can leave the vault UTXO reserved by an orphaned
-    // transaction, surfacing here as a double-spend review. The error names the
-    // reserving txids; abort exactly those to free the coin, then retry once.
-    if (!isReviewActionsError(e)) throw e
-    const competing = competingTxids(e)
-    const freed = await abortReservingTxids(w, adminOriginator, competing)
+    // A prior failed attempt can leave a vault UTXO reserved by an orphaned
+    // transaction, and until it is aborted every later withdrawal is refused
+    // outright. Two error shapes, depending on whether the orphan ever got a
+    // txid — see freeReservedInputs. Abort it and retry ONCE; anything else
+    // frees nothing and rethrows untouched.
+    const freed = await freeReservedInputs(w, adminOriginator, e, selected.map(o => o.outpoint))
     if (freed === 0) throw e
     created = await w.createAction(caArgs, adminOriginator)
   }
