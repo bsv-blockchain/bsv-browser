@@ -147,11 +147,29 @@ export default function RootLayout() {
                               contentStyle: { backgroundColor }
                             }}
                           >
-                            <Stack.Screen name="index" />
+                            {/* One Browser, ever — and one wallet screen, ever
+                                (below). Both routes take no params, so there is
+                                only ever one identity to collapse, which is what
+                                makes `dangerouslySingular` safe here.
+
+                                Without it, every navigation to a route already in
+                                the stack APPENDS another live instance rather than
+                                returning to the existing one: this expo-router
+                                emits a bare NAVIGATE, and react-navigation's stack
+                                router only reuses a route when it is already on
+                                top, is addressed with `pop`, or — as here — has an
+                                id to match on. A default browser navigates to '/'
+                                on every external link tap (see +native-intent and
+                                useDeepLinking), so a day of link taps while the
+                                wallet screen was open stacked six live wallet
+                                screens and as many Browsers, each re-running its
+                                own multi-second listOutputs balance read whenever
+                                the wallet context rebuilt. */}
+                            <Stack.Screen name="index" dangerouslySingular />
                             <Stack.Screen name="config" />
                             <Stack.Screen name="auth/mnemonic" />
                             <Stack.Screen name="transactions" />
-                            <Stack.Screen name="wallet" />
+                            <Stack.Screen name="wallet" dangerouslySingular />
                             <Stack.Screen name="wallet-config" />
                             <Stack.Screen name="vault" />
                             <Stack.Screen name="vault-recover" />
