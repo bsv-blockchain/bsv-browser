@@ -69,3 +69,6 @@ Dev Builds.zip
 .opencode
 credentials.json
 .superpowers/
+
+# Local xcodebuild output (e.g. ad-hoc Release simulator builds for screenshotting)
+/build_release
