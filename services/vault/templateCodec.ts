@@ -68,10 +68,15 @@ export interface TemplateVersion {
 /** How many independently-random sample builds to diff when deriving
  * variable-byte runs. Each sample's variable bytes come from an independent
  * hash160/random draw, so the chance that every sample happens to agree at a
- * given variable byte position is astronomically small once more than one or
- * two samples are compared; a handful of samples makes it negligible without
- * meaningfully slowing this down (building the template is fast — well under
- * a second for all samples combined). */
+ * given variable byte position is small once more than one or two samples are
+ * compared; a handful of samples makes it negligible without meaningfully
+ * slowing this down (building the template is fast — well under a second for
+ * all samples combined). "Negligible" is not zero, though: a coincidental
+ * agreement at one byte inside a real variable run would make `findVariableRuns`
+ * split that run and narrow it by one byte, changing `constantHashOf`'s mask
+ * and misdiagnosing an ordinary sampling coincidence as an `@bsv/templates`
+ * upgrade. `describeVaultTemplate` below does not trust the sample diff alone
+ * for that reason — see `PINNED_VARIABLE_RUNS_V1` and `unionRuns`. */
 const DIFF_SAMPLE_COUNT = 4
 
 /** Cache of the raw constant reference bytes for a version, keyed by
@@ -130,6 +135,51 @@ function constantHashOf(bytes: number[], runs: { offset: number; length: number 
   return Utils.toHex(Hash.sha256(masked))
 }
 
+/** Merge two lists of byte ranges into the minimal set of non-overlapping,
+ * non-adjacent runs that covers every byte position present in either list.
+ * Used to widen sample-diffed variable runs with a pinned reference geometry
+ * so a run can only ever grow, never shrink, regardless of how the sample
+ * diff came out — see `PINNED_VARIABLE_RUNS_V1`. */
+function unionRuns(
+  a: { offset: number; length: number }[],
+  b: { offset: number; length: number }[]
+): { offset: number; length: number }[] {
+  const all = [...a, ...b].sort((x, y) => x.offset - y.offset)
+  const merged: { offset: number; length: number }[] = []
+  for (const r of all) {
+    if (r.length <= 0) continue
+    const last = merged[merged.length - 1]
+    if (last && r.offset <= last.offset + last.length) {
+      last.length = Math.max(last.offset + last.length, r.offset + r.length) - last.offset
+    } else {
+      merged.push({ offset: r.offset, length: r.length })
+    }
+  }
+  return merged
+}
+
+/** Shift a set of runs by subtracting `offset` from each, dropping any run
+ * that falls entirely below zero and clipping one that straddles it — the
+ * same transformation `samples[i].slice(offset)` applies to the bytes those
+ * runs describe. Used to derive the region-0x02 pinned run geometry from the
+ * region-0x01 pinned literal below, the same way `describeVaultTemplate`
+ * derives the region-0x02 SAMPLES from the region-0x01 samples: never built
+ * or hardcoded independently, so the two can never drift out of sync. */
+function shiftRuns(
+  runs: { offset: number; length: number }[],
+  offset: number
+): { offset: number; length: number }[] {
+  const shifted: { offset: number; length: number }[] = []
+  for (const r of runs) {
+    const start = r.offset - offset
+    const end = r.offset + r.length - offset
+    if (end <= 0) continue
+    const clippedStart = Math.max(start, 0)
+    shifted.push({ offset: clippedStart, length: end - clippedStart })
+  }
+  return shifted
+}
+
 /**
  * The version-1/region-0x01 template's `constantHash` (see `constantHashOf`),
  * pinned as a literal — computed once from the CURRENT `@bsv/templates`
@@ -157,6 +207,35 @@ function constantHashOf(bytes: number[], runs: { offset: number; length: number 
 const PINNED_CONSTANT_HASH_V1 = '41f6fcbbc46fe0eeb64a176fd66709694331b2327b1a63086105529e34a7493b'
 
 /**
+ * The version-1/region-0x01 template's variable-run geometry, pinned as a
+ * literal exactly like `PINNED_CONSTANT_HASH_V1` above — the plan's Global
+ * Constraints (R1 commitment at offset 17, length 20; k1PublicKeyHash at
+ * offset 959609, length 20).
+ *
+ * `describeVaultTemplate` diffs `DIFF_SAMPLE_COUNT` throwaway samples to find
+ * this same geometry in the overwhelmingly common case, but a single sample
+ * byte that happens to draw the identical value on every sample — an
+ * independent per-byte coincidence with a small but non-zero probability, not
+ * an actual template change — would make `findVariableRuns` split a real
+ * variable run and report it one byte narrower than it truly is. That
+ * narrower run would then make `constantHashOf` mask one fewer byte than
+ * `PINNED_CONSTANT_HASH_V1` was computed against, disagree with it, and
+ * misdiagnose an ordinary sampling coincidence as an `@bsv/templates`
+ * upgrade. `describeVaultTemplate` unions the sample-derived runs with this
+ * pinned geometry (see `unionRuns`) before hashing or returning them, so a
+ * coincidental agreement can only ever be absorbed into a wider run, never
+ * split one — the derived-vs-pinned comparison stays stable regardless of
+ * sampling luck. A GENUINE upstream change to the run geometry is still
+ * caught: it would change `totalLength` and/or leave real constant-byte
+ * differences outside this pinned window, which still changes
+ * `constantHash` and still throws below.
+ */
+const PINNED_VARIABLE_RUNS_V1: { offset: number; length: number }[] = [
+  { offset: 17, length: 20 },
+  { offset: 959609, length: 20 }
+]
+
+/**
  * Number of bytes `R1K1Wallet.unlockR1` drops from the FRONT of the locking
  * script before committing the remainder into the sighash preimage's
  * `scriptCode`:
@@ -180,12 +259,23 @@ const PREIMAGE_SCRIPT_CODE_OFFSET = 60
  * The version-1/region-0x02 (preimage scriptCode) template's `constantHash`,
  * pinned the same way as `PINNED_CONSTANT_HASH_V1` above: computed once from
  * the CURRENT `@bsv/templates` output (region-0x01 samples sliced by
- * `PREIMAGE_SCRIPT_CODE_OFFSET`) and hardcoded here deliberately, so a
- * same-length drift in the scriptCode's constant bytes fails loudly instead
- * of silently reconstructing wrong bytes for a real spend. Changing this
- * literal is a deliberate act tied to minting a new version, never a silent
- * "make the assertion pass again" edit — see `PINNED_CONSTANT_HASH_V1`'s
- * fuller doc comment, which this mirrors.
+ * `PREIMAGE_SCRIPT_CODE_OFFSET`) and hardcoded here.
+ *
+ * This does NOT give independent coverage against an `@bsv/templates`
+ * upgrade the way `PINNED_CONSTANT_HASH_V1` does: `scriptCodeSamples` is
+ * sliced from the SAME `samples` that region 0x01's check above already
+ * diffed and hashed, and that region-0x01 check always runs first and throws
+ * `template-unknown` before this one is ever reached — any real upstream
+ * drift in the bytes this guard covers would already have tripped that check.
+ * What this guard actually catches is a maintainer hand-editing
+ * `PREIMAGE_SCRIPT_CODE_OFFSET` itself to the wrong value — the one constant
+ * this module documents as safe to edit locally — without updating this
+ * literal to match: that shifts which slice of the already-verified bytes
+ * becomes "scriptCode" and changes this hash without touching region 0x01's,
+ * so this is the one check that would catch it. Changing this literal
+ * (together with `PREIMAGE_SCRIPT_CODE_OFFSET`, deliberately, as one act) is
+ * tied to minting a new version, never a silent "make the assertion pass
+ * again" edit.
  */
 const PINNED_CONSTANT_HASH_V1_SCRIPT_CODE = 'f759656aadfcdbd531531c9806b8bce89f7ed4363c7d3f07578455fb1b96a990'
 
@@ -220,7 +310,16 @@ export async function describeVaultTemplate(): Promise<TemplateVersion[]> {
   }
 
   const totalLength = samples[0].length
-  const variableRuns = findVariableRuns(samples)
+  const sampleDerivedRuns = findVariableRuns(samples)
+  // Union with the pinned run geometry rather than trusting the sample diff
+  // alone — see PINNED_VARIABLE_RUNS_V1's doc comment for why a coincidental
+  // same-value draw across every sample must never narrow a real run. Only
+  // meaningful (and safe to compute — the pinned offsets may run past a
+  // wrong-length script) when the length actually matches what those pinned
+  // offsets describe; otherwise the length check below fails regardless and
+  // the exact runs used here don't matter.
+  const variableRuns =
+    totalLength === R1K1_LOCK_LEN ? unionRuns(sampleDerivedRuns, PINNED_VARIABLE_RUNS_V1) : sampleDerivedRuns
   const constantHash = constantHashOf(samples[0], variableRuns)
 
   if (totalLength !== R1K1_LOCK_LEN || constantHash !== PINNED_CONSTANT_HASH_V1) {
@@ -248,7 +347,17 @@ export async function describeVaultTemplate(): Promise<TemplateVersion[]> {
   // k1PublicKeyHash pair region 0x01 carries.
   const scriptCodeSamples = samples.map((s) => s.slice(PREIMAGE_SCRIPT_CODE_OFFSET))
   const scriptCodeLength = scriptCodeSamples[0].length
-  const scriptCodeVariableRuns = findVariableRuns(scriptCodeSamples)
+  const scriptCodeSampleDerivedRuns = findVariableRuns(scriptCodeSamples)
+  // Same coincidental-agreement backstop as region 0x01 above, using the
+  // region-0x02 pinned geometry DERIVED from PINNED_VARIABLE_RUNS_V1 by the
+  // same shift `scriptCodeSamples` itself already went through — never a
+  // second independently-hardcoded literal. `totalLength === R1K1_LOCK_LEN`
+  // is already guaranteed here (the check above would have thrown otherwise),
+  // so this union is always safe to compute.
+  const scriptCodeVariableRuns = unionRuns(
+    scriptCodeSampleDerivedRuns,
+    shiftRuns(PINNED_VARIABLE_RUNS_V1, PREIMAGE_SCRIPT_CODE_OFFSET)
+  )
   const scriptCodeConstantHash = constantHashOf(scriptCodeSamples[0], scriptCodeVariableRuns)
 
   if (scriptCodeConstantHash !== PINNED_CONSTANT_HASH_V1_SCRIPT_CODE) {
@@ -382,6 +491,23 @@ export function isCompressed(bytes: number[]): boolean {
  * the header format): this must never turn unrecognised bytes into something
  * that looks compressed.
  *
+ * The one exception: bytes that already begin with `TEMPLATE_MARKER` (0xff)
+ * but don't match any known version are refused with a thrown
+ * `VaultError('template-invalid')` rather than passed through. Passing them
+ * through unchanged would make `isCompressed` report `true` for bytes that
+ * are not a legitimately compressed header — and a storage layer following
+ * this module's own documented `isCompressed(b) ? expandScript(b) : b`
+ * pattern would then hand them to `expandScript`, which resolves a
+ * marker-led header purely from its version/region/length fields and splices
+ * the trailing bytes into the cached reference template regardless of
+ * whether they were ever produced by `compressForRegion`. Since output
+ * scripts are not executed at creation, a counterparty could mint a real
+ * on-chain output whose locking script is exactly such attacker-chosen bytes;
+ * silently "compressing" (i.e. passing through) that input would let it
+ * later inflate into a fabricated ~960 KB script that disagrees with the
+ * chain. Throwing here is what keeps `expand(compress(x)) === x` true for
+ * every constructible `x`, not just for legitimate template instances.
+ *
  * Awaits `describeVaultTemplate()` itself before consulting `matchesTemplate`
  * so the normal path can never hit that function's "no cached reference"
  * throw — this is always called with the descriptors it just (re)populated
@@ -402,6 +528,16 @@ async function compressForRegion(bytes: number[], region: TemplateRegion): Promi
     }
 
     return [TEMPLATE_MARKER, v.version, v.region, ...writeUInt32BE(v.totalLength), ...payload]
+  }
+
+  if (bytes.length > 0 && bytes[0] === TEMPLATE_MARKER) {
+    throw new VaultError(
+      'template-invalid',
+      `cannot compress region ${region} bytes that already begin with the compressed-script ` +
+        `marker 0x${TEMPLATE_MARKER.toString(16)} but match no known template version — passing ` +
+        'them through unchanged would make isCompressed() report a false positive for bytes that ' +
+        'are not actually a compressed header'
+    )
   }
 
   return bytes.slice()
@@ -438,11 +574,17 @@ export async function compressScriptCode(bytes: number[]): Promise<number[]> {
  *
  * Fails closed in every direction — never returns bytes that are merely
  * approximately right:
- * - fewer than `HEADER_LENGTH` bytes (can't even read a full header):
- *   throws `template-invalid`.
- * - a version/region this build's codec has no descriptor for (including a
- *   `bytes[0]` that isn't the `0xff` marker at all, since that decodes to no
- *   version this codec issued): throws `template-unknown`.
+ * - `bytes[0]` isn't the `0xff` marker at all (including an empty array,
+ *   which has no byte 0 to be the marker): decodes to no version this codec
+ *   ever issued, so this is simply not a compressed script — throws
+ *   `template-unknown`. Checked FIRST, before the length check below, so a
+ *   short array that was never meant to be a compressed header in the first
+ *   place is diagnosed as "unrecognised", not misreported as a truncated
+ *   header of a real one.
+ * - marker-led but fewer than `HEADER_LENGTH` bytes (can't even read a full
+ *   header): throws `template-invalid`.
+ * - a marker-led version/region this build's codec has no descriptor for:
+ *   throws `template-unknown`.
  * - a well-known version/region whose `originalLength` field disagrees with
  *   that version's actual template length, or whose payload is the wrong
  *   size for that version's variable runs: throws `template-invalid`.
@@ -453,16 +595,17 @@ export async function compressScriptCode(bytes: number[]): Promise<number[]> {
  * `matchesTemplate`-style "no cached reference" failures.
  */
 export async function expandScript(bytes: number[]): Promise<number[]> {
+  if (bytes.length === 0 || bytes[0] !== TEMPLATE_MARKER) {
+    throw new VaultError(
+      'template-unknown',
+      `expected compressed-script marker 0x${TEMPLATE_MARKER.toString(16)}, got ` +
+        (bytes.length === 0 ? 'an empty array' : `0x${bytes[0].toString(16)}`)
+    )
+  }
   if (bytes.length < HEADER_LENGTH) {
     throw new VaultError(
       'template-invalid',
       `compressed-script header truncated: got ${bytes.length} bytes, need at least ${HEADER_LENGTH}`
-    )
-  }
-  if (bytes[0] !== TEMPLATE_MARKER) {
-    throw new VaultError(
-      'template-unknown',
-      `expected compressed-script marker 0x${TEMPLATE_MARKER.toString(16)}, got 0x${bytes[0].toString(16)}`
     )
   }
 

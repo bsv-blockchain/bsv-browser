@@ -23,7 +23,8 @@ savings table below is reproduced from there, not recomputed.
 
 A compressed script is not a script anyone could ever be tricked into broadcasting — but
 the encoding is deliberately chosen so that even if compressed bytes somehow reached the
-network in place of a real locking script, they could never be spent or mined.
+network in place of a real locking script, they could never be *spent* — see below for why
+that guarantee doesn't extend to mining.
 
 The natural-looking choice would be `OP_NOP7` (`0xb6`): a defined Bitcoin Script opcode
 that evaluates as a no-op. That's exactly the problem. A script left in compressed form —
@@ -32,11 +33,18 @@ the interpreter. Depending on what those trailing bytes happened to disassemble 
 could pass evaluation and reach the chain as a spendable (or worse, always-true) output.
 
 `0xff` is `OP_INVALIDOPCODE` — not a defined opcode in any context. A script beginning
-with it fails evaluation immediately and unconditionally. So a compressed blob fails
-closed: it can never be spent, never be mined, and any code path that mistakenly treats a
-compressed script as a real one gets an immediate, loud failure instead of silently wrong
-money. This was an explicit decision by the project owner, made and recorded when the
-format was designed — see the design spec's Wire Format section.
+with it fails evaluation immediately and unconditionally, so a compressed blob can never be
+*spent*: any attempt to unlock an output whose locking script is compressed bytes fails
+script evaluation outright.
+
+That does **not** mean a compressed script can never be *mined*. Output scripts are never
+executed at creation, only at spend time, so a compressed blob can absolutely be mined into
+a real on-chain output — the only consequence is that the funds it holds become permanently
+unspendable (burnt), not that the network rejects the output. Keeping a compressed blob from
+ever reaching a `lockingScript` on its way to being broadcast is a procedural property of
+this codec's callers, not something `0xff` cryptographically guarantees on its own. This was
+an explicit decision by the project owner, made and recorded when the format was designed —
+see the design spec's Wire Format section.
 
 ## Header layout
 
@@ -105,8 +113,9 @@ instead. This check runs on every process, not only in CI, and changing the pinn
 is a deliberate, version-bumping act — never a "make the assertion pass again" edit.
 
 Versions are pinned by the constant bytes they describe, not by an `@bsv/templates` semver
-range, precisely because that package can (and did, mid-development) ship a byte-level
-change between minor versions.
+range, as a precaution — that package went 1.9.6 to 1.10.0 mid-development, and a future
+byte-level change between minor versions must surface as `template-unknown`, never as a
+silent wrong reconstruction.
 
 ## Measured savings
 
@@ -115,16 +124,17 @@ Reproduced from the design spec — measured against a real mined mainnet transa
 
 | | verbatim | compressed |
 |---|---|---|
-| deposit `rawTx` | 959,836 B | 246 B |
-| deposit as a backup record (base64) | 1,279,784 B | 328 B |
-| `outputs.lockingScript` | 959,632 B | 42 B |
-| R1 preimage | 959,733 B | 203 B |
-| R1 unlocking script | 959,871 B | 338 B |
-| withdrawal tx, 1 vault input | 960,075 B | 542 B |
-| withdrawal tx, 2 vault inputs | 1,919,946 B | 880 B |
-| backup per user per year (1 vault tx/month) | 15.4 MB | 3.8 KB |
+| deposit `rawTx` | 959,836 B | 251 B |
+| deposit as a backup record (base64) | 1,279,784 B | 336 B |
+| `outputs.lockingScript` | 959,632 B | 47 B |
+| R1 preimage | 959,733 B | 188 B |
+| R1 unlocking script | 959,871 B | 323 B |
+| withdrawal tx, 1 vault input | 960,075 B | 527 B |
+| withdrawal tx, 2 vault inputs | 1,919,946 B | 850 B |
+| DB per vault tx (stored twice) | 1,919,468 B | 298 B |
+| backup per user per year (1 vault tx/month) | 15.4 MB | 3.9 KB |
 
-Roughly 3,900x on a deposit and 1,771x on a withdrawal.
+Roughly 3,824x on a deposit and 1,822x on a withdrawal.
 
 ## What this does not solve
 
@@ -139,6 +149,10 @@ Roughly 3,900x on a deposit and 1,771x on a withdrawal.
 - **Anything other than this known template.** This works because the vault script has an
   exact, pinned shape. It is not a general answer for large records; the client's oversize
   guard remains the backstop for everything else.
+- **Nothing calls this codec yet.** No storage or backup path invokes `compressScript`,
+  `compressScriptCode`, or `expandScript` — the read/write wiring that would actually realise
+  the savings above is a deliberately separate change, so those numbers are what this codec
+  *makes possible*, not what the app currently achieves.
 
 ## Where this lives
 

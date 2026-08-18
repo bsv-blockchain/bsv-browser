@@ -54,16 +54,17 @@ One pinned template therefore reconstructs both regions: rebuild the locking scr
 
 | | verbatim | compressed |
 |---|---|---|
-| deposit `rawTx` | 959,836 B | 246 B |
-| deposit as a backup record (base64) | 1,279,784 B | 328 B |
-| `outputs.lockingScript` | 959,632 B | 42 B |
-| R1 preimage | 959,733 B | 203 B |
-| R1 unlocking script | 959,871 B | 338 B |
-| withdrawal tx, 1 vault input | 960,075 B | 542 B |
-| withdrawal tx, 2 vault inputs | 1,919,946 B | 880 B |
-| backup per user per year (1 vault tx/month) | 15.4 MB | 3.8 KB |
+| deposit `rawTx` | 959,836 B | 251 B |
+| deposit as a backup record (base64) | 1,279,784 B | 336 B |
+| `outputs.lockingScript` | 959,632 B | 47 B |
+| R1 preimage | 959,733 B | 188 B |
+| R1 unlocking script | 959,871 B | 323 B |
+| withdrawal tx, 1 vault input | 960,075 B | 527 B |
+| withdrawal tx, 2 vault inputs | 1,919,946 B | 850 B |
+| DB per vault tx (stored twice) | 1,919,468 B | 298 B |
+| backup per user per year (1 vault tx/month) | 15.4 MB | 3.9 KB |
 
-Roughly 3,900x on a deposit and 1,771x on a withdrawal.
+Roughly 3,824x on a deposit and 1,822x on a withdrawal.
 
 ## Wire format
 
