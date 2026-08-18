@@ -19,6 +19,12 @@ export type VaultErrorCode =
    * something a user can cause or fix. Distinct from 'wrong-key', which
    * vaultErrorFromNative may reclassify to 'nfc-lost'. */
   | 'template-invalid'
+  /** A compressed script's header names a version/region this build's codec
+   * has no template for — e.g. written by a newer build, or corrupted beyond
+   * the header's own internal consistency (see 'template-invalid' for the
+   * case where the version/region IS known but the header disagrees with
+   * what that version reconstructs). */
+  | 'template-unknown'
   | 'serial-mismatch'
   | 'user-cancelled'
   | 'not-enrolled'
