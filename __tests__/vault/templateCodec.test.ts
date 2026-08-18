@@ -69,4 +69,22 @@ describe('vault template codec: descriptor + exact recognition', () => {
     expect(p2pkh.length).toBe(25)
     expect(matchesTemplate(p2pkh, descriptor)).toBe(false)
   })
+
+  it('throws rather than silently answering false for a descriptor this process never cached', () => {
+    // Simulates the real footgun: TemplateVersion is documented as "small,
+    // serialisable", so nothing stops a caller from persisting one and
+    // rehydrating it in a later process that never awaited
+    // describeVaultTemplate() for that exact version/region. A version
+    // number this process has no cached reference bytes for reproduces that
+    // cold-call condition without needing to reset module state.
+    const neverCached: TemplateVersion = { ...descriptor, version: 999 }
+
+    let caught: unknown
+    try {
+      matchesTemplate(scriptBytes, neverCached)
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toMatchObject({ code: 'template-invalid' })
+  })
 })

@@ -27,6 +27,7 @@ import { Hash, Utils } from '@bsv/sdk'
 import { p256 } from '@noble/curves/nist.js'
 import { buildVaultLockingScript } from './r1k1'
 import { randomBytes } from './random'
+import { VaultError } from './types'
 
 /** Marker byte for a compressed script. OP_INVALIDOPCODE (0xff) — NEVER
  * OP_NOP7/0xb6 or any other NOP-like opcode. If a compressed blob ever escapes
@@ -67,8 +68,10 @@ const DIFF_SAMPLE_COUNT = 4
  * anywhere outside the variable runs is caught on the first differing byte
  * without touching the rest of the ~960 KB script. Populated as a side effect
  * of `describeVaultTemplate`; a `TemplateVersion` whose reference was never
- * cached (e.g. a hand-built object rather than one this module produced)
- * fails closed rather than matching. */
+ * cached in THIS process (e.g. rehydrated from persisted/serialised form, or
+ * simply never obtained via `describeVaultTemplate`) makes `matchesTemplate`
+ * throw rather than silently answer `false` — see its doc comment for why a
+ * cache miss must never look like an ordinary non-match. */
 const referenceBytesByKey = new Map<string, number[]>()
 
 function versionKey(version: number, region: TemplateRegion): string {
@@ -153,12 +156,28 @@ export async function describeVaultTemplate(): Promise<TemplateVersion[]> {
  * copy of the candidate, no hashing — and returns on the first differing
  * byte, so a non-matching script (the common case for anything that isn't a
  * vault output) is rejected in O(distance to first mismatch), not O(960 KB).
+ *
+ * Throws `VaultError('template-invalid')`, rather than returning `false`, if
+ * this process never cached reference bytes for `v.version`/`v.region` (i.e.
+ * `describeVaultTemplate()` was never awaited here). `TemplateVersion` is a
+ * small, serialisable value, so nothing stops a caller from persisting one
+ * and rehydrating it in a later process; without this check, doing so would
+ * make every real vault script silently and permanently "not match" — no
+ * exception, no log — in that process, which is a compression path quietly
+ * going dark rather than a corruption risk. A cache miss must never come
+ * back looking like an ordinary non-match.
  */
 export function matchesTemplate(bytes: number[], v: TemplateVersion): boolean {
-  if (bytes.length !== v.totalLength) return false
-
   const reference = referenceBytesByKey.get(versionKey(v.version, v.region))
-  if (!reference) return false
+  if (!reference) {
+    throw new VaultError(
+      'template-invalid',
+      `matchesTemplate has no cached reference for version ${v.version} region ${v.region} in this process — ` +
+        'describeVaultTemplate() must be awaited before recognition is attempted'
+    )
+  }
+
+  if (bytes.length !== v.totalLength) return false
 
   const runs = [...v.variableRuns].sort((a, b) => a.offset - b.offset)
   let runIdx = 0
