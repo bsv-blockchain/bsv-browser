@@ -50,6 +50,7 @@ import ActivityRow, { type ActivityAction } from '@/components/wallet/ActivityRo
 import { showToast } from '@/components/ui/Toast'
 import { exportTransactionsAsCsv } from '@/utils/exportTransactions'
 import { findOfflineActions, type OfflineActionRow } from '@/storage/methods/offlineActions'
+import { readWalletBalance } from '@/storage/methods/walletBalanceSql'
 import tabStore from '@/stores/TabStore'
 import WalletLockNotice from '@/components/security/WalletLockNotice'
 
@@ -137,24 +138,34 @@ export default function WalletScreen() {
   /**
    * One balance read at a time, shared by every caller.
    *
-   * `listOutputs({ basket: specOpWalletBalance })` is a serialised SQL scan —
-   * seconds on a real wallet — so two overlapping reads do not merely duplicate
-   * work, they QUEUE, and the second returns the figure the first already had.
    * Mount, invalidation and pull-to-refresh all funnel through this latch, so a
    * caller arriving mid-read awaits that read instead of starting another.
    */
   const inFlightBalanceRef = useRef<Promise<void> | null>(null)
   const refreshBalance = useCallback(async () => {
-    const pm = managers.permissionsManager
-    if (!pm) return
     if (inFlightBalanceRef.current) return await inFlightBalanceRef.current
     const read = (async () => {
       try {
-        const { totalOutputs } = await pm.listOutputs(
-          { basket: sdk.specOpWalletBalance },
-          adminOriginator
-        )
-        const total = totalOutputs ?? 0
+        // Straight to our own SQLite, deliberately NOT through the wallet's
+        // listOutputs: every call through WalletStorageManager queues on one
+        // FIFO reader lock, and the monitor holds that lock across network
+        // broadcasts — so this read used to wait on whatever the monitor was
+        // doing rather than on the database. See storage/methods/walletBalanceSql.
+        // The wallet's own path stays as the fallback for the window before
+        // storage and the user id are known.
+        let total: number | null = null
+        if (storage && walletUserId != null) {
+          total = await readWalletBalance(storage, walletUserId)
+        }
+        if (total == null) {
+          const pm = managers.permissionsManager
+          if (!pm) return
+          const { totalOutputs } = await pm.listOutputs(
+            { basket: sdk.specOpWalletBalance },
+            adminOriginator
+          )
+          total = totalOutputs ?? 0
+        }
         setBalance(total)
         await AsyncStorage.setItem(balanceCacheKey, String(total))
       } catch {
@@ -164,13 +175,13 @@ export default function WalletScreen() {
     })()
     inFlightBalanceRef.current = read
     // Cleared here rather than in a `finally` inside the body: a synchronous
-    // throw from listOutputs would run that finally BEFORE the assignment
-    // above, leaving a settled promise latched forever.
+    // throw from the read would run that finally BEFORE the assignment above,
+    // leaving a settled promise latched forever.
     void read.finally(() => {
       if (inFlightBalanceRef.current === read) inFlightBalanceRef.current = null
     })
     return await read
-  }, [managers.permissionsManager, adminOriginator, balanceCacheKey])
+  }, [storage, walletUserId, managers.permissionsManager, adminOriginator, balanceCacheKey])
 
   /**
    * The effects below key off DATA changes, never off `refreshBalance`'s
@@ -187,7 +198,9 @@ export default function WalletScreen() {
   useEffect(() => {
     refreshBalanceRef.current = refreshBalance
   }, [refreshBalance])
-  const hasWallet = managers.permissionsManager != null
+  // Either route to a figure counts: the direct read needs storage and the user
+  // id, the fallback needs the permissions manager.
+  const hasWallet = (storage != null && walletUserId != null) || managers.permissionsManager != null
 
   useEffect(() => {
     let cancelled = false
