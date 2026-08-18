@@ -663,6 +663,128 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
     void fx
   })
 
+  // The shape a failed withdrawal ACTUALLY leaves behind: the orphan died
+  // before signing, so it has no txid for the review path to blame and the
+  // toolbox refuses the input with a plain WERR_INVALID_PARAMETER naming the
+  // outpoint instead. Before this was healed, the vault stayed wedged until
+  // some later attempt happened to produce a review error.
+  const unspendableError = (outpoint: string) => {
+    const [txid, vout] = outpoint.split('.')
+    return Object.assign(
+      new Error(
+        `The inputs[0] parameter must be spendable output. output ${txid}:${vout} ` +
+          'appears to have been spent (spendable=false).'
+      ),
+      { code: 'WERR_INVALID_PARAMETER' }
+    )
+  }
+
+  test('aborts the orphan reserving the outpoint (matched on its inputs) then retries', async () => {
+    const fx = await seedVaultOutputs(1)
+    let createCalls = 0
+    const aborted: string[] = []
+
+    wallet.listActions.mockImplementation(async (args: any) => {
+      // The heal cannot match on txid here, so it must ask for inputs.
+      expect(args.includeInputs).toBe(true)
+      // One page, as real paging behaves — an offset past the end is empty.
+      if (args.offset > 0) return { actions: [] }
+      return {
+        actions: [
+          // The culprit: no txid at all, reserving our outpoint.
+          { status: 'unsigned', reference: 'ref-orphan', inputs: [{ sourceOutpoint: fx[0].outpoint }] },
+          // Reserves something else entirely.
+          { status: 'unsigned', reference: 'ref-other', inputs: [{ sourceOutpoint: `${'ee'.repeat(32)}.0` }] },
+          // Ours, but terminal — not abortable.
+          { txid: 'cd'.repeat(32), status: 'completed', reference: 'ref-done', inputs: [{ sourceOutpoint: fx[0].outpoint }] }
+        ]
+      }
+    })
+    wallet.abortAction.mockImplementation(async (args: any) => {
+      aborted.push(args.reference)
+      return {}
+    })
+    const realCreateAction = wallet.createAction.getMockImplementation()!
+    wallet.createAction.mockImplementation(async (...args: any[]) => {
+      if (++createCalls === 1) throw unspendableError(fx[0].outpoint)
+      return realCreateAction(...args)
+    })
+
+    const { txid } = await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all')
+    expect(txid).toBeDefined()
+    expect(createCalls).toBe(2)
+    expect(aborted).toEqual(['ref-orphan'])
+  })
+
+  test('matches the outpoint spelling the toolbox uses in error text (txid:vout)', async () => {
+    const fx = await seedVaultOutputs(1)
+    const [txid] = fx[0].outpoint.split('.')
+    // Assert the fixture really is the dotted spelling, so this test would fail
+    // if the two forms ever silently converged.
+    expect(fx[0].outpoint).toBe(`${txid}.0`)
+    expect(unspendableError(fx[0].outpoint).message).toContain(`${txid}:0`)
+
+    let createCalls = 0
+    wallet.listActions.mockResolvedValue({
+      actions: [{ status: 'nosend', reference: 'ref-orphan', inputs: [{ sourceOutpoint: fx[0].outpoint }] }]
+    })
+    const realCreateAction = wallet.createAction.getMockImplementation()!
+    wallet.createAction.mockImplementation(async (...args: any[]) => {
+      if (++createCalls === 1) throw unspendableError(fx[0].outpoint)
+      return realCreateAction(...args)
+    })
+
+    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all')).resolves.toMatchObject({
+      txid: expect.any(String)
+    })
+    expect(wallet.abortAction).toHaveBeenCalledWith({ reference: 'ref-orphan' }, ADMIN)
+  })
+
+  test('rethrows an unrelated WERR_INVALID_PARAMETER without aborting anything', async () => {
+    await seedVaultOutputs(1)
+    wallet.createAction.mockImplementation(async () => {
+      throw Object.assign(new Error('The outputs[0].satoshis parameter must be a positive integer.'), {
+        code: 'WERR_INVALID_PARAMETER'
+      })
+    })
+
+    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all')).rejects.toMatchObject({
+      code: 'WERR_INVALID_PARAMETER'
+    })
+    expect(wallet.listActions).not.toHaveBeenCalled()
+    expect(wallet.abortAction).not.toHaveBeenCalled()
+    expect(wallet.createAction).toHaveBeenCalledTimes(1) // no retry
+  })
+
+  test('rethrows when the wedged outpoint is not one this withdrawal is spending', async () => {
+    await seedVaultOutputs(1)
+    const someoneElse = `${'ee'.repeat(32)}.0`
+    wallet.createAction.mockImplementation(async () => {
+      throw unspendableError(someoneElse)
+    })
+
+    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all')).rejects.toMatchObject({
+      code: 'WERR_INVALID_PARAMETER'
+    })
+    expect(wallet.abortAction).not.toHaveBeenCalled()
+  })
+
+  test('rethrows when nothing reserving the outpoint can be aborted', async () => {
+    const fx = await seedVaultOutputs(1)
+    wallet.listActions.mockResolvedValue({
+      // Reserves our outpoint but is terminal, so the coin stays stuck.
+      actions: [{ txid: 'cd'.repeat(32), status: 'completed', reference: 'ref-done', inputs: [{ sourceOutpoint: fx[0].outpoint }] }]
+    })
+    wallet.createAction.mockImplementation(async () => {
+      throw unspendableError(fx[0].outpoint)
+    })
+
+    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all')).rejects.toMatchObject({
+      code: 'WERR_INVALID_PARAMETER'
+    })
+    expect(wallet.abortAction).not.toHaveBeenCalled()
+  })
+
   test('rethrows the review error when the reserving tx is not abortable/found', async () => {
     await seedVaultOutputs(1)
     const RESERVING = 'ab'.repeat(32)
