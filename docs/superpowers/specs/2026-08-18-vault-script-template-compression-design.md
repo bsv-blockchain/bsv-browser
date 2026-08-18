@@ -163,6 +163,11 @@ unrecognized version (including a literal v1 header) is simply rejected as
 `template-unknown`, the same as any other unknown version — a clean cut, not a
 compatibility gap.
 
+This checksum is not a MAC: it carries no secret, so anyone able to rewrite a stored blob
+can recompute a matching checksum for their rewritten bytes. It catches accidental
+corruption only, and must not be leaned on for tamper-resistance at the storage boundary
+against a hostile writer.
+
 **2. Vendor the template, gzipped.** Requirement 5 above ("versions are pinned by the
 constant bytes they describe, not by an `@bsv/templates` semver range") turned out to be
 under-implemented: only a SHA-256 of the constant bytes was pinned, while the reference
@@ -202,10 +207,16 @@ the whole batch and release once at the end, not per record.
 Same derivation chain as the original table, with the v1 compressed component sizes (47,
 27) replaced by the v2 ones (51, 31 — the 4-byte checksum added to each): deposit `rawTx` =
 204 + lockingScript; R1 preimage = 161 + scriptCode; R1 unlocking script =
-65 + 34 + 33 + (2 + preimage) + 1; withdrawal tx = 204 + unlock × inputs; base64 backup
-record = ⌈n/3⌉ × 4; DB per vault tx = rawTx + lockingScript. (204 and 161 are the
+65 + 34 + 33 + (pushPrefix + preimage) + 1; withdrawal tx = 204 + unlock × inputs; base64
+backup record = ⌈n/3⌉ × 4; DB per vault tx = rawTx + lockingScript. (204 and 161 are the
 non-script overhead this codec doesn't touch — the difference between each verbatim row
-and the script/scriptCode length it wraps; unchanged from v1.)
+and the script/scriptCode length it wraps; unchanged from v1.) `pushPrefix` is not a
+constant 2 — it's the size of whichever script push opcode the preimage's length actually
+requires: 2 bytes (`OP_PUSHDATA1` + a 1-byte length) for the compressed 192-byte preimage,
+which fits in 255 bytes, but 5 bytes (`OP_PUSHDATA4` + a 4-byte length) for the verbatim
+959,733-byte preimage, which doesn't. That's 65+34+33+(2+192)+1 = 327 compressed, matching
+the table, and 65+34+33+(5+959733)+1 = 959,871 verbatim, also matching the table — the two
+cases need different `pushPrefix` values, not the same one.
 
 | | verbatim | compressed (v2) |
 |---|---|---|

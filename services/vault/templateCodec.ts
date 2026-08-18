@@ -363,7 +363,7 @@ export async function describeVaultTemplate(): Promise<TemplateVersion[]> {
     version: TEMPLATE_VERSION,
     region: 0x01,
     totalLength: cache.region1.length,
-    variableRuns: PINNED_VARIABLE_RUNS,
+    variableRuns: PINNED_VARIABLE_RUNS.map(r => ({ ...r })), // fresh copies, not the live module array/objects
     constantHash: PINNED_CONSTANT_HASH
   }
   const region2: TemplateVersion = {

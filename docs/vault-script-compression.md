@@ -72,8 +72,9 @@ rather than ever returning approximately-right bytes.
 
 ### Why v2: the checksum
 
-Version 1 (the format this codec originally shipped with) had a 7-byte header —
-marker/version/region/originalLength, no checksum — and relied entirely on
+Version 1 — a format that existed only during this branch's development, was never
+persisted by anything, and has no reader in this codec by design (see below) — had a
+7-byte header: marker/version/region/originalLength, no checksum. It relied entirely on
 `originalLength` and payload-size checks to validate a compressed blob. Neither check can
 see corruption *inside* the payload itself: a single bit flip in a stored or transmitted
 40-byte payload still produces the right length, still splices cleanly into the reference
@@ -88,6 +89,12 @@ reconstructed result. That order matters: reconstruct, hash, compare, and only t
 return — never the reverse. Checking the reconstruction rather than the payload alone
 means corruption anywhere is caught, including (in principle) in the constant template
 itself, not just in the 20/40 bytes the payload carries.
+
+**This checksum is not a MAC.** It's a plain SHA-256 prefix with no secret key, so anyone
+able to rewrite a stored blob can simply recompute the checksum to match their rewritten
+bytes — it detects accidental corruption only. It must never be relied on as a
+tamper-resistance guarantee at the storage boundary against a hostile writer; that is a
+different property, not one this codec provides.
 
 v1 never shipped: nothing has ever called `compressScript`/`compressScriptCode`/
 `expandScript` outside this codec's own tests (see "Nothing calls this codec yet" below),
