@@ -14,9 +14,15 @@ import {
   expandScript,
   isCompressed,
   matchesTemplate,
+  releaseTemplateCache,
   TEMPLATE_MARKER,
   TemplateVersion
 } from '@/services/vault/templateCodec'
+
+/** 11-byte v2 header: marker(1) + version(1) + region(1) + originalLength(4) +
+ * checksum(4). Kept as a local literal (not imported) so tests can't be made
+ * to pass by silently changing the implementation's HEADER_LENGTH. */
+const HEADER_LENGTH = 11
 
 function fixture() {
   const r1PublicKey = Utils.toHex(Array.from(p256.getPublicKey(p256.utils.randomSecretKey(), true)))
@@ -41,13 +47,16 @@ describe('vault template codec: descriptor + exact recognition', () => {
     expect(matchesTemplate(scriptBytes, descriptor)).toBe(true)
   })
 
-  it('derives totalLength 959632 and the two pinned variable runs, from the library', () => {
+  it('reads totalLength 959632 and the two pinned variable runs from the vendored template', () => {
     // These are the plan's pinned, verbatim constants (Global Constraints:
     // R1K1_LOCK_LEN = 959632; commitment at offsets 17..36; k1PublicKeyHash
-    // at offsets 959609..959628). describeVaultTemplate derives them by
-    // diffing built scripts rather than reading them from here — this
-    // assertion is what would fail if @bsv/templates ever changed the
-    // layout, instead of the change silently being adopted.
+    // at offsets 959609..959628). describeVaultTemplate no longer diffs live
+    // @bsv/templates builds to find these — it reads the vendored asset
+    // (services/vault/vaultTemplateArtifact.ts) and the PINNED_VARIABLE_RUNS
+    // literal directly. This assertion is what the separate "installed
+    // library still matches the vendored template" test below exists to keep
+    // honest: THAT test is what would fail if @bsv/templates ever changed the
+    // layout, since this one no longer consults the library at all.
     expect(descriptor.totalLength).toBe(959632)
     expect(descriptor.totalLength).toBe(R1K1_LOCK_LEN)
     expect(descriptor.variableRuns).toEqual([
@@ -57,19 +66,12 @@ describe('vault template codec: descriptor + exact recognition', () => {
     expect(descriptor.constantHash).toMatch(/^[0-9a-f]{64}$/)
   })
 
-  it('constantHash matches the pinned reference recorded for version 1', () => {
-    // Pinned literal, computed once from the CURRENT @bsv/templates
-    // R1K1Wallet output — mirrors PINNED_CONSTANT_HASH_V1 in
+  it('constantHash matches the pinned reference for the vendored template', () => {
+    // Pinned literal, computed once from a genuine @bsv/templates sample
+    // before the template was vendored — mirrors PINNED_CONSTANT_HASH in
     // templateCodec.ts (kept as a separately-recorded literal here, not an
     // import, so this test can't be made to pass by silently changing the
-    // implementation's pinned value). totalLength/variableRuns alone cannot
-    // catch an @bsv/templates upgrade that keeps 959,632 bytes but alters a
-    // constant byte in between — this is the assertion that closes that
-    // gap. describeVaultTemplate() itself would already have thrown
-    // 'template-unknown' by the time this runs if the live template ever
-    // disagreed with this value (see the next describe block for that
-    // throwing behaviour); this test additionally pins the exact expected
-    // value so a change shows up here too, by name.
+    // implementation's pinned value).
     expect(descriptor.constantHash).toBe('41f6fcbbc46fe0eeb64a176fd66709694331b2327b1a63086105529e34a7493b')
   })
 
@@ -96,7 +98,6 @@ describe('vault template codec: descriptor + exact recognition', () => {
   it('does not match a 25-byte P2PKH script', () => {
     const pkh = Hash.hash160(PrivateKey.fromRandom().toPublicKey().encode(true) as number[])
     const p2pkh = new P2PKH().lock(pkh).toBinary()
-
     expect(p2pkh.length).toBe(25)
     expect(matchesTemplate(p2pkh, descriptor)).toBe(false)
   })
@@ -106,8 +107,8 @@ describe('vault template codec: descriptor + exact recognition', () => {
     // serialisable", so nothing stops a caller from persisting one and
     // rehydrating it in a later process that never awaited
     // describeVaultTemplate() for that exact version/region. A version
-    // number this process has no cached reference bytes for reproduces that
-    // cold-call condition without needing to reset module state.
+    // number this codec has never supported reproduces that cold-call
+    // condition without needing to reset module state.
     const neverCached: TemplateVersion = { ...descriptor, version: 999 }
 
     let caught: unknown
@@ -117,6 +118,43 @@ describe('vault template codec: descriptor + exact recognition', () => {
       caught = e
     }
     expect(caught).toMatchObject({ code: 'template-invalid' })
+  })
+})
+
+describe('vault template codec: the vendored template still matches the installed library', () => {
+  // The one test decision 2 requires: the vendored asset is now the SOLE
+  // source of the reference template at runtime (describeVaultTemplate no
+  // longer builds or diffs anything via @bsv/templates), so nothing else in
+  // this file would notice if the currently-installed @bsv/templates drifted
+  // from what was vendored. This test builds a script with whatever
+  // @bsv/templates is installed RIGHT NOW, masks the same two variable runs
+  // by hand (not via any codec helper — this must stay independent of the
+  // implementation it's cross-checking), and hashes the result. A future
+  // @bsv/templates upgrade that changes the template fails THIS test, loudly,
+  // in CI — it can no longer make an already-stored compressed record
+  // unreadable, because reconstruction never consults the installed library.
+  it('a freshly built locking script, masked, hashes to the pinned constant', async () => {
+    const scriptBytes = (await buildVaultLockingScript(fixture())).toBinary()
+    expect(scriptBytes.length).toBe(959632)
+
+    const masked = scriptBytes.slice()
+    for (let i = 17; i < 17 + 20; i++) masked[i] = 0
+    for (let i = 959609; i < 959609 + 20; i++) masked[i] = 0
+
+    expect(Utils.toHex(Hash.sha256(masked))).toBe('41f6fcbbc46fe0eeb64a176fd66709694331b2327b1a63086105529e34a7493b')
+  })
+
+  it('the same masked bytes, sliced 60 bytes in for the preimage scriptCode, hash to the pinned scriptCode constant', async () => {
+    const scriptBytes = (await buildVaultLockingScript(fixture())).toBinary()
+    const masked = scriptBytes.slice()
+    for (let i = 17; i < 17 + 20; i++) masked[i] = 0
+    for (let i = 959609; i < 959609 + 20; i++) masked[i] = 0
+
+    const scriptCode = masked.slice(60)
+    expect(scriptCode.length).toBe(959572)
+    expect(Utils.toHex(Hash.sha256(scriptCode))).toBe(
+      'f759656aadfcdbd531531c9806b8bce89f7ed4363c7d3f07578455fb1b96a990'
+    )
   })
 })
 
@@ -145,11 +183,10 @@ describe('vault template codec: compress + expand', () => {
     expect(expanded).toEqual(mainnetScript)
   })
 
-  it('produces a 47-byte compressed script starting with the 0xff marker', async () => {
+  it('produces a 51-byte compressed script starting with the 0xff marker', async () => {
     const compressed = await compressScript(scriptBytes)
     expect(compressed[0]).toBe(TEMPLATE_MARKER)
-    expect(compressed[0]).toBe(0xff)
-    expect(compressed.length).toBe(47) // 7-byte header + 40-byte payload (commitment 20 + k1PublicKeyHash 20)
+    expect(compressed.length).toBe(51) // 11-byte v2 header + 40-byte payload (commitment 20 + k1PublicKeyHash 20)
     expect(isCompressed(compressed)).toBe(true)
   })
 
@@ -188,18 +225,32 @@ describe('vault template codec: compress + expand', () => {
   })
 
   it('compressScript throws rather than silently passing through bytes that already begin with the compressed-script marker', async () => {
-    // A 47-byte, marker-led, well-formed-looking header (version 1, region
-    // 0x01, originalLength 959632 — the real R1K1_LOCK_LEN) whose 40-byte
-    // payload is not a real commitment/k1PublicKeyHash pair at all. Before
-    // the Fix 1 guard, compressForRegion's pass-through returned this
-    // verbatim (it matches no known template, since it's only 47 bytes
-    // long): isCompressed() would then report true, and a caller following
-    // this module's own documented isCompressed(b) ? expandScript(b) : b
-    // pattern would inflate it into a fabricated 959632-byte vault script
-    // whose commitment and k1PublicKeyHash are both 0xaa x20 — violating
+    // A 51-byte, marker-led, well-formed-looking v2 header (version 2, region
+    // 0x01, originalLength 959632 — the real R1K1_LOCK_LEN, plus 4 arbitrary
+    // checksum bytes) whose 40-byte payload is not a real commitment/
+    // k1PublicKeyHash pair at all. Before the Fix 1 guard, compressForRegion's
+    // pass-through returned this verbatim (it matches no known template,
+    // since it's only 51 bytes long): isCompressed() would then report true,
+    // and a caller following this module's own documented
+    // isCompressed(b) ? expandScript(b) : b pattern would inflate it into a
+    // fabricated 959632-byte vault script whose commitment and
+    // k1PublicKeyHash are both 0xaa x20 — violating
     // expand(compress(x)) === x for this constructible x.
-    const markerLeading = [TEMPLATE_MARKER, 0x01, 0x01, 0x00, 0x0e, 0xa4, 0x90, ...Array(40).fill(0xaa)]
-    expect(markerLeading.length).toBe(47)
+    const markerLeading = [
+      TEMPLATE_MARKER,
+      0x02,
+      0x01,
+      0x00,
+      0x0e,
+      0xa4,
+      0x90, // originalLength = 959632, big-endian
+      0xde,
+      0xad,
+      0xbe,
+      0xef, // arbitrary checksum bytes
+      ...Array(40).fill(0xaa)
+    ]
+    expect(markerLeading.length).toBe(51)
     expect(isCompressed(markerLeading)).toBe(true)
 
     let caught: unknown
@@ -212,7 +263,8 @@ describe('vault template codec: compress + expand', () => {
   })
 
   it('expandScript throws template-unknown for an unrecognised version', async () => {
-    const bogus = [TEMPLATE_MARKER, 250, 0x01, 0, 0, 0, 0]
+    const bogus = [TEMPLATE_MARKER, 250, 0x01, 0, 0, 0, 0, 0, 0, 0, 0]
+    expect(bogus.length).toBe(HEADER_LENGTH)
 
     let caught: unknown
     try {
@@ -224,7 +276,12 @@ describe('vault template codec: compress + expand', () => {
   })
 
   it('expandScript throws template-unknown for an unrecognised region', async () => {
-    const bogus = [TEMPLATE_MARKER, 1, 0x7f, 0, 0, 0, 0]
+    // version 2 (this codec's only supported version) paired with a region
+    // byte no descriptor uses — isolates "unrecognised region" from
+    // "unrecognised version" (a bogus version alone would already explain
+    // the throw without this test proving anything about region handling).
+    const bogus = [TEMPLATE_MARKER, 2, 0x7f, 0, 0, 0, 0, 0, 0, 0, 0]
+    expect(bogus.length).toBe(HEADER_LENGTH)
 
     let caught: unknown
     try {
@@ -236,7 +293,7 @@ describe('vault template codec: compress + expand', () => {
   })
 
   it('expandScript throws rather than returning short bytes for a truncated header', async () => {
-    const truncated = [TEMPLATE_MARKER, 1, 0x01, 0, 0] // 5 bytes; a full header needs 7
+    const truncated = [TEMPLATE_MARKER, 2, 0x01, 0, 0, 0, 0, 0] // 8 bytes; a full v2 header needs 11
 
     let caught: unknown
     try {
@@ -265,9 +322,9 @@ describe('vault template codec: compress + expand', () => {
   })
 
   it('expandScript throws template-invalid when the payload length disagrees with the version it names', async () => {
-    // Header fields (version/region/originalLength) are left intact and
-    // correctly name a known version; only the payload itself is one byte
-    // short. This is the guard that stands between a corrupt blob and
+    // Header fields (version/region/originalLength/checksum) are left intact
+    // and correctly name a known version; only the payload itself is one
+    // byte short. This is the guard that stands between a corrupt blob and
     // `undefined` landing in the reconstructed bytes at a variable-run
     // offset (result[r.offset + i] = payload[payloadOffset + i]).
     const compressed = await compressScript(scriptBytes)
@@ -295,11 +352,53 @@ describe('vault template codec: compress + expand', () => {
     }
     expect(caught).toMatchObject({ code: 'template-invalid' })
   })
+
+  it('expandScript throws template-invalid when the checksum disagrees with the reconstructed bytes', async () => {
+    // The v2 header's whole reason for existing: flip one payload byte
+    // (still the right LENGTH, so the length/originalLength guards above
+    // don't fire) and confirm the corruption is still caught — by the
+    // checksum, computed over the FULL reconstructed bytes, not by any
+    // header field. Before v2, this exact mutation would have round-tripped
+    // into a structurally perfect but WRONG 959632-byte script with no error
+    // at all (wrong txid, broken merkle proof, unrecoverable deposit record).
+    const compressed = await compressScript(scriptBytes)
+    const tampered = compressed.slice()
+    tampered[HEADER_LENGTH] ^= 0xff // first payload byte (start of the commitment run)
+
+    let caught: unknown
+    try {
+      await expandScript(tampered)
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toMatchObject({ code: 'template-invalid' })
+    expect((caught as Error).message).toMatch(/checksum/i)
+  })
+
+  it('expandScript still throws template-invalid on a checksum mismatch even when the corrupted bytes still happen to have the right length and originalLength', async () => {
+    // Belt-and-braces: corrupt a CONSTANT byte (outside every variable run,
+    // so matchesTemplate-style recognition plays no role here — expandScript
+    // never calls matchesTemplate) by tampering with the header's own
+    // checksum field instead of the payload, proving the checksum is checked
+    // against the RECONSTRUCTION, not merely echoed back.
+    const compressed = await compressScript(scriptBytes)
+    const tampered = compressed.slice()
+    tampered[7] ^= 0xff // first checksum byte
+
+    let caught: unknown
+    try {
+      await expandScript(tampered)
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toMatchObject({ code: 'template-invalid' })
+    expect((caught as Error).message).toMatch(/checksum/i)
+  })
 })
 
 describe('vault template codec: region 0x02 (preimage scriptCode)', () => {
-  // Building the ~960 KB locking script (and diffing it inside
-  // describeVaultTemplate) is not free — build once for this whole block.
+  // Building the ~960 KB locking script is not free — build once for this
+  // whole block.
   let scriptCodeDescriptor: TemplateVersion
   let scriptBytes: number[]
   let scriptCodeBytes: number[]
@@ -334,7 +433,7 @@ describe('vault template codec: region 0x02 (preimage scriptCode)', () => {
     expect(scriptCodeDescriptor.variableRuns).toEqual([{ offset: 959549, length: 20 }])
   })
 
-  it('scriptCode constantHash matches the pinned reference recorded for version 1 region 0x02', () => {
+  it('scriptCode constantHash matches the pinned reference for the vendored template', () => {
     // Pinned literal, independently re-declared here (not imported) so a
     // one-sided edit to the implementation's pinned value can't silently
     // pass — mirrors the region-0x01 constantHash test above.
@@ -367,15 +466,15 @@ describe('vault template codec: region 0x02 (preimage scriptCode)', () => {
     // be — part of this payload. The commitment stays recoverable elsewhere:
     // the unlocking script pushes publicKey and salt verbatim, and
     // commitment = hash160(publicKey ‖ salt).
-    const payload = compressed.slice(7) // HEADER_LENGTH: marker(1)+version(1)+region(1)+originalLength(4)
+    const payload = compressed.slice(HEADER_LENGTH)
     expect(payload.length).toBe(20)
     expect(Utils.toHex(payload)).toBe(MAINNET_K1_PUBLIC_KEY_HASH_HEX)
   })
 
-  it('produces a 27-byte compressed scriptCode starting with the 0xff marker (7-byte header + 20-byte payload)', async () => {
+  it('produces a 31-byte compressed scriptCode starting with the 0xff marker (11-byte v2 header + 20-byte payload)', async () => {
     const compressed = await compressScriptCode(scriptCodeBytes)
     expect(compressed[0]).toBe(TEMPLATE_MARKER)
-    expect(compressed.length).toBe(27)
+    expect(compressed.length).toBe(31)
     expect(isCompressed(compressed)).toBe(true)
   })
 
@@ -388,38 +487,40 @@ describe('vault template codec: region 0x02 (preimage scriptCode)', () => {
   })
 })
 
-describe('vault template codec: same-length constant-byte drift is caught', () => {
-  // The failure mode this guards against: an @bsv/templates upgrade that
-  // keeps R1K1_LOCK_LEN (959632) bytes but alters one of the FIXED bytes in
-  // between. totalLength and originalLength checks can't see this — only
-  // comparing the live template's constantHash against a pinned reference
-  // can. This is exercised end-to-end (a real describeVaultTemplate() call,
-  // not a duplicated/extracted comparison helper), against a mocked
-  // buildVaultLockingScript that flips one constant byte the SAME way on
-  // every sample it builds — so the diffing logic still treats it as
-  // constant, not variable, and only its value has drifted.
-  //
-  // Runs inside jest.isolateModulesAsync so the mocked drift gets its own,
-  // separate `templateCodec` module instance (own `cachedDescriptors`,
+describe('vault template codec: vendored-asset corruption is caught', () => {
+  // The failure mode this guards against, now that the reference template is
+  // vendored rather than rebuilt: a corrupted or hand-edited
+  // vaultTemplateArtifact.ts whose inflated bytes disagree with
+  // PINNED_CONSTANT_HASH. This used to be caught by re-diffing live
+  // @bsv/templates builds on every describeVaultTemplate() call; now it's
+  // caught by ensureTemplateCache's masked-hash cross-check against the
+  // vendored asset it just inflated (see templateCodec.ts). Runs inside
+  // jest.isolateModulesAsync so the mocked corruption gets its own, separate
+  // templateCodec module instance (own module-level template cache),
   // untouched by whatever the other describe blocks in this file already
-  // cached) rather than contaminating the real one the rest of this suite
-  // relies on.
-  it('describeVaultTemplate throws template-unknown when a constant byte drifts at the same length', async () => {
+  // cached.
+  it('describeVaultTemplate throws template-invalid when the vendored asset is corrupted', async () => {
+    // Build a real reference template the same way vaultTemplateArtifact.ts
+    // was generated, flip one constant byte (well outside both variable
+    // runs), and re-gzip — reproducing a corrupted commit of that file
+    // without needing to touch the real one on disk.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- this file otherwise only imports fflate transitively; a plain require avoids a dynamic-import that this Jest/Babel setup doesn't support
+    const { gzipSync } = require('fflate')
+    const real = (await buildVaultLockingScript(fixture())).toBinary()
+    const masked = real.slice()
+    for (let i = 17; i < 17 + 20; i++) masked[i] = 0
+    for (let i = 959609; i < 959609 + 20; i++) masked[i] = 0
+    masked[0] ^= 0xff // corrupt a constant byte, same idea as the old drift test
+    const corruptedGzip = gzipSync(Uint8Array.from(masked), { level: 9 })
+    const corruptedBase64 = Buffer.from(corruptedGzip).toString('base64')
+
     let freshDescribe: (() => Promise<unknown>) | undefined
 
     await jest.isolateModulesAsync(async () => {
-      jest.doMock('@/services/vault/r1k1', () => {
-        const actual = jest.requireActual('@/services/vault/r1k1')
-        return {
-          ...actual,
-          buildVaultLockingScript: async (a: { r1PublicKey: string; salt: string; k1PublicKeyHash: number[] }) => {
-            const script = await actual.buildVaultLockingScript(a)
-            const bytes: number[] = script.toBinary()
-            bytes[0] ^= 0xff // outside both variable runs; same on every sample, so it reads as "constant" — just the wrong constant
-            return { toBinary: () => bytes }
-          }
-        }
-      })
+      jest.doMock('@/services/vault/vaultTemplateArtifact', () => ({
+        VAULT_TEMPLATE_GZIP_BASE64: corruptedBase64,
+        VAULT_TEMPLATE_RAW_LENGTH: 959_632
+      }))
       // eslint-disable-next-line @typescript-eslint/no-require-imports -- isolated module registry needs a fresh require, not the file's top-level import
       const mod = require('@/services/vault/templateCodec')
       freshDescribe = mod.describeVaultTemplate
@@ -431,64 +532,54 @@ describe('vault template codec: same-length constant-byte drift is caught', () =
     } catch (e) {
       caught = e
     }
-    expect(caught).toMatchObject({ code: 'template-unknown' })
+    expect(caught).toMatchObject({ code: 'template-invalid' })
   })
 })
 
-describe('vault template codec: coincidental sample agreement cannot narrow a real variable run', () => {
-  // Regression test for a subtle false-positive distinct from the drift test
-  // above: DIFF_SAMPLE_COUNT (4) throwaway samples are diffed to FIND the
-  // variable runs, so a genuinely-variable byte that happens to draw the
-  // SAME value on every sample — a real, if individually unlikely,
-  // per-process coincidence, not an actual template change — would make
-  // findVariableRuns split a real run and report it one byte narrower than
-  // it truly is. Without a backstop, that narrower run changes constantHash
-  // and makes describeVaultTemplate throw 'template-unknown' — a false
-  // diagnosis of an @bsv/templates upgrade when nothing changed, and (since
-  // only the success path is memoized) a ~114ms re-pay on every subsequent
-  // call until the coincidence stops recurring.
-  //
-  // describeVaultTemplate masks (unions) the sample-derived runs against
-  // PINNED_VARIABLE_RUNS_V1 precisely so a coincidental agreement can only
-  // ever widen a run, never split one. This mocks buildVaultLockingScript to
-  // force one byte inside the real commitment run (offsets 17..36) to the
-  // SAME value on every sample, reproducing that coincidence deterministically
-  // rather than waiting on real (im)probability.
-  //
-  // Runs inside jest.isolateModulesAsync for the same reason as the drift
-  // test above: an isolated module instance with its own `cachedDescriptors`.
-  it('describeVaultTemplate does not throw, and keeps the full pinned run geometry, when one byte inside a real variable run agrees on every sample', async () => {
-    let freshDescribe: (() => Promise<TemplateVersion[]>) | undefined
+describe('vault template codec: template cache release', () => {
+  it('releaseTemplateCache lets describeVaultTemplate/compress/expand keep working, transparently re-inflating the vendored asset', async () => {
+    // Prove the cache is genuinely gone and genuinely comes back: populate
+    // it, release it, then exercise every exported entry point afterwards —
+    // each one must re-populate on demand rather than depending on state left
+    // over from before the release.
+    await describeVaultTemplate()
+    releaseTemplateCache()
 
-    await jest.isolateModulesAsync(async () => {
-      jest.doMock('@/services/vault/r1k1', () => {
-        const actual = jest.requireActual('@/services/vault/r1k1')
-        return {
-          ...actual,
-          buildVaultLockingScript: async (a: { r1PublicKey: string; salt: string; k1PublicKeyHash: number[] }) => {
-            const script = await actual.buildVaultLockingScript(a)
-            const bytes: number[] = script.toBinary()
-            // Offset 25 sits inside the real 17..36 commitment run (a
-            // genuine hash160 output, ordinarily different on every sample).
-            // Forcing it to a fixed value on every sample simulates the rare
-            // coincidence without needing astronomical luck.
-            bytes[25] = 0x00
-            return { toBinary: () => bytes }
-          }
-        }
-      })
-      // eslint-disable-next-line @typescript-eslint/no-require-imports -- isolated module registry needs a fresh require, not the file's top-level import
-      const mod = require('@/services/vault/templateCodec')
-      freshDescribe = mod.describeVaultTemplate
-    })
+    const descriptors = await describeVaultTemplate()
+    expect(descriptors).toHaveLength(2)
+    expect(descriptors[0].totalLength).toBe(959632)
 
-    const descriptors = await freshDescribe!()
-    const region1 = descriptors.find((d) => d.region === 0x01)
-    expect(region1).toBeDefined()
-    // The full 20-byte commitment run, NOT split around offset 25.
-    expect(region1!.variableRuns).toEqual([
-      { offset: 17, length: 20 },
-      { offset: 959609, length: 20 }
-    ])
+    const scriptBytes = (await buildVaultLockingScript(fixture())).toBinary()
+    releaseTemplateCache()
+    const compressed = await compressScript(scriptBytes)
+    expect(compressed.length).toBe(51)
+
+    releaseTemplateCache()
+    const expanded = await expandScript(compressed)
+    expect(expanded).toEqual(scriptBytes)
+
+    // Leave the cache populated for whatever test runs next in this file —
+    // this test's job is to prove release-then-reuse works, not to leave
+    // global module state released for later tests that don't expect it.
+    await describeVaultTemplate()
+  })
+
+  it('matchesTemplate throws template-invalid, not a stale true/false, right after a release with no intervening describeVaultTemplate call', async () => {
+    const [descriptor] = await describeVaultTemplate()
+    const scriptBytes = (await buildVaultLockingScript(fixture())).toBinary()
+    expect(matchesTemplate(scriptBytes, descriptor)).toBe(true)
+
+    releaseTemplateCache()
+
+    let caught: unknown
+    try {
+      matchesTemplate(scriptBytes, descriptor)
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toMatchObject({ code: 'template-invalid' })
+
+    // Restore populated state for subsequent tests in this file.
+    await describeVaultTemplate()
   })
 })
