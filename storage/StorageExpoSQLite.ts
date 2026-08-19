@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite'
 import type { SQLiteDatabase } from 'expo-sqlite'
 import { createTables, ensureOfflineActionsColumns } from './schema/createTables'
 import { PROVEN_HEIGHTS_SQL, buildFindSql, columnsExcluding, rangeReadSql } from './methods/findSql'
+import { scrubHistoryJson } from './methods/historyNotes'
 import { devLog } from '../utils/logging'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import type { StorageProviderOptions } from '@bsv/wallet-toolbox-mobile'
@@ -482,6 +483,9 @@ export class StorageExpoSQLite extends StorageProvider {
   async insertProvenTxReq(tx: TableProvenTxReq, trx?: TrxToken): Promise<number> {
     const e = await this.validateEntityForInsert(tx, trx)
     if (e.provenTxReqId === 0) delete e.provenTxReqId
+    // See methods/historyNotes.ts: provider error notes carry the full EF/rawTx
+    // hex and reach this column untruncated.
+    e.history = scrubHistoryJson(e.history)
     const id = await this.sqlInsert('proven_tx_reqs', e, 'provenTxReqId')
     tx.provenTxReqId = id
     return id
@@ -597,9 +601,15 @@ export class StorageExpoSQLite extends StorageProvider {
     return await this.sqlUpdate('proven_txs', id, u as any, 'provenTxId')
   }
 
+  /**
+   * The single write path for proven_tx_reqs, and therefore the backstop for the
+   * history column: every note the toolbox's own broadcast providers produce
+   * arrives here, and they capture whole Extended Format payloads as hex.
+   */
   async updateProvenTxReq(id: number | number[], update: Partial<TableProvenTxReq>, trx?: TrxToken): Promise<number> {
-    const u = this.validatePartialForUpdate(update)
-    return await this.sqlUpdate('proven_tx_reqs', id, u as any, 'provenTxReqId')
+    const u = this.validatePartialForUpdate(update) as any
+    if ('history' in u) u.history = scrubHistoryJson(u.history)
+    return await this.sqlUpdate('proven_tx_reqs', id, u, 'provenTxReqId')
   }
 
   async updateCertificate(id: number, update: Partial<TableCertificate>, trx?: TrxToken): Promise<number> {
