@@ -30,6 +30,7 @@
  */
 import { PrivateKey, HD, Mnemonic } from '@bsv/sdk'
 import { normalizeVaultPassphrase } from './vaultPassphrase'
+import { randomBytes } from './random'
 import { VaultError } from './types'
 
 /** BIP32 hardened-index boundary. Hardened children cannot be derived from an
@@ -82,6 +83,30 @@ export function indexFromKeyID(keyID: string): number | null {
   if (!/^\d+$/.test(raw)) return null
   const n = Number(raw)
   return Number.isSafeInteger(n) && n < HARDENED ? n : null
+}
+
+/** Floor for an adopted vault's first deposit index — above any counter a
+ * device that started at zero could plausibly have reached. */
+const ADOPT_INDEX_MIN = 1 << 20
+/** Width of the random span above that floor. Keeps every index well below the
+ * hardened boundary, so a lifetime of increments can never reach it. */
+const ADOPT_INDEX_SPAN = 1 << 28
+
+/**
+ * A random, non-hardened starting deposit index.
+ *
+ * Used when a device adopts a YubiKey that is already enrolled elsewhere: both
+ * devices derive from the SAME xpub, and a device-local counter is the only
+ * thing choosing indices, so two devices starting at zero would hand out the
+ * same deposit addresses. Reusing an address does not risk funds — it links
+ * two deposits and confuses the history — and coordinating counters across
+ * devices would need a channel the vault deliberately does not have. A random
+ * start in a 2^28-wide span makes a collision negligible instead.
+ */
+export function randomDepositStartIndex(): number {
+  const b = randomBytes(4)
+  const r = ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0
+  return ADOPT_INDEX_MIN + (r % ADOPT_INDEX_SPAN)
 }
 
 /** The vault's private HD node. */
