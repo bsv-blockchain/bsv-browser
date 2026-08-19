@@ -49,6 +49,17 @@ import {
 export const VAULT_BASKET = 'admin vault'
 
 /**
+ * Storage-backed lookup of the transactions reserving a set of outpoints.
+ *
+ * Injected rather than imported so this module stays testable without a database
+ * — and optional, so a caller that has no storage handle keeps the original
+ * paged-scan heal. See findSpendingReferences in StorageExpoSQLite.
+ */
+export type SpendingReferenceLookup = (
+  outpoints: string[]
+) => Promise<{ reference: string; status: string }[]>
+
+/**
  * Economic-dust floor for a vault output — a hard minimum, not a caution.
  *
  * An R1 spend pays the ~960 KB script twice — once to create the output, once
@@ -253,8 +264,38 @@ async function abortReservingTxids(w: VaultWallet, adminOriginator: string, txid
 /** Abort the orphaned transactions holding these outpoints, matched on each
  * action's own input list — the only handle available when the reservation has
  * no txid to blame. */
-async function abortReservingOutpoints(w: VaultWallet, adminOriginator: string, outpoints: string[]): Promise<number> {
+async function abortReservingOutpoints(
+  w: VaultWallet,
+  adminOriginator: string,
+  outpoints: string[],
+  findSpendingReferences?: SpendingReferenceLookup
+): Promise<number> {
   if (outpoints.length === 0) return 0
+
+  // One indexed query when storage is reachable. The scan below answers the
+  // same question by paging up to 5,000 actions with includeInputs, and
+  // listActionsSql answers each page by loading every action's full rawTx and
+  // running Transaction.fromBinary on it to read a sequence number — so a vault
+  // retry parsed thousands of transactions to find one outpoint.
+  if (findSpendingReferences) {
+    try {
+      const rows = await findSpendingReferences(outpoints)
+      const aborted = new Set<string>()
+      for (const r of rows) {
+        if (!ABORTABLE.has(r.status) || aborted.has(r.reference)) continue
+        aborted.add(r.reference)
+        await w.abortAction({ reference: r.reference }, adminOriginator).catch(err =>
+          console.log('[vault] abortAction rejected:', (err as Error)?.message)
+        )
+      }
+      console.log('[vault] abort by outpoint · matched=%d · aborted=%d', rows.length, aborted.size)
+      return aborted.size
+    } catch (e) {
+      // A storage failure must not cost the retry: fall through to the scan.
+      console.log('[vault] spending-reference lookup failed, falling back to scan:', (e as Error)?.message)
+    }
+  }
+
   const want = new Set(outpoints.map(sameOutpoint))
   return await abortActions(
     w,
@@ -279,14 +320,15 @@ async function freeReservedInputs(
   w: VaultWallet,
   adminOriginator: string,
   e: unknown,
-  ours: string[]
+  ours: string[],
+  findSpendingReferences?: SpendingReferenceLookup
 ): Promise<number> {
   if (isReviewActionsError(e)) {
     return await abortReservingTxids(w, adminOriginator, competingTxids(e))
   }
   const mine = new Set(ours.map(sameOutpoint))
   const wedged = unspendableInputOutpoints(e).filter(o => mine.has(o))
-  return await abortReservingOutpoints(w, adminOriginator, wedged)
+  return await abortReservingOutpoints(w, adminOriginator, wedged, findSpendingReferences)
 }
 
 // ── balance ─────────────────────────────────────────────────────────────
@@ -356,7 +398,7 @@ async function spendVaultOutputs(
   amount: number | 'all',
   reason: string,
   spend: SpendPath,
-  opts: { revaultRemainder: boolean }
+  opts: { revaultRemainder: boolean; findSpendingReferences?: SpendingReferenceLookup }
 ): Promise<{ txid: string }> {
   // Announce work BEFORE starting it, then hand the JS thread back once so
   // React can actually paint the sheet. Everything below — a ~1.83 MB
@@ -458,7 +500,13 @@ async function spendVaultOutputs(
     // outright. Two error shapes, depending on whether the orphan ever got a
     // txid — see freeReservedInputs. Abort it and retry ONCE; anything else
     // frees nothing and rethrows untouched.
-    const freed = await freeReservedInputs(w, adminOriginator, e, selected.map(o => o.outpoint))
+    const freed = await freeReservedInputs(
+      w,
+      adminOriginator,
+      e,
+      selected.map(o => o.outpoint),
+      opts.findSpendingReferences
+    )
     if (freed === 0) throw e
     created = await w.createAction(caArgs, adminOriginator)
   }
@@ -591,12 +639,14 @@ export async function withdrawFromVault(
   w: VaultWallet,
   adminOriginator: string,
   amount: number | 'all',
-  reason: string
+  reason: string,
+  findSpendingReferences?: SpendingReferenceLookup
 ): Promise<{ txid: string }> {
   const signer = await requestVaultSigner(reason)
   try {
     return await spendVaultOutputs(w, adminOriginator, amount, reason, { path: 'r1', signer }, {
-      revaultRemainder: true
+      revaultRemainder: true,
+      findSpendingReferences
     })
   } finally {
     signer.release()
@@ -612,11 +662,13 @@ export async function sweepVaultWithHD(
   w: VaultWallet,
   adminOriginator: string,
   hd: HD,
-  reason: string
+  reason: string,
+  findSpendingReferences?: SpendingReferenceLookup
 ): Promise<{ txid: string } | null> {
   try {
     return await spendVaultOutputs(w, adminOriginator, 'all', reason, { path: 'k1', hd }, {
-      revaultRemainder: false
+      revaultRemainder: false,
+      findSpendingReferences
     })
   } catch (e) {
     if (e instanceof VaultError && e.code === 'vault-empty') return null

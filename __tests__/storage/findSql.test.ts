@@ -5,6 +5,7 @@
  * needs a hardcoded column list, and a list that falls behind the schema would
  * silently drop a column from every read that projects.
  */
+import { DatabaseSync } from 'node:sqlite'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -13,7 +14,9 @@ import {
   TABLE_COLUMNS,
   buildFindSql,
   columnsExcluding,
-  rangeReadSql
+  rangeReadSql,
+  spendingReferencesSql,
+  splitOutpoint
 } from '@/storage/methods/findSql'
 
 describe('columnsExcluding', () => {
@@ -162,4 +165,62 @@ describe('column lists match the schema', () => {
       }
     })
   }
+})
+
+describe('spendingReferencesSql against real SQLite', () => {
+  const seeded = () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('CREATE TABLE outputs (txid TEXT, vout INTEGER, spentBy INTEGER)')
+    d.exec('CREATE TABLE transactions (transactionId INTEGER, reference TEXT, status TEXT)')
+    d.prepare('INSERT INTO transactions VALUES (?,?,?)').run(1, 'ref-orphan', 'unsigned')
+    d.prepare('INSERT INTO transactions VALUES (?,?,?)').run(2, 'ref-done', 'completed')
+    d.prepare('INSERT INTO outputs VALUES (?,?,?)').run('aa'.repeat(32), 0, 1)
+    d.prepare('INSERT INTO outputs VALUES (?,?,?)').run('bb'.repeat(32), 1, 2)
+    // Unspent: must never be reported.
+    d.prepare('INSERT INTO outputs VALUES (?,?,?)').run('cc'.repeat(32), 0, null)
+    return d
+  }
+
+  it('finds the reserving transaction by outpoint', () => {
+    const rows = seeded()
+      .prepare(spendingReferencesSql(1))
+      .all('aa'.repeat(32), 0) as { reference: string; status: string }[]
+    expect(rows).toEqual([{ reference: 'ref-orphan', status: 'unsigned' }])
+  })
+
+  it('matches on the vout as well as the txid', () => {
+    // vout 1 of that txid is spent by ref-done; vout 0 is not present.
+    const rows = seeded().prepare(spendingReferencesSql(1)).all('bb'.repeat(32), 0) as unknown[]
+    expect(rows).toEqual([])
+  })
+
+  it('takes several outpoints in one query', () => {
+    const rows = seeded()
+      .prepare(spendingReferencesSql(2))
+      .all('aa'.repeat(32), 0, 'bb'.repeat(32), 1) as { reference: string }[]
+    expect(rows.map(r => r.reference).sort()).toEqual(['ref-done', 'ref-orphan'])
+  })
+
+  it('ignores unspent outputs', () => {
+    const rows = seeded().prepare(spendingReferencesSql(1)).all('cc'.repeat(32), 0) as unknown[]
+    expect(rows).toEqual([])
+  })
+})
+
+describe('splitOutpoint', () => {
+  it('accepts both spellings the toolbox uses', () => {
+    const txid = 'ab'.repeat(32)
+    expect(splitOutpoint(`${txid}.3`)).toEqual({ txid, vout: 3 })
+    expect(splitOutpoint(`${txid}:3`)).toEqual({ txid, vout: 3 })
+  })
+
+  it('lowercases the txid so a mixed-case outpoint still matches storage', () => {
+    expect(splitOutpoint(`${'AB'.repeat(32)}.0`)!.txid).toBe('ab'.repeat(32))
+  })
+
+  it('rejects anything that is not an outpoint', () => {
+    expect(splitOutpoint('nonsense')).toBeNull()
+    expect(splitOutpoint('ab.0')).toBeNull()
+    expect(splitOutpoint(`${'ab'.repeat(32)}.`)).toBeNull()
+  })
 })

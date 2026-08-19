@@ -716,6 +716,61 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
     expect(aborted).toEqual(['ref-orphan'])
   })
 
+  test('with a storage lookup, heals from one query and never pages actions', async () => {
+    const fx = await seedVaultOutputs(1)
+    let createCalls = 0
+    const asked: string[][] = []
+    const findSpendingReferences = jest.fn(async (outpoints: string[]) => {
+      asked.push(outpoints)
+      return [
+        { reference: 'ref-orphan', status: 'unsigned' },
+        // Terminal, so not abortable — the status filter must still apply on
+        // this path exactly as it does on the scan.
+        { reference: 'ref-done', status: 'completed' }
+      ]
+    })
+    const realCreateAction = wallet.createAction.getMockImplementation()!
+    wallet.createAction.mockImplementation(async (...args: any[]) => {
+      if (++createCalls === 1) throw unspendableError(fx[0].outpoint)
+      return realCreateAction(...args)
+    })
+
+    const { txid } = await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all', findSpendingReferences)
+
+    expect(txid).toBeDefined()
+    expect(createCalls).toBe(2)
+    expect(asked).toEqual([[fx[0].outpoint]])
+    expect(wallet.abortAction).toHaveBeenCalledWith({ reference: 'ref-orphan' }, ADMIN)
+    expect(wallet.abortAction).not.toHaveBeenCalledWith({ reference: 'ref-done' }, ADMIN)
+    // The whole point: no paged scan, so no per-action rawTx load and parse.
+    expect(wallet.listActions).not.toHaveBeenCalled()
+  })
+
+  test('falls back to the scan when the storage lookup throws', async () => {
+    // A storage failure must not cost the retry.
+    const fx = await seedVaultOutputs(1)
+    let createCalls = 0
+    const findSpendingReferences = jest.fn(async () => {
+      throw new Error('database is locked')
+    })
+    wallet.listActions.mockResolvedValue({
+      actions: [{ status: 'unsigned', reference: 'ref-orphan', inputs: [{ sourceOutpoint: fx[0].outpoint }] }]
+    })
+    const realCreateAction = wallet.createAction.getMockImplementation()!
+    wallet.createAction.mockImplementation(async (...args: any[]) => {
+      if (++createCalls === 1) throw unspendableError(fx[0].outpoint)
+      return realCreateAction(...args)
+    })
+
+    await expect(
+      withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all', findSpendingReferences)
+    ).resolves.toMatchObject({ txid: expect.any(String) })
+
+    expect(findSpendingReferences).toHaveBeenCalled()
+    expect(wallet.listActions).toHaveBeenCalled()
+    expect(wallet.abortAction).toHaveBeenCalledWith({ reference: 'ref-orphan' }, ADMIN)
+  })
+
   test('matches the outpoint spelling the toolbox uses in error text (txid:vout)', async () => {
     const fx = await seedVaultOutputs(1)
     const [txid] = fx[0].outpoint.split('.')

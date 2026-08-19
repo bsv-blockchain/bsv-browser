@@ -203,3 +203,30 @@ export function rangeReadSql(table: 'proven_txs' | 'proven_tx_reqs'): string {
  * merklePath in the wallet to build a map of two small columns.
  */
 export const PROVEN_HEIGHTS_SQL = 'SELECT txid, height FROM proven_txs'
+
+/**
+ * The transactions that have reserved the given outpoints, by `reference`.
+ *
+ * `reference` and not `txid` deliberately: this exists to heal a vault UTXO left
+ * reserved by an attempt that died BEFORE signing, so the reserving row has no
+ * txid at all — which is exactly why the old heal had to page every action and
+ * match on its input list. `abortAction` takes a reference anyway.
+ *
+ * One OR-group per outpoint rather than a row-value IN, so the query works on
+ * any SQLite build.
+ */
+export function spendingReferencesSql(pairCount: number): string {
+  const groups = Array.from({ length: pairCount }, () => '("o"."txid" = ? AND "o"."vout" = ?)').join(' OR ')
+  return (
+    'SELECT DISTINCT "t"."reference" AS reference, "t"."status" AS status ' +
+    'FROM "outputs" "o" JOIN "transactions" "t" ON "t"."transactionId" = "o"."spentBy" ' +
+    `WHERE "o"."spentBy" IS NOT NULL AND (${groups})`
+  )
+}
+
+/** Split a `txid.vout` or `txid:vout` outpoint into its parts, or null. */
+export function splitOutpoint(outpoint: string): { txid: string; vout: number } | null {
+  const m = /^([0-9a-fA-F]{64})[.:](\d+)$/.exec(outpoint.trim())
+  if (!m) return null
+  return { txid: m[1].toLowerCase(), vout: Number(m[2]) }
+}

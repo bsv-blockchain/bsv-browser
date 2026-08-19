@@ -1,7 +1,14 @@
 import * as SQLite from 'expo-sqlite'
 import type { SQLiteDatabase } from 'expo-sqlite'
 import { createTables, ensureOfflineActionsColumns } from './schema/createTables'
-import { PROVEN_HEIGHTS_SQL, buildFindSql, columnsExcluding, rangeReadSql } from './methods/findSql'
+import {
+  PROVEN_HEIGHTS_SQL,
+  buildFindSql,
+  columnsExcluding,
+  rangeReadSql,
+  spendingReferencesSql,
+  splitOutpoint
+} from './methods/findSql'
 import { scrubHistoryJson } from './methods/historyNotes'
 import { devLog } from '../utils/logging'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
@@ -1261,6 +1268,32 @@ export class StorageExpoSQLite extends StorageProvider {
    * wallet to build a map of two small columns. On a wallet with vault history
    * that is hundreds of megabytes of transient heap.
    */
+  /**
+   * The transactions reserving the given outpoints, by `reference`.
+   *
+   * Answers in one indexed query (outputs.spentBy is indexed) what the vault's
+   * reservation heal previously answered by paging up to 5,000 actions with
+   * includeInputs — where listActionsSql loads each action's full rawTx and runs
+   * Transaction.fromBinary on it just to read a sequence number.
+   *
+   * `reference`, not `txid`: the reservation being healed belongs to an attempt
+   * that died before signing, so it has no txid. abortAction takes a reference.
+   */
+  async findSpendingReferences(outpoints: string[]): Promise<{ reference: string; status: string }[]> {
+    if (outpoints.length === 0) return []
+    if (!this.isAvailable()) await this.makeAvailable()
+    const pairs = outpoints.map(splitOutpoint).filter((p): p is { txid: string; vout: number } => p !== null)
+    if (pairs.length === 0) return []
+    const params = pairs.flatMap(p => [p.txid, p.vout])
+    const rows = (await this.getDB().getAllAsync(spendingReferencesSql(pairs.length), params)) as {
+      reference?: string
+      status?: string
+    }[]
+    return rows
+      .filter(r => typeof r.reference === 'string' && typeof r.status === 'string')
+      .map(r => ({ reference: r.reference as string, status: r.status as string }))
+  }
+
   async getProvenTxHeights(): Promise<Map<string, number>> {
     if (!this.isAvailable()) await this.makeAvailable()
     const rows = (await this.getDB().getAllAsync(PROVEN_HEIGHTS_SQL)) as { txid?: string; height?: number }[]
