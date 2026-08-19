@@ -2103,7 +2103,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
             })
             // Match by looking up which of our change outputs belong to the spending tx
             // via the transactions table (our tx with this on-chain txid)
-            const txRows = await storage.findTransactions({ partial: { txid: spendingTxid } })
+            // Only transactionId is used below; noRawTx keeps the ~960 KB blob
+            // (and its JS-array expansion) out of the read entirely.
+            const txRows = await storage.findTransactions({ partial: { txid: spendingTxid }, noRawTx: true })
             const matchingTxId = txRows.length > 0 ? txRows[0].transactionId : undefined
 
             const outputsToInternalize: any[] = []

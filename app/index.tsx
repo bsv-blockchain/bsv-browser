@@ -1149,8 +1149,17 @@ const Browser = observer(function Browser() {
     [domainForUrl, permissionRouterConfig]
   )
 
+  /**
+   * The async worker takes the two values it needs, never the event.
+   *
+   * A WebViewMessageEvent captured in an async closure is retained for the whole
+   * duration of the call, and nativeEvent.data is the entire message JSON — a
+   * measured 3.6-4.0x the payload size in Hermes string memory, held across
+   * every await in a wallet operation. onWebViewMessage below destructures it in
+   * a synchronous wrapper so the event becomes collectable immediately.
+   */
   const handleMessage = useCallback(
-    async (tabId: number, event: WebViewMessageEvent) => {
+    async (tabId: number, eventData: string, eventUrl: string) => {
       if (!activeTab) return
       // Warm background tabs stay mounted and their pages keep running; ignore
       // their messages so only the visible tab can drive wallet/CWI calls and
@@ -1159,7 +1168,7 @@ const Browser = observer(function Browser() {
       // user returns to it.
       if (tabId !== activeTab.id) return
 
-      const frameIdentity = walletFrameIdentityFromUrl(event.nativeEvent.url)
+      const frameIdentity = walletFrameIdentityFromUrl(eventUrl)
 
       const sendResponseToWebView = (id: string, result: any) => {
         if (!activeTab?.webviewRef?.current) return
@@ -1189,7 +1198,7 @@ const Browser = observer(function Browser() {
       let msg
       const endParse = perf.mark('webview.message.parse')
       try {
-        msg = JSON.parse(event.nativeEvent.data)
+        msg = JSON.parse(eventData)
       } catch {
         endParse()
         return
@@ -1364,6 +1373,19 @@ const Browser = observer(function Browser() {
     [activeTab, wallet, routeWebViewMessage, isWeb2Mode, walletBuilding]
   )
 
+  /**
+   * Synchronous adapter: pulls the two values off the event and hands them on,
+   * so the event object (and the whole message JSON it holds) is not reachable
+   * from the async handler's closure. See handleMessage's doc comment.
+   */
+  const onWebViewMessage = useCallback(
+    (tabId: number, event: WebViewMessageEvent) => {
+      const { data, url } = event.nativeEvent
+      void handleMessage(tabId, data, url)
+    },
+    [handleMessage]
+  )
+
   // Reload the active tab as soon as the wallet becomes available so any
   // page that loaded before the wallet was ready gets a fresh start with
   // the CWI provider backed by a ready wallet.
@@ -1536,7 +1558,7 @@ const Browser = observer(function Browser() {
       isWeb2Mode={isWeb2Mode}
       injectedJavaScript={injectedJavaScript}
       injectedJSBefore={injectedJSBefore}
-      onMessage={handleMessage}
+      onMessage={onWebViewMessage}
       onNavStateChange={handleNavStateChange}
       paymentHandlerRef={paymentHandlerRef}
       paymentInFlightUrl={paymentInFlightUrl}
