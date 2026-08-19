@@ -65,6 +65,7 @@ export default function WalletConfigScreen() {
   const [vaultMockOn, setVaultMockOn] = useState(false)
   const [backupPushOn, setBackupPushOn] = useState(true)
   const [erasingBackup, setErasingBackup] = useState(false)
+  const [storageBusy, setStorageBusy] = useState(false)
   const [currencyExpanded, setCurrencyExpanded] = useState(false)
   const [thresholdExpanded, setThresholdExpanded] = useState(false)
   const [thresholdSats, setThresholdSats] = useState(DEFAULT_AUTO_APPROVE_THRESHOLD)
@@ -171,6 +172,69 @@ export default function WalletConfigScreen() {
       setErasingBackup(false)
     }
   }, [erasingBackup, t, getMnemonic, getRecoveredKey])
+
+  /**
+   * Show what the wallet database is using, and offer the one safe reclaim.
+   *
+   * Deliberately an explicit user action rather than something the low-disk gate
+   * triggers: on a nearly full volume the UPDATE's own rollback journal can fail
+   * with SQLITE_FULL, and with no WAL and no auto_vacuum the file does not shrink
+   * afterwards — so the copy promises bytes freed inside the database, never
+   * recovered disk space.
+   */
+  const handleStorage = useCallback(async () => {
+    if (storageBusy) return
+    setStorageBusy(true)
+    try {
+      if (!storage) {
+        showToast(t('storage_unavailable'), { type: 'error' })
+        return
+      }
+      const pm = managers?.permissionsManager
+      // The reorg horizon is measured in confirmations, so the report needs the
+      // current tip. Without it, nothing is eligible — which is the safe
+      // direction to fail in.
+      const height = pm ? ((await pm.getHeight({}, adminOriginator)) as { height?: number })?.height ?? 0 : 0
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      const report = await storage.reclaimReport(height, cutoff)
+
+      const mb = (bytes: number | null) => (bytes == null ? '—' : `${(bytes / 1024 / 1024).toFixed(1)} MB`)
+      const held = report.excluded.reduce((sum, e) => sum + e.rows, 0)
+      const lines = [
+        t('storage_db_size', { size: mb(report.dbBytes) }),
+        t('storage_free_space', { size: mb(report.freeBytes) }),
+        t('storage_reclaimable', { size: mb(report.reclaimable.bytes), count: report.reclaimable.rows }),
+        ...(held > 0 ? [t('storage_held_back', { count: held })] : [])
+      ]
+
+      if (report.reclaimable.rows === 0) {
+        await showAlert({
+          title: t('storage_title'),
+          message: lines.join('\n'),
+          buttons: [{ text: t('vault_ok'), key: 'ok' }]
+        })
+        return
+      }
+
+      const choice = await showAlert({
+        title: t('storage_title'),
+        message: `${lines.join('\n')}\n\n${t('storage_reclaim_explain')}`,
+        buttons: [
+          { text: t('storage_reclaim_confirm'), key: 'confirm' },
+          { text: t('cancel'), key: 'cancel', style: 'cancel' }
+        ]
+      })
+      if (choice !== 'confirm') return
+
+      const { rows } = await storage.reclaimInputBeef(height, cutoff)
+      showToast(t('storage_reclaimed', { count: rows }), { type: 'success' })
+    } catch (e) {
+      console.error('[wallet-config] storage report failed:', e)
+      showToast(t('storage_failed'), { type: 'error' })
+    } finally {
+      setStorageBusy(false)
+    }
+  }, [storageBusy, storage, managers, adminOriginator, t])
 
   // Load persisted ARC URL + token for current network
   useEffect(() => {
@@ -596,6 +660,14 @@ export default function WalletConfigScreen() {
               }}
             />
           )}
+          <ListRow
+            label={t('storage_row')}
+            icon="server-outline"
+            iconColor="#8E8E93"
+            showChevron={false}
+            onPress={handleStorage}
+            trailing={storageBusy ? <ActivityIndicator size="small" /> : undefined}
+          />
           <ListRow
             label={t('trust_network')}
             icon="shield-checkmark-outline"
