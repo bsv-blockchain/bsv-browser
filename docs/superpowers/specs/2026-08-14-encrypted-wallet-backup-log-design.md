@@ -54,8 +54,8 @@ silence:
 
 - Disclose it at wallet creation and in settings — what is sent, that it is encrypted
   with a key only their seed can derive, and that the operator cannot read it.
-- Provide an off switch in settings that stops pushing and offers to delete the log
-  (`DELETE /v1/generation/...`).
+- Provide an off switch in settings that stops pushing, and a separate erasure action that
+  deletes the whole log (`DELETE /v1/account`).
 - Do not present this as a substitute for the mnemonic. The log is useless without the
   seed or shares, and the UI must not imply otherwise — that misconception would make
   users *less* likely to keep their paper backup, actively worsening the situation.
@@ -533,6 +533,16 @@ contiguous per `(pseudonym, deviceId, generation)`.
 | `GET` | `/v1/log/{deviceId}` | `200` index (`from`, `limit`) | `401`, `404 ERR_DEVICE_NOT_FOUND` |
 | `GET` | `/v1/log/{deviceId}/{seq}` | `200 application/octet-stream` | `401`, `404 ERR_BLOB_NOT_FOUND` |
 | `DELETE` | `/v1/generation/{deviceId}/{generation}` | `204` | `401`, `404`, `409` |
+| `DELETE` | `/v1/account` | `200 {"deleted":N}` | `401`, `500` |
+
+`DELETE /v1/account` is erasure on request (GDPR Art. 17): every generation for the
+authenticated pseudonym, across every device, ignoring the retained window that
+`DELETE /v1/generation/...` enforces. It exists as its own route precisely because that
+guard must not apply — pruning protects the user's only restorable snapshot, erasure has to
+remove it. Idempotent: an account holding nothing answers `200` with `deleted: 0`, so a
+client retrying after a lost response has nothing to interpret. Authorisation is structural:
+the pseudonym comes from the auth context alone, so there is no operator override and
+nothing for one to act on.
 
 `POST /v1/log/{deviceId}` takes the raw ciphertext as an `application/octet-stream` body,
 with `seq`, `generation` and `prevSha256` as query parameters. Reject any other

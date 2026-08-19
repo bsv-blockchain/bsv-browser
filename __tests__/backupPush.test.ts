@@ -22,6 +22,7 @@ import { emptyChunk } from '@/utils/backup/codec'
 import { GENERATION_CHUNK_THRESHOLD } from '@/utils/backup/constants'
 import { loadCursor, saveCursor, freshCursor, zeroOffsets } from '@/utils/backup/cursor'
 import { backupPseudonym } from '@/utils/backup/derive'
+import { setBackupPushEnabled } from '@/utils/backup/preference'
 import { pushOnce } from '@/utils/backup/push'
 
 const PRIMARY = new PrivateKey(11).toArray('be', 32)
@@ -290,5 +291,51 @@ describe('pushOnce oversize guard', () => {
     expect(client.append).toHaveBeenCalled()
     expect(r.pushed).toBe(1)
     expect(r.oversized).toBeFalsy()
+  })
+})
+
+describe('pushOnce opt-out', () => {
+  it('sends nothing, and does not even read the database, once the user opts out', async () => {
+    await setBackupPushEnabled(false)
+    const storage = fakeStorage(chunkWith({ provenTxs: 1 }))
+    const client = fakeClient()
+
+    const r = await pushOnce({ storage: storage as any, primaryKey: PRIMARY, identityKey: IDENTITY, client, deviceId: DEVICE })
+
+    expect(r).toEqual({ pushed: 0, bytes: 0, windowClosed: false, rotated: false, optedOut: true })
+    expect(storage.getSyncChunk).not.toHaveBeenCalled()
+    expect(client.append).not.toHaveBeenCalled()
+  })
+
+  it('leaves the cursor untouched while opted out, so opting back in resumes rather than skips', async () => {
+    const before = await loadCursor(PSEUDONYM, DEVICE)
+    await setBackupPushEnabled(false)
+
+    await pushOnce({
+      storage: fakeStorage(chunkWith({ provenTxs: 1 })) as any,
+      primaryKey: PRIMARY,
+      identityKey: IDENTITY,
+      client: fakeClient(),
+      deviceId: DEVICE
+    })
+
+    expect(await loadCursor(PSEUDONYM, DEVICE)).toEqual(before)
+  })
+
+  it('pushes again after opting back in', async () => {
+    await setBackupPushEnabled(false)
+    await setBackupPushEnabled(true)
+    const client = fakeClient()
+
+    const r = await pushOnce({
+      storage: fakeStorage(chunkWith({ provenTxs: 1 })) as any,
+      primaryKey: PRIMARY,
+      identityKey: IDENTITY,
+      client,
+      deviceId: DEVICE
+    })
+
+    expect(r.pushed).toBe(1)
+    expect(client.append).toHaveBeenCalledTimes(1)
   })
 })

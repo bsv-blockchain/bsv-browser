@@ -122,3 +122,17 @@ export async function saveCursor (pseudonym: string, deviceId: string, c: PushCu
 export async function clearCursor (pseudonym: string, deviceId: string): Promise<void> {
   await AsyncStorage.removeItem(cursorKey(pseudonym, deviceId))
 }
+
+/**
+ * Drop every cursor belonging to one pseudonym, whichever device wrote it.
+ *
+ * For erasure: after the server's log is gone, a cursor still claiming "generation 3, seq 9"
+ * describes a log that no longer exists, and the next append would conflict with a head the
+ * server has never heard of instead of starting a fresh generation. Scoped by prefix so a
+ * second wallet on the same device keeps its own bookkeeping.
+ */
+export async function clearCursorsForPseudonym (pseudonym: string): Promise<void> {
+  const prefix = cursorKey(pseudonym, '')
+  const keys = (await AsyncStorage.getAllKeys()).filter(k => k.startsWith(prefix))
+  if (keys.length > 0) await AsyncStorage.multiRemove(keys)
+}

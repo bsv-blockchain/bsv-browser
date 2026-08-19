@@ -32,6 +32,7 @@ import {
 } from './cursor'
 import { backupPseudonym, deriveBackupWallet } from './derive'
 import { getDeviceId } from './deviceId'
+import { isBackupPushEnabled } from './preference'
 
 export interface PushDeps {
   storage: StorageExpoSQLite
@@ -56,6 +57,8 @@ export interface PushResult {
   rotated: boolean
   /** True when the chunk was too large for the server and nothing was sent. */
   oversized?: boolean
+  /** True when the user has opted out of pushing; nothing was read or sent. */
+  optedOut?: boolean
 }
 
 /**
@@ -66,6 +69,14 @@ export interface PushResult {
  * backlog.
  */
 export async function pushOnce (deps: PushDeps): Promise<PushResult> {
+  // Checked FIRST, ahead of even reading the local database: the opt-out means no wallet
+  // data leaves this device, and the cheapest way to guarantee that is to do nothing at
+  // all. The cursor is left untouched, so opting back in resumes from where the log
+  // stopped instead of skipping everything written while it was off.
+  if (!(await isBackupPushEnabled())) {
+    return { pushed: 0, bytes: 0, windowClosed: false, rotated: false, optedOut: true }
+  }
+
   const client = resolveClient(deps)
   const pseudonym = backupPseudonym(deps.primaryKey)
   const deviceId = deps.deviceId ?? (await getDeviceId())

@@ -155,6 +155,21 @@ export class BackupClient {
     if (!res.ok) await this.throwFor(res)
   }
 
+  /**
+   * Erase every generation for this pseudonym, across all devices — the GDPR Article 17
+   * path.
+   *
+   * A separate route from `pruneGeneration` because pruning REFUSES the two newest
+   * generations (`ERR_RETENTION_GUARD`), which is right for compaction and useless for
+   * erasure. Idempotent server-side: erasing an account that holds nothing answers 200 with
+   * a count of zero, so a retry after a lost response is not an error.
+   */
+  async deleteAccount (): Promise<{ deleted: number }> {
+    const res = await this.fetcher(`${this.baseUrl}/v1/account`, { method: 'DELETE' })
+    const body = await this.json(res)
+    return { deleted: Number(body.deleted ?? 0) }
+  }
+
   private async json (res: Response): Promise<Record<string, unknown>> {
     if (!res.ok) await this.throwFor(res)
     return (await res.json()) as Record<string, unknown>
