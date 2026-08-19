@@ -9,6 +9,13 @@
  *
  * enrollVault() drives the YubiKey (getKeyInfo → PIN → generate). Every prompt
  * is gathered BEFORE the tap, since the NFC sheet covers the app.
+ *
+ * The adopt step exists because slot occupancy is only knowable ON the card:
+ * enrollVault refuses an occupied slot with 'slot-occupied', this wizard turns
+ * that refusal into an explicit choice, and a second run with adoptExisting
+ * enrolls against the key already there. That costs a second tap only in the
+ * occupied case, which is what keeps the one-tap rule intact for the normal
+ * one.
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import { View, Text, StyleSheet, TextInput, ScrollView, ActivityIndicator } from 'react-native'
@@ -35,7 +42,7 @@ import { useWallet } from '@/context/WalletContext'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 
-type Step = 'backup' | 'phrase' | 'intro' | 'passphrase' | 'running' | 'done'
+type Step = 'backup' | 'phrase' | 'intro' | 'passphrase' | 'adopt' | 'running' | 'done'
 
 interface PinRequest {
   kind: 'pin' | 'change'
@@ -163,7 +170,7 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
     setStep('passphrase')
   }, [getMnemonic])
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (adoptExisting = false) => {
     setStep('running')
     setError(null)
     try {
@@ -173,6 +180,7 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
         nickname: nickname.trim() || t('vault_default_nickname'),
         mnemonic,
         passphrase,
+        adoptExisting,
         onPhase: p => setPhaseLabel(t(`vault_enroll_phase_${p}`)),
         getPin: requestPin,
         requestPinChange
@@ -186,6 +194,13 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
       setStep('done')
       onDone()
     } catch (e) {
+      // An occupied slot is a fork in the road, not a failure: the key already
+      // there is exactly what a second device needs. Offer it instead of
+      // dropping the user back to the passphrase step with a dead-end error.
+      if (e instanceof VaultError && e.code === 'slot-occupied' && !adoptExisting) {
+        setStep('adopt')
+        return
+      }
       const msg =
         e instanceof VaultError ? t(`vault_err_${e.code.replace(/-/g, '_')}`, {}) : String(e)
       setError(msg || t('vault_err_generic'))
@@ -369,7 +384,7 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
         {error && <Text style={[styles.err, { color: colors.error }]}>{error}</Text>}
         <PressableScale
           haptic="confirm"
-          onPress={passphraseOk ? start : undefined}
+          onPress={passphraseOk ? () => start() : undefined}
           style={[
             styles.primary,
             {
@@ -390,6 +405,37 @@ export const EnrollWizard: React.FC<{ onDone: () => void; onCancel: () => void }
         <PressableScale onPress={() => setStep('intro')} style={styles.secondary}>
           <Text style={[styles.secondaryLabel, { color: colors.textSecondary }]}>
             {t('vault_back')}
+          </Text>
+        </PressableScale>
+      </ScrollView>
+    )
+  }
+
+  // ── adopt (slot already holds a key) ────────────────────────────────
+  if (step === 'adopt') {
+    return (
+      <ScrollView contentContainerStyle={styles.body}>
+        <Ionicons
+          name="hardware-chip-outline"
+          size={48}
+          color={colors.textPrimary}
+          style={styles.hero}
+        />
+        <Text style={[styles.h1, { color: colors.textPrimary }]}>{t('vault_slot_in_use_title')}</Text>
+        <Text style={[styles.p, { color: colors.textSecondary }]}>{t('vault_slot_in_use_body')}</Text>
+
+        <PressableScale
+          haptic="confirm"
+          onPress={() => start(true)}
+          style={[styles.primary, { backgroundColor: colors.accent }]}
+        >
+          <Text style={[styles.primaryLabel, { color: colors.textOnAccent }]}>
+            {t('vault_use_existing_key')}
+          </Text>
+        </PressableScale>
+        <PressableScale onPress={onCancel} style={styles.secondary}>
+          <Text style={[styles.secondaryLabel, { color: colors.textSecondary }]}>
+            {t('vault_cancel')}
           </Text>
         </PressableScale>
       </ScrollView>

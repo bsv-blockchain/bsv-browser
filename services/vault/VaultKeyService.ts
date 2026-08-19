@@ -26,7 +26,7 @@ import { getVaultDriver } from './driver'
 import { withKeySession } from './session'
 import { vaultStore, VaultMetaV3 } from './vaultStore'
 import { VaultError } from './types'
-import { deriveVaultSeed, deriveVaultHD, vaultXpub } from './vaultDerivation'
+import { deriveVaultSeed, deriveVaultHD, vaultXpub, randomDepositStartIndex } from './vaultDerivation'
 import { checkVaultPassphrase } from './vaultPassphrase'
 import { compressP256 } from './r1k1'
 
@@ -45,7 +45,23 @@ export async function enrollVault(args: {
   mnemonic: string
   /** Non-empty vault passphrase. Must pass checkVaultPassphrase. */
   passphrase: string
-  onPhase: (p: 'connecting' | 'pin-check' | 'generating' | 'done') => void
+  /**
+   * Enroll against the key ALREADY in the PIV slot instead of refusing it.
+   *
+   * This is how one YubiKey serves the same vault on several devices: the slot
+   * key is what locks the R1 branch, and everything a second device needs to
+   * use it is public (the slot's P-256 public key, the serial, and an xpub the
+   * mnemonic + passphrase re-derive). Nothing is generated, so every output the
+   * first device created stays spendable.
+   *
+   * Only ever set from an explicit user choice: 0x82 is a *retired* PIV slot,
+   * so the key sitting there may belong to something else entirely (an
+   * age-plugin-yubikey identity, say), and adopting it silently would quietly
+   * couple that key to the vault. An empty slot with this set generates
+   * normally — the flag permits adoption, it does not require it.
+   */
+  adoptExisting?: boolean
+  onPhase: (p: 'connecting' | 'pin-check' | 'generating' | 'adopting' | 'done') => void
   getPin: () => Promise<string>
   /** Called when the key still has the factory-default PIV PIN; must return a
    * new PIN the user chose. If omitted, enrollment proceeds on the default PIN
@@ -77,7 +93,7 @@ export async function enrollVault(args: {
   }
 
   // ── Token phase: one session / one NFC tap ──
-  const { info, publicKey } = await withKeySession(
+  const { info, publicKey, adopted } = await withKeySession(
     driver,
     async () => {
       const info = await driver.getKeyInfo()
@@ -85,16 +101,25 @@ export async function enrollVault(args: {
       if (info.pinRetries === 0) throw new VaultError('pin-locked', 'PIN is blocked')
       // Never silently overwrite an occupied slot: generating into a used PIV
       // slot destroys the existing key, and retired slots 82-95 are what
-      // age-plugin-yubikey uses. Refuse and let the user decide.
-      if (await driver.readVaultPublicKey(VAULT_SLOT)) {
+      // age-plugin-yubikey uses. Refuse and let the user decide — the wizard
+      // turns this refusal into the adopt-or-cancel choice that comes back as
+      // `adoptExisting`.
+      const occupant = await driver.readVaultPublicKey(VAULT_SLOT)
+      if (occupant && !args.adoptExisting) {
         throw new VaultError('slot-occupied', `PIV slot ${VAULT_SLOT.toString(16)} already holds a key`)
       }
       if (pinChange) await driver.changePin(pinChange.oldPin, pinChange.newPin)
       const verified = await driver.verifyPin(pin)
       if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)
+      // Adoption still verifies the PIN above: it proves the holder can
+      // actually sign with the key they are about to lock funds to.
+      if (occupant) {
+        args.onPhase('adopting')
+        return { info, publicKey: occupant.publicKey, adopted: true }
+      }
       args.onPhase('generating')
       const { publicKey } = await driver.generateVaultKey(VAULT_SLOT)
-      return { info, publicKey }
+      return { info, publicKey, adopted: false }
     },
     () => args.onPhase('connecting')
   )
@@ -114,7 +139,10 @@ export async function enrollVault(args: {
       yubiSerial: info.serial,
       nickname: args.nickname,
       slot: VAULT_SLOT,
-      nextKeyIndex: 0,
+      // An adopted key is already in use by another device whose deposit
+      // counter this one cannot see, so starting at zero would reissue that
+      // device's addresses. See randomDepositStartIndex.
+      nextKeyIndex: adopted ? randomDepositStartIndex() : 0,
       xpub: vaultXpub(hd),
       // The driver returns a 65-byte uncompressed SEC1 point; the template
       // needs 33-byte compressed.

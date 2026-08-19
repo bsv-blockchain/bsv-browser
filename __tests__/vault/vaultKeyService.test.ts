@@ -199,6 +199,44 @@ describe('enrollVault', () => {
     expect(await vaultStore.isEnrolled()).toBe(false)
   })
 
+  test('adopting an occupied slot reuses that key and never generates', async () => {
+    mock.occupySlot() // the same YubiKey, already enrolled on another device
+    const existing = (await mock.readVaultPublicKey(VAULT_SLOT))!.publicKey
+    const genSpy = jest.spyOn(mock, 'generateVaultKey')
+    const phases: string[] = []
+
+    const { pending } = await enrollVault(
+      args({ adoptExisting: true, onPhase: (p: string) => phases.push(p) })
+    )
+
+    expect(genSpy).not.toHaveBeenCalled()
+    expect(phases).toContain('adopting')
+    expect(phases).not.toContain('generating')
+    expect(pending.meta.r1PublicKey).toBe(compressP256(existing))
+    // Same wallet phrase + passphrase means the SAME vault as the other device.
+    expect(pending.meta.xpub).toBe(vaultXpub(deriveVaultHD(MNEMONIC, PASSPHRASE)))
+    // Still nothing on disk until finalize.
+    expect(await vaultStore.isEnrolled()).toBe(false)
+  })
+
+  test('adoption starts deposit indices high, so two devices do not reissue the same address', async () => {
+    mock.occupySlot()
+    const { pending: adopted } = await enrollVault(args({ adoptExisting: true }))
+    expect(adopted.meta.nextKeyIndex).toBeGreaterThanOrEqual(1 << 20)
+    expect(adopted.meta.nextKeyIndex).toBeLessThan(0x80000000)
+
+    // Two adoptions in a row must not land on the same index.
+    const { pending: again } = await enrollVault(args({ adoptExisting: true }))
+    expect(again.meta.nextKeyIndex).not.toBe(adopted.meta.nextKeyIndex)
+  })
+
+  test('adoptExisting on an EMPTY slot still generates a fresh key from index 0', async () => {
+    const genSpy = jest.spyOn(mock, 'generateVaultKey')
+    const { pending } = await enrollVault(args({ adoptExisting: true }))
+    expect(genSpy).toHaveBeenCalledTimes(1)
+    expect(pending.meta.nextKeyIndex).toBe(0)
+  })
+
   test('session-based enroll (NFC): PIN collected BEFORE the tap; ops run in one session', async () => {
     const nfc = new MockYubiKey()
     ;(nfc as any).sessionBased = true

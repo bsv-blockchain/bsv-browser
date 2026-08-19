@@ -26,7 +26,8 @@ import {
   depositPrivKey,
   verifyVaultPassphrase,
   bip32KeyID,
-  indexFromKeyID
+  indexFromKeyID,
+  randomDepositStartIndex
 } from '../../services/vault/vaultDerivation'
 
 // A fixed, well-known throwaway BIP39 test vector. NEVER a real wallet phrase.
@@ -201,5 +202,28 @@ describe('verifyVaultPassphrase', () => {
 
   it('returns false rather than throwing on a malformed xpub', () => {
     expect(verifyVaultPassphrase(TEST_MNEMONIC, PASSPHRASE, 'not-an-xpub')).toBe(false)
+  })
+})
+
+describe('randomDepositStartIndex', () => {
+  it('stays inside the non-hardened range with room to increment', () => {
+    for (let i = 0; i < 200; i++) {
+      const n = randomDepositStartIndex()
+      expect(Number.isSafeInteger(n)).toBe(true)
+      // Above any counter a from-zero device could plausibly have reached...
+      expect(n).toBeGreaterThanOrEqual(1 << 20)
+      // ...and far enough below the hardened boundary that a lifetime of
+      // deposits can never walk into it.
+      expect(n).toBeLessThan(0x40000000)
+      // Derivable, which is the whole point — a hardened index would not be.
+      expect(depositPkhFromXpub(vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE)), n)).toMatch(
+        /^[0-9a-f]{40}$/
+      )
+    }
+  })
+
+  it('does not repeat', () => {
+    const seen = new Set(Array.from({ length: 50 }, () => randomDepositStartIndex()))
+    expect(seen.size).toBe(50)
   })
 })
