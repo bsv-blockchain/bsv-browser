@@ -1251,14 +1251,29 @@ export class StorageExpoSQLite extends StorageProvider {
   ): Promise<number[] | undefined> {
     if (!txid) return undefined
     if (!this.isAvailable()) await this.makeAvailable()
-    let rawTx: number[] | undefined
-    const r = await this.getProvenOrRawTx(txid, trx)
-    if (r.proven) rawTx = r.proven.rawTx
-    else rawTx = r.rawTx
-    if (rawTx && offset !== undefined && length !== undefined && Number.isInteger(offset) && Number.isInteger(length)) {
-      rawTx = rawTx.slice(offset, offset + length)
+
+    // Range reads are served in SQL. The caller here is almost always
+    // validateOutputScript re-slicing one output's locking script out of its
+    // source transaction, and with maxOutputScript = 1024 the outputs that take
+    // that path are exactly the ~960 KB vault scripts. Loading the whole rawTx
+    // to slice it meant reading ~960 KB off disk and Array.from-ing it into an
+    // ~960 K-element JS array to keep a few hundred bytes.
+    //
+    // Table order and the status filter mirror getProvenOrRawTx exactly (see
+    // rangeReadSql), so a range read can never see a row the full read refuses.
+    if (offset !== undefined && length !== undefined && Number.isInteger(offset) && Number.isInteger(length)) {
+      const db = this.getDB()
+      // substr is 1-indexed over bytes; a JS offset of n starts at n + 1.
+      const args = [offset + 1, length, txid]
+      const proven = (await db.getFirstAsync(rangeReadSql('proven_txs'), args)) as { chunk?: Uint8Array } | null
+      const row =
+        proven ?? ((await db.getFirstAsync(rangeReadSql('proven_tx_reqs'), args)) as { chunk?: Uint8Array } | null)
+      if (!row?.chunk) return undefined
+      return Array.from(row.chunk)
     }
-    return rawTx
+
+    const r = await this.getProvenOrRawTx(txid, trx)
+    return r.proven ? r.proven.rawTx : r.rawTx
   }
 
   async getLabelsForTransactionId(transactionId?: number, trx?: TrxToken): Promise<TableTxLabel[]> {
