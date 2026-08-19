@@ -29,6 +29,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { useWalletManagers } from '@/context/WalletContext'
 import { guardVaultAccess } from '@/services/vault/guard'
 import { capWalletArgs } from '@/services/capWalletArgs'
+import { messageTooLarge } from '@/utils/webview/messageSizeCeiling'
 import { ADMIN_ORIGINATOR } from '@/context/config'
 import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
@@ -1197,6 +1198,15 @@ const Browser = observer(function Browser() {
           description
         }
         activeTab.webviewRef.current.injectJavaScript(buildWalletResponseScript(message, frameIdentity?.responseOrigin))
+      }
+
+      // Absolute ceiling BEFORE the parse. A damage limiter, not a fix: the
+      // native side has already built ~4 bytes per JSON character by the time
+      // this runs (see utils/webview/messageSizeCeiling.ts). What it prevents is
+      // the second, larger allocation — JSON.parse materialising the arrays.
+      if (messageTooLarge(eventData)) {
+        console.warn(`[webview] dropped an oversize message: ${eventData.length} chars`)
+        return
       }
 
       let msg
