@@ -28,6 +28,7 @@ import { router } from 'expo-router'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { useWalletManagers } from '@/context/WalletContext'
 import { guardVaultAccess } from '@/services/vault/guard'
+import { capWalletArgs } from '@/services/capWalletArgs'
 import { ADMIN_ORIGINATOR } from '@/context/config'
 import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
@@ -726,7 +727,10 @@ const Browser = observer(function Browser() {
       // admin-only, so a page cannot enumerate or spend vault funds. The 402
       // payment handler keeps the raw manager — it only does non-privileged
       // createAction/signAction, which the guard passes through anyway.
-      setWallet(guardVaultAccess(managers.walletManager as any, ADMIN_ORIGINATOR))
+      // capWalletArgs sits OUTSIDE the vault guard so an oversize payload is
+      // refused before it can cost a permission prompt or a storage touch. See
+      // services/capWalletArgs.ts for why the cap cannot live any lower.
+      setWallet(capWalletArgs(guardVaultAccess(managers.walletManager as any, ADMIN_ORIGINATOR)))
       paymentHandlerRef.current = getPaymentHandler(managers.walletManager)
     } else if (isWeb2Mode) {
       setWallet(undefined)

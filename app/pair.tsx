@@ -14,6 +14,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWalletConnection } from '@/context/WalletConnectionContext'
 import { guardVaultAccess } from '@/services/vault/guard'
+import { capWalletArgs } from '@/services/capWalletArgs'
 import { ADMIN_ORIGINATOR } from '@/context/config'
 
 function domainFromOrigin(origin: string): string {
@@ -89,7 +90,7 @@ export default function PairScreen() {
     // an external surface (the desktop/browser pairing peer dispatches
     // BRC-100 methods by name), so it must never receive the unguarded
     // manager — see guard.ts for what that would otherwise expose.
-    const wallet = new WalletClient(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR), originator)
+    const wallet = new WalletClient(capWalletArgs(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR)), originator)
     try {
       await connect({
         topic:              params.topic,
