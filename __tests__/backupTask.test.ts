@@ -174,3 +174,24 @@ describe('TaskBackupPush runTask', () => {
     expect(TaskBackupPush.backoffMs).toBe(TaskBackupPush.BASE_BACKOFF_MS)
   })
 })
+
+describe('TaskBackupPush opt-out', () => {
+  it('treats an opted-out pass as neither progress nor failure', async () => {
+    TaskBackupPush.noteChanged()
+    const before = TaskBackupPush.backoffMs
+    const t = task(async () => ok({ windowClosed: false, optedOut: true }))
+
+    const log = await t.runTask()
+
+    // No log line: an opt-out is not an event worth reporting every minute.
+    expect(log).toBe('')
+    // No backoff escalation — nothing failed.
+    expect(TaskBackupPush.backoffMs).toBe(before)
+    // No hot loop: the interval floor was set.
+    expect(TaskBackupPush.checkNow).toBe(false)
+    expect(TaskBackupPush.nextDueAt).toBeGreaterThan(0)
+    // And the wallet is NOT claimed as backed up.
+    expect(TaskBackupPush.hasChanges).toBe(true)
+    expect(TaskBackupPush.lastSuccessAt).toBeUndefined()
+  })
+})

@@ -31,6 +31,11 @@ import { importWalletDatabase } from '@/utils/importDatabases'
 import { PrivateKey } from '@bsv/sdk'
 import { printRecoveryShares } from '@/utils/printRecoveryShares'
 import { recordBackupAttestation } from '@/services/vault/backupAttestation'
+import { isBackupPushEnabled, setBackupPushEnabled } from '@/utils/backup/preference'
+import { eraseRemoteBackup } from '@/utils/backup/erase'
+import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
+import { TaskBackupPush } from '@/utils/monitor/TaskBackupPush'
+import { DEFAULT_BACKUP_URL } from '@/context/config'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 export default function WalletConfigScreen() {
@@ -58,6 +63,8 @@ export default function WalletConfigScreen() {
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [vaultMockOn, setVaultMockOn] = useState(false)
+  const [backupPushOn, setBackupPushOn] = useState(true)
+  const [erasingBackup, setErasingBackup] = useState(false)
   const [currencyExpanded, setCurrencyExpanded] = useState(false)
   const [thresholdExpanded, setThresholdExpanded] = useState(false)
   const [thresholdSats, setThresholdSats] = useState(DEFAULT_AUTO_APPROVE_THRESHOLD)
@@ -76,6 +83,94 @@ export default function WalletConfigScreen() {
       if (v !== null) setThresholdSats(Number(v) || 0)
     })
   }, [])
+
+  // Load the backup-push opt-out. Defaults to on, so a slow read shows the true default
+  // rather than flashing "Off".
+  useEffect(() => {
+    isBackupPushEnabled().then(setBackupPushOn)
+  }, [])
+
+  /**
+   * Toggle pushing to the backup server.
+   *
+   * Turning it OFF is confirmed, because the cost is not obvious: the recovery phrase alone
+   * cannot rebuild change-output derivation data, so a wallet with no log cannot be fully
+   * restored on a new device. Turning it back ON resumes from where the log stopped (the
+   * cursor is never advanced while opted out) and asks the monitor for an immediate pass.
+   */
+  const handleToggleBackupPush = useCallback(async () => {
+    const next = !backupPushOn
+    if (!next) {
+      const choice = await showAlert({
+        title: t('backup_push_off_title'),
+        message: t('backup_push_off_message'),
+        buttons: [
+          { text: t('backup_push_off_confirm'), key: 'confirm', style: 'destructive' },
+          { text: t('cancel'), key: 'cancel', style: 'cancel' }
+        ]
+      })
+      if (choice !== 'confirm') return
+    }
+
+    await setBackupPushEnabled(next)
+    setBackupPushOn(next)
+    if (next) TaskBackupPush.requestNow()
+    showToast(next ? t('backup_push_on_toast') : t('backup_push_off_toast'), { type: 'info' })
+  }, [backupPushOn, t])
+
+  /**
+   * Erase the server's copy of this wallet's backup, on request (GDPR Article 17).
+   *
+   * The primary key is derived here, at the moment of use, from whichever secret this wallet
+   * has — the mnemonic, or the WIF for a wallet recovered from legacy shares. Both mirror
+   * what WalletContext derives for the push path, so both address the same pseudonym. It is
+   * deliberately not kept in a longer-lived place just to serve this button.
+   *
+   * eraseRemoteBackup turns pushing off before it deletes; see its module doc for why that
+   * order matters. The switch below therefore reads Off afterwards.
+   */
+  const handleEraseBackup = useCallback(async () => {
+    if (erasingBackup) return
+
+    const choice = await showAlert({
+      title: t('backup_erase_title'),
+      message: t('backup_erase_message'),
+      buttons: [
+        { text: t('backup_erase_confirm'), key: 'confirm', style: 'destructive' },
+        { text: t('cancel'), key: 'cancel', style: 'cancel' }
+      ]
+    })
+    if (choice !== 'confirm') return
+
+    setErasingBackup(true)
+    try {
+      const mnemonic = await getMnemonic()
+      const wif = mnemonic ? null : await getRecoveredKey()
+      const primaryKey = mnemonic
+        ? recoverMnemonicWallet(mnemonic).primaryKey
+        : wif
+          ? PrivateKey.fromWif(wif).toArray()
+          : null
+      if (primaryKey == null) {
+        showToast(t('backup_erase_no_key'), { type: 'error' })
+        return
+      }
+
+      const { deleted } = await eraseRemoteBackup({ primaryKey, baseUrl: DEFAULT_BACKUP_URL })
+      setBackupPushOn(false)
+      showToast(t('backup_erase_done', { count: deleted }), { type: 'success' })
+    } catch (e) {
+      // Never report an erasure that did not happen. The server's copy is still there and
+      // the user has to be told, not reassured.
+      console.error('[wallet-config] backup erase failed:', e)
+      showToast(t('backup_erase_failed'), { type: 'error' })
+      // Pushing is off either way — eraseRemoteBackup wrote that before it tried the
+      // delete, and a failed erasure is no reason to start uploading again.
+      setBackupPushOn(false)
+    } finally {
+      setErasingBackup(false)
+    }
+  }, [erasingBackup, t, getMnemonic, getRecoveredKey])
 
   // Load persisted ARC URL + token for current network
   useEffect(() => {
@@ -555,6 +650,36 @@ export default function WalletConfigScreen() {
             isLast
           />
         </GroupedSection>
+
+        {/* ── Private backup ──
+            Its own section purely so the footer can carry the disclosure: the app sends an
+            encrypted copy of the wallet database to a BSVA-operated server by default, and
+            that deserves saying out loud rather than burying in a row label. */}
+        {DEFAULT_BACKUP_URL !== '' && (
+          <GroupedSection header={t('backup_push_section')} footer={t('backup_push_disclosure')}>
+            <ListRow
+              label={t('backup_push_toggle')}
+              icon="cloud-upload-outline"
+              iconColor="#0A84FF"
+              showChevron={false}
+              value={backupPushOn ? t('vault_on') : t('vault_off')}
+              onPress={handleToggleBackupPush}
+            />
+            {/* Erasure on request. Separate from the toggle because they are different
+                asks: the toggle stops sending anything new, this removes what is already
+                there. Turning the toggle off deliberately deletes nothing. */}
+            <ListRow
+              label={t('backup_erase_row')}
+              icon="trash-outline"
+              iconColor={colors.error}
+              destructive
+              showChevron={false}
+              onPress={handleEraseBackup}
+              trailing={erasingBackup ? <ActivityIndicator size="small" /> : undefined}
+              isLast
+            />
+          </GroupedSection>
+        )}
 
         {/* ── Account ── */}
         <GroupedSection>

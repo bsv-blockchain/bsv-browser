@@ -121,6 +121,16 @@ export class TaskBackupPush extends WalletMonitorTask {
     try {
       const r = await this.push()
 
+      // Opted out: a deliberate no-op, not a failure and not progress. noteRan keeps the
+      // interval floor so the monitor does not re-check every tick, and hasChanges is left
+      // alone — those records really are not backed up, and clearing the flag would claim
+      // otherwise if the user opts back in.
+      if (r.optedOut === true) {
+        TaskBackupPush.checkNow = false
+        TaskBackupPush.noteRan(startedAt)
+        return ''
+      }
+
       // An oversized chunk is a standing condition, not a transient hiccup: it will be
       // oversized on every pass until the offending record is dealt with. It must NOT take
       // the success path — that resets the backoff and, because the window has not closed,
