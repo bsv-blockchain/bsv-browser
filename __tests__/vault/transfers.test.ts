@@ -54,7 +54,9 @@ import {
   withdrawFromVault,
   sweepVaultWithHD,
   getVaultBalance,
-  VaultWallet
+  VaultWallet,
+  VAULT_MAX_INPUTS,
+  VAULT_HARD_MAX_INPUTS
 } from '@/services/vault/transfers'
 
 const ADMIN = 'admin.com'
@@ -714,6 +716,46 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
     expect(txid).toBeDefined()
     expect(createCalls).toBe(2)
     expect(aborted).toEqual(['ref-orphan'])
+  })
+
+  test('spends at most VAULT_MAX_INPUTS and re-vaults the remainder', async () => {
+    // 10 outputs of 300,000 = 3,000,000 in the vault. 'all' now means "as much
+    // as fits in one safe transaction", because ~1.83 MB of inputBEEF per input
+    // is a measured 146 MB Hermes array at 20 inputs, and toEF() re-embeds each
+    // input's source script on the wire regardless of how it is stored.
+    await seedVaultOutputs(10)
+
+    const r = await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all')
+    expect(r.txid).toBeDefined()
+    expect(r.remainingInputs).toBe(10 - VAULT_MAX_INPUTS)
+
+    const args = wallet.createAction.mock.calls.at(-1)![0] as any
+    expect(args.inputs.length).toBe(VAULT_MAX_INPUTS)
+    expect(args.inputs.length).toBeLessThanOrEqual(VAULT_HARD_MAX_INPUTS)
+  })
+
+  test('reports nothing remaining when the whole vault fits', async () => {
+    await seedVaultOutputs(3)
+    const r = await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all')
+    expect(r.remainingInputs).toBe(0)
+  })
+
+  test('refuses before signing when the amount cannot be funded within the cap', async () => {
+    // 10 x 300,000 is plenty of money, but 6 inputs only reach 1,800,000 — so
+    // this is an input-count problem, not an insufficient-funds one, and it must
+    // say so rather than blaming the balance.
+    await seedVaultOutputs(10)
+    await expect(withdrawFromVault(wallet, ADMIN, 2_400_000, 'Withdraw')).rejects.toMatchObject({
+      code: 'too-many-inputs'
+    })
+    expect(wallet.signAction).not.toHaveBeenCalled()
+  })
+
+  test('still reports amount-exceeds-balance when the vault really is too small', async () => {
+    await seedVaultOutputs(2)
+    await expect(withdrawFromVault(wallet, ADMIN, 5_000_000, 'Withdraw')).rejects.toMatchObject({
+      code: 'amount-exceeds-balance'
+    })
   })
 
   test('with a storage lookup, heals from one query and never pages actions', async () => {

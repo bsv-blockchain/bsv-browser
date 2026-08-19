@@ -83,7 +83,7 @@ export default function VaultTransferScreen() {
         haptics.success()
         showToast(t('vault_deposit_done'), { type: 'success' })
       } else {
-        await withdrawFromVault(
+        const result = await withdrawFromVault(
           w,
           adminOriginator,
           isMax ? 'all' : sats,
@@ -93,7 +93,16 @@ export default function VaultTransferScreen() {
           storage ? outpoints => storage.findSpendingReferences(outpoints) : undefined
         )
         // vaultOpen/haptic already fired by the ceremony's onArmed
-        showToast(t('vault_withdraw_done'), { type: 'success' })
+        //
+        // A capped withdrawal is partial by design (see VAULT_MAX_INPUTS), so
+        // say so rather than letting the balance look wrong: the vault still
+        // holds the untouched outputs, and repeating the withdrawal moves them.
+        showToast(
+          result.remainingInputs > 0
+            ? t('vault_withdraw_partial', { count: result.remainingInputs })
+            : t('vault_withdraw_done'),
+          { type: 'success' }
+        )
       }
       setAmount('')
       refresh()

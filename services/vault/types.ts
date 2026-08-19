@@ -44,6 +44,10 @@ export type VaultErrorCode =
   /** No backup attestation for this wallet — depositing would create funds
    *  with no recovery path. Advisory gate, not a security control. */
   | 'backup-required'
+  /** More vault inputs would be needed than one transaction may safely carry.
+   *  See VAULT_MAX_INPUTS — the remedy is a smaller withdrawal, which also
+   *  consolidates the vault. */
+  | 'too-many-inputs'
 
 export class VaultError extends Error {
   code: VaultErrorCode
