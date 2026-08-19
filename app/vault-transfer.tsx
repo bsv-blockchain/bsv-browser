@@ -29,6 +29,7 @@ import { useWallet } from '@/context/WalletContext'
 import { useVaultBalance } from '@/hooks/useVaultBalance'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { depositToVault, withdrawFromVault, type VaultWallet } from '@/services/vault/transfers'
+import { getOnline } from '@/utils/net/online'
 import { VaultError } from '@/services/vault/types'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
@@ -78,7 +79,7 @@ export default function VaultTransferScreen() {
     try {
       const w = pm as unknown as VaultWallet
       if (isDeposit) {
-        await depositToVault(w, adminOriginator, sats)
+        await depositToVault(w, adminOriginator, sats, { isOnline: getOnline })
         sounds.confirmation()
         haptics.success()
         showToast(t('vault_deposit_done'), { type: 'success' })
@@ -88,9 +89,12 @@ export default function VaultTransferScreen() {
           adminOriginator,
           isMax ? 'all' : sats,
           t('vault_withdraw_reason', { amount: isMax ? (balance ?? 0) : sats }),
-          // Lets the reservation heal find the reserving transaction with one
-          // indexed query instead of paging every action in the wallet.
-          storage ? outpoints => storage.findSpendingReferences(outpoints) : undefined
+          {
+            // Lets the reservation heal find the reserving transaction with one
+            // indexed query instead of paging every action in the wallet.
+            findSpendingReferences: storage ? outpoints => storage.findSpendingReferences(outpoints) : undefined,
+            isOnline: getOnline
+          }
         )
         // vaultOpen/haptic already fired by the ceremony's onArmed
         //

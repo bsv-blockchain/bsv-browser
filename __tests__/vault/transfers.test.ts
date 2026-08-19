@@ -718,6 +718,32 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
     expect(aborted).toEqual(['ref-orphan'])
   })
 
+  test('refuses a deposit while offline', async () => {
+    await seedMeta()
+    await expect(
+      depositToVault(wallet, ADMIN, 300_000, { isOnline: async () => false })
+    ).rejects.toMatchObject({ code: 'requires-online' })
+    expect(wallet.createAction).not.toHaveBeenCalled()
+  })
+
+  test('refuses a withdrawal while offline, before arming the key', async () => {
+    await seedVaultOutputs(1)
+    await expect(
+      withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all', { isOnline: async () => false })
+    ).rejects.toMatchObject({ code: 'requires-online' })
+    // No ceremony: an offline user is never asked to present a YubiKey for a
+    // transfer that cannot proceed.
+    expect(requestVaultSigner).not.toHaveBeenCalled()
+    expect(wallet.createAction).not.toHaveBeenCalled()
+  })
+
+  test('proceeds when the online signal says so', async () => {
+    await seedVaultOutputs(1)
+    await expect(
+      withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all', { isOnline: async () => true })
+    ).resolves.toMatchObject({ txid: expect.any(String) })
+  })
+
   test('spends at most VAULT_MAX_INPUTS and re-vaults the remainder', async () => {
     // 10 outputs of 300,000 = 3,000,000 in the vault. 'all' now means "as much
     // as fits in one safe transaction", because ~1.83 MB of inputBEEF per input
@@ -777,7 +803,7 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
       return realCreateAction(...args)
     })
 
-    const { txid } = await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all', findSpendingReferences)
+    const { txid } = await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all', { findSpendingReferences })
 
     expect(txid).toBeDefined()
     expect(createCalls).toBe(2)
@@ -805,7 +831,7 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
     })
 
     await expect(
-      withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all', findSpendingReferences)
+      withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all', { findSpendingReferences })
     ).resolves.toMatchObject({ txid: expect.any(String) })
 
     expect(findSpendingReferences).toHaveBeenCalled()

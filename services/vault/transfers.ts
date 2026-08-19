@@ -59,6 +59,29 @@ export type SpendingReferenceLookup = (
   outpoints: string[]
 ) => Promise<{ reference: string; status: string }[]>
 
+/**
+ * Injected dependencies for a vault transfer.
+ *
+ * Injected rather than imported so the module stays testable without native
+ * modules or a database, and optional so a caller that has neither still works.
+ */
+export interface VaultTransferOptions {
+  /** Storage-backed reservation heal. See SpendingReferenceLookup. */
+  findSpendingReferences?: SpendingReferenceLookup
+  /**
+   * The app's single online signal.
+   *
+   * Vault transfers are refused while offline. The offline queue exists for
+   * small casual default-basket payments: processOfflineActions holds every held
+   * request's full rawTx and inputBEEF in one in-memory Beef, and a held row has
+   * no attempt cap, no expiry and no local terminal state that releases its
+   * reservation — so a vault transaction landing there would freeze real money
+   * with no way out. Refusing up front is also what makes "no vault row ever
+   * reaches the offline drain" a testable invariant.
+   */
+  isOnline?: () => Promise<boolean>
+}
+
 export interface VaultSpendResult {
   txid: string
   /**
@@ -364,6 +387,20 @@ async function freeReservedInputs(
   return await abortReservingOutpoints(w, adminOriginator, wedged, findSpendingReferences)
 }
 
+/**
+ * Refuse a vault transfer while offline.
+ *
+ * Checked before anything else: before the deposit's backup attestation, and
+ * before the withdrawal arms the YubiKey — an offline user must not be asked to
+ * present a key for a transfer that cannot proceed.
+ */
+async function requireOnline(opts?: VaultTransferOptions): Promise<void> {
+  if (!opts?.isOnline) return
+  if (!(await opts.isOnline())) {
+    throw new VaultError('requires-online', 'Vault transfers need a connection')
+  }
+}
+
 // ── balance ─────────────────────────────────────────────────────────────
 
 export async function getVaultBalance(w: VaultWallet, adminOriginator: string): Promise<number> {
@@ -376,8 +413,10 @@ export async function getVaultBalance(w: VaultWallet, adminOriginator: string): 
 export async function depositToVault(
   w: VaultWallet,
   adminOriginator: string,
-  satoshis: number
+  satoshis: number,
+  opts?: VaultTransferOptions
 ): Promise<{ txid: string }> {
+  await requireOnline(opts)
   if (satoshis < VAULT_DEPOSIT_MIN) {
     throw new VaultError('below-dust', `Vault deposits must be at least ${VAULT_DEPOSIT_MIN} satoshis`)
   }
@@ -431,7 +470,7 @@ async function spendVaultOutputs(
   amount: number | 'all',
   reason: string,
   spend: SpendPath,
-  opts: { revaultRemainder: boolean; findSpendingReferences?: SpendingReferenceLookup }
+  opts: { revaultRemainder: boolean } & VaultTransferOptions
 ): Promise<VaultSpendResult> {
   // Announce work BEFORE starting it, then hand the JS thread back once so
   // React can actually paint the sheet. Everything below — a ~1.83 MB
@@ -688,13 +727,15 @@ export async function withdrawFromVault(
   adminOriginator: string,
   amount: number | 'all',
   reason: string,
-  findSpendingReferences?: SpendingReferenceLookup
+  opts?: VaultTransferOptions
 ): Promise<VaultSpendResult> {
+  // Before the ceremony: no key prompt for a transfer that cannot proceed.
+  await requireOnline(opts)
   const signer = await requestVaultSigner(reason)
   try {
     return await spendVaultOutputs(w, adminOriginator, amount, reason, { path: 'r1', signer }, {
       revaultRemainder: true,
-      findSpendingReferences
+      ...opts
     })
   } finally {
     signer.release()
@@ -711,12 +752,13 @@ export async function sweepVaultWithHD(
   adminOriginator: string,
   hd: HD,
   reason: string,
-  findSpendingReferences?: SpendingReferenceLookup
+  opts?: VaultTransferOptions
 ): Promise<VaultSpendResult | null> {
+  await requireOnline(opts)
   try {
     return await spendVaultOutputs(w, adminOriginator, 'all', reason, { path: 'k1', hd }, {
       revaultRemainder: false,
-      findSpendingReferences
+      ...opts
     })
   } catch (e) {
     if (e instanceof VaultError && e.code === 'vault-empty') return null

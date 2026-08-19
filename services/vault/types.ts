@@ -48,6 +48,9 @@ export type VaultErrorCode =
    *  See VAULT_MAX_INPUTS — the remedy is a smaller withdrawal, which also
    *  consolidates the vault. */
   | 'too-many-inputs'
+  /** The device is offline. Vault transfers never enter the offline queue — see
+   *  VaultTransferOptions.isOnline. */
+  | 'requires-online'
 
 export class VaultError extends Error {
   code: VaultErrorCode
