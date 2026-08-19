@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite'
 import type { SQLiteDatabase } from 'expo-sqlite'
 import { createTables, ensureOfflineActionsColumns } from './schema/createTables'
+import { PROVEN_HEIGHTS_SQL, buildFindSql, columnsExcluding, rangeReadSql } from './methods/findSql'
 import { devLog } from '../utils/logging'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import type { StorageProviderOptions } from '@bsv/wallet-toolbox-mobile'
@@ -319,6 +320,12 @@ export class StorageExpoSQLite extends StorageProvider {
     return { sql, params }
   }
 
+  /**
+   * @param columns explicit projection. Omit for `SELECT *`. Passing the
+   * non-blob columns is what makes `noRawTx`/`noScript` actually cheap: without
+   * it every BLOB is read off disk and `Array.from`-expanded by validateEntity
+   * before being discarded. See storage/methods/findSql.ts.
+   */
   private async sqlFind<T>(
     table: string,
     args: {
@@ -329,29 +336,28 @@ export class StorageExpoSQLite extends StorageProvider {
       trx?: TrxToken
     },
     pkCol: string,
-    extraClauses?: { conditions: string[]; params: any[] }
+    extraClauses?: { conditions: string[]; params: any[] },
+    columns?: string[]
   ): Promise<T[]> {
     const db = this.getDB()
     const { sql: whereSql, params } = this.buildWhere(args.partial)
-    let query = `SELECT * FROM "${table}" ${whereSql}`
 
-    if (args.since) {
-      query += `${whereSql ? ' AND' : ' WHERE'} updated_at >= ?`
-      params.push(this.validateDateForWhere(args.since))
-    }
-    if (extraClauses) {
-      for (const c of extraClauses.conditions) {
-        query += `${whereSql || args.since ? ' AND' : ' WHERE'} ${c}`
-      }
-      params.push(...extraClauses.params)
-    }
-    query += ` ORDER BY "${pkCol}" ${args.orderDescending ? 'DESC' : 'ASC'}`
-    if (args.paged?.limit) {
-      query += ` LIMIT ${args.paged.limit}`
-      if (args.paged?.offset) {
-        query += ` OFFSET ${args.paged.offset}`
-      }
-    }
+    // Params must be pushed in the same order buildFindSql emits their
+    // placeholders: where, then since, then the extra conditions.
+    if (args.since) params.push(this.validateDateForWhere(args.since))
+    if (extraClauses) params.push(...extraClauses.params)
+
+    const query = buildFindSql({
+      table,
+      whereSql,
+      hasSince: args.since !== undefined,
+      extraConditions: extraClauses?.conditions,
+      pkCol,
+      orderDescending: args.orderDescending,
+      limit: args.paged?.limit,
+      offset: args.paged?.offset,
+      columns
+    })
     return (await db.getAllAsync(query, params)) as T[]
   }
 
@@ -776,7 +782,11 @@ export class StorageExpoSQLite extends StorageProvider {
       'outputs',
       { ...args, partial },
       'outputId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined,
+      // noScript callers get a projection that never reads the column. The
+      // post-hoc `o.lockingScript = undefined` below stays as the contract for
+      // any future caller that reaches here without the projection.
+      args.noScript ? columnsExcluding('outputs', ['lockingScript']) : undefined
     )
 
     const results = this.validateEntities(rows, undefined, ['spendable', 'change'])
@@ -855,7 +865,8 @@ export class StorageExpoSQLite extends StorageProvider {
       'transactions',
       args,
       'transactionId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined,
+      args.noRawTx ? columnsExcluding('transactions', ['rawTx', 'inputBEEF']) : undefined
     )
 
     const results = this.validateEntities(rows, undefined, ['isOutgoing'])
