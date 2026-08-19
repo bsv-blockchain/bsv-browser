@@ -80,6 +80,7 @@ import { processPending } from '@/utils/localpay/pending'
 import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
 import { TaskBackupPush } from '@/utils/monitor/TaskBackupPush'
 import { pushOnce } from '@/utils/backup/push'
+import { restoreOnImport } from '@/utils/backup/restoreOnImport'
 import { processOfflineActions } from '@/storage/methods/processOfflineActions'
 import { wocConfigFor } from '@/utils/pay/rails/address'
 import { SWEEP_INTERVAL_MS, runSweep, shouldSweepNow, sweptTotal } from '@/utils/pay/sweeper'
@@ -109,6 +110,32 @@ interface ManagerState {
 
 type ConfigStatus = 'editing' | 'configured' | 'initial'
 
+/**
+ * Where the import-time restore has got to.
+ *
+ * 'no-backup' is a success, not a failure: the server has nothing under this seed, so the
+ * import continues with an empty history. 'failed' is the only phase that blocks — see
+ * restoreOnImport for why a half-replayed log must never be presented as a wallet.
+ */
+export interface BackupRestoreState {
+  phase: 'idle' | 'checking' | 'restoring' | 'restored' | 'no-backup' | 'failed'
+  /** Chunks replayed so far. */
+  chunks: number
+  /** Chunks in the generation being replayed; 0 until the log index is read. */
+  total: number
+  error?: string
+}
+
+export interface WalletBuildOptions {
+  /**
+   * Replay the encrypted backup log into the fresh database before the wallet is usable.
+   *
+   * Set ONLY by the import-an-existing-wallet flows. A newly generated wallet has nothing
+   * to restore, and an auto-build on relaunch must not re-import over a live database.
+   */
+  restoreFromBackup?: boolean
+}
+
 export interface WalletContextValue {
   // Managers:
   managers: ManagerState
@@ -135,8 +162,17 @@ export interface WalletContextValue {
   selectedMethod: string
   selectedNetwork: AppChain
   setWalletBuilt: (current: boolean) => void
-  buildWalletFromMnemonic: (mnemonic?: string) => Promise<void>
-  buildWalletFromRecoveredKey: (wif: string) => Promise<void>
+  buildWalletFromMnemonic: (mnemonic?: string, opts?: WalletBuildOptions) => Promise<void>
+  buildWalletFromRecoveredKey: (wif: string, opts?: WalletBuildOptions) => Promise<void>
+  /** Progress of the encrypted-log restore that runs during a wallet import. */
+  backupRestore: BackupRestoreState
+  /**
+   * The same value, read fresh.
+   *
+   * An import flow needs the outcome immediately after its `await` returns, where a
+   * captured `backupRestore` is still the pre-build render's value. This reads the ref.
+   */
+  getBackupRestore: () => BackupRestoreState
   switchNetwork: (network: AppChain) => Promise<void>
   /** Tear down the current wallet and re-trigger auto-build (e.g. after DB import). */
   rebuildWallet: () => Promise<void>
@@ -193,6 +229,8 @@ export const WalletContext = createContext<WalletContextValue>({
   setWalletBuilt: (current: boolean) => {},
   buildWalletFromMnemonic: async () => {},
   buildWalletFromRecoveredKey: async () => {},
+  backupRestore: { phase: 'idle', chunks: 0, total: 0 },
+  getBackupRestore: () => ({ phase: 'idle', chunks: 0, total: 0 }),
   switchNetwork: async () => {},
   rebuildWallet: async () => {},
   storage: null,
@@ -376,6 +414,25 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const [walletBuilt, setWalletBuilt] = useState<boolean>(false)
   const walletBuildingRef = useRef<boolean>(false)
   const [walletBuilding, setWalletBuilding] = useState<boolean>(false)
+  const [backupRestore, setBackupRestoreState] = useState<BackupRestoreState>({
+    phase: 'idle',
+    chunks: 0,
+    total: 0
+  })
+  const backupRestoreRef = useRef<BackupRestoreState>({ phase: 'idle', chunks: 0, total: 0 })
+  /** Writes both the render value and the ref the import flow reads back synchronously. */
+  const setBackupRestore = useCallback((next: BackupRestoreState) => {
+    backupRestoreRef.current = next
+    setBackupRestoreState(next)
+  }, [])
+  const getBackupRestore = useCallback((): BackupRestoreState => backupRestoreRef.current, [])
+  /**
+   * Set by an import flow immediately before it hands the primary key over, and consumed
+   * (and cleared) by the buildWallet pass it triggers. A ref rather than state because
+   * buildWallet is invoked from SimpleWalletManager's authenticate callback, not from a
+   * render — a state read there would see whatever was committed, which is a race.
+   */
+  const restoreIntentRef = useRef(false)
   const [localPayNotification, setLocalPayNotification] = useState<{
     message: string
     type: 'success' | 'error' | 'info'
@@ -878,6 +935,45 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           await phoneStorage.migrate('bsv-wallet', identityKey)
 
           console.log('[WalletContext] Local SQLite storage initialized successfully')
+
+          // ── Import-time restore ────────────────────────────────────────────
+          //
+          // Deliberately HERE: the database is migrated and empty, nothing has been
+          // published to the app yet, and the monitor (with its backup push task) does
+          // not exist — so this device cannot have written a log of its own that the
+          // restore would then pick as the newest. See utils/backup/restoreOnImport.ts.
+          //
+          // A failure throws, which aborts the whole build: the import screen reports it
+          // and lets the user retry or continue without history. Presenting a
+          // half-replayed database as a working wallet is the one outcome to avoid.
+          if (restoreIntentRef.current) {
+            restoreIntentRef.current = false
+            setBackupRestore({ phase: 'checking', chunks: 0, total: 0 })
+            try {
+              const restored = await restoreOnImport({
+                storage: phoneStorage,
+                primaryKey,
+                identityKey,
+                baseUrl: DEFAULT_BACKUP_URL,
+                onProgress: (chunks, total) => setBackupRestore({ phase: 'restoring', chunks, total })
+              })
+              console.log(
+                `[WalletContext] backup restore · restored=${String(restored.restored)} · ` +
+                  `chunks=${restored.chunks} · reason=${restored.reason ?? 'none'}`
+              )
+              setBackupRestore(
+                restored.restored
+                  ? { phase: 'restored', chunks: restored.chunks, total: restored.chunks }
+                  : { phase: 'no-backup', chunks: 0, total: 0 }
+              )
+            } catch (e: any) {
+              const message = e instanceof Error ? e.message : String(e)
+              console.error('[WalletContext] backup restore failed:', message)
+              setBackupRestore({ phase: 'failed', chunks: 0, total: 0, error: message })
+              throw e
+            }
+          }
+
           setStorage(phoneStorage)
 
           // addWalletStorageProvider calls makeAvailable internally
@@ -1228,6 +1324,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       }
     },
     [
+      setBackupRestore,
       selectedNetwork,
       selectedStorageUrl,
       adminOriginator,
@@ -1249,7 +1346,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   // TODO: Re-add WAB (WalletAuthenticationManager) support in future version
 
   const buildWalletFromMnemonic = useCallback(
-    async (providedMnemonic?: string) => {
+    async (providedMnemonic?: string, opts?: WalletBuildOptions) => {
       // Skip if wallet already built or a build is already in progress
       if (walletBuilt || walletBuildingRef.current) {
         return
@@ -1294,6 +1391,10 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         // Create SimpleWalletManager and provide keys for authentication
         const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet)
 
+        // Armed before the keys go in, because providing both is what triggers
+        // buildWallet — the only place a fresh, empty database exists to replay into.
+        restoreIntentRef.current = opts?.restoreFromBackup === true
+
         // Provide the primary key and privileged key manager to authenticate the wallet
         await swm.providePrimaryKey(primaryKey)
 
@@ -1309,6 +1410,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         logWithTimestamp(F, 'Mnemonic wallet build completed')
       } catch (error: any) {
+        // Never leave the intent armed: the next build on this device would otherwise be
+        // an auto-build on relaunch, which must not re-import over a live database.
+        restoreIntentRef.current = false
         walletBuildingRef.current = false
         setWalletBuilding(false)
         console.error('[WalletContext] Error building mnemonic wallet:', error)
@@ -1319,7 +1423,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
   // Build wallet from a recovered PrivateKey (WIF) obtained via backup share scanning
   const buildWalletFromRecoveredKey = useCallback(
-    async (wif: string) => {
+    async (wif: string, opts?: WalletBuildOptions) => {
       if (walletBuilt || walletBuildingRef.current) return
       if (configStatus !== 'configured') return
 
@@ -1337,6 +1441,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         const swm = new SimpleWalletManager(ADMIN_ORIGINATOR, buildWallet)
 
+        // Same arming point as the mnemonic path — see the comment there.
+        restoreIntentRef.current = opts?.restoreFromBackup === true
+
         await swm.providePrimaryKey(primaryKey)
 
         await swm.providePrivilegedKeyManager(privilegedKeyManager)
@@ -1351,6 +1458,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         logWithTimestamp(F, 'Recovered key wallet build completed')
       } catch (error: any) {
+        restoreIntentRef.current = false
         walletBuildingRef.current = false
         setWalletBuilding(false)
         console.error('[WalletContext] Error building wallet from recovered key:', error)
@@ -2085,6 +2193,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setWalletBuilt,
       buildWalletFromMnemonic,
       buildWalletFromRecoveredKey,
+      backupRestore,
+      getBackupRestore,
       switchNetwork,
       rebuildWallet,
       storage,
@@ -2125,6 +2235,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       setWalletBuilt,
       buildWalletFromMnemonic,
       buildWalletFromRecoveredKey,
+      backupRestore,
+      getBackupRestore,
       switchNetwork,
       rebuildWallet,
       storage,
