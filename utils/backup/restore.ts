@@ -23,6 +23,12 @@ export interface RestoreDeps {
   deviceId?: string
   /** Defaults to the newest generation for that device. */
   generation?: number
+  /**
+   * Called after each replayed chunk, with how many have landed and how many the
+   * generation holds. `total` is 0 until the index has been read, i.e. before the
+   * first chunk arrives.
+   */
+  onProgress?: (chunks: number, total: number) => void
 }
 
 export interface RestoreResult {
@@ -82,6 +88,7 @@ export async function restoreFromBackup (deps: RestoreDeps): Promise<RestoreResu
 
     if (result.done) break
     chunks++
+    deps.onProgress?.(chunks, reader.length)
 
     // The reader is finite; this guards against a processSyncChunk that never reports done.
     if (chunks > reader.length) break

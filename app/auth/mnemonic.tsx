@@ -33,7 +33,8 @@ type MnemonicMode = 'choose' | 'generate' | 'import'
 export default function MnemonicScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
-  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey } = useWallet()
+  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey, backupRestore, getBackupRestore } =
+    useWallet()
   const { setMnemonic: storeMnemonic, setRecoveredKey } = useLocalStorage()
 
   const [mode, setMode] = useState<MnemonicMode>('choose')
@@ -164,7 +165,8 @@ export default function MnemonicScreen() {
           if (choice === 'retry') await handleContinueWithImported()
           return
         }
-        await buildWalletFromRecoveredKey(wif)
+        await buildWalletFromRecoveredKey(wif, { restoreFromBackup: true })
+        if (await handledRestoreFailure(() => handleContinueWithImported())) return
         setCelebrating(true)
       } catch (error: any) {
         console.error('[Mnemonic] Error importing hex key:', error)
@@ -183,11 +185,50 @@ export default function MnemonicScreen() {
       return
     }
 
-    await initializeWallet(trimmed)
+    await initializeWallet(trimmed, { restore: true })
+  }
+
+  /**
+   * Deal with an import whose backup replay failed.
+   *
+   * Returns true when the failure was handled and the caller must NOT proceed to the
+   * celebration: the wallet was deliberately not built, because a half-replayed database
+   * presented as a working wallet is the one outcome worth blocking. `retry` re-runs the
+   * same import; the alternative rebuilds without a restore, which yields a usable wallet
+   * with no history.
+   *
+   * Reads getBackupRestore() rather than the `backupRestore` render value: this runs
+   * immediately after the build's own await, where the captured value is still the
+   * pre-build one.
+   */
+  const handledRestoreFailure = async (retry: () => Promise<void>): Promise<boolean> => {
+    const state = getBackupRestore()
+    if (state.phase !== 'failed') return false
+
+    setLoading(false)
+    const choice = await showAlert({
+      title: t('restore_backup_failed_title'),
+      message: `${t('restore_backup_failed_message')}${state.error ? `\n\n${state.error}` : ''}`,
+      buttons: [
+        { text: t('restore_backup_retry'), key: 'retry' },
+        { text: t('restore_backup_skip'), key: 'skip', style: 'cancel' }
+      ]
+    })
+
+    if (choice === 'retry') {
+      await retry()
+      return true
+    }
+
+    // Without a restore: a working wallet, no past transactions, and past change outputs
+    // that stay unspendable because their derivation data only ever existed in the backup.
+    const trimmed = importedMnemonic.trim()
+    if (validateMnemonic(trimmed)) await initializeWallet(trimmed, { restore: false })
+    return true
   }
 
   // Initialize wallet with mnemonic
-  const initializeWallet = async (mnemonicPhrase: string) => {
+  const initializeWallet = async (mnemonicPhrase: string, opts?: { restore?: boolean }) => {
     setLoading(true)
     try {
       console.log('[Mnemonic] Starting wallet initialization with mnemonic')
@@ -201,10 +242,17 @@ export default function MnemonicScreen() {
             { text: 'Try Again', key: 'retry' },
           ],
         })
-        if (choice === 'retry') await initializeWallet(mnemonicPhrase)
+        if (choice === 'retry') await initializeWallet(mnemonicPhrase, opts)
         return
       }
-      await buildWalletFromMnemonic(mnemonicPhrase)
+      // An imported phrase replays the encrypted backup log BEFORE the wallet becomes
+      // usable — the phrase alone cannot rebuild change-output derivation data. A freshly
+      // generated wallet passes no options and skips this entirely, since there is
+      // nothing on the server under a brand-new seed.
+      await buildWalletFromMnemonic(mnemonicPhrase, { restoreFromBackup: opts?.restore === true })
+      if (opts?.restore === true && (await handledRestoreFailure(() => initializeWallet(mnemonicPhrase, opts)))) {
+        return
+      }
       setCelebrating(true)
     } catch (error: any) {
       console.error('[Mnemonic] Error setting up wallet:', error)
@@ -554,6 +602,21 @@ export default function MnemonicScreen() {
             </Text>
           )}
         </PressableScale>
+
+        {/* Restore progress. The import blocks on replaying the encrypted backup log, and
+            a large history takes many chunks — a bare spinner would read as a hang. */}
+        {(backupRestore.phase === 'checking' || backupRestore.phase === 'restoring') && (
+          <Text
+            style={[s.bodyText, { color: colors.textSecondary, marginTop: spacing.md, textAlign: 'center' }]}
+          >
+            {backupRestore.phase === 'checking' || backupRestore.total === 0
+              ? t('restore_backup_checking')
+              : t('restore_backup_progress', {
+                  chunks: backupRestore.chunks,
+                  total: backupRestore.total
+                })}
+          </Text>
+        )}
 
         {/* ── Divider ── */}
         <View style={[s.orDivider, { marginTop: spacing.xl }]}>

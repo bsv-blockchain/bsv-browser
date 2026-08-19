@@ -18,7 +18,8 @@ import Celebration from '@/components/ui/Celebration'
 export default function ScanSharesScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
-  const { buildWalletFromRecoveredKey, buildWalletFromMnemonic } = useWallet()
+  const { buildWalletFromRecoveredKey, buildWalletFromMnemonic, backupRestore, getBackupRestore } =
+    useWallet()
   const { setRecoveredKey, setMnemonic, deleteRecoveredKey } = useLocalStorage()
 
   const [scannedShares, setScannedShares] = useState<ParsedShare[]>([])
@@ -94,6 +95,45 @@ export default function ScanSharesScreen() {
    * Legacy shares carry the hardened primary key and cannot rebuild the
    * phrase, so they keep the old WIF path and the user is told what that costs.
    */
+  /**
+   * A restore that failed must not be dressed up as a recovered wallet: the build was
+   * aborted, so there is nothing to celebrate yet. Retry re-runs the same build with the
+   * restore, `withoutHistory` rebuilds without it — a usable wallet, no past transactions.
+   *
+   * Returns true when it handled the failure and the caller must stop. Reads
+   * getBackupRestore() because the render value is still the pre-build one here.
+   */
+  const handledRestoreFailure = async (withoutHistory: () => Promise<void>): Promise<boolean> => {
+    const state = getBackupRestore()
+    if (state.phase !== 'failed') return false
+
+    const choice = await showAlert({
+      title: t('restore_backup_failed_title'),
+      message: `${t('restore_backup_failed_message')}${state.error ? `\n\n${state.error}` : ''}`,
+      buttons: [
+        { text: t('restore_backup_retry'), key: 'retry' },
+        { text: t('restore_backup_skip'), key: 'skip', style: 'cancel' }
+      ]
+    })
+
+    if (choice === 'skip') {
+      await withoutHistory()
+      setRecovered(true)
+      setCelebrating(true)
+      return true
+    }
+
+    // Retry: hand the user back to the scan screen rather than looping here, so a
+    // persistent server problem cannot trap them in an alert.
+    setError(t('restore_backup_failed_title'))
+    haptics.error()
+    setRecovered(false)
+    setScannedShares([])
+    setThreshold(null)
+    lastScannedRef.current = ''
+    return true
+  }
+
   const handleRecovery = async (shareStrings: string[]) => {
     setRecovering(true)
     try {
@@ -106,12 +146,16 @@ export default function ScanSharesScreen() {
         // Only after the phrase is safely stored: a refusal between the two
         // writes would otherwise leave the wallet with neither secret.
         await deleteRecoveredKey()
-        await buildWalletFromMnemonic(mnemonic)
+        // Shares recover an EXISTING wallet, so the encrypted backup log is replayed
+        // before the wallet is usable — same reasoning as the phrase-import flow.
+        await buildWalletFromMnemonic(mnemonic, { restoreFromBackup: true })
+        if (await handledRestoreFailure(() => buildWalletFromMnemonic(mnemonic))) return
       } else {
         const wif = new PrivateKey(secret.primaryKey).toWif()
 
         if (!(await setRecoveredKey(wif))) return await retryOrReset(shareStrings)
-        await buildWalletFromRecoveredKey(wif)
+        await buildWalletFromRecoveredKey(wif, { restoreFromBackup: true })
+        if (await handledRestoreFailure(() => buildWalletFromRecoveredKey(wif))) return
 
         await showAlert({
           title: t('scan_shares_legacy_title'),
@@ -165,7 +209,13 @@ export default function ScanSharesScreen() {
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
         <ActivityIndicator size="large" color={colors.accent} />
-        <Text style={[styles.recoveringText, { color: colors.textPrimary }]}>{t('scan_shares_recovering')}</Text>
+        <Text style={[styles.recoveringText, { color: colors.textPrimary }]}>
+          {backupRestore.phase === 'checking' || (backupRestore.phase === 'restoring' && backupRestore.total === 0)
+            ? t('restore_backup_checking')
+            : backupRestore.phase === 'restoring'
+              ? t('restore_backup_progress', { chunks: backupRestore.chunks, total: backupRestore.total })
+              : t('scan_shares_recovering')}
+        </Text>
       </View>
     )
   }
