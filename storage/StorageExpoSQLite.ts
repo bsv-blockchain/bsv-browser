@@ -10,6 +10,8 @@ import {
   splitOutpoint
 } from './methods/findSql'
 import { scrubHistoryJson } from './methods/historyNotes'
+import { StorageError, storageErrorFromSqlite } from './errors'
+import { diskPressure } from '../utils/diskSpace'
 import { devLog } from '../utils/logging'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import type { StorageProviderOptions } from '@bsv/wallet-toolbox-mobile'
@@ -153,9 +155,30 @@ export class StorageExpoSQLite extends StorageProvider {
     )
   }
 
+  /**
+   * Every wallet write funnels through here, which makes it the one place a
+   * storage-pressure gate and a failure classifier need to live.
+   *
+   * The pre-flight check is not belt-and-braces, it is the only reliable
+   * diagnosis: withExclusiveTransactionAsync awaits ROLLBACK inside its own
+   * catch BEFORE recording the error, so a rollback that also fails under disk
+   * pressure propagates instead and the original cause is destroyed.
+   * (node_modules/expo-sqlite/src/SQLiteDatabase.ts:184-189.)
+   *
+   * 'unknown' pressure proceeds. The reading can be null on either platform, and
+   * refusing writes because the disk could not be read would be worse than the
+   * problem — see utils/diskSpace.ts.
+   */
   async transaction<T>(scope: (trx: TrxToken) => Promise<T>, trx?: TrxToken): Promise<T> {
     // If already inside a transaction, reuse it — no nested BEGIN.
     if (trx) return await scope(trx)
+
+    if (diskPressure() === 'block') {
+      throw new StorageError(
+        'disk-full',
+        'Not enough free storage to write to the wallet database. Free some space and try again.'
+      )
+    }
 
     const db = this.getDB()
     const token: TrxToken = { _inTrx: true } as any
@@ -166,15 +189,23 @@ export class StorageExpoSQLite extends StorageProvider {
     // we temporarily replace this.db with the exclusive txn object and restore
     // it when the scope completes (or throws).
     let result!: T
-    await db.withExclusiveTransactionAsync(async txn => {
-      const savedDb = this.db
-      this.db = txn as any
-      try {
-        result = await scope(token)
-      } finally {
-        this.db = savedDb
-      }
-    })
+    try {
+      await db.withExclusiveTransactionAsync(async txn => {
+        const savedDb = this.db
+        this.db = txn as any
+        try {
+          result = await scope(token)
+        } finally {
+          this.db = savedDb
+        }
+      })
+    } catch (e) {
+      // Rethrow a recognisable storage failure as a typed one so the UI can say
+      // something true about it. Anything unrecognised passes through untouched:
+      // guessing would turn a schema bug into a "free up space" prompt.
+      const classified = storageErrorFromSqlite(e)
+      throw classified ?? e
+    }
     return result
   }
 
