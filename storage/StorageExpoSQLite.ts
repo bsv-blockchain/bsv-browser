@@ -1,6 +1,15 @@
 import * as SQLite from 'expo-sqlite'
 import type { SQLiteDatabase } from 'expo-sqlite'
 import { createTables, ensureOfflineActionsColumns } from './schema/createTables'
+import {
+  PROVEN_HEIGHTS_SQL,
+  buildFindSql,
+  columnsExcluding,
+  rangeReadSql,
+  spendingReferencesSql,
+  splitOutpoint
+} from './methods/findSql'
+import { scrubHistoryJson } from './methods/historyNotes'
 import { devLog } from '../utils/logging'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import type { StorageProviderOptions } from '@bsv/wallet-toolbox-mobile'
@@ -319,6 +328,12 @@ export class StorageExpoSQLite extends StorageProvider {
     return { sql, params }
   }
 
+  /**
+   * @param columns explicit projection. Omit for `SELECT *`. Passing the
+   * non-blob columns is what makes `noRawTx`/`noScript` actually cheap: without
+   * it every BLOB is read off disk and `Array.from`-expanded by validateEntity
+   * before being discarded. See storage/methods/findSql.ts.
+   */
   private async sqlFind<T>(
     table: string,
     args: {
@@ -329,29 +344,28 @@ export class StorageExpoSQLite extends StorageProvider {
       trx?: TrxToken
     },
     pkCol: string,
-    extraClauses?: { conditions: string[]; params: any[] }
+    extraClauses?: { conditions: string[]; params: any[] },
+    columns?: string[]
   ): Promise<T[]> {
     const db = this.getDB()
     const { sql: whereSql, params } = this.buildWhere(args.partial)
-    let query = `SELECT * FROM "${table}" ${whereSql}`
 
-    if (args.since) {
-      query += `${whereSql ? ' AND' : ' WHERE'} updated_at >= ?`
-      params.push(this.validateDateForWhere(args.since))
-    }
-    if (extraClauses) {
-      for (const c of extraClauses.conditions) {
-        query += `${whereSql || args.since ? ' AND' : ' WHERE'} ${c}`
-      }
-      params.push(...extraClauses.params)
-    }
-    query += ` ORDER BY "${pkCol}" ${args.orderDescending ? 'DESC' : 'ASC'}`
-    if (args.paged?.limit) {
-      query += ` LIMIT ${args.paged.limit}`
-      if (args.paged?.offset) {
-        query += ` OFFSET ${args.paged.offset}`
-      }
-    }
+    // Params must be pushed in the same order buildFindSql emits their
+    // placeholders: where, then since, then the extra conditions.
+    if (args.since) params.push(this.validateDateForWhere(args.since))
+    if (extraClauses) params.push(...extraClauses.params)
+
+    const query = buildFindSql({
+      table,
+      whereSql,
+      hasSince: args.since !== undefined,
+      extraConditions: extraClauses?.conditions,
+      pkCol,
+      orderDescending: args.orderDescending,
+      limit: args.paged?.limit,
+      offset: args.paged?.offset,
+      columns
+    })
     return (await db.getAllAsync(query, params)) as T[]
   }
 
@@ -476,6 +490,9 @@ export class StorageExpoSQLite extends StorageProvider {
   async insertProvenTxReq(tx: TableProvenTxReq, trx?: TrxToken): Promise<number> {
     const e = await this.validateEntityForInsert(tx, trx)
     if (e.provenTxReqId === 0) delete e.provenTxReqId
+    // See methods/historyNotes.ts: provider error notes carry the full EF/rawTx
+    // hex and reach this column untruncated.
+    e.history = scrubHistoryJson(e.history)
     const id = await this.sqlInsert('proven_tx_reqs', e, 'provenTxReqId')
     tx.provenTxReqId = id
     return id
@@ -591,9 +608,15 @@ export class StorageExpoSQLite extends StorageProvider {
     return await this.sqlUpdate('proven_txs', id, u as any, 'provenTxId')
   }
 
+  /**
+   * The single write path for proven_tx_reqs, and therefore the backstop for the
+   * history column: every note the toolbox's own broadcast providers produce
+   * arrives here, and they capture whole Extended Format payloads as hex.
+   */
   async updateProvenTxReq(id: number | number[], update: Partial<TableProvenTxReq>, trx?: TrxToken): Promise<number> {
-    const u = this.validatePartialForUpdate(update)
-    return await this.sqlUpdate('proven_tx_reqs', id, u as any, 'provenTxReqId')
+    const u = this.validatePartialForUpdate(update) as any
+    if ('history' in u) u.history = scrubHistoryJson(u.history)
+    return await this.sqlUpdate('proven_tx_reqs', id, u, 'provenTxReqId')
   }
 
   async updateCertificate(id: number, update: Partial<TableCertificate>, trx?: TrxToken): Promise<number> {
@@ -776,7 +799,11 @@ export class StorageExpoSQLite extends StorageProvider {
       'outputs',
       { ...args, partial },
       'outputId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined,
+      // noScript callers get a projection that never reads the column. The
+      // post-hoc `o.lockingScript = undefined` below stays as the contract for
+      // any future caller that reaches here without the projection.
+      args.noScript ? columnsExcluding('outputs', ['lockingScript']) : undefined
     )
 
     const results = this.validateEntities(rows, undefined, ['spendable', 'change'])
@@ -855,7 +882,8 @@ export class StorageExpoSQLite extends StorageProvider {
       'transactions',
       args,
       'transactionId',
-      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
+      extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined,
+      args.noRawTx ? columnsExcluding('transactions', ['rawTx', 'inputBEEF']) : undefined
     )
 
     const results = this.validateEntities(rows, undefined, ['isOutgoing'])
@@ -1232,6 +1260,50 @@ export class StorageExpoSQLite extends StorageProvider {
     return r
   }
 
+  /**
+   * txid -> height for every proven transaction.
+   *
+   * The CSV export used findProvenTxs({ partial: {} }) for this: an unbounded
+   * SELECT * that reads and Array.from-expands every rawTx and merklePath in the
+   * wallet to build a map of two small columns. On a wallet with vault history
+   * that is hundreds of megabytes of transient heap.
+   */
+  /**
+   * The transactions reserving the given outpoints, by `reference`.
+   *
+   * Answers in one indexed query (outputs.spentBy is indexed) what the vault's
+   * reservation heal previously answered by paging up to 5,000 actions with
+   * includeInputs — where listActionsSql loads each action's full rawTx and runs
+   * Transaction.fromBinary on it just to read a sequence number.
+   *
+   * `reference`, not `txid`: the reservation being healed belongs to an attempt
+   * that died before signing, so it has no txid. abortAction takes a reference.
+   */
+  async findSpendingReferences(outpoints: string[]): Promise<{ reference: string; status: string }[]> {
+    if (outpoints.length === 0) return []
+    if (!this.isAvailable()) await this.makeAvailable()
+    const pairs = outpoints.map(splitOutpoint).filter((p): p is { txid: string; vout: number } => p !== null)
+    if (pairs.length === 0) return []
+    const params = pairs.flatMap(p => [p.txid, p.vout])
+    const rows = (await this.getDB().getAllAsync(spendingReferencesSql(pairs.length), params)) as {
+      reference?: string
+      status?: string
+    }[]
+    return rows
+      .filter(r => typeof r.reference === 'string' && typeof r.status === 'string')
+      .map(r => ({ reference: r.reference as string, status: r.status as string }))
+  }
+
+  async getProvenTxHeights(): Promise<Map<string, number>> {
+    if (!this.isAvailable()) await this.makeAvailable()
+    const rows = (await this.getDB().getAllAsync(PROVEN_HEIGHTS_SQL)) as { txid?: string; height?: number }[]
+    const map = new Map<string, number>()
+    for (const r of rows) {
+      if (r.txid && typeof r.height === 'number') map.set(r.txid, r.height)
+    }
+    return map
+  }
+
   async getRawTxOfKnownValidTransaction(
     txid?: string,
     offset?: number,
@@ -1240,14 +1312,29 @@ export class StorageExpoSQLite extends StorageProvider {
   ): Promise<number[] | undefined> {
     if (!txid) return undefined
     if (!this.isAvailable()) await this.makeAvailable()
-    let rawTx: number[] | undefined
-    const r = await this.getProvenOrRawTx(txid, trx)
-    if (r.proven) rawTx = r.proven.rawTx
-    else rawTx = r.rawTx
-    if (rawTx && offset !== undefined && length !== undefined && Number.isInteger(offset) && Number.isInteger(length)) {
-      rawTx = rawTx.slice(offset, offset + length)
+
+    // Range reads are served in SQL. The caller here is almost always
+    // validateOutputScript re-slicing one output's locking script out of its
+    // source transaction, and with maxOutputScript = 1024 the outputs that take
+    // that path are exactly the ~960 KB vault scripts. Loading the whole rawTx
+    // to slice it meant reading ~960 KB off disk and Array.from-ing it into an
+    // ~960 K-element JS array to keep a few hundred bytes.
+    //
+    // Table order and the status filter mirror getProvenOrRawTx exactly (see
+    // rangeReadSql), so a range read can never see a row the full read refuses.
+    if (offset !== undefined && length !== undefined && Number.isInteger(offset) && Number.isInteger(length)) {
+      const db = this.getDB()
+      // substr is 1-indexed over bytes; a JS offset of n starts at n + 1.
+      const args = [offset + 1, length, txid]
+      const proven = (await db.getFirstAsync(rangeReadSql('proven_txs'), args)) as { chunk?: Uint8Array } | null
+      const row =
+        proven ?? ((await db.getFirstAsync(rangeReadSql('proven_tx_reqs'), args)) as { chunk?: Uint8Array } | null)
+      if (!row?.chunk) return undefined
+      return Array.from(row.chunk)
     }
-    return rawTx
+
+    const r = await this.getProvenOrRawTx(txid, trx)
+    return r.proven ? r.proven.rawTx : r.rawTx
   }
 
   async getLabelsForTransactionId(transactionId?: number, trx?: TrxToken): Promise<TableTxLabel[]> {

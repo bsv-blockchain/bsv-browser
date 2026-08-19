@@ -54,7 +54,7 @@ export default function VaultTransferScreen() {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   const { direction } = useLocalSearchParams<{ direction?: string }>()
-  const { managers, adminOriginator } = useWallet()
+  const { managers, adminOriginator, storage } = useWallet()
   const { balance, refresh } = useVaultBalance()
   const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState(false)
@@ -87,7 +87,10 @@ export default function VaultTransferScreen() {
           w,
           adminOriginator,
           isMax ? 'all' : sats,
-          t('vault_withdraw_reason', { amount: isMax ? (balance ?? 0) : sats })
+          t('vault_withdraw_reason', { amount: isMax ? (balance ?? 0) : sats }),
+          // Lets the reservation heal find the reserving transaction with one
+          // indexed query instead of paging every action in the wallet.
+          storage ? outpoints => storage.findSpendingReferences(outpoints) : undefined
         )
         // vaultOpen/haptic already fired by the ceremony's onArmed
         showToast(t('vault_withdraw_done'), { type: 'success' })

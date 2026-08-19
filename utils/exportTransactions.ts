@@ -46,13 +46,10 @@ export async function exportTransactionsAsCsv(
 
   if (actions.length === 0) return 0
 
-  const heightMap = new Map<string, number>()
-  if (storage) {
-    const proven = await storage.findProvenTxs({ partial: {} })
-    for (const p of proven) {
-      if (p.txid && typeof p.height === 'number') heightMap.set(p.txid, p.height)
-    }
-  }
+  // Two columns, read as two columns. findProvenTxs({ partial: {} }) would
+  // SELECT * over every proven transaction, expanding each rawTx and merklePath
+  // into a JS array on the way to being ignored.
+  const heightMap = storage ? await storage.getProvenTxHeights() : new Map<string, number>()
 
   const header = [
     'txid',
