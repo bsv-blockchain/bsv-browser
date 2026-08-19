@@ -1253,6 +1253,24 @@ export class StorageExpoSQLite extends StorageProvider {
     return r
   }
 
+  /**
+   * txid -> height for every proven transaction.
+   *
+   * The CSV export used findProvenTxs({ partial: {} }) for this: an unbounded
+   * SELECT * that reads and Array.from-expands every rawTx and merklePath in the
+   * wallet to build a map of two small columns. On a wallet with vault history
+   * that is hundreds of megabytes of transient heap.
+   */
+  async getProvenTxHeights(): Promise<Map<string, number>> {
+    if (!this.isAvailable()) await this.makeAvailable()
+    const rows = (await this.getDB().getAllAsync(PROVEN_HEIGHTS_SQL)) as { txid?: string; height?: number }[]
+    const map = new Map<string, number>()
+    for (const r of rows) {
+      if (r.txid && typeof r.height === 'number') map.set(r.txid, r.height)
+    }
+    return map
+  }
+
   async getRawTxOfKnownValidTransaction(
     txid?: string,
     offset?: number,
