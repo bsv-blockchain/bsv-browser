@@ -53,9 +53,12 @@ android {
 }
 
 dependencies {
-  implementation 'com.yubico.yubikit:android:3.2.0'
-  implementation 'com.yubico.yubikit:piv:3.2.0'
-  implementation 'com.yubico.yubikit:core:3.2.0'
+  // Pinned to 3.1.0: yubikit 3.2.0's AAR metadata demands minCompileSdk=37,
+  // and Expo SDK 55 / AGP 8.12 compile against 36 (36 is AGP 8.12's max).
+  // 3.1.0 declares minCompileSdk=36 and carries the same PIV API surface.
+  implementation 'com.yubico.yubikit:android:3.1.0'
+  implementation 'com.yubico.yubikit:piv:3.1.0'
+  implementation 'com.yubico.yubikit:core:3.1.0'
   implementation project(':react-native-nitro-modules')
   // For < 0.71, this will be from the local maven repo; for > 0.71 this is
   // replaced by `com.facebook.react:react-android:$version` by the react
