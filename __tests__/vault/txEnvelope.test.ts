@@ -129,6 +129,21 @@ const p2pkh = () => Uint8Array.from([0x76, 0xa9, 0x14, ...new Array(20).fill(0x0
 
 // ── tests ─────────────────────────────────────────────────────────────────
 
+describe('layout constants', () => {
+  it('match r1k1.ts, which txEnvelope deliberately does not import', () => {
+    // txEnvelope declares these locally so the storage import graph does not pull
+    // @bsv/templates (via r1k1.ts) into app startup for two integers. This test is
+    // what stops the duplication drifting.
+    // R1K1_LOCK_LEN / R1K1_R1_UNLOCK_LEN here are r1k1.ts's exports (imported at
+    // the top of this file); the envelope's local copies must equal them, and the
+    // real fixture must match both.
+    expect(R1K1_LOCK_LEN).toBe(959_632)
+    expect(R1K1_R1_UNLOCK_LEN).toBe(959_871)
+    expect(LOCK.length).toBe(R1K1_LOCK_LEN)
+    expect(r1UnlockingScript().length).toBe(R1K1_R1_UNLOCK_LEN)
+  })
+})
+
 describe('compressTransaction / expandTransaction', () => {
   it('round-trips a deposit byte-exactly and preserves the txid', async () => {
     const tx = buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 300_000, script: LOCK }] })

@@ -40,10 +40,6 @@
 import { Hash, Utils } from '@bsv/sdk'
 import { VaultError } from './types'
 import {
-  R1K1_LOCK_LEN,
-  R1K1_R1_UNLOCK_LEN
-} from './r1k1'
-import {
   compressScriptBytes,
   compressScriptCodeBytes,
   describeCurrentVaultTemplate,
@@ -88,6 +84,18 @@ const SPAN_HEADER_LEN = 4 + 1 + 2
  */
 const UNLOCK_SCRIPT_CODE_OFFSET = 246
 const SCRIPT_CODE_LEN = 959_572
+
+/**
+ * Script lengths, declared here rather than imported from r1k1.ts.
+ *
+ * r1k1.ts imports @bsv/templates, and this module is now in the STORAGE import
+ * graph — so importing it from here would pull the template library into app
+ * startup for the sake of two integers, on a wallet that already fights cold
+ * start. __tests__/vault/txEnvelope.test.ts asserts both against r1k1's
+ * exports, so the duplication cannot drift.
+ */
+const R1K1_LOCK_LEN = 959_632
+const R1K1_R1_UNLOCK_LEN = 959_871
 
 type Region = 0x01 | 0x02
 
