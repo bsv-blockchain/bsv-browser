@@ -11,7 +11,13 @@ import {
   splitOutpoint
 } from './methods/findSql'
 import { scrubHistoryJson } from './methods/historyNotes'
-import { assertExpanded, expandStoredRange, expandStoredScript, expandStoredTx } from './methods/expandStored'
+import {
+  assertExpanded,
+  compressStoredTx,
+  expandStoredRange,
+  expandStoredScript,
+  expandStoredTx
+} from './methods/expandStored'
 import { StorageError, storageErrorFromSqlite } from './errors'
 import {
   RECLAIM_CANDIDATES_SQL,
@@ -533,6 +539,11 @@ export class StorageExpoSQLite extends StorageProvider {
     // See methods/historyNotes.ts: provider error notes carry the full EF/rawTx
     // hex and reach this column untruncated.
     e.history = scrubHistoryJson(e.history)
+    // Compress-on-write. A vault transaction's rawTx is ~960 KB of template that
+    // reconstructs from ~40 bytes; this is the column TaskSendWaiting re-reads in
+    // full on every sweep and the one that pushed a backup chunk over the
+    // server's 1 MiB cap.
+    e.rawTx = await compressStoredTx(e.rawTx, e.txid)
     const id = await this.sqlInsert('proven_tx_reqs', e, 'provenTxReqId')
     tx.provenTxReqId = id
     return id
@@ -616,6 +627,7 @@ export class StorageExpoSQLite extends StorageProvider {
   async insertTransaction(tx: TableTransaction, trx?: TrxToken): Promise<number> {
     const e = await this.validateEntityForInsert(tx, trx)
     if (e.transactionId === 0) delete (e as any).transactionId
+    e.rawTx = await compressStoredTx(e.rawTx, e.txid)
     const id = await this.sqlInsert('transactions', e, 'transactionId')
     tx.transactionId = id
     return id
@@ -656,7 +668,25 @@ export class StorageExpoSQLite extends StorageProvider {
   async updateProvenTxReq(id: number | number[], update: Partial<TableProvenTxReq>, trx?: TrxToken): Promise<number> {
     const u = this.validatePartialForUpdate(update) as any
     if ('history' in u) u.history = scrubHistoryJson(u.history)
+    // An update carrying rawTx must know which transaction it is, or the envelope
+    // could not self-verify on the way out. When the txid is not part of the same
+    // update, read it back rather than storing an unverifiable envelope.
+    if (u.rawTx) {
+      const txid = u.txid ?? (await this.txidOfProvenTxReq(id))
+      u.rawTx = await compressStoredTx(u.rawTx, txid)
+    }
     return await this.sqlUpdate('proven_tx_reqs', id, u, 'provenTxReqId')
+  }
+
+  /** The txid of a single proven_tx_req, for a compress-on-update that did not
+   * carry one. Returns undefined for a multi-row update, which then stores raw. */
+  private async txidOfProvenTxReq(id: number | number[]): Promise<string | undefined> {
+    if (Array.isArray(id)) return undefined
+    const row = (await this.getDB().getFirstAsync(
+      'SELECT txid FROM proven_tx_reqs WHERE provenTxReqId = ?',
+      [id]
+    )) as { txid?: string } | null
+    return row?.txid
   }
 
   async updateCertificate(id: number, update: Partial<TableCertificate>, trx?: TrxToken): Promise<number> {
@@ -715,8 +745,22 @@ export class StorageExpoSQLite extends StorageProvider {
   }
 
   async updateTransaction(id: number | number[], update: Partial<TableTransaction>, trx?: TrxToken): Promise<number> {
-    const u = this.validatePartialForUpdate(update)
-    return await this.sqlUpdate('transactions', id, u as any, 'transactionId')
+    const u = this.validatePartialForUpdate(update) as any
+    if (u.rawTx) {
+      const txid = u.txid ?? (await this.txidOfTransaction(id))
+      u.rawTx = await compressStoredTx(u.rawTx, txid)
+    }
+    return await this.sqlUpdate('transactions', id, u, 'transactionId')
+  }
+
+  /** The txid of a single transaction row, for a compress-on-update that did not
+   * carry one. Undefined for a multi-row update, which then stores raw. */
+  private async txidOfTransaction(id: number | number[]): Promise<string | undefined> {
+    if (Array.isArray(id)) return undefined
+    const row = (await this.getDB().getFirstAsync('SELECT txid FROM transactions WHERE transactionId = ?', [
+      id
+    ])) as { txid?: string } | null
+    return row?.txid
   }
 
   async updateTxLabel(id: number, update: Partial<TableTxLabel>, trx?: TrxToken): Promise<number> {

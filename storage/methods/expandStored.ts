@@ -30,7 +30,7 @@
  * unreconstructable and erroring the whole query would be worse.
  */
 import { expandScriptBytes, isCompressed } from '@/services/vault/templateCodec'
-import { expandTransaction, isEnvelope, readEnvelopeRange } from '@/services/vault/txEnvelope'
+import { compressTransaction, expandTransaction, isEnvelope, readEnvelopeRange } from '@/services/vault/txEnvelope'
 
 const asBytes = (b: number[] | Uint8Array): Uint8Array => (b instanceof Uint8Array ? b : Uint8Array.from(b))
 
@@ -124,5 +124,41 @@ export function assertExpanded(bytes: number[] | Uint8Array | undefined, what: s
       `${what} still carries a compressed-at-rest marker (0x${first.toString(16)}) at the point where real ` +
         'bytes are required — a read path is missing its expansion hook'
     )
+  }
+}
+
+/**
+ * Compress a stored transaction blob on the way in.
+ *
+ * Idempotent and total: an envelope is returned as-is, a transaction with no
+ * R1-K1 span is returned unchanged, and anything unparseable is returned
+ * unchanged — so this is safe to call on every write, which is what keeps a
+ * future write path from being a missing `if`.
+ *
+ * Idempotence is load-bearing rather than tidy: `processSyncChunk` feeds bytes
+ * from a backup restore straight back through the insert methods, and those bytes
+ * are in STORED form because getSyncChunk deliberately emits stored form. Without
+ * the envelope guard, a restore would wrap an envelope in an envelope.
+ *
+ * @param txid the transaction's own txid. Required, because expansion verifies
+ *   the reconstruction by hashing it and comparing — a blob with no single txid
+ *   (a BEEF container) must not be routed here.
+ */
+export async function compressStoredTx<T extends number[] | Uint8Array | undefined>(
+  bytes: T,
+  txid: string | undefined
+): Promise<T> {
+  if (!bytes || bytes.length === 0) return bytes
+  if (isEnvelope(bytes)) return bytes
+  if (!txid || !/^[0-9a-fA-F]{64}$/.test(txid)) return bytes
+  try {
+    const compressed = await compressTransaction(asBytes(bytes), txid)
+    if (compressed.length >= bytes.length) return bytes
+    return (bytes instanceof Uint8Array ? compressed : Array.from(compressed)) as T
+  } catch (e) {
+    // Never fail a write because compression could not help. The uncompressed
+    // bytes are always correct; the envelope is only ever an optimisation.
+    console.warn(`[storage] could not compress rawTx for ${txid}: ${(e as Error)?.message ?? 'unknown'}`)
+    return bytes
   }
 }
