@@ -15,6 +15,7 @@ import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
 import { useWallet } from '@/context/WalletContext'
 import { guardVaultAccess } from '@/services/vault/guard'
+import { capWalletArgs } from '@/services/capWalletArgs'
 import { ADMIN_ORIGINATOR } from '@/context/config'
 import { showToast } from '@/components/ui/Toast'
 import connectionStore, { type Connection } from '@/stores/ConnectionStore'
@@ -120,7 +121,7 @@ export default observer(function ConnectionsScreen() {
       return
     }
     const originator = domainFromOrigin(result.params.origin)
-    const wallet = new WalletClient(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR), originator)
+    const wallet = new WalletClient(capWalletArgs(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR)), originator)
     try {
       await connect(result.params, wallet)
     } catch (err) {
@@ -134,7 +135,7 @@ export default observer(function ConnectionsScreen() {
     if (!managers.permissionsManager) return
     try {
       const protocolID = JSON.parse(conn.protocolID) as WalletProtocol
-      const wallet = new WalletClient(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR), domainFromOrigin(conn.origin))
+      const wallet = new WalletClient(capWalletArgs(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR)), domainFromOrigin(conn.origin))
       const ws = new WebSocket(`${conn.relay}/ws?topic=${conn.sessionId}&role=mobile`)
 
       ws.onopen = async () => {
@@ -172,7 +173,7 @@ export default observer(function ConnectionsScreen() {
 
   async function handleReconnect(conn: Connection) {
     if (!managers.permissionsManager) return
-    const wallet = new WalletClient(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR), domainFromOrigin(conn.origin))
+    const wallet = new WalletClient(capWalletArgs(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR)), domainFromOrigin(conn.origin))
     try {
       await reconnect(conn, wallet)
     } catch (err) {

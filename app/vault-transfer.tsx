@@ -29,6 +29,7 @@ import { useWallet } from '@/context/WalletContext'
 import { useVaultBalance } from '@/hooks/useVaultBalance'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { depositToVault, withdrawFromVault, type VaultWallet } from '@/services/vault/transfers'
+import { getOnline } from '@/utils/net/online'
 import { VaultError } from '@/services/vault/types'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
@@ -78,22 +79,34 @@ export default function VaultTransferScreen() {
     try {
       const w = pm as unknown as VaultWallet
       if (isDeposit) {
-        await depositToVault(w, adminOriginator, sats)
+        await depositToVault(w, adminOriginator, sats, { isOnline: getOnline })
         sounds.confirmation()
         haptics.success()
         showToast(t('vault_deposit_done'), { type: 'success' })
       } else {
-        await withdrawFromVault(
+        const result = await withdrawFromVault(
           w,
           adminOriginator,
           isMax ? 'all' : sats,
           t('vault_withdraw_reason', { amount: isMax ? (balance ?? 0) : sats }),
-          // Lets the reservation heal find the reserving transaction with one
-          // indexed query instead of paging every action in the wallet.
-          storage ? outpoints => storage.findSpendingReferences(outpoints) : undefined
+          {
+            // Lets the reservation heal find the reserving transaction with one
+            // indexed query instead of paging every action in the wallet.
+            findSpendingReferences: storage ? outpoints => storage.findSpendingReferences(outpoints) : undefined,
+            isOnline: getOnline
+          }
         )
         // vaultOpen/haptic already fired by the ceremony's onArmed
-        showToast(t('vault_withdraw_done'), { type: 'success' })
+        //
+        // A capped withdrawal is partial by design (see VAULT_MAX_INPUTS), so
+        // say so rather than letting the balance look wrong: the vault still
+        // holds the untouched outputs, and repeating the withdrawal moves them.
+        showToast(
+          result.remainingInputs > 0
+            ? t('vault_withdraw_partial', { count: result.remainingInputs })
+            : t('vault_withdraw_done'),
+          { type: 'success' }
+        )
       }
       setAmount('')
       refresh()

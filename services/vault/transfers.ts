@@ -60,6 +60,41 @@ export type SpendingReferenceLookup = (
 ) => Promise<{ reference: string; status: string }[]>
 
 /**
+ * Injected dependencies for a vault transfer.
+ *
+ * Injected rather than imported so the module stays testable without native
+ * modules or a database, and optional so a caller that has neither still works.
+ */
+export interface VaultTransferOptions {
+  /** Storage-backed reservation heal. See SpendingReferenceLookup. */
+  findSpendingReferences?: SpendingReferenceLookup
+  /**
+   * The app's single online signal.
+   *
+   * Vault transfers are refused while offline. The offline queue exists for
+   * small casual default-basket payments: processOfflineActions holds every held
+   * request's full rawTx and inputBEEF in one in-memory Beef, and a held row has
+   * no attempt cap, no expiry and no local terminal state that releases its
+   * reservation — so a vault transaction landing there would freeze real money
+   * with no way out. Refusing up front is also what makes "no vault row ever
+   * reaches the offline drain" a testable invariant.
+   */
+  isOnline?: () => Promise<boolean>
+}
+
+export interface VaultSpendResult {
+  txid: string
+  /**
+   * Vault outputs left untouched because of the input cap.
+   *
+   * Non-zero means the withdrawal was partial: the caller should tell the user
+   * that funds remain and that repeating the withdrawal will move them (each
+   * pass also consolidates, so the next one needs fewer inputs).
+   */
+  remainingInputs: number
+}
+
+/**
  * Economic-dust floor for a vault output — a hard minimum, not a caution.
  *
  * An R1 spend pays the ~960 KB script twice — once to create the output, once
@@ -69,6 +104,27 @@ export type SpendingReferenceLookup = (
  * withdrawal rather than re-vaulted.
  */
 export const VAULT_DEPOSIT_MIN = 200_000
+
+/**
+ * Vault inputs per withdrawal.
+ *
+ * This used to be "spend EVERY output — there is no input cap", which is the
+ * single largest OOM risk in the app and is not fixed by storing scripts
+ * compressed. Each input contributes ~1.83 MB of inputBEEF (a measured 146 MB
+ * Hermes array at 20 inputs), and Extended Format re-embeds every input's SOURCE
+ * locking script, so the leanest possible wire payload is ~188 MB at 20 inputs
+ * however the bytes are stored at rest.
+ *
+ * 6 sits inside all three independent constraints: measured memory (~110-150 MB
+ * at 6 versus ~350 MB at 20), Arcade's 10 MB MaxTxSizePolicy (~10 inputs) and
+ * its 32 MiB single-transaction endpoint (~18 inputs). The hard ceiling is the
+ * value no future tuning may exceed without redoing that arithmetic.
+ *
+ * Consolidation is automatic: a capped withdrawal re-vaults its remainder as one
+ * output, so repeated withdrawals converge on a single vault UTXO.
+ */
+export const VAULT_MAX_INPUTS = 6
+export const VAULT_HARD_MAX_INPUTS = 8
 
 /** The subset of the wallet interface transfers depends on (injected so the
  * whole module is testable without the toolbox). */
@@ -331,6 +387,20 @@ async function freeReservedInputs(
   return await abortReservingOutpoints(w, adminOriginator, wedged, findSpendingReferences)
 }
 
+/**
+ * Refuse a vault transfer while offline.
+ *
+ * Checked before anything else: before the deposit's backup attestation, and
+ * before the withdrawal arms the YubiKey — an offline user must not be asked to
+ * present a key for a transfer that cannot proceed.
+ */
+async function requireOnline(opts?: VaultTransferOptions): Promise<void> {
+  if (!opts?.isOnline) return
+  if (!(await opts.isOnline())) {
+    throw new VaultError('requires-online', 'Vault transfers need a connection')
+  }
+}
+
 // ── balance ─────────────────────────────────────────────────────────────
 
 export async function getVaultBalance(w: VaultWallet, adminOriginator: string): Promise<number> {
@@ -343,8 +413,10 @@ export async function getVaultBalance(w: VaultWallet, adminOriginator: string): 
 export async function depositToVault(
   w: VaultWallet,
   adminOriginator: string,
-  satoshis: number
+  satoshis: number,
+  opts?: VaultTransferOptions
 ): Promise<{ txid: string }> {
+  await requireOnline(opts)
   if (satoshis < VAULT_DEPOSIT_MIN) {
     throw new VaultError('below-dust', `Vault deposits must be at least ${VAULT_DEPOSIT_MIN} satoshis`)
   }
@@ -398,8 +470,8 @@ async function spendVaultOutputs(
   amount: number | 'all',
   reason: string,
   spend: SpendPath,
-  opts: { revaultRemainder: boolean; findSpendingReferences?: SpendingReferenceLookup }
-): Promise<{ txid: string }> {
+  opts: { revaultRemainder: boolean } & VaultTransferOptions
+): Promise<VaultSpendResult> {
   // Announce work BEFORE starting it, then hand the JS thread back once so
   // React can actually paint the sheet. Everything below — a ~1.83 MB
   // listOutputs, then createAction over a ~960 KB-per-input transaction —
@@ -438,20 +510,35 @@ async function spendVaultOutputs(
   if (spendable.length === 0) throw new VaultError('vault-empty', 'Vault is empty')
 
   const total = spendable.reduce((s, o) => s + o.satoshis, 0)
-  const want = amount === 'all' ? total : amount
-  if (want > total) throw new VaultError('amount-exceeds-balance', 'Withdrawal exceeds vault balance')
+  if (amount !== 'all' && amount > total) {
+    throw new VaultError('amount-exceeds-balance', 'Withdrawal exceeds vault balance')
+  }
 
-  // Spend EVERY output — there is no input cap. Each input's ~960 KB R1
-  // unlocking script (it embeds its own full preimage — see r1k1.ts) is built
-  // and signed one at a time (the sequential loop below), which bounds
-  // TRANSIENT working memory to roughly one input's worth at a time rather
-  // than N in flight together. The final `spends` payload handed to
-  // signAction is still O(inputs) in size — that is inherent to the R1
-  // script, not something sequencing can avoid — so consolidating the vault
-  // toward a single UTXO after each withdrawal is what actually keeps later
-  // ones cheap.
-  const selected = spendable
-  const acc = total
+  // Bounded input count. Each input's ~960 KB R1 unlocking script is built and
+  // signed one at a time (the sequential loop below), which bounds TRANSIENT
+  // working memory to roughly one input at a time — but the `spends` payload
+  // handed to signAction, and the Extended Format that goes on the wire, are
+  // both O(inputs) and unavoidable. See VAULT_MAX_INPUTS.
+  //
+  // Largest first (already sorted), so the fewest inputs cover the most value.
+  const cap = Math.min(VAULT_MAX_INPUTS, VAULT_HARD_MAX_INPUTS)
+  const selected = spendable.slice(0, cap)
+  const acc = selected.reduce((s, o) => s + o.satoshis, 0)
+  const remainingInputs = spendable.length - selected.length
+
+  // 'all' means "as much as one safe transaction can carry"; the untouched
+  // outputs stay in the vault and the re-vaulted remainder consolidates what was
+  // spent, so repeating the withdrawal drains it.
+  const want = amount === 'all' ? acc : amount
+  if (want > acc) {
+    // The vault holds enough (checked above) but not within the input cap. Say
+    // so, rather than blaming the balance: the remedy is a smaller withdrawal,
+    // which also consolidates and makes the next one cheaper.
+    throw new VaultError(
+      'too-many-inputs',
+      `Withdrawing ${want} satoshis would need more than ${cap} vault inputs; withdraw a smaller amount first`
+    )
+  }
 
   const outputs: unknown[] = []
   const remainder = acc - want
@@ -514,7 +601,7 @@ async function spendVaultOutputs(
   if (!created.signableTransaction) {
     const txid = created.txid ?? (created.tx ? Transaction.fromAtomicBEEF(created.tx).id('hex') : undefined)
     if (!txid) throw new VaultError('no-transaction', 'Withdrawal produced no transaction')
-    return { txid }
+    return { txid, remainingInputs }
   }
 
   const { tx: atomic, reference } = created.signableTransaction
@@ -628,7 +715,7 @@ async function spendVaultOutputs(
   )
   const txid = signed.txid ?? (signed.tx ? Transaction.fromAtomicBEEF(signed.tx).id('hex') : undefined)
   if (!txid) throw new VaultError('no-transaction', 'Withdrawal produced no transaction')
-  return { txid }
+  return { txid, remainingInputs }
 }
 
 /** Withdraw via the YubiKey (R1 branch). Arms one signing session for the whole
@@ -640,13 +727,15 @@ export async function withdrawFromVault(
   adminOriginator: string,
   amount: number | 'all',
   reason: string,
-  findSpendingReferences?: SpendingReferenceLookup
-): Promise<{ txid: string }> {
+  opts?: VaultTransferOptions
+): Promise<VaultSpendResult> {
+  // Before the ceremony: no key prompt for a transfer that cannot proceed.
+  await requireOnline(opts)
   const signer = await requestVaultSigner(reason)
   try {
     return await spendVaultOutputs(w, adminOriginator, amount, reason, { path: 'r1', signer }, {
       revaultRemainder: true,
-      findSpendingReferences
+      ...opts
     })
   } finally {
     signer.release()
@@ -663,12 +752,13 @@ export async function sweepVaultWithHD(
   adminOriginator: string,
   hd: HD,
   reason: string,
-  findSpendingReferences?: SpendingReferenceLookup
-): Promise<{ txid: string } | null> {
+  opts?: VaultTransferOptions
+): Promise<VaultSpendResult | null> {
+  await requireOnline(opts)
   try {
     return await spendVaultOutputs(w, adminOriginator, 'all', reason, { path: 'k1', hd }, {
       revaultRemainder: false,
-      findSpendingReferences
+      ...opts
     })
   } catch (e) {
     if (e instanceof VaultError && e.code === 'vault-empty') return null
