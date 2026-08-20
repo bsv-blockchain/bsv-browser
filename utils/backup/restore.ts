@@ -64,6 +64,21 @@ export async function restoreFromBackup (deps: RestoreDeps): Promise<RestoreResu
   const chosen = pickTarget(devices, deps.deviceId, deps.generation)
 
   const settings = await deps.storage.makeAvailable()
+
+  // processSyncChunk's preconditions, which a fresh, just-migrated database does
+  // not meet: it does verifyTruthy(findUserByIdentityKey(identityKey)) and then
+  // verifyOne(findSyncStates({storageIdentityKey: fromStorageIdentityKey, userId})).
+  // On a new device the restore runs BEFORE addWalletStorageProvider/getAuth ever
+  // create the user row, so without seeding both rows here every replay dies with
+  // the toolbox's bare "A truthy value is required." Both helpers are idempotent
+  // (find-or-insert), so a retry converges.
+  const { user } = await deps.storage.findOrInsertUser(deps.identityKey)
+  await deps.storage.findOrInsertSyncStateAuth(
+    { userId: user.userId, identityKey: deps.identityKey },
+    chosen.deviceId,
+    'backup-restore'
+  )
+
   const reader = new RemoteSyncReader(client, wallet, chosen.deviceId, chosen.generation, settings)
 
   let chunks = 0
