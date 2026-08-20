@@ -4,10 +4,19 @@
 
 Two store artifacts, built from `claude/vault-expansion-boundary` (which contains the whole PR stack: #136 → #137 → #138 plus the BEEF work). Both were archived from the identical working tree, so the two binaries carry the same code.
 
-- **iOS** → `build-*.ipa` (newest), production profile, local credentials. Upload with Transporter, not `eas submit` — see the note below.
-- **Android** → `build-*.aab` (newest), production profile, app-bundle, remote credentials.
+- **iOS** → `build-1787200068859.ipa` — 39.2 MB, version **1.6.0 build 165**, `org.bsvassociation.browser`, team `SV8SWTHA2H`. Upload with Transporter, not `eas submit` — see the note below.
+- **Android** → `build-1787199672574.aab` — 112.3 MB, **versionCode 91** (EAS auto-increment).
 
-`ls -lat build-*.ipa build-*.aab | head -4` gives the newest of each. Anything older is from a previous session.
+Both were verified after building, not just reported as "successful", because on this project a build has succeeded before while silently missing a whole native module:
+
+| Check | iOS | Android |
+|---|---|---|
+| YubiKey native module linked | `HybridYubiKeyPiv` + `YubiKitManager` present in the binary; pods `YubiKeyPiv`, `YubiKit` | `libYubiKeyPiv.so` in all four ABIs |
+| Localpay transport linked | `HybridLocalPayTransport` present | `libLocalPayTransport.so` in all four ABIs |
+| No banned Bluetooth key | no `NSBluetooth*` key at all | n/a |
+| NFC kept | `com.apple.developer.nfc.readersession.formats` entitlement + `NFCReaderUsageDescription` present | n/a |
+| Release signing | `get-task-allow = false`, distribution-signed | n/a |
+| 16 KB page alignment | n/a | first LOAD segment `2**14` on every lib |
 
 **Transporter, not Deliver.** Past experience on this project: `ITMS-90683` appears at Deliver and demands a `NSBluetoothAlwaysUsageDescription` key that must NOT be added, and Transporter's own Verify step does not catch it. If it appears again, the answer is still not to add the key.
 
