@@ -5,11 +5,13 @@ import {
   PROVEN_HEIGHTS_SQL,
   buildFindSql,
   columnsExcluding,
+  fullReadSql,
   rangeReadSql,
   spendingReferencesSql,
   splitOutpoint
 } from './methods/findSql'
 import { scrubHistoryJson } from './methods/historyNotes'
+import { assertExpanded, expandStoredRange, expandStoredScript, expandStoredTx } from './methods/expandStored'
 import { StorageError, storageErrorFromSqlite } from './errors'
 import {
   RECLAIM_CANDIDATES_SQL,
@@ -848,6 +850,13 @@ export class StorageExpoSQLite extends StorageProvider {
 
     for (const o of results) {
       if (!args.noScript) {
+        // E3 of the expansion boundary, BEFORE validateOutputScript: that
+        // function short-circuits when lockingScript.length equals scriptLength
+        // and otherwise re-slices from rawTx, so expanding after it would let a
+        // compressed value be silently accepted on createAction-born outputs
+        // (vault deposits, change) while breaking internalize-born ones — green
+        // on a vault wallet, broken on someone else's.
+        o.lockingScript = await expandStoredScript(o.lockingScript)
         await this.validateOutputScript(o, args.trx)
       } else {
         o.lockingScript = undefined
@@ -928,6 +937,9 @@ export class StorageExpoSQLite extends StorageProvider {
 
     for (const t of results) {
       if (!args.noRawTx) {
+        // E4 of the expansion boundary.
+        t.rawTx = await expandStoredTx(t.rawTx)
+        t.inputBEEF = await expandStoredTx(t.inputBEEF)
         await this.validateRawTransaction(t, args.trx)
       } else {
         t.rawTx = undefined
@@ -979,14 +991,33 @@ export class StorageExpoSQLite extends StorageProvider {
       'provenTxReqId',
       extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
     )
-    return this.validateEntities(rows, undefined, ['notified', 'wasBroadcast'])
+    const reqs = this.validateEntities(rows, undefined, ['notified', 'wasBroadcast'])
+    // E5 of the expansion boundary. proven_tx_reqs is where the monitor's txid
+    // tripwire reads from (TaskCheckForProofs re-hashes rawTx and flips the row
+    // to status='invalid' on a mismatch — irreversible, and it cascades to every
+    // notified transaction), and it is also the row mergeReqToBeefToShareExternally
+    // turns into a broadcast payload.
+    for (const req of reqs) {
+      req.rawTx = await expandStoredTx(req.rawTx)
+      req.inputBEEF = await expandStoredTx(req.inputBEEF)
+    }
+    return reqs
   }
 
   async findProvenTxs(args: FindProvenTxsArgs): Promise<TableProvenTx[]> {
     if ((args.partial as any).rawTx) throw new Error('ProvenTxs may not be found by rawTx value.')
     if ((args.partial as any).merklePath) throw new Error('ProvenTxs may not be found by merklePath value.')
     const rows = await this.sqlFind<any>('proven_txs', args, 'provenTxId')
-    return this.validateEntities(rows)
+    const proven = this.validateEntities(rows)
+    // E6 of the expansion boundary. proven_txs.rawTx is the merkle evidence:
+    // Beef.verifyBumpIndexLeaves requires hash256(rawTx) to equal a chain-committed
+    // BUMP leaf, and that check lives in @bsv/sdk where no subclass can intercept
+    // it — so anything leaving here must already be real bytes.
+    for (const p of proven) {
+      p.rawTx = await expandStoredTx(p.rawTx)
+      assertExpanded(p.rawTx, `proven_txs.rawTx for ${p.txid}`)
+    }
+    return proven
   }
 
   async findTxLabelMaps(args: FindTxLabelMapsArgs): Promise<TableTxLabelMap[]> {
@@ -1178,6 +1209,22 @@ export class StorageExpoSQLite extends StorageProvider {
   // getForUser methods (4)
   // ============================================================================
 
+  /**
+   * DELIBERATELY OUTSIDE the expansion boundary — do not add an expansion hook.
+   *
+   * This and getProvenTxReqsForUser below are what getSyncChunk reads, and a
+   * sync chunk is the ONE consumer that wants bytes in their stored form: the
+   * whole point of compressing at rest is that a vault record fits inside the
+   * backup server's 1 MiB blob cap. Expanding here would put ~960 KB back into
+   * every chunk carrying a vault transaction and reinstate exactly the wedge
+   * this work exists to clear.
+   *
+   * Both issue their own SQL and so bypass the find* hooks anyway, which is what
+   * makes the exception expressible at all — but it is an exception, and the
+   * restore side has to know: processSyncChunk feeds these bytes back through
+   * insertProvenTxReq/insertOutput, where the compress-on-write hooks must be
+   * idempotent (isEnvelope/isCompressed guards) rather than double-wrapping.
+   */
   async getProvenTxsForUser(args: FindForUserSincePagedArgs): Promise<TableProvenTx[]> {
     const db = this.getDB()
     let query = `SELECT pt.* FROM proven_txs pt
@@ -1282,7 +1329,47 @@ export class StorageExpoSQLite extends StorageProvider {
     return await this.insertCertificate(certificate)
   }
 
+  /**
+   * E7 of the expansion boundary: the one place stored bytes become a network
+   * payload.
+   *
+   * `attemptToPostReqsToNetwork` builds its beef exclusively through here, and
+   * every broadcaster — ARC, Arcade, WhatsOnChain, Bitails — reads out of that
+   * beef, so this is the convergence point for the wire. Reqs loaded through
+   * findProvenTxReqs are already expanded by E5, which makes this a belt rather
+   * than the mechanism; it exists because a caller can hand over a req obtained
+   * some other way (getProvenTxReqsForUser deliberately returns stored form),
+   * and posting a compressed payload is not a recoverable mistake: ARC rejects
+   * it, the req goes `invalid`, `reviewStatus` is a stub so it never becomes
+   * `failed`, and `releaseStuckReservations` only frees outputs whose spender is
+   * `failed` — so vault UTXOs stay reserved against a dead txid with nothing
+   * surfaced.
+   */
+  async mergeReqToBeefToShareExternally(
+    req: TableProvenTxReq,
+    mergeToBeef: Beef,
+    knownTxids: string[],
+    trx?: TrxToken
+  ): Promise<void> {
+    const expanded: TableProvenTxReq = {
+      ...req,
+      rawTx: await expandStoredTx(req.rawTx),
+      inputBEEF: await expandStoredTx(req.inputBEEF)
+    }
+    assertExpanded(expanded.rawTx, `broadcast rawTx for ${req.txid}`)
+    assertExpanded(expanded.inputBEEF, `broadcast inputBEEF for ${req.txid}`)
+    return await super.mergeReqToBeefToShareExternally(expanded, mergeToBeef, knownTxids, trx)
+  }
+
   // Data retrieval
+  /**
+   * E1 of the expansion boundary (see storage/methods/expandStored.ts).
+   *
+   * Every identity-deriving and BEEF-assembling consumer in the toolbox reaches
+   * bytes through here, including three that bypass the find* hooks entirely, so
+   * this is the load-bearing one: a compressed value escaping here becomes a
+   * WRONG TXID rather than an error.
+   */
   async getProvenOrRawTx(txid: string, trx?: TrxToken): Promise<ProvenOrRawTx> {
     const r: ProvenOrRawTx = { proven: undefined, rawTx: undefined, inputBEEF: undefined }
     const provenResults = await this.findProvenTxs({ partial: { txid }, trx })
@@ -1295,6 +1382,15 @@ export class StorageExpoSQLite extends StorageProvider {
         r.inputBEEF = req.inputBEEF
       }
     }
+    // findProvenTxs/findProvenTxReqs already expand (E4/E5), so these are
+    // normally no-ops. Kept unconditional because this method is what the
+    // bypassing consumers call, and an assertion is cheaper than reasoning about
+    // which of them arrived by which route.
+    r.rawTx = await expandStoredTx(r.rawTx)
+    r.inputBEEF = await expandStoredTx(r.inputBEEF)
+    if (r.proven) r.proven.rawTx = (await expandStoredTx(r.proven.rawTx)) as number[]
+    assertExpanded(r.rawTx, `proven_tx_reqs.rawTx for ${txid}`)
+    assertExpanded(r.proven?.rawTx, `proven_txs.rawTx for ${txid}`)
     return r
   }
 
@@ -1438,10 +1534,25 @@ export class StorageExpoSQLite extends StorageProvider {
       const db = this.getDB()
       // substr is 1-indexed over bytes; a JS offset of n starts at n + 1.
       const args = [offset + 1, length, txid]
-      const proven = (await db.getFirstAsync(rangeReadSql('proven_txs'), args)) as { chunk?: Uint8Array } | null
-      const row =
-        proven ?? ((await db.getFirstAsync(rangeReadSql('proven_tx_reqs'), args)) as { chunk?: Uint8Array } | null)
+      type RangeRow = { marker?: Uint8Array; chunk?: Uint8Array } | null
+      let table: 'proven_txs' | 'proven_tx_reqs' = 'proven_txs'
+      let row = (await db.getFirstAsync(rangeReadSql('proven_txs'), args)) as RangeRow
+      if (!row) {
+        table = 'proven_tx_reqs'
+        row = (await db.getFirstAsync(rangeReadSql('proven_tx_reqs'), args)) as RangeRow
+      }
       if (!row?.chunk) return undefined
+
+      // E2 of the expansion boundary. Slicing a stored envelope is the silent
+      // fund-eviction path (see storage/methods/expandStored.ts), so a marked row
+      // is re-read whole and the range served from its span list.
+      if (row.marker?.[0] === 0xfe) {
+        const full = (await db.getFirstAsync(fullReadSql(table), [txid])) as { rawTx?: Uint8Array } | null
+        if (!full?.rawTx) return undefined
+        const range = await expandStoredRange(Array.from(full.rawTx), offset, length)
+        assertExpanded(range, `range of rawTx for ${txid}`)
+        return range
+      }
       return Array.from(row.chunk)
     }
 
