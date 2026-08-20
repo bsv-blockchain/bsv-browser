@@ -9,6 +9,7 @@
  * makes a crash recoverable.
  */
 import type { IncomingPayment, PaymentToken, PeerPayClient } from '@bsv/message-box-client'
+import { Transaction } from '@bsv/sdk'
 import { markOutboxSent, saveOutboxEntry, updateOutboxEntry, type OutboxEntry } from '@/utils/peerpay/outbox'
 
 export const MESSAGE_BOX_URL_KEY = 'message_box_url'
@@ -199,12 +200,23 @@ export async function sendViaHandle(args: {
   recipient: string
   satoshis: number
   messageBoxUrl: string
-}): Promise<{ outboxId: string }> {
+}): Promise<{ outboxId: string; satoshis: number }> {
   const { client, storage, recipient, messageBoxUrl } = args
   const sats = Math.round(Number(args.satoshis))
   if (!Number.isFinite(sats) || sats <= 0) throw new Error('Invalid amount')
 
   const token = await client.createPaymentToken({ recipient, amount: sats })
+  // A send-max request asks for maxPossibleSatoshis and the wallet rewrites the
+  // output to whatever the inputs could fund, so the token minted above still
+  // carries the sentinel as its amount. The recipient displays token.amount, so
+  // deliver the real figure: the BRC-29 module builds with randomizeOutputs:
+  // false and outputIndex 0, making output 0 authoritative.
+  if (sats === 2099999999999999) {
+    const tx = Transaction.fromAtomicBEEF(token.transaction as number[])
+    const paid = tx.outputs[0]?.satoshis
+    if (typeof paid !== 'number' || paid <= 0) throw new Error('Could not determine send-max amount')
+    token.amount = paid
+  }
   const outboxId = await saveOutboxEntry(storage, {
     recipient,
     token: token as PaymentToken & { transaction: number[] },
@@ -216,7 +228,7 @@ export async function sendViaHandle(args: {
     body: JSON.stringify(token)
   })
   await markOutboxSent(storage, outboxId)
-  return { outboxId }
+  return { outboxId, satoshis: token.amount }
 }
 
 /** Re-deliver a persisted token. The transaction is already broadcast; only delivery is retried. */
