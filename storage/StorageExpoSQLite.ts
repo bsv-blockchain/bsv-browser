@@ -10,6 +10,15 @@ import {
   splitOutpoint
 } from './methods/findSql'
 import { scrubHistoryJson } from './methods/historyNotes'
+import { StorageError, storageErrorFromSqlite } from './errors'
+import {
+  RECLAIM_CANDIDATES_SQL,
+  RECLAIM_EXCLUDED_SQL,
+  RECLAIM_INPUT_BEEF_SQL,
+  RECLAIM_SIZES_SQL,
+  type ReclaimReport
+} from './methods/reclaim'
+import { availableDiskBytes, diskPressure } from '../utils/diskSpace'
 import { devLog } from '../utils/logging'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 import type { StorageProviderOptions } from '@bsv/wallet-toolbox-mobile'
@@ -153,9 +162,30 @@ export class StorageExpoSQLite extends StorageProvider {
     )
   }
 
+  /**
+   * Every wallet write funnels through here, which makes it the one place a
+   * storage-pressure gate and a failure classifier need to live.
+   *
+   * The pre-flight check is not belt-and-braces, it is the only reliable
+   * diagnosis: withExclusiveTransactionAsync awaits ROLLBACK inside its own
+   * catch BEFORE recording the error, so a rollback that also fails under disk
+   * pressure propagates instead and the original cause is destroyed.
+   * (node_modules/expo-sqlite/src/SQLiteDatabase.ts:184-189.)
+   *
+   * 'unknown' pressure proceeds. The reading can be null on either platform, and
+   * refusing writes because the disk could not be read would be worse than the
+   * problem — see utils/diskSpace.ts.
+   */
   async transaction<T>(scope: (trx: TrxToken) => Promise<T>, trx?: TrxToken): Promise<T> {
     // If already inside a transaction, reuse it — no nested BEGIN.
     if (trx) return await scope(trx)
+
+    if (diskPressure() === 'block') {
+      throw new StorageError(
+        'disk-full',
+        'Not enough free storage to write to the wallet database. Free some space and try again.'
+      )
+    }
 
     const db = this.getDB()
     const token: TrxToken = { _inTrx: true } as any
@@ -166,15 +196,23 @@ export class StorageExpoSQLite extends StorageProvider {
     // we temporarily replace this.db with the exclusive txn object and restore
     // it when the scope completes (or throws).
     let result!: T
-    await db.withExclusiveTransactionAsync(async txn => {
-      const savedDb = this.db
-      this.db = txn as any
-      try {
-        result = await scope(token)
-      } finally {
-        this.db = savedDb
-      }
-    })
+    try {
+      await db.withExclusiveTransactionAsync(async txn => {
+        const savedDb = this.db
+        this.db = txn as any
+        try {
+          result = await scope(token)
+        } finally {
+          this.db = savedDb
+        }
+      })
+    } catch (e) {
+      // Rethrow a recognisable storage failure as a typed one so the UI can say
+      // something true about it. Anything unrecognised passes through untouched:
+      // guessing would turn a schema bug into a "free up space" prompt.
+      const classified = storageErrorFromSqlite(e)
+      throw classified ?? e
+    }
     return result
   }
 
@@ -1292,6 +1330,80 @@ export class StorageExpoSQLite extends StorageProvider {
     return rows
       .filter(r => typeof r.reference === 'string' && typeof r.status === 'string')
       .map(r => ({ reference: r.reference as string, status: r.status as string }))
+  }
+
+  /** Size of the database file on disk, or null when it cannot be read. */
+  async databaseFileBytes(): Promise<number | null> {
+    try {
+      const path = (this.db as unknown as { databasePath?: string })?.databasePath
+      if (!path) return null
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { File } = require('expo-file-system') as typeof import('expo-file-system')
+      const size = new File(path).size
+      // Deliberately NOT gated on .exists: the Android exists getter is
+      // permission-gated while size is not. A zero is treated as unknown rather
+      // than as an empty database.
+      return typeof size === 'number' && size > 0 ? size : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * What could be reclaimed, and what is being held back.
+   *
+   * Read-only by design: this ships before anything destructive so the decision
+   * can be made from real device numbers. See storage/methods/reclaim.ts for why
+   * row deletion is not on offer at all.
+   */
+  async reclaimReport(tipHeight: number, cutoff: string): Promise<ReclaimReport> {
+    if (!this.isAvailable()) await this.makeAvailable()
+    const db = this.getDB()
+
+    const perTable = (await db.getAllAsync(RECLAIM_SIZES_SQL)) as {
+      table: string
+      rows: number
+      blobBytes: number
+    }[]
+    const candidates = (await db.getAllAsync(RECLAIM_CANDIDATES_SQL, [tipHeight, cutoff])) as { bytes: number }[]
+    const excluded = (await db.getAllAsync(RECLAIM_EXCLUDED_SQL, [tipHeight, tipHeight, cutoff])) as {
+      reason: string
+      rows: number
+      bytes: number
+    }[]
+
+    return {
+      dbBytes: await this.databaseFileBytes(),
+      freeBytes: availableDiskBytes(),
+      perTable,
+      reclaimable: {
+        rows: candidates.length,
+        bytes: candidates.reduce((sum, c) => sum + (c.bytes ?? 0), 0)
+      },
+      excluded
+    }
+  }
+
+  /**
+   * Null transactions.inputBEEF for settled transactions.
+   *
+   * The one destructive operation here, and the only blob whose clearing is both
+   * safe and effective — nothing reads this column for BEEF. Raw SQL because
+   * updateTransaction cannot write NULL: sqlUpdate skips undefined values, so an
+   * update meaning "clear this" is silently dropped.
+   *
+   * Not wired to the low-disk trigger: on a nearly full volume this UPDATE's own
+   * rollback journal can fail with SQLITE_FULL, and with no WAL and no
+   * auto_vacuum the file does not shrink afterwards.
+   */
+  async reclaimInputBeef(tipHeight: number, cutoff: string): Promise<{ rows: number }> {
+    if (!this.isAvailable()) await this.makeAvailable()
+    const result = await this.getDB().runAsync(RECLAIM_INPUT_BEEF_SQL, [
+      new Date().toISOString(),
+      tipHeight,
+      cutoff
+    ])
+    return { rows: result.changes ?? 0 }
   }
 
   async getProvenTxHeights(): Promise<Map<string, number>> {
