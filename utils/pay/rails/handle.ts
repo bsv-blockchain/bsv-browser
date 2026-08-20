@@ -13,7 +13,10 @@ import { Transaction } from '@bsv/sdk'
 import { markOutboxSent, saveOutboxEntry, updateOutboxEntry, type OutboxEntry } from '@/utils/peerpay/outbox'
 
 export const MESSAGE_BOX_URL_KEY = 'message_box_url'
-export const DEFAULT_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
+export const DEFAULT_MESSAGE_BOX_URL = 'https://gmb.bsvblockchain.tech'
+/** The previous default. A saved preference equal to it is treated as "use the
+ * default", so existing installs follow the default forward. */
+export const LEGACY_MESSAGE_BOX_URL = 'https://messagebox.babbage.systems'
 /** The sentinel the config panel writes when the user opts out of a server. */
 export const NO_MESSAGE_BOX = 'noMessageBox'
 

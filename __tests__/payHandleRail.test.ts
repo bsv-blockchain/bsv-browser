@@ -50,7 +50,7 @@ describe('peerPayLinkFor', () => {
 describe('message box constants', () => {
   it('keeps the storage key and default host the old screen used', () => {
     expect(MESSAGE_BOX_URL_KEY).toBe('message_box_url')
-    expect(DEFAULT_MESSAGE_BOX_URL).toBe('https://messagebox.babbage.systems')
+    expect(DEFAULT_MESSAGE_BOX_URL).toBe('https://gmb.bsvblockchain.tech')
     expect(NO_MESSAGE_BOX).toBe('noMessageBox')
   })
 })
