@@ -211,7 +211,9 @@ export default function MnemonicScreen() {
       message: `${t('restore_backup_failed_message')}${state.error ? `\n\n${state.error}` : ''}`,
       buttons: [
         { text: t('restore_backup_retry'), key: 'retry' },
-        { text: t('restore_backup_skip'), key: 'skip', style: 'cancel' }
+        // Destructive, not cancel: abandoning the history forfeits past change
+        // outputs whose derivation data only existed in the backup.
+        { text: t('restore_backup_skip'), key: 'skip', style: 'destructive' }
       ]
     })
 

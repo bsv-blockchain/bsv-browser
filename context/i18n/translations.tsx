@@ -520,7 +520,7 @@ const resources = {
       restore_backup_failed_title: 'Could not restore your history',
       restore_backup_failed_message: 'Your recovery phrase is fine, but the encrypted backup could not be replayed. Trying again is usually enough. Continuing without it gives you a working wallet with no past transactions, and past change outputs will not be spendable.',
       restore_backup_retry: 'Try again',
-      restore_backup_skip: 'Continue without history',
+      restore_backup_skip: 'Abandon history',
       import_wallet: 'Import Wallet',
 
       // Permission sheet
@@ -973,7 +973,7 @@ const resources = {
       restore_backup_failed_title: '无法恢复历史记录',
       restore_backup_failed_message: '您的助记词没有问题，但加密备份无法重放。通常重试一次即可。若继续，钱包可用但没有历史交易，且过去的零钱输出将无法花费。',
       restore_backup_retry: '重试',
-      restore_backup_skip: '不恢复历史并继续',
+      restore_backup_skip: '放弃历史记录',
       import_wallet: '导入钱包',
 
       reject: '拒绝',
@@ -1416,7 +1416,7 @@ const resources = {
       restore_backup_failed_title: 'इतिहास पुनर्स्थापित नहीं हो सका',
       restore_backup_failed_message: 'आपका रिकवरी फ़्रेज़ ठीक है, लेकिन एन्क्रिप्टेड बैकअप दोहराया नहीं जा सका। आमतौर पर दोबारा कोशिश करना पर्याप्त होता है। इसके बिना जारी रखने पर वॉलेट काम करेगा लेकिन कोई पुराना लेनदेन नहीं होगा, और पुराने चेंज आउटपुट खर्च नहीं हो पाएँगे।',
       restore_backup_retry: 'पुनः प्रयास करें',
-      restore_backup_skip: 'इतिहास के बिना जारी रखें',
+      restore_backup_skip: 'इतिहास छोड़ें',
       import_wallet: 'वॉलेट आयात करें',
 
       reject: 'अस्वीकार करें',
@@ -1862,7 +1862,7 @@ const resources = {
       restore_backup_failed_title: 'No se pudo restaurar el historial',
       restore_backup_failed_message: 'Tu frase de recuperación está bien, pero la copia cifrada no se pudo reproducir. Normalmente basta con reintentar. Si continúas sin ella tendrás una billetera funcional sin transacciones anteriores, y el cambio anterior no será gastable.',
       restore_backup_retry: 'Reintentar',
-      restore_backup_skip: 'Continuar sin historial',
+      restore_backup_skip: 'Abandonar el historial',
       import_wallet: 'Importar billetera',
 
       reject: 'Rechazar',
@@ -2303,7 +2303,7 @@ const resources = {
       restore_backup_failed_title: 'Impossible de restaurer l\'historique',
       restore_backup_failed_message: 'Votre phrase de récupération est valide, mais la sauvegarde chiffrée n\'a pas pu être rejouée. Un nouvel essai suffit généralement. Sans elle, le portefeuille fonctionne mais sans transactions passées, et l\'ancienne monnaie rendue ne sera pas dépensable.',
       restore_backup_retry: 'Réessayer',
-      restore_backup_skip: 'Continuer sans l\'historique',
+      restore_backup_skip: 'Abandonner l\'historique',
       import_wallet: 'Importer le portefeuille',
 
       reject: 'Rejeter',
@@ -2741,7 +2741,7 @@ const resources = {
       restore_backup_failed_title: 'تعذّرت استعادة السجل',
       restore_backup_failed_message: 'عبارة الاسترداد سليمة، لكن تعذّر إعادة تشغيل النسخة الاحتياطية المشفّرة. عادةً تكفي المحاولة مرة أخرى. المتابعة بدونها تمنحك محفظة عاملة بلا معاملات سابقة، ولن تكون مخارج الفكة السابقة قابلة للإنفاق.',
       restore_backup_retry: 'إعادة المحاولة',
-      restore_backup_skip: 'المتابعة بدون السجل',
+      restore_backup_skip: 'التخلي عن السجل',
       import_wallet: 'استيراد المحفظة',
 
       reject: 'رفض',
@@ -3179,7 +3179,7 @@ const resources = {
       restore_backup_failed_title: 'Não foi possível restaurar o histórico',
       restore_backup_failed_message: 'Sua frase de recuperação está correta, mas o backup criptografado não pôde ser reproduzido. Normalmente basta tentar de novo. Continuar sem ele dá uma carteira funcional sem transações anteriores, e o troco antigo não será gastável.',
       restore_backup_retry: 'Tentar novamente',
-      restore_backup_skip: 'Continuar sem histórico',
+      restore_backup_skip: 'Abandonar o histórico',
       import_wallet: 'Importar carteira',
 
       reject: 'Rejeitar',
@@ -3619,7 +3619,7 @@ const resources = {
       restore_backup_failed_title: 'ইতিহাস পুনরুদ্ধার করা যায়নি',
       restore_backup_failed_message: 'আপনার রিকভারি ফ্রেজ ঠিক আছে, কিন্তু এনক্রিপ্টেড ব্যাকআপ রিপ্লে করা যায়নি। সাধারণত আবার চেষ্টা করলেই হয়। এটি ছাড়া চালিয়ে গেলে ওয়ালেট কাজ করবে কিন্তু আগের কোনো লেনদেন থাকবে না, আর পুরোনো চেঞ্জ আউটপুট খরচ করা যাবে না।',
       restore_backup_retry: 'আবার চেষ্টা করুন',
-      restore_backup_skip: 'ইতিহাস ছাড়া চালিয়ে যান',
+      restore_backup_skip: 'ইতিহাস পরিত্যাগ করুন',
       import_wallet: 'ওয়ালেট আমদানি করুন',
 
       reject: 'প্রত্যাখ্যান করুন',
@@ -4059,7 +4059,7 @@ const resources = {
       restore_backup_failed_title: 'Не удалось восстановить историю',
       restore_backup_failed_message: 'Ваша сид-фраза в порядке, но зашифрованную копию не удалось воспроизвести. Обычно достаточно повторить попытку. Продолжив без неё, вы получите рабочий кошелёк без прошлых транзакций, а прежняя сдача останется непригодной к трате.',
       restore_backup_retry: 'Повторить',
-      restore_backup_skip: 'Продолжить без истории',
+      restore_backup_skip: 'Отказаться от истории',
       import_wallet: 'Импортировать кошелёк',
 
       reject: 'Отклонить',
@@ -4500,7 +4500,7 @@ const resources = {
       restore_backup_failed_title: 'Riwayat tidak dapat dipulihkan',
       restore_backup_failed_message: 'Frasa pemulihan Anda benar, tetapi cadangan terenkripsi tidak dapat diputar ulang. Biasanya cukup dicoba lagi. Melanjutkan tanpanya memberi dompet yang berfungsi tanpa transaksi lama, dan kembalian lama tidak akan dapat dibelanjakan.',
       restore_backup_retry: 'Coba lagi',
-      restore_backup_skip: 'Lanjutkan tanpa riwayat',
+      restore_backup_skip: 'Tinggalkan riwayat',
       import_wallet: 'Impor Dompet',
 
       reject: 'Tolak',
@@ -4951,7 +4951,7 @@ const resources = {
       restore_backup_failed_title: '履歴を復元できませんでした',
       restore_backup_failed_message: 'リカバリーフレーズには問題ありませんが、暗号化バックアップを再生できませんでした。通常は再試行で解決します。復元せずに続けるとウォレットは使えますが過去の取引は残らず、過去のお釣り出力は使用できません。',
       restore_backup_retry: '再試行',
-      restore_backup_skip: '履歴なしで続ける',
+      restore_backup_skip: '履歴を破棄する',
       import_wallet: 'ウォレットをインポート',
 
       // Permission sheet
@@ -5407,7 +5407,7 @@ const resources = {
       restore_backup_failed_title: 'Nie udało się przywrócić historii',
       restore_backup_failed_message: 'Twoja fraza odzyskiwania jest poprawna, ale zaszyfrowanej kopii nie udało się odtworzyć. Zwykle wystarcza ponowna próba. Kontynuacja bez niej daje działający portfel bez wcześniejszych transakcji, a dawna reszta nie będzie do wydania.',
       restore_backup_retry: 'Spróbuj ponownie',
-      restore_backup_skip: 'Kontynuuj bez historii',
+      restore_backup_skip: 'Porzuć historię',
       import_wallet: 'Importuj portfel',
 
       // Permission sheet
