@@ -15,6 +15,7 @@ import { compressScriptBytes, isCompressed } from '@/services/vault/templateCode
 import {
   COMPRESS_PROVEN_TX_RAWTX,
   assertExpanded,
+  compressStoredBeef,
   compressStoredTx,
   expandStoredRange,
   expandStoredScript,
@@ -550,6 +551,7 @@ export class StorageExpoSQLite extends StorageProvider {
     // full on every sweep and the one that pushed a backup chunk over the
     // server's 1 MiB cap.
     e.rawTx = await compressStoredTx(e.rawTx, e.txid)
+    e.inputBEEF = await compressStoredBeef(e.inputBEEF)
     const id = await this.sqlInsert('proven_tx_reqs', e, 'provenTxReqId')
     tx.provenTxReqId = id
     return id
@@ -634,6 +636,7 @@ export class StorageExpoSQLite extends StorageProvider {
     const e = await this.validateEntityForInsert(tx, trx)
     if (e.transactionId === 0) delete (e as any).transactionId
     e.rawTx = await compressStoredTx(e.rawTx, e.txid)
+    e.inputBEEF = await compressStoredBeef(e.inputBEEF)
     const id = await this.sqlInsert('transactions', e, 'transactionId')
     tx.transactionId = id
     return id
@@ -687,6 +690,7 @@ export class StorageExpoSQLite extends StorageProvider {
       const txid = u.txid ?? (await this.txidOfProvenTxReq(id))
       u.rawTx = await compressStoredTx(u.rawTx, txid)
     }
+    if (u.inputBEEF) u.inputBEEF = await compressStoredBeef(u.inputBEEF)
     return await this.sqlUpdate('proven_tx_reqs', id, u, 'provenTxReqId')
   }
 
@@ -762,6 +766,7 @@ export class StorageExpoSQLite extends StorageProvider {
       const txid = u.txid ?? (await this.txidOfTransaction(id))
       u.rawTx = await compressStoredTx(u.rawTx, txid)
     }
+    if (u.inputBEEF) u.inputBEEF = await compressStoredBeef(u.inputBEEF)
     return await this.sqlUpdate('transactions', id, u, 'transactionId')
   }
 
@@ -1905,9 +1910,11 @@ export class StorageExpoSQLite extends StorageProvider {
     }
     for (const req of chunk.provenTxReqs ?? []) {
       req.rawTx = await compressStoredTx(req.rawTx, req.txid)
+      req.inputBEEF = await compressStoredBeef(req.inputBEEF)
     }
     for (const t of chunk.transactions ?? []) {
       t.rawTx = await compressStoredTx(t.rawTx, t.txid)
+      t.inputBEEF = await compressStoredBeef(t.inputBEEF)
     }
     return chunk
   }

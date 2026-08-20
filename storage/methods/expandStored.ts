@@ -30,7 +30,13 @@
  * unreconstructable and erroring the whole query would be worse.
  */
 import { expandScriptBytes, isCompressed } from '@/services/vault/templateCodec'
-import { compressTransaction, expandTransaction, isEnvelope, readEnvelopeRange } from '@/services/vault/txEnvelope'
+import {
+  compressContainer,
+  compressTransaction,
+  expandTransaction,
+  isEnvelope,
+  readEnvelopeRange
+} from '@/services/vault/txEnvelope'
 
 const asBytes = (b: number[] | Uint8Array): Uint8Array => (b instanceof Uint8Array ? b : Uint8Array.from(b))
 
@@ -180,3 +186,30 @@ export async function compressStoredTx<T extends number[] | Uint8Array | undefin
  * stay readable if it is turned back off.
  */
 export const COMPRESS_PROVEN_TX_RAWTX = false
+
+/**
+ * Compress a stored BEEF container (`inputBEEF`, `beef`) on the way in.
+ *
+ * Separate from compressStoredTx because a container holds several transactions
+ * and has no single txid: its envelope commits to a SHA-256 of the blob instead.
+ * Routing one through the transaction path would produce an envelope whose
+ * integrity check verified nothing.
+ *
+ * This is the column that matters for a WITHDRAWAL: inputBEEF carries ~1.83 MB
+ * per vault input, several times the rawTx it accompanies, so a withdrawal's
+ * backup chunk stays over the server's 1 MiB cap until this is compressed.
+ *
+ * Idempotent and total, for the same reasons as compressStoredTx.
+ */
+export async function compressStoredBeef<T extends number[] | Uint8Array | undefined>(bytes: T): Promise<T> {
+  if (!bytes || bytes.length === 0) return bytes
+  if (isEnvelope(bytes)) return bytes
+  try {
+    const compressed = await compressContainer(asBytes(bytes))
+    if (compressed.length >= bytes.length) return bytes
+    return (bytes instanceof Uint8Array ? compressed : Array.from(compressed)) as T
+  } catch (e) {
+    console.warn(`[storage] could not compress a BEEF blob: ${(e as Error)?.message ?? 'unknown'}`)
+    return bytes
+  }
+}

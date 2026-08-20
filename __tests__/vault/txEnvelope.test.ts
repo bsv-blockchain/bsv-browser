@@ -11,8 +11,10 @@
  */
 import { Hash, Utils } from '@bsv/sdk'
 import {
+  ENVELOPE_FLAG_DIGEST,
   ENVELOPE_MAGIC,
   ENVELOPE_VERSION,
+  compressContainer,
   compressTransaction,
   envelopeTxid,
   expandTransaction,
@@ -359,5 +361,102 @@ describe('readEnvelopeRange', () => {
     const tx = buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 300_000, script: LOCK }] })
     const envelope = await compressTransaction(tx, txidOf(tx))
     await expect(readEnvelopeRange(envelope, 1.5, 4)).rejects.toThrow(/integer/)
+  })
+})
+
+describe('compressContainer', () => {
+  // A BEEF is a container of several transactions with no single txid, so the
+  // header commits to SHA-256 of the whole blob instead. Everything else — spans,
+  // literal, reconstruction — is shared with the transaction path.
+  const beefish = (txs: Uint8Array[]): Uint8Array =>
+    cat([
+      [0x01, 0x00, 0xbe, 0xef], // version
+      [0x01], // one BUMP
+      filled(37, 0x77), // BUMP bytes this codec deliberately does not parse
+      varint(txs.length),
+      ...txs.flatMap(t => [t, [0x00]] as (Uint8Array | number[])[])
+    ])
+
+  it('round-trips a container carrying a vault transaction', async () => {
+    const tx = buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 300_000, script: LOCK }] })
+    const blob = beefish([tx])
+
+    const envelope = await compressContainer(blob)
+    expect(isEnvelope(envelope)).toBe(true)
+    expect(blob.length).toBeGreaterThan(950_000)
+    expect(envelope.length).toBeLessThan(1200)
+    expect(Array.from(await expandTransaction(envelope))).toEqual(Array.from(blob))
+  })
+
+  it('round-trips a withdrawal-shaped container: unlocking scripts and a re-vault output', async () => {
+    // The shape that actually wedges the backup log — inputBEEF carries ~1.83 MB
+    // per vault input, several times the rawTx it accompanies.
+    const spend = buildTx({
+      inputs: [{ script: r1UnlockingScript() }, { script: r1UnlockingScript() }],
+      outputs: [{ satoshis: 400_000, script: LOCK }, { satoshis: 50_000, script: p2pkh() }]
+    })
+    const blob = beefish([spend])
+
+    const envelope = await compressContainer(blob)
+    expect(blob.length).toBeGreaterThan(2_800_000)
+    expect(envelope.length).toBeLessThan(2000)
+    expect(Array.from(await expandTransaction(envelope))).toEqual(Array.from(blob))
+  })
+
+  it('round-trips several transactions in one container', async () => {
+    const a = buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 300_000, script: LOCK }] })
+    const b = buildTx({ inputs: [{ script: r1UnlockingScript() }], outputs: [{ satoshis: 1000, script: p2pkh() }] })
+    const blob = beefish([a, b])
+
+    const envelope = await compressContainer(blob)
+    expect(Array.from(await expandTransaction(envelope))).toEqual(Array.from(blob))
+  })
+
+  it('does not report a scriptCode inside a locking script as its own span', async () => {
+    // Region 0x02 is a byte-for-byte SUFFIX of region 0x01, so a naive scan finds
+    // one inside every locking script and produces overlapping spans. Region 0x01
+    // is claimed first and its range excluded.
+    const tx = buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 300_000, script: LOCK }] })
+    const blob = beefish([tx])
+    const envelope = await compressContainer(blob)
+    expect(envelope[39]).toBe(1) // spanCount
+    expect(Array.from(await expandTransaction(envelope))).toEqual(Array.from(blob))
+  })
+
+  it('leaves a container with no vault script unchanged', async () => {
+    const blob = beefish([buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 1000, script: p2pkh() }] })])
+    expect(await compressContainer(blob)).toBe(blob)
+  })
+
+  it('refuses a tampered container: the digest, not a txid, is what it checks', async () => {
+    const tx = buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 300_000, script: LOCK }] })
+    const envelope = Uint8Array.from(await compressContainer(beefish([tx])))
+    envelope[envelope.length - 1] ^= 0x01
+    await expect(expandTransaction(envelope)).rejects.toThrow(/container envelope expands to digest/)
+  })
+
+  it('sets the digest flag, and a transaction envelope does not', async () => {
+    const tx = buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 300_000, script: LOCK }] })
+    const container = await compressContainer(beefish([tx]))
+    const single = await compressTransaction(tx, txidOf(tx))
+    expect(container[2] & ENVELOPE_FLAG_DIGEST).toBe(ENVELOPE_FLAG_DIGEST)
+    expect(single[2] & ENVELOPE_FLAG_DIGEST).toBe(0)
+  })
+
+  it('is idempotent', async () => {
+    const blob = beefish([buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 300_000, script: LOCK }] })])
+    const once = await compressContainer(blob)
+    expect(await compressContainer(once)).toBe(once)
+  })
+
+  it('serves ranges out of a container envelope too', async () => {
+    const tx = buildTx({ inputs: [{ script: p2pkh() }], outputs: [{ satoshis: 300_000, script: LOCK }] })
+    const blob = beefish([tx])
+    const envelope = await compressContainer(blob)
+    for (const [offset, length] of [[0, 5], [40, 64], [blob.length - 3, 3]]) {
+      expect(Array.from(await readEnvelopeRange(envelope, offset, length))).toEqual(
+        Array.from(blob.subarray(offset, offset + length))
+      )
+    }
   })
 })
