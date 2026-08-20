@@ -28,7 +28,7 @@
  * public keys, salts, and signatures. The K1 sweep path does handle a private
  * key (the vault HD node), but never logs it.
  */
-import { HD, Transaction, Utils } from '@bsv/sdk'
+import { HD, Hash, P2PKH, PublicKey, Transaction, TransactionSignature, UnlockingScript, Utils } from '@bsv/sdk'
 import { R1K1Wallet } from '@bsv/templates'
 import { vaultStore } from './vaultStore'
 import { VaultError } from './types'
@@ -38,6 +38,7 @@ import { noteVaultProgress, requestVaultSigner } from './ceremonyHost'
 import { randomBytes } from './random'
 import { bip32KeyID, indexFromKeyID, depositPkhFromXpub, depositPrivKey, vaultXpub } from './vaultDerivation'
 import {
+  R1K1_LOCK_LEN,
   R1K1_R1_UNLOCK_LEN,
   R1K1_K1_UNLOCK_LEN,
   buildVaultLockingScript,
@@ -47,6 +48,66 @@ import {
 } from './r1k1'
 
 export const VAULT_BASKET = 'admin vault'
+
+/**
+ * The intermediate basket a deposit splits its funding into. See depositToVault:
+ * tx1 carves out exactly (deposit + tx2 fee) here; tx2 spends it as its ONLY
+ * input into the vault output, with no change. A stranded output in this basket
+ * (tx1 landed, tx2 failed) is reused by the next deposit of the same amount.
+ */
+export const VAULT_STAGING_BASKET = 'vault staging'
+
+/** BRC-42 protocol the staging output's P2PKH key is derived under. */
+const STAGING_PROTOCOL: [number, string] = [2, 'vault deposit staging']
+
+/** P2PKH unlock, worst case: push(73-byte DER+hashtype sig) + push(33-byte key). */
+const STAGING_UNLOCK_LEN = 108
+
+/**
+ * Must equal the storage feeModel WalletContext configures
+ * (`feeModel: { model: 'sat/kb', value: 100 }`). The split math relies on it:
+ * tx1's staging output is sized to deposit + fee so that tx2's feeExcess is
+ * exactly zero and generateChange adds no change output.
+ */
+export const VAULT_SATS_PER_KB = 100
+
+/** Serialized tx size, byte-identical to wallet-toolbox's transactionSize. */
+function txSizeBytes(inputScriptLens: number[], outputScriptLens: number[]): number {
+  const varUint = (n: number) => (n <= 0xfc ? 1 : n <= 0xffff ? 3 : n <= 0xffffffff ? 5 : 9)
+  return (
+    4 +
+    varUint(inputScriptLens.length) +
+    inputScriptLens.reduce((a, e) => a + 40 + varUint(e) + e, 0) +
+    varUint(outputScriptLens.length) +
+    outputScriptLens.reduce((a, e) => a + 8 + varUint(e) + e, 0) +
+    4
+  )
+}
+
+/** The exact fee the vault-creating tx2 needs under the wallet's fee model. */
+export function vaultDepositTx2Fee(satsPerKb: number = VAULT_SATS_PER_KB): number {
+  return Math.ceil((txSizeBytes([STAGING_UNLOCK_LEN], [R1K1_LOCK_LEN]) / 1000) * satsPerKb)
+}
+
+interface StagingInstructions {
+  v: 1
+  type: 'staging'
+  keyID: string
+}
+
+function encodeStagingInstructions(i: StagingInstructions): string {
+  return JSON.stringify(i)
+}
+
+function decodeStagingInstructions(s: string | undefined): StagingInstructions | null {
+  if (!s) return null
+  try {
+    const o = JSON.parse(s)
+    return o && o.v === 1 && o.type === 'staging' && typeof o.keyID === 'string' ? o : null
+  } catch {
+    return null
+  }
+}
 
 /**
  * Storage-backed lookup of the transactions reserving a set of outpoints.
@@ -133,6 +194,8 @@ export interface VaultWallet {
   signAction(args: unknown, originator: string): Promise<{ txid?: string; tx?: number[] }>
   listOutputs(args: unknown, originator: string): Promise<ListOutputsResult>
   getPublicKey(args: unknown, originator: string): Promise<{ publicKey: string }>
+  /** Signs the staging input of a deposit's tx2 (BRC-42 key, counterparty 'self'). */
+  createSignature(args: unknown, originator: string): Promise<{ signature: number[] }>
   abortAction(args: unknown, originator: string): Promise<unknown>
   listActions?(args: unknown, originator: string): Promise<{ actions: VaultActionRow[] }>
 }
@@ -435,10 +498,81 @@ export async function depositToVault(
     throw new VaultError('backup-required', 'Back up this wallet before depositing')
   }
 
+  // ── tx1: split ──────────────────────────────────────────────────────────
+  //
+  // Carve deposit + tx2's exact fee into a staging output, with the wallet's
+  // normal change machinery keeping the rest in the default basket. tx2 then
+  // spends ONLY that output into the vault script, so the ~960 KB vault output
+  // never appears as a sibling output in any later payment's source
+  // transaction — without the split, the first ordinary payment after a
+  // deposit has to carry the whole vault script inside its inputBEEF.
+  const fee = vaultDepositTx2Fee()
+  const stagingTotal = satoshis + fee
+
+  // A stranded staging output (tx1 landed, tx2 failed) is money already carved
+  // out for exactly one deposit size. Reuse it rather than splitting again, so
+  // retrying the same deposit self-heals.
+  const listStaging = async () =>
+    (await w.listOutputs(
+      { basket: VAULT_STAGING_BASKET, include: 'entire transactions', includeCustomInstructions: true, limit: 100 },
+      adminOriginator
+    )) as ListOutputsResult
+  let staged = await listStaging()
+  let stagingOut = staged.outputs
+    .map(o => ({ ...o, si: decodeStagingInstructions(o.customInstructions) }))
+    .find((o): o is typeof o & { si: StagingInstructions } => o.si != null && o.satoshis === stagingTotal)
+
+  if (!stagingOut) {
+    const keyID = `staging ${Utils.toHex(randomBytes(8))}`
+    const { publicKey: stagingPub } = await w.getPublicKey(
+      { protocolID: STAGING_PROTOCOL, keyID, counterparty: 'self' },
+      adminOriginator
+    )
+    const stagingScript = new P2PKH().lock(PublicKey.fromString(stagingPub).toAddress()).toHex()
+    await w.createAction(
+      {
+        description: 'Prepare vault deposit',
+        outputs: [
+          {
+            satoshis: stagingTotal,
+            lockingScript: stagingScript,
+            outputDescription: 'Vault deposit funding',
+            basket: VAULT_STAGING_BASKET,
+            customInstructions: encodeStagingInstructions({ v: 1, type: 'staging', keyID }),
+            tags: ['vault']
+          }
+        ],
+        labels: ['vault', 'vault-deposit-split'],
+        options: { randomizeOutputs: false, acceptDelayedBroadcast: false }
+      },
+      adminOriginator
+    )
+    // Re-list rather than trusting the createAction result shape: this yields
+    // the outpoint AND the BEEF tx2 needs as inputBEEF in one call.
+    staged = await listStaging()
+    stagingOut = staged.outputs
+      .map(o => ({ ...o, si: decodeStagingInstructions(o.customInstructions) }))
+      .find((o): o is typeof o & { si: StagingInstructions } => o.si != null && o.satoshis === stagingTotal)
+    if (!stagingOut) throw new VaultError('no-transaction', 'Deposit split produced no staging output')
+  }
+
+  // ── tx2: vault ──────────────────────────────────────────────────────────
+  //
+  // Explicit single input, single vault output, no change. Funding covers the
+  // outputs plus exactly the feeModel's target fee (vaultDepositTx2Fee uses the
+  // same size formula), so generateChange's feeExcess is 0 and it neither adds
+  // a change output nor pulls in extra funding inputs.
   const target = await nextDepositTarget()
-  const res = await w.createAction(
+  const created = await w.createAction(
     {
       description: 'Move to vault',
+      inputs: [
+        {
+          outpoint: stagingOut.outpoint,
+          unlockingScriptLength: STAGING_UNLOCK_LEN,
+          inputDescription: 'Vault deposit funding'
+        }
+      ],
       outputs: [
         {
           satoshis,
@@ -450,11 +584,67 @@ export async function depositToVault(
         }
       ],
       labels: ['vault', 'vault-deposit'],
-      options: { randomizeOutputs: false, acceptDelayedBroadcast: false }
+      inputBEEF: staged.BEEF?.length ? staged.BEEF : undefined,
+      options: { randomizeOutputs: false, acceptDelayedBroadcast: false, trustSelf: 'known' }
     },
     adminOriginator
   )
-  const txid = res.txid ?? (res.tx ? Transaction.fromAtomicBEEF(res.tx).id('hex') : undefined)
+
+  if (!created.signableTransaction) {
+    const txid = created.txid ?? (created.tx ? Transaction.fromAtomicBEEF(created.tx).id('hex') : undefined)
+    if (!txid) throw new VaultError('no-transaction', 'Deposit produced no transaction')
+    return { txid }
+  }
+
+  const { tx: atomic, reference } = created.signableTransaction
+  let unlockingScript: string
+  try {
+    const tx = Transaction.fromAtomicBEEF(atomic)
+    const { publicKey: stagingPub } = await w.getPublicKey(
+      { protocolID: STAGING_PROTOCOL, keyID: stagingOut.si.keyID, counterparty: 'self' },
+      adminOriginator
+    )
+    const subscript = new P2PKH().lock(PublicKey.fromString(stagingPub).toAddress())
+    const input = tx.inputs[0]
+    const scope = TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID
+    const preimage = TransactionSignature.format({
+      sourceTXID: stagingOut.outpoint.split('.')[0],
+      sourceOutputIndex: input.sourceOutputIndex,
+      sourceSatoshis: stagingOut.satoshis,
+      transactionVersion: tx.version,
+      otherInputs: [],
+      outputs: tx.outputs,
+      inputIndex: 0,
+      inputSequence: input.sequence ?? 0xffffffff,
+      subscript,
+      lockTime: tx.lockTime,
+      scope
+    })
+    const { signature } = await w.createSignature(
+      {
+        protocolID: STAGING_PROTOCOL,
+        keyID: stagingOut.si.keyID,
+        counterparty: 'self',
+        hashToDirectlySign: Array.from(Hash.hash256(preimage))
+      },
+      adminOriginator
+    )
+    unlockingScript = new UnlockingScript([
+      { op: signature.length + 1, data: [...signature, scope] },
+      { op: 33, data: Utils.toArray(stagingPub, 'hex') }
+    ]).toHex()
+  } catch (e) {
+    // Nothing was signed: release the reservation so the staging output stays
+    // spendable, and the next deposit of the same amount reuses it.
+    await w.abortAction({ reference }, adminOriginator).catch(() => {})
+    throw e
+  }
+
+  const signed = await w.signAction(
+    { reference, spends: { 0: { unlockingScript } }, options: { acceptDelayedBroadcast: false } },
+    adminOriginator
+  )
+  const txid = signed.txid ?? (signed.tx ? Transaction.fromAtomicBEEF(signed.tx).id('hex') : undefined)
   if (!txid) throw new VaultError('no-transaction', 'Deposit produced no transaction')
   return { txid }
 }
