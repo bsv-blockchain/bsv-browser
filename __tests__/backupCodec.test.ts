@@ -41,6 +41,34 @@ describe('backup chunk codec', () => {
     expect(decoded.provenTxs?.[0].rawTx).not.toBeInstanceOf(Uint8Array)
   })
 
+  it('revives created_at/updated_at as Date instances', async () => {
+    // BinaryJson has no Date support: encode writes ISO strings. The merge
+    // entities call .getTime() on these columns (EntityProvenTxReq.mergeExisting
+    // crashed the real on-device restore on a string), so decode must revive
+    // them. Other string fields must stay strings.
+    const w = deriveBackupWallet(KEY)
+    const base = emptyChunk('from', 'to', 'user') as unknown as Record<string, unknown>
+    base.provenTxReqs = [{
+      provenTxReqId: 1,
+      created_at: new Date('2026-01-02T03:04:05.000Z'),
+      updated_at: new Date('2026-02-03T04:05:06.000Z'),
+      txid: 'aa',
+      status: 'completed',
+      attempts: 0,
+      notified: false,
+      history: '{}',
+      notify: '{}',
+      rawTx: ALL_BYTES
+    }]
+    const decoded = await decodeChunk(w, await encodeChunk(w, base as unknown as SyncChunk))
+    const req = decoded.provenTxReqs?.[0] as any
+    expect(req.created_at).toBeInstanceOf(Date)
+    expect(req.updated_at).toBeInstanceOf(Date)
+    expect(req.updated_at.getTime()).toBe(new Date('2026-02-03T04:05:06.000Z').getTime())
+    expect(typeof req.txid).toBe('string')
+    expect(typeof req.history).toBe('string')
+  })
+
   it('packs byte arrays instead of expanding them to decimal', async () => {
     // Without packing, binaryJsonReplacer ignores number[] — every binary field on the
     // toolbox's tables is typed number[] — and each byte costs ~2.9 characters as decimal

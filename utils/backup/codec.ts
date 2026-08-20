@@ -99,13 +99,24 @@ export function estimateEncodedBytes (chunk: SyncChunk): number {
   return bytes
 }
 
-/** Inverse of packBytes: every Uint8Array becomes the `number[]` the toolbox expects. */
-function unpackBytes (value: unknown): unknown {
+/** The table columns the toolbox types as Date. BinaryJson has no Date support:
+ * encode writes them as ISO strings, so decode must revive them — the merge
+ * entities call `.getTime()`/date arithmetic on them directly
+ * (EntityProvenTxReq.mergeExisting was the first to crash on a string). */
+const DATE_KEYS = new Set(['created_at', 'updated_at'])
+
+/** Inverse of packBytes: every Uint8Array becomes the `number[]` the toolbox
+ * expects, and date columns come back as Date instances. */
+function unpackBytes (value: unknown, key?: string): unknown {
   if (value instanceof Uint8Array) return Array.from(value)
-  if (Array.isArray(value)) return value.map(unpackBytes)
+  if (typeof value === 'string' && key != null && DATE_KEYS.has(key)) {
+    const d = new Date(value)
+    return Number.isNaN(d.getTime()) ? value : d
+  }
+  if (Array.isArray(value)) return value.map(v => unpackBytes(v))
   if (value != null && typeof value === 'object' && !(value instanceof Date)) {
     const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = unpackBytes(v)
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = unpackBytes(v, k)
     return out
   }
   return value
