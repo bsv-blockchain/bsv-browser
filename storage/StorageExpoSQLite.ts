@@ -11,7 +11,9 @@ import {
   splitOutpoint
 } from './methods/findSql'
 import { scrubHistoryJson } from './methods/historyNotes'
+import { compressScriptBytes, isCompressed } from '@/services/vault/templateCodec'
 import {
+  COMPRESS_PROVEN_TX_RAWTX,
   assertExpanded,
   compressStoredTx,
   expandStoredRange,
@@ -528,6 +530,10 @@ export class StorageExpoSQLite extends StorageProvider {
   async insertProvenTx(tx: TableProvenTx, trx?: TrxToken): Promise<number> {
     const e = await this.validateEntityForInsert(tx, trx)
     if (e.provenTxId === 0) delete e.provenTxId
+    // Gated: this row is the merkle evidence, and Beef.verifyBumpIndexLeaves binds
+    // hash256(rawTx) to a chain-committed leaf inside @bsv/sdk where no subclass
+    // can intercept. See COMPRESS_PROVEN_TX_RAWTX.
+    if (COMPRESS_PROVEN_TX_RAWTX) e.rawTx = (await compressStoredTx(e.rawTx, e.txid)) as number[]
     const id = await this.sqlInsert('proven_txs', e, 'provenTxId')
     tx.provenTxId = id
     return id
@@ -656,8 +662,14 @@ export class StorageExpoSQLite extends StorageProvider {
   }
 
   async updateProvenTx(id: number, update: Partial<TableProvenTx>, trx?: TrxToken): Promise<number> {
-    const u = this.validatePartialForUpdate(update)
-    return await this.sqlUpdate('proven_txs', id, u as any, 'provenTxId')
+    const u = this.validatePartialForUpdate(update) as any
+    if (COMPRESS_PROVEN_TX_RAWTX && u.rawTx) {
+      const row = (await this.getDB().getFirstAsync('SELECT txid FROM proven_txs WHERE provenTxId = ?', [
+        id
+      ])) as { txid?: string } | null
+      u.rawTx = await compressStoredTx(u.rawTx, u.txid ?? row?.txid)
+    }
+    return await this.sqlUpdate('proven_txs', id, u, 'provenTxId')
   }
 
   /**
@@ -1856,6 +1868,48 @@ export class StorageExpoSQLite extends StorageProvider {
       pairs.push({ req, tx })
     }
     return pairs
+  }
+
+  /**
+   * Keep sync chunks in stored form.
+   *
+   * getSyncChunk reads outputs through findOutputs WITHOUT noScript, so two
+   * things happen that make a chunk enormous: E3 expands any compressed script,
+   * and validateOutputScript re-slices the full ~960 KB script out of rawTx for
+   * vault outputs whose column is NULL (maxOutputScript is 1024, so it is always
+   * NULL for them). The result is that a chunk carrying one vault output exceeds
+   * the backup server's 1 MiB blob cap even though the database itself stores
+   * almost nothing for it.
+   *
+   * So the chunk is re-compressed on the way out. This is the deliberate
+   * exception to the expansion boundary — the one consumer that wants stored
+   * form — and it is safe because the receiving side is symmetric:
+   * processSyncChunk writes through the insert hooks, which are idempotent, and
+   * every read path expands.
+   *
+   * IF PEER SYNC IS EVER ENABLED (storageUrl is 'local' today, so the only
+   * consumer is our own encrypted backup), this needs a capability flag first:
+   * the toolbox's portable layer base64s byte columns verbatim and neither
+   * getSyncChunk nor processSyncChunk inspects them, so envelopes would replicate
+   * to a peer with no signal, and byte-for-byte entity diffs would make a mixed
+   * fleet see every record as changed and re-push forever.
+   */
+  async getSyncChunk(args: RequestSyncChunkArgs): Promise<SyncChunk> {
+    const chunk = await super.getSyncChunk(args)
+
+    for (const o of chunk.outputs ?? []) {
+      if (o.lockingScript && !isCompressed(o.lockingScript)) {
+        const compressed = await compressScriptBytes(Uint8Array.from(o.lockingScript))
+        if (compressed.length < o.lockingScript.length) o.lockingScript = Array.from(compressed)
+      }
+    }
+    for (const req of chunk.provenTxReqs ?? []) {
+      req.rawTx = await compressStoredTx(req.rawTx, req.txid)
+    }
+    for (const t of chunk.transactions ?? []) {
+      t.rawTx = await compressStoredTx(t.rawTx, t.txid)
+    }
+    return chunk
   }
 
   // processSyncChunk — delegate to inherited implementation if available, stub otherwise

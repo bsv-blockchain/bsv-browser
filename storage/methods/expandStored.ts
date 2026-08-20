@@ -162,3 +162,21 @@ export async function compressStoredTx<T extends number[] | Uint8Array | undefin
     return bytes
   }
 }
+
+/**
+ * Whether `proven_txs.rawTx` may be stored compressed.
+ *
+ * OFF, and it must stay off until a device has run a full deposit -> withdrawal
+ * -> proof cycle with the other columns compressed. That row is not like the
+ * others: it IS the merkle evidence for a mined transaction, and
+ * `Beef.verifyBumpIndexLeaves` binds `hash256(rawTx)` to a chain-committed BUMP
+ * leaf inside @bsv/sdk, where no subclass can intercept it. A bug in the other
+ * columns is recoverable by rewriting them from the network; a bug here makes
+ * every later spend of that transaction's outputs fail `beef.verify()` with
+ * nothing local able to repair it.
+ *
+ * Expansion (E6) is already unconditional, so flipping this on is a one-line,
+ * reversible change once the evidence exists — and rows written while it was on
+ * stay readable if it is turned back off.
+ */
+export const COMPRESS_PROVEN_TX_RAWTX = false
