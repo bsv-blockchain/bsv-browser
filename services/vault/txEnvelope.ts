@@ -43,7 +43,13 @@ import {
   R1K1_LOCK_LEN,
   R1K1_R1_UNLOCK_LEN
 } from './r1k1'
-import { compressScript, compressScriptCode, expandScript, matchesTemplate, describeVaultTemplate } from './templateCodec'
+import {
+  compressScript,
+  compressScriptCode,
+  describeCurrentVaultTemplate,
+  expandScript,
+  matchesTemplate
+} from './templateCodec'
 
 /** First byte of an envelope. See the module doc for why not 0xff. */
 export const ENVELOPE_MAGIC = 0xfe
@@ -132,7 +138,12 @@ function readVarInt(b: Uint8Array, at: number): { value: number; next: number } 
  * exactly on the end of the buffer. Null means "store it raw" — never "guess".
  */
 async function discoverSpans(tx: Uint8Array): Promise<Span[] | null> {
-  const versions = await describeVaultTemplate()
+  // The CURRENT version's descriptors, not every registered version's:
+  // compression must write exactly one version, and describeVaultTemplate()
+  // grows a pair per registered entry — so a `find` over it would silently pick
+  // the oldest once a second version exists. Expansion is unaffected: a record's
+  // own header names the version expandScript looks up.
+  const versions = await describeCurrentVaultTemplate()
   const region1 = versions.find(v => v.region === 0x01)
   const region2 = versions.find(v => v.region === 0x02)
   if (!region1 || !region2) return null

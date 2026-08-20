@@ -48,7 +48,13 @@
 import { Hash, Utils } from '@bsv/sdk'
 import { gunzipSync } from 'fflate'
 import { R1K1_LOCK_LEN } from './r1k1'
-import { VAULT_TEMPLATE_GZIP_BASE64, VAULT_TEMPLATE_RAW_LENGTH } from './vaultTemplateArtifact'
+import {
+  CURRENT_TEMPLATE_VERSION,
+  TEMPLATE_REGISTRY,
+  type TemplateRegistryEntry,
+  currentEntry,
+  entryForVersion
+} from './templateRegistry'
 import { VaultError } from './types'
 
 /** Marker byte for a compressed script. OP_INVALIDOPCODE (0xff) — NEVER
@@ -94,7 +100,15 @@ export interface TemplateVersion {
  * over its payload (see the checksum doc below for exactly why that shape
  * was replaced), for records that provably do not exist.
  */
-const TEMPLATE_VERSION = 2
+/**
+ * The version new records are written with.
+ *
+ * Sourced from the append-only registry rather than declared here: this codec
+ * must be able to EXPAND every version that has ever shipped, while only ever
+ * COMPRESSING with the newest. See services/vault/templateRegistry.ts for why
+ * that asymmetry is not optional.
+ */
+const TEMPLATE_VERSION = CURRENT_TEMPLATE_VERSION
 
 /** Number of bytes `R1K1Wallet.unlockR1` drops from the FRONT of the locking
  * script before committing the remainder into the sighash preimage's
@@ -111,7 +125,7 @@ const TEMPLATE_VERSION = 2
  * many bytes `unlockR1` drops, this is the one constant to update —
  * everything else in region 0x02 (its length, its variable run, its pinned
  * constant hash) recomputes from it automatically. */
-const PREIMAGE_SCRIPT_CODE_OFFSET = 60
+const PREIMAGE_SCRIPT_CODE_OFFSET = currentEntry().preimageScriptCodeOffset
 
 /**
  * The region-0x01 (R1-K1 locking script) template's `constantHash` (see
@@ -139,7 +153,7 @@ const PREIMAGE_SCRIPT_CODE_OFFSET = 60
  * `vaultTemplateArtifact.ts` — never as a silent "make the assertion pass
  * again" edit.
  */
-const PINNED_CONSTANT_HASH = '41f6fcbbc46fe0eeb64a176fd66709694331b2327b1a63086105529e34a7493b'
+const PINNED_CONSTANT_HASH = currentEntry().constantHash
 
 /**
  * The region-0x01 template's variable-run geometry — the plan's Global
@@ -151,10 +165,10 @@ const PINNED_CONSTANT_HASH = '41f6fcbbc46fe0eeb64a176fd66709694331b2327b1a630861
  * positions would produce the wrong hash), rather than merely trusting this
  * literal — see that constant's doc comment for exactly how.
  */
-const PINNED_VARIABLE_RUNS: { offset: number; length: number }[] = [
-  { offset: 17, length: 20 },
-  { offset: 959609, length: 20 }
-]
+const PINNED_VARIABLE_RUNS: { offset: number; length: number }[] = currentEntry().variableRuns.map(r => ({
+  offset: r.offset,
+  length: r.length
+}))
 
 /**
  * The region-0x02 (preimage scriptCode) template's `constantHash`, pinned the
@@ -176,7 +190,7 @@ const PINNED_VARIABLE_RUNS: { offset: number; length: number }[] = [
  * `PREIMAGE_SCRIPT_CODE_OFFSET`, deliberately, as one act) is tied to minting
  * a new version, never a silent "make the assertion pass again" edit.
  */
-const PINNED_CONSTANT_HASH_SCRIPT_CODE = 'f759656aadfcdbd531531c9806b8bce89f7ed4363c7d3f07578455fb1b96a990'
+const PINNED_CONSTANT_HASH_SCRIPT_CODE = currentEntry().constantHashScriptCode
 
 /** Shift a set of runs by subtracting `offset` from each, dropping any run
  * that falls entirely below zero and clipping one that straddles it — the
@@ -233,7 +247,12 @@ interface TemplateCacheEntry {
   region2: Uint8Array
 }
 
-let templateCache: TemplateCacheEntry | undefined
+/**
+ * Per-version cache. Keyed because expansion must serve any version that has
+ * ever shipped, and a build carrying several artifacts would otherwise thrash a
+ * single slot.
+ */
+const templateCache = new Map<number, TemplateCacheEntry>()
 
 /**
  * Populate (or reuse) `templateCache`: base64-decode and gunzip the vendored
@@ -256,42 +275,54 @@ let templateCache: TemplateCacheEntry | undefined
  * version in `expandScript` — a broken vendored asset is always a build
  * problem, never a legitimately-different-but-unsupported one.
  */
-function ensureTemplateCache(): TemplateCacheEntry {
-  if (templateCache) return templateCache
+function ensureTemplateCache(version: number = TEMPLATE_VERSION): TemplateCacheEntry {
+  const cached = templateCache.get(version)
+  if (cached) return cached
 
-  const gzip = Uint8Array.from(Utils.toArray(VAULT_TEMPLATE_GZIP_BASE64, 'base64'))
+  const entry = entryForVersion(version)
+  if (!entry) {
+    throw new VaultError(
+      'template-unknown',
+      `no vendored template for version ${version} — this build cannot reconstruct records written with it`
+    )
+  }
+
+  const gzip = Uint8Array.from(Utils.toArray(entry.gzipBase64, 'base64'))
   const region1 = gunzipSync(gzip)
 
-  if (region1.length !== VAULT_TEMPLATE_RAW_LENGTH || region1.length !== R1K1_LOCK_LEN) {
+  if (region1.length !== entry.rawLength || region1.length !== R1K1_LOCK_LEN) {
     throw new VaultError(
       'template-invalid',
-      `vendored template inflated to ${region1.length} bytes, expected ${VAULT_TEMPLATE_RAW_LENGTH} ` +
+      `vendored template v${version} inflated to ${region1.length} bytes, expected ${entry.rawLength} ` +
         `(R1K1_LOCK_LEN ${R1K1_LOCK_LEN}) — the committed asset is corrupt or was built for a different version`
     )
   }
 
-  const constantHash = constantHashOf(region1, PINNED_VARIABLE_RUNS)
-  if (constantHash !== PINNED_CONSTANT_HASH) {
+  const runs = entry.variableRuns.map(r => ({ offset: r.offset, length: r.length }))
+  const constantHash = constantHashOf(region1, runs)
+  if (constantHash !== entry.constantHash) {
     throw new VaultError(
       'template-invalid',
-      `vendored template's masked constantHash ${constantHash} disagrees with the pinned ${PINNED_CONSTANT_HASH} ` +
-        '— the committed asset is corrupt, or PINNED_VARIABLE_RUNS no longer names the positions it was zeroed at'
+      `vendored template v${version}'s masked constantHash ${constantHash} disagrees with the pinned ` +
+        `${entry.constantHash} — the committed asset is corrupt, or its variableRuns no longer name the ` +
+        'positions it was zeroed at'
     )
   }
 
-  const region2 = region1.subarray(PREIMAGE_SCRIPT_CODE_OFFSET)
-  const scriptCodeRuns = shiftRuns(PINNED_VARIABLE_RUNS, PREIMAGE_SCRIPT_CODE_OFFSET)
+  const region2 = region1.subarray(entry.preimageScriptCodeOffset)
+  const scriptCodeRuns = shiftRuns(runs, entry.preimageScriptCodeOffset)
   const scriptCodeConstantHash = constantHashOf(region2, scriptCodeRuns)
-  if (scriptCodeConstantHash !== PINNED_CONSTANT_HASH_SCRIPT_CODE) {
+  if (scriptCodeConstantHash !== entry.constantHashScriptCode) {
     throw new VaultError(
       'template-invalid',
-      `vendored scriptCode's masked constantHash ${scriptCodeConstantHash} disagrees with the pinned ` +
-        `${PINNED_CONSTANT_HASH_SCRIPT_CODE}`
+      `vendored scriptCode v${version}'s masked constantHash ${scriptCodeConstantHash} disagrees with the ` +
+        `pinned ${entry.constantHashScriptCode}`
     )
   }
 
-  templateCache = { region1, region2 }
-  return templateCache
+  const populated: TemplateCacheEntry = { region1, region2 }
+  templateCache.set(version, populated)
+  return populated
 }
 
 /**
@@ -318,7 +349,7 @@ function ensureTemplateCache(): TemplateCacheEntry {
  * batch, not to avoid holding it for the (short) duration of one.
  */
 export function releaseTemplateCache(): void {
-  templateCache = undefined
+  templateCache.clear()
 }
 
 /** Sum of every variable run's length — the payload size a version's header
@@ -336,9 +367,10 @@ function payloadLengthOf(v: TemplateVersion): number {
  * one supported version.
  */
 function referenceBytesFor(version: number, region: TemplateRegion): Uint8Array | undefined {
-  if (version !== TEMPLATE_VERSION || !templateCache) return undefined
-  if (region === 0x01) return templateCache.region1
-  if (region === 0x02) return templateCache.region2
+  const cached = templateCache.get(version)
+  if (!cached) return undefined
+  if (region === 0x01) return cached.region1
+  if (region === 0x02) return cached.region2
   return undefined
 }
 
@@ -357,23 +389,41 @@ function referenceBytesFor(version: number, region: TemplateRegion): Uint8Array 
  * sample-diffing implementation, nothing here actually awaits anything.
  */
 export async function describeVaultTemplate(): Promise<TemplateVersion[]> {
-  const cache = ensureTemplateCache()
+  // Every registered version, so expansion can serve a record written by any
+  // build that has ever shipped. Oldest first, matching the registry's order.
+  return TEMPLATE_REGISTRY.flatMap(entry => describeEntry(entry))
+}
 
-  const region1: TemplateVersion = {
-    version: TEMPLATE_VERSION,
-    region: 0x01,
-    totalLength: cache.region1.length,
-    variableRuns: PINNED_VARIABLE_RUNS.map(r => ({ ...r })), // fresh copies, not the live module array/objects
-    constantHash: PINNED_CONSTANT_HASH
-  }
-  const region2: TemplateVersion = {
-    version: TEMPLATE_VERSION,
-    region: 0x02,
-    totalLength: cache.region2.length,
-    variableRuns: shiftRuns(PINNED_VARIABLE_RUNS, PREIMAGE_SCRIPT_CODE_OFFSET),
-    constantHash: PINNED_CONSTANT_HASH_SCRIPT_CODE
-  }
-  return [region1, region2]
+/**
+ * Descriptors for the version new records are written with.
+ *
+ * Compression must use exactly one version — the newest — so a caller matching
+ * candidate bytes should ask for this rather than picking an element out of
+ * `describeVaultTemplate()`, which grows a pair per registered version.
+ */
+export async function describeCurrentVaultTemplate(): Promise<TemplateVersion[]> {
+  return describeEntry(currentEntry())
+}
+
+function describeEntry(entry: TemplateRegistryEntry): TemplateVersion[] {
+  const cache = ensureTemplateCache(entry.version)
+  const runs = entry.variableRuns.map(r => ({ offset: r.offset, length: r.length }))
+  return [
+    {
+      version: entry.version,
+      region: 0x01,
+      totalLength: cache.region1.length,
+      variableRuns: runs.map(r => ({ ...r })), // fresh copies, never the registry's own objects
+      constantHash: entry.constantHash
+    },
+    {
+      version: entry.version,
+      region: 0x02,
+      totalLength: cache.region2.length,
+      variableRuns: shiftRuns(runs, entry.preimageScriptCodeOffset),
+      constantHash: entry.constantHashScriptCode
+    }
+  ]
 }
 
 /**
