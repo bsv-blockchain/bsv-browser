@@ -8,7 +8,10 @@ import {
 } from './fixtures/r1k1MainnetFixture'
 import { R1K1_LOCK_LEN, buildVaultLockingScript } from '@/services/vault/r1k1'
 import {
-  compressScript,
+  compressScriptBytes,
+  compressScriptCodeBytes,
+  expandScriptBytes,
+compressScript,
   compressScriptCode,
   describeVaultTemplate,
   expandScript,
@@ -581,5 +584,54 @@ describe('vault template codec: template cache release', () => {
 
     // Restore populated state for subsequent tests in this file.
     await describeVaultTemplate()
+  })
+})
+
+describe('the Uint8Array core', () => {
+  // The array-shaped API is an adapter over these. Converting a 959,632-byte
+  // script to number[] and back costs a measured ~13 MB of Hermes heap per call
+  // — the bulk of what the compressed form exists to avoid — so callers holding
+  // bytes must have a path that never does it.
+  it('returns typed arrays, not arrays', async () => {
+    const script = Uint8Array.from(await buildMainnetFixtureScript())
+    const record = await compressScriptBytes(script)
+    expect(record).toBeInstanceOf(Uint8Array)
+    expect(record.length).toBe(51)
+
+    const back = await expandScriptBytes(record)
+    expect(back).toBeInstanceOf(Uint8Array)
+    expect(back.length).toBe(script.length)
+  })
+
+  it('round-trips byte-identically, and identically to the array API', async () => {
+    const script = await buildMainnetFixtureScript()
+    const bytes = Uint8Array.from(script)
+
+    const viaBytes = await expandScriptBytes(await compressScriptBytes(bytes))
+    const viaArray = await expandScript(await compressScript(script))
+
+    expect(Array.from(viaBytes)).toEqual(script)
+    expect(viaArray).toEqual(script)
+  })
+
+  it('compresses the scriptCode region through the byte core too', async () => {
+    const script = Uint8Array.from(await buildMainnetFixtureScript())
+    const scriptCode = script.subarray(60)
+    const record = await compressScriptCodeBytes(scriptCode)
+    expect(record).toBeInstanceOf(Uint8Array)
+    expect(record.length).toBe(31)
+    expect(Array.from(await expandScriptBytes(record))).toEqual(Array.from(scriptCode))
+  })
+
+  it('accepts a subarray view without copying it first', async () => {
+    // Discovery hands windows straight out of a transaction buffer, which are
+    // views rather than standalone arrays.
+    const script = Uint8Array.from(await buildMainnetFixtureScript())
+    const framed = new Uint8Array(script.length + 8)
+    framed.set(script, 4)
+    const view = framed.subarray(4, 4 + script.length)
+    expect(view.byteOffset).toBe(4)
+    const record = await compressScriptBytes(view)
+    expect(record.length).toBe(51)
   })
 })

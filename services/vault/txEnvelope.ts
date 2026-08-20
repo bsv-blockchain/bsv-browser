@@ -44,10 +44,10 @@ import {
   R1K1_R1_UNLOCK_LEN
 } from './r1k1'
 import {
-  compressScript,
-  compressScriptCode,
+  compressScriptBytes,
+  compressScriptCodeBytes,
   describeCurrentVaultTemplate,
-  expandScript,
+  expandScriptBytes,
   matchesTemplate
 } from './templateCodec'
 
@@ -161,9 +161,9 @@ async function discoverSpans(tx: Uint8Array): Promise<Span[] | null> {
       if (script.value === R1K1_R1_UNLOCK_LEN) {
         const start = at + UNLOCK_SCRIPT_CODE_OFFSET
         const window = tx.subarray(start, start + SCRIPT_CODE_LEN)
-        if (window.length === SCRIPT_CODE_LEN && matchesTemplate(Array.from(window), region2)) {
-          const record = await compressScriptCode(Array.from(window))
-          spans.push({ offset: start, region: 0x02, record: asBytes(record), length: SCRIPT_CODE_LEN })
+        if (window.length === SCRIPT_CODE_LEN && matchesTemplate(window, region2)) {
+          const record = await compressScriptCodeBytes(window)
+          spans.push({ offset: start, region: 0x02, record, length: SCRIPT_CODE_LEN })
         }
       }
       at += script.value
@@ -178,9 +178,9 @@ async function discoverSpans(tx: Uint8Array): Promise<Span[] | null> {
       at = script.next
       if (script.value === R1K1_LOCK_LEN) {
         const window = tx.subarray(at, at + R1K1_LOCK_LEN)
-        if (window.length === R1K1_LOCK_LEN && matchesTemplate(Array.from(window), region1)) {
-          const record = await compressScript(Array.from(window))
-          spans.push({ offset: at, region: 0x01, record: asBytes(record), length: R1K1_LOCK_LEN })
+        if (window.length === R1K1_LOCK_LEN && matchesTemplate(window, region1)) {
+          const record = await compressScriptBytes(window)
+          spans.push({ offset: at, region: 0x01, record, length: R1K1_LOCK_LEN })
         }
       }
       at += script.value
@@ -340,8 +340,7 @@ export async function expandTransaction(envelope: Uint8Array | number[]): Promis
 
   const expanded: Uint8Array[] = []
   for (const span of parsed.spans) {
-    const bytes = await expandScript(Array.from(span.record))
-    expanded.push(asBytes(bytes))
+    expanded.push(await expandScriptBytes(span.record))
   }
 
   const total = expanded.reduce((sum, e) => sum + e.length, 0) + parsed.literal.length
@@ -427,7 +426,7 @@ export async function readEnvelopeRange(
     // Only expand a span the requested range actually touches.
     const spanLen = readUInt32BE(span.record, 3)
     if (offset < outAt + spanLen && end > outAt) {
-      const bytes = asBytes(await expandScript(Array.from(span.record)))
+      const bytes = await expandScriptBytes(span.record)
       emit(bytes, 0, bytes.length, outAt)
       outAt += bytes.length
     } else {
