@@ -1915,6 +1915,12 @@ export class StorageExpoSQLite extends StorageProvider {
     for (const req of chunk.provenTxReqs ?? []) {
       req.rawTx = await compressStoredTx(req.rawTx, req.txid)
       req.inputBEEF = await compressStoredBeef(req.inputBEEF)
+      // Rows written before the write-time scrub landed (2026-08-19) can carry
+      // the full EF/rawTx HEX in provider error notes — the same forbidden
+      // R1-K1 bytes at twice the size, as text. getProvenTxReqsForUser is a
+      // SELECT *, so without this a single pre-scrub row re-wedges the backup
+      // right after the rawTx compression clears it.
+      req.history = scrubHistoryJson(req.history) as typeof req.history
     }
     // proven_txs is the row that actually wedged the first mainnet vault wallet:
     // its rawTx is the full mined transaction (~960 KB for a deposit), it is read
@@ -1938,7 +1944,9 @@ export class StorageExpoSQLite extends StorageProvider {
    * driven by utils/monitor/TaskCompressAtRest.ts, one row per monitor pass.
    */
   async compressNextOversizeRow(): Promise<CompactionStep | undefined> {
-    return await compressOneAtRest(this.getDB())
+    // Scoped by database name so the in-process skip set of one wallet's
+    // database can never suppress a colliding row id in another's.
+    return await compressOneAtRest(this.getDB(), this.dbName)
   }
 
   // processSyncChunk — delegate to inherited implementation if available, stub otherwise

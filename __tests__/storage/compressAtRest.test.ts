@@ -70,7 +70,9 @@ function adapt (d: DatabaseSync): CompactionDb {
 function seeded (): { d: DatabaseSync; db: CompactionDb } {
   const d = new DatabaseSync(':memory:')
   d.exec('CREATE TABLE proven_txs (provenTxId INTEGER PRIMARY KEY, txid TEXT, rawTx BLOB)')
-  d.exec('CREATE TABLE proven_tx_reqs (provenTxReqId INTEGER PRIMARY KEY, txid TEXT, rawTx BLOB, inputBEEF BLOB)')
+  d.exec(
+    'CREATE TABLE proven_tx_reqs (provenTxReqId INTEGER PRIMARY KEY, txid TEXT, rawTx BLOB, inputBEEF BLOB, history TEXT)'
+  )
   d.exec('CREATE TABLE transactions (transactionId INTEGER PRIMARY KEY, txid TEXT, rawTx BLOB, inputBEEF BLOB)')
   d.exec('CREATE TABLE outputs (outputId INTEGER PRIMARY KEY, lockingScript BLOB)')
   return { d, db: adapt(d) }
@@ -145,6 +147,49 @@ describe('compressOneAtRest', () => {
     resetCompactionSkips()
     // The rewritten row is now far below the threshold, so nothing qualifies.
     expect(await compressOneAtRest(db)).toBeUndefined()
+  })
+
+  it('finds a compressible row behind many unshrinkable ones in the same column', async () => {
+    // Regression: the first cut probed LIMIT 5 without excluding skipped ids,
+    // so five unshrinkable rows in one column permanently masked everything
+    // behind them and the task reported drained with the invariant violated.
+    const { db, d } = seeded()
+    for (let i = 0; i < 6; i++) {
+      const junk = Uint8Array.from({ length: OVERSIZE_THRESHOLD + 10 + i }, (_, j) => (j * 31 + i) % 256)
+      d.prepare('INSERT INTO outputs (lockingScript) VALUES (?)').run(junk)
+    }
+    d.prepare('INSERT INTO outputs (lockingScript) VALUES (?)').run(VAULT_LOCK)
+
+    const step = await compressOneAtRest(db)
+    expect(step).toMatchObject({ table: 'outputs', column: 'lockingScript', id: 7 })
+    expect(await compressOneAtRest(db)).toBeUndefined()
+  })
+
+  it('scopes the skip set by database, so row ids cannot collide across wallets', async () => {
+    const a = seeded()
+    const b = seeded()
+    const junk = Uint8Array.from({ length: VAULT_LOCK.length }, (_, j) => (j * 31 + 7) % 256)
+    a.d.prepare('INSERT INTO outputs (lockingScript) VALUES (?)').run(junk)
+    b.d.prepare('INSERT INTO outputs (lockingScript) VALUES (?)').run(VAULT_LOCK)
+
+    // Wallet A skips its outputId=1; wallet B's outputId=1 must still compact.
+    expect(await compressOneAtRest(a.db, 'wallet-a.db')).toBeUndefined()
+    const step = await compressOneAtRest(b.db, 'wallet-b.db')
+    expect(step).toMatchObject({ table: 'outputs', id: 1 })
+  })
+
+  it('scrubs an oversize pre-scrub history row', async () => {
+    const { db, d } = seeded()
+    const history = JSON.stringify({
+      notes: [{ what: 'broadcast failed', rawTx: 'ab'.repeat(OVERSIZE_THRESHOLD) }]
+    })
+    d.prepare('INSERT INTO proven_tx_reqs (txid, history) VALUES (?, ?)').run(VAULT_TXID, history)
+
+    const step = await compressOneAtRest(db)
+    expect(step).toMatchObject({ table: 'proven_tx_reqs', column: 'history' })
+    const stored = (d.prepare('SELECT history FROM proven_tx_reqs').get() as any).history as string
+    expect(stored.length).toBeLessThan(OVERSIZE_THRESHOLD)
+    expect(() => JSON.parse(stored)).not.toThrow()
   })
 
   it('compresses a full-size transactions.inputBEEF container', async () => {

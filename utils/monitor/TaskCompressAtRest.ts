@@ -36,7 +36,7 @@ export class TaskCompressAtRest extends WalletMonitorTask {
     TaskCompressAtRest.nextDueAt = 0
   }
 
-  /** Test seam; also used on sign-out. */
+  /** Test seam. */
   static reset (): void {
     TaskCompressAtRest.maybePending = true
     TaskCompressAtRest.nextDueAt = 0
