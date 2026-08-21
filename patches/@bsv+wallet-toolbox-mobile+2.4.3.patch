@@ -1,3 +1,48 @@
+diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/src/WalletPermissionsManager.js b/node_modules/@bsv/wallet-toolbox-mobile/out/src/WalletPermissionsManager.js
+index 17cbea2..2a21776 100644
+--- a/node_modules/@bsv/wallet-toolbox-mobile/out/src/WalletPermissionsManager.js
++++ b/node_modules/@bsv/wallet-toolbox-mobile/out/src/WalletPermissionsManager.js
+@@ -2996,7 +2996,12 @@ class WalletPermissionsManager {
+         for (let i = 0; i < requested.length; i++) {
+             const wantScript = (requested[i].lockingScript ?? '').toLowerCase();
+             const wantSats = requested[i].satoshis;
+-            const match = available.find(a => !a.used && a.script === wantScript && a.satoshis === wantSats);
++            // A sendMax output is requested as maxPossibleSatoshis (see
++            // generateChange.maxPossibleSatoshis); generateChange rewrites its
++            // amount to whatever the inputs can fund, so only the locking
++            // script can be pinned for that output.
++            const isSendMax = wantSats === 2099999999999999;
++            const match = available.find(a => !a.used && a.script === wantScript && (isSendMax || a.satoshis === wantSats));
+             if (match == null) {
+                 throw new Error(`The transaction returned for signing does not contain caller-requested output ${i} ` +
+                     `(locking script and amount). The recipient may have been substituted by storage.`);
+@@ -3021,13 +3026,23 @@ class WalletPermissionsManager {
+                 });
+             }
+         }
+-        // Sum originator-requested outputs:
+-        const totalOutputSatoshis = (args.outputs || []).reduce((acc, out) => acc + out.satoshis, 0);
++        // Sum originator-requested outputs. A sendMax output is requested as
++        // maxPossibleSatoshis and rewritten by generateChange to the funded
++        // amount, so read its real figure off the transaction (matched by
++        // locking script) rather than off the request.
++        const actualOutputSats = (out) => {
++            if (out.satoshis !== 2099999999999999)
++                return out.satoshis;
++            const wantScript = (out.lockingScript ?? '').toLowerCase();
++            const match = tx.outputs.find(o => o.lockingScript.toHex().toLowerCase() === wantScript);
++            return match != null ? match.satoshis : out.satoshis;
++        };
++        const totalOutputSatoshis = (args.outputs || []).reduce((acc, out) => acc + actualOutputSats(out), 0);
+         for (const outIndex in args.outputs || []) {
+             const out = args.outputs[outIndex];
+             lineItems.push({
+                 type: 'output',
+-                satoshis: out.satoshis,
++                satoshis: actualOutputSats(out),
+                 description: originalOutputDescriptions[outIndex] || 'No output description provided'
+             });
+         }
 diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js b/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js
 index 4569453..032f38c 100644
 --- a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js

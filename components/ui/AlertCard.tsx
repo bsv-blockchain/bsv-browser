@@ -153,6 +153,10 @@ export function AlertHost() {
                 onPress={() => dismiss(b.key ?? b.text.toLowerCase())}
                 style={({ pressed }) => [
                   styles.button,
+                  // flex:1 only splits the two-up row; in the stacked column it
+                  // resolves to a zero flex-basis and clips the label against
+                  // minHeight, so stacked buttons size to their content instead.
+                  sideBySide && styles.buttonRowItem,
                   sideBySide && i > 0 && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.separator },
                   !sideBySide && i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
                   pressed && { backgroundColor: colors.fillTertiary },
@@ -208,12 +212,12 @@ const styles = StyleSheet.create({
   },
   buttonGroupStacked: { flexDirection: 'column' },
   button: {
-    flex: 1,
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: spacing.md,
   },
+  buttonRowItem: { flex: 1 },
   buttonText: { ...typography.body, textAlign: 'center' },
   buttonTextBold: { fontWeight: '600' },
 })

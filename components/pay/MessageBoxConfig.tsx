@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { showToast } from '@/components/ui/Toast'
 import { spacing, typography, radii } from '@/context/theme/tokens'
-import { DEFAULT_MESSAGE_BOX_URL, MESSAGE_BOX_URL_KEY, NO_MESSAGE_BOX } from '@/utils/pay/rails/handle'
+import { DEFAULT_MESSAGE_BOX_URL, LEGACY_MESSAGE_BOX_URL, MESSAGE_BOX_URL_KEY, NO_MESSAGE_BOX } from '@/utils/pay/rails/handle'
 
 export function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next').useTranslation>['t']) {
   const [messageBoxUrl, setMessageBoxUrl] = useState(DEFAULT_MESSAGE_BOX_URL)
@@ -22,6 +22,12 @@ export function useMessageBoxConfig(t: ReturnType<typeof import('react-i18next')
 
   useEffect(() => {
     AsyncStorage.getItem(MESSAGE_BOX_URL_KEY).then(saved => {
+      // A preference equal to the retired default means "default", not a
+      // deliberate choice of that server — follow the new default instead.
+      if (saved === LEGACY_MESSAGE_BOX_URL) {
+        void AsyncStorage.removeItem(MESSAGE_BOX_URL_KEY)
+        return
+      }
       if (saved) {
         setMessageBoxUrl(saved)
         setUrlInput(saved)

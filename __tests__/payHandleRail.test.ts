@@ -50,7 +50,7 @@ describe('peerPayLinkFor', () => {
 describe('message box constants', () => {
   it('keeps the storage key and default host the old screen used', () => {
     expect(MESSAGE_BOX_URL_KEY).toBe('message_box_url')
-    expect(DEFAULT_MESSAGE_BOX_URL).toBe('https://messagebox.babbage.systems')
+    expect(DEFAULT_MESSAGE_BOX_URL).toBe('https://gmb.bsvblockchain.tech')
     expect(NO_MESSAGE_BOX).toBe('noMessageBox')
   })
 })
@@ -221,6 +221,37 @@ describe('sendViaHandle', () => {
       sendViaHandle({ client: client as never, storage: s, recipient: KEY, satoshis: 0, messageBoxUrl: 'https://mb' })
     ).rejects.toThrow(/amount/i)
     expect(client.createPaymentToken).not.toHaveBeenCalled()
+  })
+
+  it('rewrites a send-max token amount to the real output-0 figure', async () => {
+    const { Transaction, P2PKH, PrivateKey } = require('@bsv/sdk')
+    const tx = new Transaction()
+    tx.addOutput({
+      lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()),
+      satoshis: 4990
+    })
+    const maxToken = {
+      customInstructions: { derivationPrefix: 'p', derivationSuffix: 's' },
+      transaction: tx.toAtomicBEEF(),
+      amount: 2099999999999999
+    }
+    const s = fakeStorage()
+    const client = {
+      createPaymentToken: jest.fn().mockResolvedValue(maxToken),
+      sendMessage: jest.fn().mockResolvedValue(undefined)
+    }
+    const result = await sendViaHandle({
+      client: client as never,
+      storage: s,
+      recipient: KEY,
+      satoshis: 2099999999999999,
+      messageBoxUrl: 'https://mb'
+    })
+    expect(result.satoshis).toBe(4990)
+    // Both the delivered body and the persisted outbox entry carry the real amount.
+    const delivered = JSON.parse((client.sendMessage.mock.calls[0][0] as { body: string }).body)
+    expect(delivered.amount).toBe(4990)
+    expect((await getOutboxEntries(s))[0].token.amount).toBe(4990)
   })
 })
 

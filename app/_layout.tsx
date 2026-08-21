@@ -144,7 +144,10 @@ export default function RootLayout() {
                             screenOptions={{
                               animation: 'slide_from_right',
                               headerShown: false,
-                              contentStyle: { backgroundColor }
+                              contentStyle: { backgroundColor },
+                              // Every menu/wallet/vault screen stays upright; only
+                              // the Browser (index, below) follows the device.
+                              orientation: 'portrait_up'
                             }}
                           >
                             {/* One Browser, ever — and one wallet screen, ever
@@ -165,7 +168,7 @@ export default function RootLayout() {
                                 screens and as many Browsers, each re-running its
                                 own multi-second listOutputs balance read whenever
                                 the wallet context rebuilt. */}
-                            <Stack.Screen name="index" dangerouslySingular />
+                            <Stack.Screen name="index" dangerouslySingular options={{ orientation: 'default' }} />
                             <Stack.Screen name="config" />
                             <Stack.Screen name="auth/mnemonic" />
                             <Stack.Screen name="transactions" />

@@ -9,7 +9,7 @@
  * signs for real with a P-256 key (so the R1 template's own commitment
  * check inside the signing loop is exercised, not just mocked away).
  */
-import { Beef, HD, P2PKH, Transaction, UnlockingScript, Utils } from '@bsv/sdk'
+import { Beef, HD, P2PKH, PublicKey, Transaction, UnlockingScript, Utils } from '@bsv/sdk'
 import { p256 } from '@noble/curves/nist.js'
 import {
   R1K1_R1_UNLOCK_LEN,
@@ -49,7 +49,9 @@ import { requestVaultSigner, noteVaultProgress } from '@/services/vault/ceremony
 import { VaultError } from '@/services/vault/types'
 import {
   VAULT_BASKET,
+  VAULT_STAGING_BASKET,
   VAULT_DEPOSIT_MIN,
+  vaultDepositTx2Fee,
   depositToVault,
   withdrawFromVault,
   sweepVaultWithHD,
@@ -160,9 +162,14 @@ let wallet: VaultWallet & {
   signAction: jest.Mock
   listOutputs: jest.Mock
   getPublicKey: jest.Mock
+  createSignature: jest.Mock
   abortAction: jest.Mock
   listActions: jest.Mock
 }
+
+/** Staging outputs the fake wallet "holds": created by a deposit's split tx1,
+ * consumed when a vault tx2 lists one as its input. */
+let fakeStagingUtxos: { outpoint: string; satoshis: number; customInstructions?: string }[]
 
 let signerRelease: jest.Mock
 let mockSigner: { publicKey: number[]; sign: jest.Mock; release: () => void }
@@ -171,11 +178,37 @@ beforeEach(async () => {
   await AsyncStorage.clear()
   for (const k of Object.keys(secureItems)) delete secureItems[k]
 
+  fakeStagingUtxos = []
+  let stagingSeq = 0
   wallet = {
-    createAction: jest.fn(async () => ({ txid: 'deadbeef'.repeat(8) })),
+    // Default behavior mirrors the two-transaction deposit: a split action
+    // (basket VAULT_STAGING_BASKET output) mints a fake staging UTXO; a vault
+    // action that names one as an explicit input consumes it.
+    createAction: jest.fn(async (args: any) => {
+      const out = args?.outputs?.[0]
+      if (out?.basket === VAULT_STAGING_BASKET) {
+        fakeStagingUtxos.push({
+          outpoint: `${String(stagingSeq++).padStart(2, '0')}${'ab'.repeat(31)}.0`,
+          satoshis: out.satoshis,
+          customInstructions: out.customInstructions
+        })
+      } else if (Array.isArray(args?.inputs) && args.inputs.length > 0) {
+        fakeStagingUtxos = fakeStagingUtxos.filter(u => !args.inputs.some((i: any) => i.outpoint === u.outpoint))
+      }
+      return { txid: 'deadbeef'.repeat(8) }
+    }),
     signAction: jest.fn(async () => ({ txid: 'feedface'.repeat(8) })),
-    listOutputs: jest.fn(async () => ({ outputs: [] })),
-    getPublicKey: jest.fn(async () => ({ publicKey: IDENTITY_KEY })),
+    listOutputs: jest.fn(async (args: any) =>
+      args?.basket === VAULT_STAGING_BASKET ? { outputs: [...fakeStagingUtxos] } : { outputs: [] }
+    ),
+    // Staging derivation parses this as a curve point, so those calls need a
+    // real one (compressed secp256k1 G); identity lookups keep the fixture key.
+    getPublicKey: jest.fn(async (args: any) => ({
+      publicKey: args?.identityKey
+        ? IDENTITY_KEY
+        : '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+    })),
+    createSignature: jest.fn(async () => ({ signature: new Array(70).fill(1) })),
     abortAction: jest.fn(async () => ({})),
     listActions: jest.fn(async () => ({ actions: [] }))
   }
@@ -246,11 +279,106 @@ describe('depositToVault', () => {
     expect(wallet.createAction).not.toHaveBeenCalled()
   })
 
+  /** The createAction calls that carry the vault output (deposit tx2). */
+  const vaultCalls = () =>
+    wallet.createAction.mock.calls.map(([a]: [any]) => a).filter((a: any) => a.labels?.includes('vault-deposit'))
+  /** The split calls that carve out staging funding (deposit tx1). */
+  const splitCalls = () =>
+    wallet.createAction.mock.calls.map(([a]: [any]) => a).filter((a: any) => a.labels?.includes('vault-deposit-split'))
+
+  it('splits first: tx1 stages deposit + tx2 fee, tx2 spends only that input with no change', async () => {
+    await seedMeta()
+    await depositToVault(wallet, ADMIN, 250_000)
+
+    const [split] = splitCalls()
+    const [vault] = vaultCalls()
+    expect(split).toBeDefined()
+    expect(vault).toBeDefined()
+
+    // tx1 stages exactly deposit + tx2's fee into the staging basket.
+    expect(split.outputs).toHaveLength(1)
+    expect(split.outputs[0].basket).toBe(VAULT_STAGING_BASKET)
+    expect(split.outputs[0].satoshis).toBe(250_000 + vaultDepositTx2Fee())
+
+    // tx2 names the staging output as its ONLY input and the vault output as
+    // its ONLY output — the exact funding means no change output can appear.
+    expect(vault.inputs).toHaveLength(1)
+    expect(vault.inputs[0].outpoint).toMatch(/\.0$/)
+    expect(vault.outputs).toHaveLength(1)
+    expect(vault.outputs[0].basket).toBe(VAULT_BASKET)
+  })
+
+  it('reuses a stranded staging output of the same amount instead of splitting again', async () => {
+    await seedMeta()
+    await depositToVault(wallet, ADMIN, 250_000)
+    // Simulate tx2 having failed: put the consumed staging output back.
+    const [split] = splitCalls()
+    fakeStagingUtxos.push({
+      outpoint: `${'cd'.repeat(32)}.0`,
+      satoshis: split.outputs[0].satoshis,
+      customInstructions: split.outputs[0].customInstructions
+    })
+    wallet.createAction.mockClear()
+    await depositToVault(wallet, ADMIN, 250_000)
+    expect(splitCalls()).toHaveLength(0)
+    expect(vaultCalls()).toHaveLength(1)
+  })
+
+  it('signs tx2 with a wallet-derived staging key when a signable transaction comes back', async () => {
+    await seedMeta()
+    const G = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+    const stagingTotal = 250_000 + vaultDepositTx2Fee()
+    const stagingScript = new P2PKH().lock(PublicKey.fromString(G).toAddress())
+    const src = new Transaction()
+    src.addOutput({ satoshis: stagingTotal, lockingScript: stagingScript })
+    const stagingOut = {
+      outpoint: `${src.id('hex')}.0`,
+      satoshis: stagingTotal,
+      customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: 'staging cafebabe' })
+    }
+    wallet.listOutputs.mockImplementation(async (args: any) =>
+      args?.basket === VAULT_STAGING_BASKET ? { outputs: [stagingOut], BEEF: stitchBeef([{ src }]) } : { outputs: [] }
+    )
+    wallet.createAction.mockImplementation(async (args: any) => {
+      const tx = new Transaction()
+      tx.addInput({
+        sourceTransaction: src,
+        sourceOutputIndex: 0,
+        sequence: 0xffffffff,
+        unlockingScript: new UnlockingScript([])
+      })
+      tx.addOutput({
+        satoshis: args.outputs[0].satoshis,
+        lockingScript: new P2PKH().lock(Utils.toArray('11'.repeat(20), 'hex'))
+      })
+      return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-dep' } }
+    })
+
+    const { txid } = await depositToVault(wallet, ADMIN, 250_000)
+    expect(txid).toBe('feedface'.repeat(8))
+
+    // The digest handed to the wallet is a real 32-byte sighash under the
+    // staging key's own derivation.
+    const [sigArgs] = wallet.createSignature.mock.calls[0]
+    expect(sigArgs.keyID).toBe('staging cafebabe')
+    expect(sigArgs.counterparty).toBe('self')
+    expect(sigArgs.hashToDirectlySign).toHaveLength(32)
+
+    // signAction gets a P2PKH-shaped unlock: <sig+hashtype> <staging pubkey>.
+    const [signArgs] = wallet.signAction.mock.calls[0]
+    expect(signArgs.reference).toBe('ref-dep')
+    const unlock = signArgs.spends[0].unlockingScript as string
+    expect(unlock.endsWith(`21${G}`)).toBe(true)
+    // sig push = 70 mock bytes + 0x41 hashtype
+    expect(unlock.startsWith('47')).toBe(true)
+    expect(unlock.slice(2 + 70 * 2, 2 + 71 * 2)).toBe('41')
+  })
+
   it('builds an R1-K1 output with complete customInstructions', async () => {
     await seedMeta()
     await depositToVault(wallet, ADMIN, 250_000)
 
-    const [args] = wallet.createAction.mock.calls[0]
+    const [args] = vaultCalls()
     const out = args.outputs[0]
 
     expect(out.basket).toBe(VAULT_BASKET)
@@ -270,9 +398,7 @@ describe('depositToVault', () => {
     await depositToVault(wallet, ADMIN, 250_000)
     await depositToVault(wallet, ADMIN, 250_000)
 
-    const salts = wallet.createAction.mock.calls.map(
-      ([a]: [any]) => decodeVaultInstructions(a.outputs[0].customInstructions)!.salt
-    )
+    const salts = vaultCalls().map((a: any) => decodeVaultInstructions(a.outputs[0].customInstructions)!.salt)
     expect(salts[0]).not.toBe(salts[1])
     // One YubiKey key serves the whole vault, so identical salts would give
     // identical commitments and make every output trivially linkable.
@@ -284,9 +410,7 @@ describe('depositToVault', () => {
     await depositToVault(wallet, ADMIN, 250_000)
     await depositToVault(wallet, ADMIN, 250_000)
 
-    const keyIDs = wallet.createAction.mock.calls.map(
-      ([a]: [any]) => decodeVaultInstructions(a.outputs[0].customInstructions)!.keyID
-    )
+    const keyIDs = vaultCalls().map((a: any) => decodeVaultInstructions(a.outputs[0].customInstructions)!.keyID)
     expect(keyIDs).toEqual(['bip32/0', 'bip32/1'])
   })
 

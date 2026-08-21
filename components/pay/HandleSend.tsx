@@ -204,7 +204,7 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
     haptics.confirm()
     setIsSending(true)
     try {
-      await sendViaHandle({
+      const { satoshis: paidSats } = await sendViaHandle({
         client,
         storage,
         recipient: search.recipientKey,
@@ -212,7 +212,7 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
         messageBoxUrl
       })
       await loadOutbox()
-      const amount = formatAmount(sats, currency, satoshisPerUSD)
+      const amount = formatAmount(paidSats, currency, satoshisPerUSD)
       const isFirst = !(await AsyncStorage.getItem(FIRST_PAYMENT_KEY))
       if (isFirst) {
         await AsyncStorage.setItem(FIRST_PAYMENT_KEY, '1')

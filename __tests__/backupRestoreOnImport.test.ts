@@ -62,15 +62,24 @@ function fakeClient (
 /** Storage stand-in: accepts chunks, reports done once it has seen them all. */
 function fakeStorage (expected: number): any {
   let seen = 0
-  return {
+  const s: any = {
     seen: () => seen,
     makeAvailable: jest.fn().mockResolvedValue({ storageIdentityKey: 'fresh-local' }),
+    findOrInsertUser: jest.fn(async () => ({ user: { userId: 7 }, isNew: true })),
+    findOrInsertSyncStateAuth: jest.fn(async () => ({ syncState: {}, isNew: true })),
     processSyncChunk: jest.fn(async () => {
+      // The real processSyncChunk verifyTruthy/verifyOne's these rows — a chunk
+      // arriving before both seeds is exactly the "A truthy value is required"
+      // failure on a fresh device.
+      if (s.findOrInsertUser.mock.calls.length === 0 || s.findOrInsertSyncStateAuth.mock.calls.length === 0) {
+        throw new Error('A truthy value is required.')
+      }
       if (seen >= expected) return { done: true, maxUpdated_at: undefined, updates: 0, inserts: 0 }
       seen++
       return { done: false, maxUpdated_at: undefined, updates: 0, inserts: 0 }
     })
   }
+  return s
 }
 
 const deps = (over: Record<string, unknown>): any => ({
@@ -127,6 +136,27 @@ describe('restoreOnImport', () => {
     // own first push would win as soon as the monitor starts.
     expect(client.index).toHaveBeenCalledWith(NEW_DEVICE, 2)
     expect(client.index).not.toHaveBeenCalledWith(OLD_DEVICE, 1)
+  })
+
+  it('seeds the user row and the source device\'s syncState before the first chunk', async () => {
+    const w = deriveBackupWallet(PRIMARY)
+    const client = fakeClient([summary({ deviceId: NEW_DEVICE, generation: 1 })], {
+      [`${NEW_DEVICE}/1`]: [await encodeChunk(w, chunkWithTx('only'))]
+    })
+    const storage = fakeStorage(1)
+    const identityKey = '02' + 'ab'.repeat(32)
+
+    const result = await restoreOnImport(deps({ storage, client }))
+
+    expect(result.restored).toBe(true)
+    expect(storage.findOrInsertUser).toHaveBeenCalledWith(identityKey)
+    // syncState keyed to the SOURCE device: processSyncChunk looks it up by
+    // fromStorageIdentityKey, which restore passes as the backup's deviceId.
+    expect(storage.findOrInsertSyncStateAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 7, identityKey }),
+      NEW_DEVICE,
+      'backup-restore'
+    )
   })
 
   it('reports progress as chunks land', async () => {
