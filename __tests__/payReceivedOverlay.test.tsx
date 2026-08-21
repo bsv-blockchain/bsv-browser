@@ -53,12 +53,26 @@ jest.mock('@/hooks/useConfirmationSound', () => ({
   sounds: { confirmation: () => mockConfirmation(), release: jest.fn() }
 }))
 
+// Done returns the user to the wallet so the updated balance is the next thing
+// they see. Navigation is the overlay's job — call sites only clean up state.
+const mockNavigate = jest.fn()
+jest.mock('expo-router', () => ({
+  router: { navigate: (href: string) => mockNavigate(href) }
+}))
+
 import React from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react-native'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
-import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
+import ReceivedOverlay from '@/components/pay/PaymentSuccessOverlay'
 
-function draw(props: { amount: number; count?: number; broadcast?: boolean; onDismiss: () => void }) {
+function draw(props: {
+  amount: number
+  count?: number
+  broadcast?: boolean
+  direction?: 'sent' | 'received'
+  recipientName?: string
+  onDismiss: () => void
+}) {
   return render(
     <ThemeProvider>
       <ReceivedOverlay {...props} />
@@ -69,6 +83,7 @@ function draw(props: { amount: number; count?: number; broadcast?: boolean; onDi
 beforeEach(() => {
   mockMarkDone = undefined
   mockConfirmation.mockClear()
+  mockNavigate.mockClear()
 })
 
 describe('ReceivedOverlay', () => {
@@ -132,6 +147,16 @@ describe('ReceivedOverlay', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1)
   })
 
+  it('returns to the wallet on acknowledgement, so the updated balance is what the user sees next', () => {
+    draw({ amount: 5000, onDismiss: jest.fn() })
+    act(() => {
+      mockMarkDone?.()
+    })
+    expect(mockNavigate).not.toHaveBeenCalled()
+    fireEvent.press(screen.getByLabelText('done'))
+    expect(mockNavigate).toHaveBeenCalledWith('/wallet')
+  })
+
   it('sounds the confirmation tone', () => {
     jest.useFakeTimers()
     try {
@@ -143,5 +168,46 @@ describe('ReceivedOverlay', () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+/**
+ * The same overlay, sent direction. The whole point of the shared component:
+ * a payment completing reads identically whichever rail carried it — same
+ * staging, same held-until-Done acknowledgement — only the words change.
+ */
+describe('PaymentSuccessOverlay (sent)', () => {
+  it('states that the payment was sent, and shows the figure', () => {
+    draw({ amount: 5000, direction: 'sent', onDismiss: jest.fn() })
+    expect(screen.getByText('local_pay_sent')).toBeTruthy()
+    expect(screen.getByText('sats:5000')).toBeTruthy()
+    // Receive-only copy stays out of the sent variant.
+    expect(screen.queryByText('local_pay_received')).toBeNull()
+    expect(screen.queryByText('local_pay_added')).toBeNull()
+  })
+
+  it('names the recipient when the rail resolved one', () => {
+    draw({ amount: 5000, direction: 'sent', recipientName: 'Alice', onDismiss: jest.fn() })
+    expect(screen.getByText('Alice')).toBeTruthy()
+  })
+
+  it('withholds the acknowledgement until the mark has landed, same as receive', () => {
+    const onDismiss = jest.fn()
+    draw({ amount: 5000, direction: 'sent', onDismiss })
+    expect(screen.queryByLabelText('done')).toBeNull()
+    act(() => {
+      mockMarkDone?.()
+    })
+    fireEvent.press(screen.getByLabelText('done'))
+    expect(onDismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns to the wallet on acknowledgement, same as receive', () => {
+    draw({ amount: 5000, direction: 'sent', onDismiss: jest.fn() })
+    act(() => {
+      mockMarkDone?.()
+    })
+    fireEvent.press(screen.getByLabelText('done'))
+    expect(mockNavigate).toHaveBeenCalledWith('/wallet')
   })
 })

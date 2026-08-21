@@ -97,7 +97,7 @@ import {
 } from 'react-native'
 import Animated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated'
 import { Ionicons } from '@expo/vector-icons'
-import { useFocusEffect } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
@@ -107,12 +107,13 @@ import type { WalletInterface } from '@bsv/sdk'
 
 import QRScanner from '@/components/QRScanner'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
-import { AmountInput } from '@/components/wallet/AmountInput'
 import Celebration from '@/components/ui/Celebration'
 import PressableScale from '@/components/ui/PressableScale'
 import PresenceRow, { type PresenceState } from '@/components/localpay/PresenceRow'
+import AvailableBalance from '@/components/pay/AvailableBalance'
+import { PayAmountField, RecipientSummary } from '@/components/pay/PayForm'
 import PaymentQrDisplay from '@/components/pay/PaymentQrDisplay'
-import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
+import ReceivedOverlay from '@/components/pay/PaymentSuccessOverlay'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { durations, springs } from '@/context/theme/motion'
@@ -1535,14 +1536,9 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
             {supportText(t('local_pay_amount_optional_hint'))}
             <View style={styles.gapXl} />
 
-            <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
-              {t('local_pay_amount').toUpperCase()}
-            </Text>
-            {/* No max button: this asks the payer for money, so "entire wallet
-                balance" would mean the requester's own balance — meaningless here. */}
-            <AmountInput value={requestAmount} onChangeText={setRequestAmount} showMax={false} />
-
-            <View style={styles.gapXl} />
+            {/* No max button and no balance line: this asks the PAYER for money,
+                so the requester's own balance is meaningless here. */}
+            <PayAmountField value={requestAmount} onChangeText={setRequestAmount} showMax={false} showBalance={false} />
             {/* Never disabled. Leaving the amount at zero is a real choice — it
                 means "payer decides" — so gating Continue on a non-zero amount
                 would make that choice unreachable. startRequest maps 0 to an
@@ -1684,32 +1680,20 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
               <>
                 {supportText(t('local_pay_enter_amount_send'))}
                 <View style={styles.gapXl} />
-                <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
-                  {t('local_pay_amount').toUpperCase()}
-                </Text>
-                <AmountInput value={sendAmount} onChangeText={setSendAmount} />
+                <PayAmountField value={sendAmount} onChangeText={setSendAmount} />
               </>
             ) : (
-              <View style={styles.stageTight}>{amountBlock(scannedSession.amount)}</View>
+              <>
+                <View style={styles.stageTight}>{amountBlock(scannedSession.amount)}</View>
+                <View style={styles.gapXl} />
+                <AvailableBalance />
+              </>
             )}
 
-            <View style={styles.gapXl} />
-            <View style={[styles.idCard, { backgroundColor: colors.backgroundElevated, borderColor: colors.separator }]}>
-              <View style={[styles.avatar, { backgroundColor: colors.fillTertiary }]}>
-                <Ionicons name="person" size={20} color={colors.textSecondary} />
-              </View>
-              <View style={styles.idText}>
-                <Text style={[styles.idLabel, { color: colors.textTertiary }]}>{t('recipient').toUpperCase()}</Text>
-                <Text style={[styles.idName, { color: colors.textPrimary }]} numberOfLines={1}>
-                  {peerName ?? abbreviateKey(scannedSession.identityKey)}
-                </Text>
-                {!!peerName && (
-                  <Text style={[styles.idKey, { color: colors.textTertiary }]} numberOfLines={1} ellipsizeMode="middle">
-                    {abbreviateKey(scannedSession.identityKey)}
-                  </Text>
-                )}
-              </View>
-            </View>
+            <RecipientSummary
+              name={peerName ?? abbreviateKey(scannedSession.identityKey)}
+              detail={peerName ? abbreviateKey(scannedSession.identityKey) : undefined}
+            />
 
             <View style={styles.gapLg} />
             {presenceBlock}
@@ -1791,7 +1775,17 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
               </>
             )}
             <View style={styles.gapXl} />
-            <PrimaryButton styles={styles} colors={colors} label={t('done')} onPress={goBack} />
+            {/* A completed payment ends on the balance it changed, on every
+                rail: exit the flow, then land on the wallet. */}
+            <PrimaryButton
+              styles={styles}
+              colors={colors}
+              label={t('done')}
+              onPress={() => {
+                goBack()
+                router.navigate('/wallet')
+              }}
+            />
           </View>
         )}
 
@@ -1917,7 +1911,12 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
         <ReceivedOverlay
           amount={receivedOverlay.amount}
           broadcast={receivedOverlay.broadcast}
-          onDismiss={() => setReceivedOverlay(null)}
+          // The overlay navigates to the wallet after this; goBack ends the
+          // session and resets the cell so /pay is not left mid-flow beneath.
+          onDismiss={() => {
+            setReceivedOverlay(null)
+            goBack()
+          }}
         />
       )}
     </View>
@@ -2085,8 +2084,6 @@ function makeStyles() {
     title: { ...typography.title2, textAlign: 'center' },
     support: { ...typography.subhead, textAlign: 'center', marginTop: spacing.sm },
     reason: { ...typography.subhead, fontWeight: '500', textAlign: 'center', marginTop: spacing.sm },
-    fieldLabel: { ...typography.caption2, fontWeight: '600', letterSpacing: 0.8, marginBottom: spacing.sm },
-
     presenceSlot: { alignSelf: 'stretch', alignItems: 'center' },
 
     // Concentric: outer 20 = inner plate 4 + padding 16.
@@ -2143,20 +2140,8 @@ function makeStyles() {
     },
     segmentTextSelected: { fontWeight: '600' },
 
-    idCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.md,
-      alignSelf: 'stretch',
-      padding: spacing.md,
-      borderRadius: radii.lg,
-      borderWidth: StyleSheet.hairlineWidth
-    },
-    avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-    idText: { flex: 1, minWidth: 0, gap: 2 },
-    idLabel: { ...typography.caption2, fontWeight: '600', letterSpacing: 0.8 },
-    idName: { ...typography.body, fontWeight: '600' },
-    idKey: { ...typography.caption2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+    // The resolved-counterparty card and field labels moved to the shared
+    // PayForm vocabulary (RecipientSummary / PayField).
 
     notice: {
       flexDirection: 'row',

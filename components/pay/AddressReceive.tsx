@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { formatDistanceToNow } from 'date-fns'
 
 import AmountDisplay from '@/components/wallet/AmountDisplay'
-import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
+import ReceivedOverlay from '@/components/pay/PaymentSuccessOverlay'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'

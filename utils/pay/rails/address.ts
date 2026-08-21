@@ -15,6 +15,7 @@ import {
   P2PKH,
   PrivateKey,
   PublicKey,
+  Transaction,
   Utils,
   type InternalizeActionArgs,
   type InternalizeOutput,
@@ -280,18 +281,29 @@ export async function sendToAddress(args: {
   adminOriginator: string
   address: string
   satoshis: number
-}): Promise<void> {
+}): Promise<{ paidSatoshis: number }> {
   const { wallet, adminOriginator, address, satoshis } = args
   const sats = Math.round(Number(satoshis))
   if (!Number.isFinite(sats) || sats <= 0) throw new Error('Invalid amount')
   if (!isValidBsvAddress(address)) throw new Error('Invalid BSV address')
   const lockingScript = new P2PKH().lock(address).toHex()
-  await wallet.createAction(
+  // A send-max request carries maxPossibleSatoshis and the wallet rewrites the
+  // output to whatever the inputs can fund, so the real figure only exists on
+  // the returned transaction. randomizeOutputs: false pins it to output 0.
+  const isSendMax = sats === 2099999999999999
+  const result = (await wallet.createAction(
     {
       description: 'Send BSV to address',
       outputs: [{ lockingScript, satoshis: sats, outputDescription: 'BSV for recipient address' }],
-      labels: ['legacy', 'outbound']
+      labels: ['legacy', 'outbound'],
+      ...(isSendMax ? { options: { randomizeOutputs: false } } : {})
     },
     adminOriginator
-  )
+  )) as { tx?: number[] }
+  if (!isSendMax) return { paidSatoshis: sats }
+  if (!result.tx) throw new Error('Could not determine send-max amount')
+  const tx = Transaction.fromAtomicBEEF(result.tx)
+  const paid = tx.outputs[0]?.satoshis
+  if (typeof paid !== 'number' || paid <= 0) throw new Error('Could not determine send-max amount')
+  return { paidSatoshis: paid }
 }

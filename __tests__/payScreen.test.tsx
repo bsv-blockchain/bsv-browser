@@ -64,7 +64,7 @@ jest.mock('@/hooks/useOnline', () => ({ useOnline: () => mockOnline }))
 
 const mockParams: Record<string, string> = {}
 jest.mock('expo-router', () => ({
-  router: { back: jest.fn(), replace: jest.fn(), canGoBack: () => true },
+  router: { back: jest.fn(), replace: jest.fn(), navigate: jest.fn(), canGoBack: () => true },
   useLocalSearchParams: () => mockParams,
   useFocusEffect: () => {}
 }))

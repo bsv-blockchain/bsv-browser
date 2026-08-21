@@ -7,20 +7,17 @@
  * line under the button says, and why it says it before the send rather than
  * after.
  */
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { useTranslation } from 'react-i18next'
-import AsyncStorage from '@react-native-async-storage/async-storage'
 import { PeerPayClient } from '@bsv/message-box-client'
 
 import QRScanner from '@/components/QRScanner'
-import { AmountInput } from '@/components/wallet/AmountInput'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
-import Celebration from '@/components/ui/Celebration'
-import PressableScale from '@/components/ui/PressableScale'
 import { showToast } from '@/components/ui/Toast'
+import { ConsequenceNote, PayAmountField, PayCta, PayField } from '@/components/pay/PayForm'
+import PaymentSuccessOverlay from '@/components/pay/PaymentSuccessOverlay'
 import ResultBanner from '@/components/pay/ResultBanner'
 import RecipientField from '@/components/pay/RecipientField'
 import { ConfigPanel, MessageBoxBar, useMessageBoxConfig } from '@/components/pay/MessageBoxConfig'
@@ -28,14 +25,16 @@ import { useIdentitySearch } from '@/components/pay/useIdentitySearch'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { ExchangeRateContext } from '@/context/ExchangeRateContext'
-import { formatAmount } from '@/utils/amountFormatHelpers'
 import { CONSEQUENCE_KEYS } from '@/utils/pay/rails'
-import { NO_MESSAGE_BOX, retryDelivery, sendViaHandle } from '@/utils/pay/rails/handle'
+import {
+  NO_MESSAGE_BOX,
+  cancelOutboxPayment,
+  isMessageBoxNetworkError,
+  retryDelivery,
+  sendViaHandle
+} from '@/utils/pay/rails/handle'
 import { getOutboxEntries, removeOutboxEntry, type OutboxEntry } from '@/utils/peerpay/outbox'
 import { haptics } from '@/hooks/useHaptics'
-
-const FIRST_PAYMENT_KEY = 'hasSentFirstPayment'
 
 // ── Outgoing Section ─────────────────────────────────────────────────────────
 
@@ -52,16 +51,14 @@ function OutgoingSection({ entries, retryingId, colors, t, onRetry, onDismiss }:
   if (entries.length === 0) return null
 
   return (
-    <>
-      <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
-        {t('outgoing_payments')}
-      </Text>
+    <PayField labelKey="outgoing_payments">
       <View style={[styles.outgoingCard, { backgroundColor: colors.background, borderColor: colors.separator }]}>
         {entries.map((entry, idx) => {
-          const isSent = entry.status === 'sent'
           const isRetrying = retryingId === entry.id
           const isLast = idx === entries.length - 1
-          const accentColor = isSent ? colors.success : colors.warning
+          // Everything in this list failed to deliver — delivered entries are
+          // filtered out before render, so the accent is always the warning.
+          const accentColor = colors.warning
           const truncated = `${entry.recipient.slice(0, 8)}…${entry.recipient.slice(-4)}`
           return (
             <View
@@ -84,11 +81,12 @@ function OutgoingSection({ entries, retryingId, colors, t, onRetry, onDismiss }:
                 </View>
 
                 {/* Status / error text */}
-                <Text
-                  style={[styles.outgoingStatusText, { color: isSent ? colors.success : colors.textSecondary }]}
-                  numberOfLines={2}
-                >
-                  {isSent ? t('payment_delivered') : (entry.lastError ?? t('payment_not_delivered'))}
+                <Text style={[styles.outgoingStatusText, { color: colors.textSecondary }]} numberOfLines={2}>
+                  {entry.lastError
+                    ? isMessageBoxNetworkError(entry.lastError)
+                      ? t('message_box_unreachable')
+                      : entry.lastError
+                    : t('payment_not_delivered')}
                 </Text>
 
                 {/* Action buttons — full-width row, easy tap targets */}
@@ -96,34 +94,28 @@ function OutgoingSection({ entries, retryingId, colors, t, onRetry, onDismiss }:
                   <TouchableOpacity
                     onPress={() => onDismiss(entry.id)}
                     disabled={isRetrying}
-                    style={[
-                      styles.outgoingDismissButton,
-                      isSent && { flex: 1 },
-                      !isSent && { borderRightColor: colors.separator }
-                    ]}
+                    style={[styles.outgoingDismissButton, { borderRightColor: colors.separator }]}
                   >
-                    <Text style={[styles.outgoingDismissText, { color: colors.textSecondary }]}>{t('dismiss')}</Text>
+                    <Text style={[styles.outgoingDismissText, { color: colors.textSecondary }]}>{t('cancel')}</Text>
                   </TouchableOpacity>
-                  {!isSent && (
-                    <TouchableOpacity
-                      onPress={() => onRetry(entry)}
-                      disabled={isRetrying}
-                      style={styles.outgoingRetryButton}
-                    >
-                      {isRetrying ? (
-                        <ActivityIndicator size="small" color={colors.accent} />
-                      ) : (
-                        <Text style={[styles.outgoingRetryText, { color: colors.accent }]}>{t('retry')}</Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    onPress={() => onRetry(entry)}
+                    disabled={isRetrying}
+                    style={styles.outgoingRetryButton}
+                  >
+                    {isRetrying ? (
+                      <ActivityIndicator size="small" color={colors.accent} />
+                    ) : (
+                      <Text style={[styles.outgoingRetryText, { color: colors.accent }]}>{t('retry')}</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
               </View>
             </View>
           )
         })}
       </View>
-    </>
+    </PayField>
   )
 }
 
@@ -139,23 +131,22 @@ export interface HandleSendProps {
 export default function HandleSend({ initialIdentityKey, initialSats, initialNotice }: HandleSendProps) {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  const { managers, adminOriginator, settings, storage } = useWallet()
+  const { managers, adminOriginator, storage } = useWallet()
   const wallet = managers?.permissionsManager || null
-  const { satoshisPerUSD } = useContext(ExchangeRateContext)
-  const currency = settings?.currency || 'BSV'
 
   const config = useMessageBoxConfig(t)
   const { messageBoxUrl } = config
   const isConfigured = !!messageBoxUrl && messageBoxUrl !== NO_MESSAGE_BOX
 
   const [sendAmount, setSendAmount] = useState(initialSats && initialSats > 0 ? String(initialSats) : '')
+  const [note, setNote] = useState('')
   const [notice, setNotice] = useState<{ type: 'error'; message: string } | null>(
     initialNotice ? { type: 'error', message: initialNotice } : null
   )
   const [isSending, setIsSending] = useState(false)
   const [sendResult, setSendResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-  const [celebrating, setCelebrating] = useState(false)
-  const [celebrationMessage, setCelebrationMessage] = useState('')
+  /** The success moment, held until acknowledged — same screen as every rail. */
+  const [sent, setSent] = useState<{ amount: number; recipient?: string } | null>(null)
   const [outbox, setOutbox] = useState<OutboxEntry[]>([])
   const [retryingId, setRetryingId] = useState<string | null>(null)
 
@@ -185,7 +176,15 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
 
   const loadOutbox = useCallback(async () => {
     if (!storage) return
-    setOutbox(await getOutboxEntries(storage))
+    // Only failed deliveries surface here: a delivered payment already had its
+    // success moment, and this list exists for the retry, not as a history.
+    // Delivered entries are pruned rather than merely hidden — nothing would
+    // ever remove them otherwise, and the transaction itself lives in the
+    // wallet's own activity, not in this delivery bookkeeping.
+    const entries = await getOutboxEntries(storage)
+    const delivered = entries.filter(e => e.status === 'sent')
+    for (const e of delivered) await removeOutboxEntry(storage, e.id)
+    setOutbox(entries.filter(e => e.status !== 'sent'))
   }, [storage])
 
   useEffect(() => {
@@ -205,27 +204,36 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
     setIsSending(true)
     try {
       const { satoshis: paidSats } = await sendViaHandle({
+        wallet: wallet as any,
+        adminOriginator,
         client,
         storage,
         recipient: search.recipientKey,
         satoshis: sats,
-        messageBoxUrl
+        messageBoxUrl,
+        note,
+        recipientName: search.selectedIdentity?.name
       })
       await loadOutbox()
-      const amount = formatAmount(paidSats, currency, satoshisPerUSD)
-      const isFirst = !(await AsyncStorage.getItem(FIRST_PAYMENT_KEY))
-      if (isFirst) {
-        await AsyncStorage.setItem(FIRST_PAYMENT_KEY, '1')
-        setCelebrationMessage(`${t('paid')} ${amount}`)
-        setCelebrating(true)
-      } else {
-        haptics.success()
-        setSendResult({ type: 'success', message: `${t('paid')} ${amount}` })
-      }
+      // The overlay stages its own haptic (inside Celebration) and tone; firing
+      // haptics.success() here would double the beat. Only a human-readable
+      // name goes on the success screen — a raw identity key is noise there.
+      setSent({
+        amount: paidSats,
+        recipient: search.selectedIdentity?.name
+      })
       setSendAmount('')
+      setNote('')
       search.clearRecipient()
     } catch (error: any) {
-      const message = error instanceof RangeError ? t('enter_valid_amount') : error?.message || t('unknown_error')
+      // An unreachable message box is a configuration problem, not a payment
+      // one — point at the fix rather than echoing the raw fetch error.
+      const message =
+        error instanceof RangeError
+          ? t('enter_valid_amount')
+          : isMessageBoxNetworkError(error)
+            ? t('message_box_unreachable')
+            : error?.message || t('unknown_error')
       setSendResult({ type: 'error', message })
       // The outbox entry stays 'unsent' and is offered for retry below.
       await loadOutbox()
@@ -233,7 +241,7 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
       setIsSending(false)
       setTimeout(() => setSendResult(null), 5000)
     }
-  }, [peerPayClient, search, sendAmount, storage, messageBoxUrl, loadOutbox, currency, satoshisPerUSD, t])
+  }, [peerPayClient, search, sendAmount, note, storage, messageBoxUrl, loadOutbox, wallet, adminOriginator, t])
 
   const handleRetry = useCallback(
     async (entry: OutboxEntry) => {
@@ -241,28 +249,43 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
       if (!client || !storage) return
       setRetryingId(entry.id)
       try {
-        await retryDelivery({ client, storage, entry })
-        showToast(t('payment_delivered'), { type: 'success' })
+        await retryDelivery({ wallet: wallet as any, adminOriginator, client, storage, entry })
+        // A retried payment that lands gets the same success moment as one
+        // that worked first time — held until Done, then back to the wallet.
+        setSent({ amount: entry.token.amount })
       } catch (e: any) {
-        showToast(`${t('retry_failed')}: ${e?.message || t('unknown_error')}`, { type: 'error' })
+        const reason = isMessageBoxNetworkError(e) ? t('message_box_unreachable') : e?.message || t('unknown_error')
+        showToast(`${t('retry_failed')}: ${reason}`, { type: 'error' })
       } finally {
         setRetryingId(null)
         await loadOutbox()
       }
     },
-    [peerPayClient, storage, loadOutbox, t]
+    [peerPayClient, storage, loadOutbox, wallet, adminOriginator, t]
   )
 
+  /**
+   * Cancel a stuck payment. For a not-yet-delivered noSend entry this aborts
+   * the underlying action, freeing its inputs — nothing was ever broadcast.
+   */
   const handleDismiss = useCallback(
     async (id: string) => {
-      if (!storage) return
-      await removeOutboxEntry(storage, id)
+      if (!storage || !wallet) return
+      const entry = outbox.find(e => e.id === id)
+      if (!entry) return
+      await cancelOutboxPayment({ wallet: wallet as any, adminOriginator, storage, entry })
       await loadOutbox()
     },
-    [storage, loadOutbox]
+    [storage, wallet, adminOriginator, outbox, loadOutbox]
   )
 
-  const canSend = search.recipientKey.length > 0 && Number(sendAmount) > 0 && !isSending && isConfigured
+  /**
+   * A stuck payment blocks new sends: every attempt while the message box is
+   * unreachable would mint another noSend action and another stuck entry, so
+   * the only ways forward are Retry and Cancel on what is already queued.
+   */
+  const canSend =
+    search.recipientKey.length > 0 && Number(sendAmount) > 0 && !isSending && isConfigured && outbox.length === 0
 
   return (
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -294,8 +317,7 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
       )}
       {notice && <ResultBanner result={notice} onDismiss={() => setNotice(null)} colors={colors} />}
 
-      <View style={styles.fieldGroup}>
-        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('recipient')}</Text>
+      <PayField labelKey="recipient">
         <RecipientField
           selectedIdentity={search.selectedIdentity}
           searchQuery={search.searchQuery}
@@ -309,35 +331,28 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
           onClear={search.clearRecipient}
           onOpenScanner={search.openScanner}
         />
-      </View>
+      </PayField>
 
-      <View style={styles.fieldGroup}>
-        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{t('amount')}</Text>
-        <AmountInput value={sendAmount} onChangeText={setSendAmount} />
-      </View>
+      <PayAmountField value={sendAmount} onChangeText={setSendAmount} />
+
+      <PayField labelKey="note">
+        <TextInput
+          value={note}
+          onChangeText={setNote}
+          placeholder={t('note_placeholder')}
+          placeholderTextColor={colors.textQuaternary}
+          maxLength={280}
+          style={[
+            styles.noteInput,
+            { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator, color: colors.textPrimary }
+          ]}
+        />
+      </PayField>
 
       {/* The consequence, before the button — not after. */}
-      <Text style={[styles.consequence, { color: colors.textSecondary }]}>{t(CONSEQUENCE_KEYS.handle)}</Text>
+      <ConsequenceNote textKey={CONSEQUENCE_KEYS.handle} />
 
-      <PressableScale
-        onPress={handleSend}
-        disabled={!canSend}
-        style={[styles.cta, { backgroundColor: canSend ? colors.accent : colors.fill, opacity: canSend ? 1 : 0.5 }]}
-        accessibilityRole="button"
-        accessibilityLabel={t('pay')}
-        accessibilityState={{ disabled: !canSend }}
-      >
-        {isSending ? (
-          <ActivityIndicator size="small" color={canSend ? colors.background : colors.textSecondary} />
-        ) : (
-          <>
-            <Ionicons name="arrow-up" size={20} color={canSend ? colors.textOnAccent : colors.textTertiary} />
-            <Text style={[styles.ctaText, { color: canSend ? colors.textOnAccent : colors.textTertiary }]}>
-              {t('pay')}
-            </Text>
-          </>
-        )}
-      </PressableScale>
+      <PayCta onPress={handleSend} disabled={!canSend} busy={isSending} />
 
       {sendResult && <ResultBanner result={sendResult} onDismiss={() => setSendResult(null)} colors={colors} />}
 
@@ -368,15 +383,13 @@ export default function HandleSend({ initialIdentityKey, initialSats, initialNot
         />
       </Modal>
 
-      {celebrating && (
-        <View style={styles.celebrationOverlay} pointerEvents="none">
-          <Celebration
-            onDone={() => {
-              setCelebrating(false)
-              setSendResult({ type: 'success', message: celebrationMessage })
-            }}
-          />
-        </View>
+      {sent && (
+        <PaymentSuccessOverlay
+          direction="sent"
+          amount={sent.amount}
+          recipientName={sent.recipient}
+          onDismiss={() => setSent(null)}
+        />
       )}
     </ScrollView>
   )
@@ -391,13 +404,6 @@ const styles = StyleSheet.create({
   // Field group
   fieldGroup: {
     marginBottom: spacing.lg
-  },
-  fieldLabel: {
-    ...typography.footnote,
-    fontWeight: '500',
-    marginBottom: spacing.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5
   },
 
   // Consequence line + call to action
@@ -479,11 +485,11 @@ const styles = StyleSheet.create({
     ...typography.subhead
   },
 
-  // First-payment celebration overlay
-  celebrationOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 100
+  noteInput: {
+    ...typography.body,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md
   }
 })

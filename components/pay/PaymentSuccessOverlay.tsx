@@ -21,6 +21,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { Modal, StyleSheet, Text, View } from 'react-native'
 import Animated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated'
+import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 
 import AmountDisplay from '@/components/wallet/AmountDisplay'
@@ -35,7 +36,7 @@ import { sounds } from '@/hooks/useConfirmationSound'
 const TONE_DELAY_MS = 120
 
 export interface ReceivedOverlayProps {
-  /** Total satoshis credited in this event. */
+  /** Total satoshis credited (received) or paid (sent) in this event. */
   amount: number
   /** How many payments made up that total. Only shown when it is more than one. */
   count?: number
@@ -46,11 +47,31 @@ export interface ReceivedOverlayProps {
    * payee is entitled to know that before treating it as final.
    */
   broadcast?: boolean
-  /** Acknowledged. The only way this screen closes. */
+  /**
+   * Which way the money moved. The staging is identical — that is the point of
+   * sharing this screen across every rail — only the words change: 'received'
+   * says the money is in the wallet; 'sent' names who it went to.
+   */
+  direction?: 'received' | 'sent'
+  /** Sent only: the resolved counterparty (name, handle, or abbreviated address). */
+  recipientName?: string
+  /**
+   * Acknowledged. The only way this screen closes. Clean up local state here —
+   * the overlay itself then returns the user to the wallet, so the updated
+   * balance is the next thing they see.
+   */
   onDismiss: () => void
 }
 
-export default function ReceivedOverlay({ amount, count = 1, broadcast = true, onDismiss }: ReceivedOverlayProps) {
+export default function PaymentSuccessOverlay({
+  amount,
+  count = 1,
+  broadcast = true,
+  direction = 'received',
+  recipientName,
+  onDismiss
+}: ReceivedOverlayProps) {
+  const sent = direction === 'sent'
   const { t } = useTranslation()
   const { colors } = useTheme()
   const reducedMotion = useReducedMotion()
@@ -74,6 +95,18 @@ export default function ReceivedOverlay({ amount, count = 1, broadcast = true, o
 
   const onMarkDone = useCallback(() => setReady(true), [])
 
+  /**
+   * Done means "back to the wallet", uniformly: a completed payment in either
+   * direction ends on the balance it changed. `navigate` walks back to the
+   * wallet screen when it is already in the stack (the common case — Pay/Get
+   * paid are reached from it) rather than stacking a fresh copy, and the wallet
+   * refetches balance and activity on focus.
+   */
+  const acknowledge = useCallback(() => {
+    onDismiss()
+    router.navigate('/wallet')
+  }, [onDismiss])
+
   const settleIn = reducedMotion
     ? undefined
     : FadeInDown.springify()
@@ -95,14 +128,14 @@ export default function ReceivedOverlay({ amount, count = 1, broadcast = true, o
         style={[styles.container, { backgroundColor: colors.background }]}
         accessibilityViewIsModal
         accessibilityRole="alert"
-        accessibilityLabel={`${t('local_pay_received')}. ${t('local_pay_added')}`}
+        accessibilityLabel={sent ? t('local_pay_sent') : `${t('local_pay_received')}. ${t('local_pay_added')}`}
       >
         <View style={styles.stage}>
           <Celebration onDone={onMarkDone} />
           <View style={styles.gapXl} />
 
           <Text style={[styles.title, { color: colors.textPrimary }]} textBreakStrategy="balanced">
-            {t('local_pay_received')}
+            {t(sent ? 'local_pay_sent' : 'local_pay_received')}
           </Text>
 
           {/* The focal element. Everything else on this screen is a label. */}
@@ -118,9 +151,17 @@ export default function ReceivedOverlay({ amount, count = 1, broadcast = true, o
             </Text>
           </Animated.View>
 
-          <Text style={[styles.support, { color: colors.success }]} textBreakStrategy="balanced">
-            {count > 1 ? t('local_pay_added_multiple', { count }) : t('local_pay_added')}
-          </Text>
+          {sent ? (
+            !!recipientName && (
+              <Text style={[styles.support, { color: colors.textSecondary }]} numberOfLines={1} ellipsizeMode="middle">
+                {recipientName}
+              </Text>
+            )
+          ) : (
+            <Text style={[styles.support, { color: colors.success }]} textBreakStrategy="balanced">
+              {count > 1 ? t('local_pay_added_multiple', { count }) : t('local_pay_added')}
+            </Text>
+          )}
 
           {!broadcast && (
             <Text style={[styles.pending, { color: colors.textSecondary }]}>{t('pay_received_not_broadcast')}</Text>
@@ -130,7 +171,7 @@ export default function ReceivedOverlay({ amount, count = 1, broadcast = true, o
         {ready && (
           <Animated.View entering={fadeIn} style={styles.footer}>
             <PressableScale
-              onPress={onDismiss}
+              onPress={acknowledge}
               haptic="tap"
               style={[styles.button, { backgroundColor: colors.accent }]}
               accessibilityRole="button"

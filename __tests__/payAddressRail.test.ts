@@ -265,6 +265,31 @@ describe('sendToAddress', () => {
     ])
   })
 
+  it('reports the requested amount as paid for an ordinary send', async () => {
+    const wallet = { createAction: jest.fn().mockResolvedValue({}) }
+    await expect(
+      sendToAddress({ wallet: wallet as never, adminOriginator: 'admin.com', address: ADDRESS, satoshis: 1234 })
+    ).resolves.toEqual({ paidSatoshis: 1234 })
+  })
+
+  it('pins output order on a send-max and reads the real figure off output 0', async () => {
+    const { Transaction, P2PKH } = require('@bsv/sdk')
+    const tx = new Transaction()
+    tx.addOutput({ lockingScript: new P2PKH().lock(ADDRESS), satoshis: 4990 })
+    const wallet = { createAction: jest.fn().mockResolvedValue({ tx: tx.toAtomicBEEF() }) }
+    await expect(
+      sendToAddress({
+        wallet: wallet as never,
+        adminOriginator: 'admin.com',
+        address: ADDRESS,
+        satoshis: 2099999999999999
+      })
+    ).resolves.toEqual({ paidSatoshis: 4990 })
+    const [args] = wallet.createAction.mock.calls[0]
+    expect(args.options).toEqual({ randomizeOutputs: false })
+    expect(args.outputs[0].satoshis).toBe(2099999999999999)
+  })
+
   it('refuses a non-positive amount before touching the wallet', async () => {
     const wallet = { createAction: jest.fn() }
     await expect(

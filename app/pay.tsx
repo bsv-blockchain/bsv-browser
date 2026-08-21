@@ -27,7 +27,7 @@ import AddressSend from '@/components/pay/AddressSend'
 import AddressReceive from '@/components/pay/AddressReceive'
 import OfflineNotice from '@/components/pay/OfflineNotice'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { radii, spacing, typography } from '@/context/theme/tokens'
+import { spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
 import { useOnline } from '@/hooks/useOnline'
 import { validatePeerPayURI } from '@/utils/parsePeerPayURI'
@@ -211,11 +211,16 @@ export default function PayScreen() {
     return () => task.cancel()
   }, [online, runMonitorTask])
 
+  /**
+   * Back from anywhere on this screen means "back to the wallet" — never to
+   * the chooser grid. The grid is a decision the user already made on the way
+   * in; stepping back through it makes leaving a two- or three-tap affair.
+   * `navigate` walks back to the wallet when it is in the stack (the normal
+   * case) and pushes it when /pay was deep-linked into directly.
+   */
   const goBack = useCallback(() => {
-    if (cell) setCell(null)
-    else if (router.canGoBack()) router.back()
-    else router.replace('/')
-  }, [cell])
+    router.navigate('/wallet')
+  }, [])
 
   const grid = () => (
     <View style={styles.grid}>
@@ -257,9 +262,9 @@ export default function PayScreen() {
   const body = () => {
     switch (cell) {
       case 'pay-nearby':
-        return <NearbyFlow role="payer" onExit={() => setCell(null)} />
+        return <NearbyFlow role="payer" onExit={goBack} />
       case 'get-nearby':
-        return <NearbyFlow role="payee" onExit={() => setCell(null)} />
+        return <NearbyFlow role="payee" onExit={goBack} />
       case 'pay-handle':
         return (
           <HandleSend initialIdentityKey={initialIdentityKey} initialSats={initialSats} initialNotice={peerPayNotice} />

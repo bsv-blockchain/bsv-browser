@@ -5,38 +5,39 @@
  * notification mechanism at all, so a user who pastes an address expecting
  * messaging-style delivery has effectively posted cash. The line says so, in
  * the same place every time — under the amount, above the button.
+ *
+ * Form vocabulary comes from PayForm: this file owns only what is
+ * address-specific — the address input, its validation, and the send call.
  */
-import React, { useCallback, useContext, useState } from 'react'
-import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import React, { useCallback, useState } from 'react'
+import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { StatusBar } from 'expo-status-bar'
 import { useTranslation } from 'react-i18next'
 
 import QRScanner from '@/components/QRScanner'
-import { AmountInput } from '@/components/wallet/AmountInput'
-import PressableScale from '@/components/ui/PressableScale'
+import { ConsequenceNote, PayAmountField, PayCta, PayField } from '@/components/pay/PayForm'
+import PaymentSuccessOverlay from '@/components/pay/PaymentSuccessOverlay'
 import { showToast } from '@/components/ui/Toast'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { ExchangeRateContext } from '@/context/ExchangeRateContext'
-import { formatAmount } from '@/utils/amountFormatHelpers'
 import { CONSEQUENCE_KEYS, isValidBsvAddress, normalizeAddressInput } from '@/utils/pay/rails'
 import { sendToAddress } from '@/utils/pay/rails/address'
 
 export default function AddressSend({ initialAddress }: { initialAddress?: string }) {
   const { t } = useTranslation()
   const { colors } = useTheme()
-  const { managers, adminOriginator, settings } = useWallet()
+  const { managers, adminOriginator } = useWallet()
   const wallet = managers?.permissionsManager || null
-  const { satoshisPerUSD } = useContext(ExchangeRateContext)
-  const currency = settings?.currency || 'BSV'
 
   const [address, setAddress] = useState(initialAddress ?? '')
   const [amount, setAmount] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
   const [scannerVisible, setScannerVisible] = useState(false)
+  /** The success moment, held until acknowledged — same screen as every rail. */
+  const [sent, setSent] = useState<{ amount: number; recipient: string } | null>(null)
 
   const onChangeAddress = useCallback(
     (text: string) => {
@@ -61,8 +62,8 @@ export default function AddressSend({ initialAddress }: { initialAddress?: strin
     const sats = Math.round(Number(amount))
     setIsSending(true)
     try {
-      await sendToAddress({ wallet: wallet as any, adminOriginator, address, satoshis: sats })
-      showToast(`${t('paid')} ${formatAmount(sats, currency, satoshisPerUSD)}`, { type: 'success' })
+      const { paidSatoshis } = await sendToAddress({ wallet: wallet as any, adminOriginator, address, satoshis: sats })
+      setSent({ amount: paidSatoshis, recipient: address })
       setAddress('')
       setAmount('')
       setError(null)
@@ -71,7 +72,7 @@ export default function AddressSend({ initialAddress }: { initialAddress?: strin
     } finally {
       setIsSending(false)
     }
-  }, [wallet, adminOriginator, address, amount, currency, satoshisPerUSD, t])
+  }, [wallet, adminOriginator, address, amount, t])
 
   return (
     <ScrollView
@@ -79,8 +80,7 @@ export default function AddressSend({ initialAddress }: { initialAddress?: strin
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
     >
-      <View style={styles.fieldGroup}>
-        <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>{t('recipient_address').toUpperCase()}</Text>
+      <PayField labelKey="recipient_address">
         <View
           style={[
             styles.inputRow,
@@ -105,39 +105,14 @@ export default function AddressSend({ initialAddress }: { initialAddress?: strin
           </TouchableOpacity>
         </View>
         {error ? <Text style={[styles.fieldError, { color: colors.error }]}>{error}</Text> : null}
-      </View>
+      </PayField>
 
-      <View style={styles.fieldGroup}>
-        <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>{t('amount').toUpperCase()}</Text>
-        <AmountInput value={amount} onChangeText={setAmount} />
-      </View>
+      <PayAmountField value={amount} onChangeText={setAmount} />
 
       {/* Never implicit. This rail cannot notify the payee. */}
-      <View style={[styles.consequence, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}>
-        <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
-        <Text style={[styles.consequenceText, { color: colors.textSecondary }]}>{t(CONSEQUENCE_KEYS.address)}</Text>
-      </View>
+      <ConsequenceNote textKey={CONSEQUENCE_KEYS.address} />
 
-      <PressableScale
-        onPress={handleSend}
-        disabled={!canSend}
-        haptic="confirm"
-        style={[styles.cta, { backgroundColor: canSend ? colors.accent : colors.fill }]}
-        accessibilityRole="button"
-        accessibilityLabel={t('pay')}
-        accessibilityState={{ disabled: !canSend }}
-      >
-        {isSending ? (
-          <ActivityIndicator size="small" color={canSend ? colors.background : colors.textTertiary} />
-        ) : (
-          <>
-            <Ionicons name="arrow-up" size={20} color={canSend ? colors.textOnAccent : colors.textTertiary} />
-            <Text style={[styles.ctaText, { color: canSend ? colors.textOnAccent : colors.textTertiary }]}>
-              {t('pay')}
-            </Text>
-          </>
-        )}
-      </PressableScale>
+      <PayCta onPress={handleSend} disabled={!canSend} busy={isSending} />
 
       <Modal
         visible={scannerVisible}
@@ -153,14 +128,21 @@ export default function AddressSend({ initialAddress }: { initialAddress?: strin
           hintText={t('scan_bsv_address_hint')}
         />
       </Modal>
+
+      {sent && (
+        <PaymentSuccessOverlay
+          direction="sent"
+          amount={sent.amount}
+          recipientName={sent.recipient}
+          onDismiss={() => setSent(null)}
+        />
+      )}
     </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
-  fieldGroup: { marginBottom: spacing.xl },
-  fieldLabel: { ...typography.caption2, fontWeight: '600', letterSpacing: 0.8, marginBottom: spacing.sm },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -170,25 +152,5 @@ const styles = StyleSheet.create({
   },
   input: { ...typography.body, flex: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
   inputAction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  fieldError: { ...typography.caption1, marginTop: spacing.xs },
-  consequence: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radii.md,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.lg
-  },
-  consequenceText: { ...typography.footnote, flex: 1 },
-  cta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.md + 2,
-    borderRadius: radii.md
-  },
-  ctaText: { ...typography.subhead, fontWeight: '600' }
+  fieldError: { ...typography.caption1, marginTop: spacing.xs }
 })

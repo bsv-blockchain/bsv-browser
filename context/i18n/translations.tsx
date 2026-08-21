@@ -535,6 +535,10 @@ const resources = {
 
       // Amount input
       send_max: 'Send Max',
+      message_box_unreachable: 'Could not reach the payment server. Check the message box URL in your settings.',
+      available: 'available',
+      note: 'Note',
+      note_placeholder: "What's it for? (optional)",
       entire_wallet_balance: 'Entire wallet balance',
       entire_vault_balance: 'Entire vault balance',
       export_wallet_data: 'Export Wallet Data',
@@ -986,6 +990,10 @@ const resources = {
       requested_fields: '请求的字段',
 
       send_max: '发送最大值',
+      message_box_unreachable: '无法连接支付服务器。请在设置中检查消息盒 URL。',
+      available: '可用',
+      note: '备注',
+      note_placeholder: '用途？（可选）',
       entire_wallet_balance: '全部钱包余额',
       export_wallet_data: '导出钱包数据',
       import_wallet_data: '导入钱包数据',
@@ -1429,6 +1437,10 @@ const resources = {
       requested_fields: 'अनुरोधित फ़ील्ड',
 
       send_max: 'अधिकतम भेजें',
+      message_box_unreachable: 'भुगतान सर्वर से संपर्क नहीं हो सका। सेटिंग्स में message box URL जांचें।',
+      available: 'उपलब्ध',
+      note: 'नोट',
+      note_placeholder: 'किसलिए? (वैकल्पिक)',
       entire_wallet_balance: 'पूरी वॉलेट शेष राशि',
       export_wallet_data: 'वॉलेट डेटा निर्यात करें',
       import_wallet_data: 'वॉलेट डेटा आयात करें',
@@ -1875,6 +1887,10 @@ const resources = {
       requested_fields: 'Campos solicitados',
 
       send_max: 'Enviar máximo',
+      message_box_unreachable: 'No se pudo conectar con el servidor de pagos. Revisa la URL del message box en los ajustes.',
+      available: 'disponible',
+      note: 'Nota',
+      note_placeholder: '¿Para qué es? (opcional)',
       entire_wallet_balance: 'Todo el saldo de la billetera',
       export_wallet_data: 'Exportar datos de cartera',
       import_wallet_data: 'Importar datos de cartera',
@@ -2316,6 +2332,10 @@ const resources = {
       requested_fields: 'Champs demandés',
 
       send_max: 'Envoyer le maximum',
+      message_box_unreachable: "Impossible de joindre le serveur de paiement. Vérifiez l'URL de la message box dans les réglages.",
+      available: 'disponible',
+      note: 'Note',
+      note_placeholder: "C'est pour quoi ? (facultatif)",
       entire_wallet_balance: 'Solde total du portefeuille',
       export_wallet_data: 'Exporter les données du portefeuille',
       import_wallet_data: 'Importer les données du portefeuille',
@@ -2754,6 +2774,10 @@ const resources = {
       requested_fields: 'الحقول المطلوبة',
 
       send_max: 'إرسال الحد الأقصى',
+      message_box_unreachable: 'تعذر الوصول إلى خادم الدفع. تحقق من عنوان URL لصندوق الرسائل في الإعدادات.',
+      available: 'متاح',
+      note: 'ملاحظة',
+      note_placeholder: 'ما الغرض؟ (اختياري)',
       entire_wallet_balance: 'رصيد المحفظة بالكامل',
       export_wallet_data: 'تصدير بيانات المحفظة',
       import_wallet_data: 'استيراد بيانات المحفظة',
@@ -3192,6 +3216,10 @@ const resources = {
       requested_fields: 'Campos solicitados',
 
       send_max: 'Enviar máximo',
+      message_box_unreachable: 'Não foi possível conectar ao servidor de pagamentos. Verifique o URL da message box nas configurações.',
+      available: 'disponível',
+      note: 'Nota',
+      note_placeholder: 'Para que é? (opcional)',
       entire_wallet_balance: 'Saldo total da carteira',
       export_wallet_data: 'Exportar dados da carteira',
       import_wallet_data: 'Importar dados da carteira',
@@ -3632,6 +3660,10 @@ const resources = {
       requested_fields: 'অনুরোধকৃত ক্ষেত্র',
 
       send_max: 'সর্বোচ্চ পাঠান',
+      message_box_unreachable: 'পেমেন্ট সার্ভারে পৌঁছানো যায়নি। সেটিংসে message box URL যাচাই করুন।',
+      available: 'উপলব্ধ',
+      note: 'নোট',
+      note_placeholder: 'কীসের জন্য? (ঐচ্ছিক)',
       entire_wallet_balance: 'সম্পূর্ণ ওয়ালেট ব্যালেন্স',
       export_wallet_data: 'ওয়ালেট ডেটা রপ্তানি করুন',
       import_wallet_data: 'ওয়ালেট ডেটা আমদানি করুন',
@@ -4072,6 +4104,10 @@ const resources = {
       requested_fields: 'Запрошенные поля',
 
       send_max: 'Отправить максимум',
+      message_box_unreachable: 'Не удалось связаться с платёжным сервером. Проверьте URL message box в настройках.',
+      available: 'доступно',
+      note: 'Заметка',
+      note_placeholder: 'За что? (необязательно)',
       entire_wallet_balance: 'Весь баланс кошелька',
       export_wallet_data: 'Экспортировать данные кошелька',
       import_wallet_data: 'Импортировать данные кошелька',
@@ -4513,6 +4549,10 @@ const resources = {
       requested_fields: 'Kolom yang diminta',
 
       send_max: 'Kirim Maksimal',
+      message_box_unreachable: 'Tidak dapat menghubungi server pembayaran. Periksa URL message box di pengaturan.',
+      available: 'tersedia',
+      note: 'Catatan',
+      note_placeholder: 'Untuk apa? (opsional)',
       entire_wallet_balance: 'Seluruh saldo dompet',
       export_wallet_data: 'Ekspor Data Dompet',
       import_wallet_data: 'Impor Data Dompet',
@@ -4966,6 +5006,10 @@ const resources = {
 
       // Amount input
       send_max: '最大額を送金',
+      message_box_unreachable: '決済サーバーに接続できませんでした。設定でメッセージボックスのURLを確認してください。',
+      available: '利用可能',
+      note: 'メモ',
+      note_placeholder: '何のため？（任意）',
       entire_wallet_balance: 'ウォレットの全残高',
       export_wallet_data: 'ウォレットデータをエクスポート',
       import_wallet_data: 'ウォレットデータをインポート',
@@ -5422,6 +5466,10 @@ const resources = {
 
       // Amount input
       send_max: 'Wyślij maksimum',
+      message_box_unreachable: 'Nie można połączyć się z serwerem płatności. Sprawdź adres URL message box w ustawieniach.',
+      available: 'dostępne',
+      note: 'Notatka',
+      note_placeholder: 'Za co? (opcjonalnie)',
       entire_wallet_balance: 'Całe saldo portfela',
       export_wallet_data: 'Eksportuj dane portfela',
       import_wallet_data: 'Importuj dane portfela',

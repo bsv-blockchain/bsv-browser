@@ -31,6 +31,8 @@ export interface OutboxEntry {
     }
     transaction: number[]
     amount: number
+    /** User's note; delivered inside the token and shown by the recipient. */
+    note?: string
   }
   /** The MessageBox host URL used at creation time */
   messageBoxUrl: string
@@ -39,6 +41,18 @@ export interface OutboxEntry {
   lastAttemptAt?: string
   /** Error message from the most recent failed delivery attempt */
   lastError?: string
+  /**
+   * Txid of the noSend transaction backing this token. Present on entries
+   * minted since the deferred-broadcast flow; its absence marks a legacy entry
+   * whose transaction was already broadcast at creation.
+   */
+  txid?: string
+  /**
+   * True once the token reached the recipient's message box. From that point
+   * the payment is considered handed over: retry only re-attempts the
+   * broadcast, and cancel no longer aborts the transaction.
+   */
+  delivered?: boolean
 }
 
 interface StorageLike {
@@ -85,9 +99,10 @@ export async function saveOutboxEntry(
     recipient: string
     token: OutboxEntry['token']
     messageBoxUrl: string
+    txid?: string
   }
 ): Promise<string> {
-  const { recipient, token, messageBoxUrl } = params
+  const { recipient, token, messageBoxUrl, txid } = params
   const id = `${Date.now()}_${recipient.slice(0, 8)}`
   const entry: OutboxEntry = {
     id,
@@ -95,7 +110,8 @@ export async function saveOutboxEntry(
     recipient,
     token,
     messageBoxUrl,
-    status: 'unsent'
+    status: 'unsent',
+    ...(txid ? { txid } : {})
   }
   const all = await readEntries(storage)
   all.push(entry)

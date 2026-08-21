@@ -35,7 +35,7 @@ import type { DisplayableIdentity } from '@bsv/sdk'
 
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import ResultBanner from '@/components/pay/ResultBanner'
-import ReceivedOverlay from '@/components/pay/ReceivedOverlay'
+import ReceivedOverlay from '@/components/pay/PaymentSuccessOverlay'
 import { ConfigPanel, MessageBoxBar, useMessageBoxConfig } from '@/components/pay/MessageBoxConfig'
 import { showToast } from '@/components/ui/Toast'
 import { useTheme } from '@/context/theme/ThemeContext'

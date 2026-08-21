@@ -43,6 +43,25 @@ index 17cbea2..2a21776 100644
                  description: originalOutputDescriptions[outIndex] || 'No output description provided'
              });
          }
+diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/buildSignableTransaction.js b/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/buildSignableTransaction.js
+--- a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/buildSignableTransaction.js
++++ b/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/buildSignableTransaction.js
+@@ -188,7 +188,14 @@
+         if (requestedScript.length === 0 || requestedScript !== providedScript) {
+             throw new WERR_errors_1.WERR_INVALID_PARAMETER('output.lockingScript', `equal to the caller-requested locking script. Storage returned a different locking script for output index ${i}; the recipient may have been substituted.`);
+         }
+-        if (provided.satoshis !== requested.satoshis) {
++        // A sendMax output is requested as maxPossibleSatoshis (see
++        // generateChange.maxPossibleSatoshis); generateChange rewrites its
++        // amount to whatever the inputs can fund, so only the locking
++        // script can be pinned for that output. Any rewrite is bounded by
++        // the wallet's own inputs, and diverting the difference to change
++        // still pays this client.
++        const isSendMax = requested.satoshis === 2099999999999999;
++        if (!isSendMax && provided.satoshis !== requested.satoshis) {
+             throw new WERR_errors_1.WERR_INVALID_PARAMETER('output.satoshis', `equal to the caller-requested satoshis. Storage returned ${provided.satoshis} for output index ${i}, caller requested ${requested.satoshis}.`);
+         }
+     }
 diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js b/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js
 index 4569453..032f38c 100644
 --- a/node_modules/@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js
