@@ -15,6 +15,7 @@ import { compressScriptBytes, isCompressed } from '@/services/vault/templateCode
 import {
   COMPRESS_PROVEN_TX_RAWTX,
   assertExpanded,
+  compressOutputScript,
   compressStoredBeef,
   compressStoredTx,
   expandStoredRange,
@@ -598,6 +599,7 @@ export class StorageExpoSQLite extends StorageProvider {
   async insertOutput(output: TableOutput, trx?: TrxToken): Promise<number> {
     const e = await this.validateEntityForInsert(output, trx)
     if (e.outputId === 0) delete (e as any).outputId
+    e.lockingScript = await compressOutputScript(e.lockingScript)
     const id = await this.sqlInsert('outputs', e, 'outputId')
     output.outputId = id
     return id
@@ -731,8 +733,9 @@ export class StorageExpoSQLite extends StorageProvider {
   }
 
   async updateOutput(id: number, update: Partial<TableOutput>, trx?: TrxToken): Promise<number> {
-    const u = this.validatePartialForUpdate(update)
-    return await this.sqlUpdate('outputs', id, u as any, 'outputId')
+    const u = this.validatePartialForUpdate(update) as any
+    if (u.lockingScript) u.lockingScript = await compressOutputScript(u.lockingScript)
+    return await this.sqlUpdate('outputs', id, u, 'outputId')
   }
 
   async updateOutputBasket(id: number, update: Partial<TableOutputBasket>, trx?: TrxToken): Promise<number> {
@@ -1911,6 +1914,15 @@ export class StorageExpoSQLite extends StorageProvider {
     for (const req of chunk.provenTxReqs ?? []) {
       req.rawTx = await compressStoredTx(req.rawTx, req.txid)
       req.inputBEEF = await compressStoredBeef(req.inputBEEF)
+    }
+    // proven_txs is the row that actually wedged the first mainnet vault wallet:
+    // its rawTx is the full mined transaction (~960 KB for a deposit), it is read
+    // for the chunk via getProvenTxsForUser in stored form, and nothing below the
+    // envelope can split one record across blobs. Whatever COMPRESS_PROVEN_TX_RAWTX
+    // says about the AT-REST column, the sync form must always be compressed or a
+    // single vault deposit blocks every backup that follows it.
+    for (const p of chunk.provenTxs ?? []) {
+      p.rawTx = (await compressStoredTx(p.rawTx, p.txid)) as number[]
     }
     for (const t of chunk.transactions ?? []) {
       t.rawTx = await compressStoredTx(t.rawTx, t.txid)

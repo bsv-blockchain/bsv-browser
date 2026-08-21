@@ -29,7 +29,7 @@
  * `expandStoredScript`, where a page-supplied value can legitimately be
  * unreconstructable and erroring the whole query would be worse.
  */
-import { expandScriptBytes, isCompressed } from '@/services/vault/templateCodec'
+import { compressScriptBytes, expandScriptBytes, isCompressed } from '@/services/vault/templateCodec'
 import {
   compressContainer,
   compressTransaction,
@@ -114,6 +114,32 @@ export async function expandStoredScript(bytes: number[] | undefined): Promise<n
 }
 
 /**
+ * Compress a stored output script (`outputs.lockingScript`) on the way in.
+ *
+ * New vault deposits never reach here at full size — `maxOutputScript` keeps the
+ * column NULL for them — so this exists for every OTHER writer: restores of rows
+ * written by older builds (the first mainnet vault wallet holds a 959,632-byte
+ * script in this column), `processSyncChunk` replaying a chunk, and any future
+ * path that hands the full script to an insert. Idempotent (a compressed value
+ * passes through) and total (anything the codec does not recognise as a genuine
+ * R1-K1 template instance is stored unchanged). A marker-led forgery is left
+ * alone by the isCompressed guard rather than thrown on, because this column can
+ * hold page-supplied bytes — the same provenance argument as expandStoredScript.
+ */
+export async function compressOutputScript<T extends number[] | Uint8Array | undefined>(bytes: T): Promise<T> {
+  if (!bytes || bytes.length === 0) return bytes
+  if (isCompressed(bytes)) return bytes
+  try {
+    const compressed = await compressScriptBytes(asBytes(bytes))
+    if (compressed.length >= bytes.length) return bytes
+    return (bytes instanceof Uint8Array ? compressed : Array.from(compressed)) as T
+  } catch (e) {
+    console.warn(`[storage] could not compress an output script: ${(e as Error)?.message ?? 'unknown'}`)
+    return bytes
+  }
+}
+
+/**
  * Assert that bytes about to leave for somewhere that needs real ones are real.
  *
  * The last line of defence for the invariant, and the reason it is checkable
@@ -172,20 +198,22 @@ export async function compressStoredTx<T extends number[] | Uint8Array | undefin
 /**
  * Whether `proven_txs.rawTx` may be stored compressed.
  *
- * OFF, and it must stay off until a device has run a full deposit -> withdrawal
- * -> proof cycle with the other columns compressed. That row is not like the
- * others: it IS the merkle evidence for a mined transaction, and
+ * ON, by explicit decision (2026-08-20): the first mainnet vault wallet wedged
+ * its backup log on exactly this row — proven_txs.rawTx held the full 960,075
+ * bytes of the deposit — and the standing requirement is now that R1-K1 bytes
+ * are NEVER kept at full size anywhere in the database. This row is still not
+ * like the others: it IS the merkle evidence for a mined transaction, and
  * `Beef.verifyBumpIndexLeaves` binds `hash256(rawTx)` to a chain-committed BUMP
- * leaf inside @bsv/sdk, where no subclass can intercept it. A bug in the other
- * columns is recoverable by rewriting them from the network; a bug here makes
- * every later spend of that transaction's outputs fail `beef.verify()` with
- * nothing local able to repair it.
+ * leaf inside @bsv/sdk, where no subclass can intercept it. What makes ON
+ * tenable is that the envelope self-verifies — expansion hashes its own output
+ * against the recorded txid and throws rather than returning near-miss bytes —
+ * and E6 plus `assertExpanded` sit on every read path out of this table.
  *
- * Expansion (E6) is already unconditional, so flipping this on is a one-line,
- * reversible change once the evidence exists — and rows written while it was on
- * stay readable if it is turned back off.
+ * Turning it back off is safe at any time: rows written while it was on stay
+ * readable, because expansion is unconditional. The remaining risk to retire is
+ * a full deposit -> withdrawal -> proof cycle on a physical device.
  */
-export const COMPRESS_PROVEN_TX_RAWTX = false
+export const COMPRESS_PROVEN_TX_RAWTX = true
 
 /**
  * Compress a stored BEEF container (`inputBEEF`, `beef`) on the way in.
