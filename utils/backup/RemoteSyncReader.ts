@@ -60,7 +60,7 @@ export class RemoteSyncReader {
 
     const entry = this.entries[this.next++]
     const ciphertext = await this.client.blob(this.deviceId, this.generation, entry.seq)
-    return await decodeChunk(this.wallet, ciphertext)
+    return await decodeChunk(this.wallet, Array.from(ciphertext))
   }
 
   /** Number of chunks in this generation, once the index has been read. */

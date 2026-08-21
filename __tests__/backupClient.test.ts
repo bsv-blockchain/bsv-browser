@@ -1,179 +1,155 @@
-import { PrivateKey } from '@bsv/sdk'
-import { BackupClient, BackupHttpError, BACKUP_REQUEST_TIMEOUT_MS, ERR_BLOB_TOO_LARGE, ERR_SEQ_CONFLICT } from '@/utils/backup/client'
-import type { BackupRequestInit } from '@/utils/backup/client'
+/**
+ * The app-side adapter over @bsv/backup-cache-client.
+ *
+ * The wire protocol itself is tested in the package (go-private-backup-cache/
+ * ts-client); these tests pin the two decisions this repo owns — requests
+ * authenticate as the backup pseudonym, and every request is time-bounded —
+ * plus the seams call sites rely on (number[] bodies, error codes, limits).
+ */
+import { Hash, PrivateKey, Utils } from '@bsv/sdk'
+import {
+  BackupClient,
+  BackupHttpError,
+  BACKUP_REQUEST_TIMEOUT_MS,
+  ERR_BLOB_TOO_LARGE,
+  ERR_SEQ_CONFLICT
+} from '@/utils/backup/client'
+import { backupPseudonym } from '@/utils/backup/derive'
 
 const KEY = new PrivateKey(9).toArray('be', 32)
 const DEVICE = 'a'.repeat(32)
 const BASE = 'https://backup.example.test'
+const SERVER_KEY = new PrivateKey(7).toPublicKey().toString()
 
-interface Call { url: string, init: BackupRequestInit }
-
-function clientWith (
-  respond: (call: Call) => Response
-): { client: BackupClient, calls: Call[] } {
-  const calls: Call[] = []
-  const client = new BackupClient(BASE, KEY, async (url, init) => {
-    const call = { url, init }
-    calls.push(call)
-    return respond(call)
-  })
-  return { client, calls }
-}
+interface Call { url: string, init: RequestInit | undefined }
 
 const jsonRes = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
-describe('BackupClient', () => {
-  it('posts raw octet-stream, never JSON', async () => {
-    // The server rejects anything else with 415, and JSON would cost ~4x for a payload
-    // that is mostly transaction bytes.
-    const { client, calls } = clientWith(() => jsonRes({ status: 'success', seq: 1, sha256: 'ab' }, 201))
+const limitsRes = (): Response =>
+  jsonRes({ maxBlobBytes: 200 * 1024 * 1024, maxBodyBytes: 210 * 1024 * 1024, serverIdentityKey: SERVER_KEY })
+
+/** Fetch stub answering /v1/limits itself and delegating everything else. */
+function clientWith (
+  respond: (call: Call) => Response
+): { client: BackupClient, calls: Call[] } {
+  const calls: Call[] = []
+  const client = new BackupClient(BASE, KEY, (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/limits')) return limitsRes()
+    const call = { url, init }
+    calls.push(call)
+    return respond(call)
+  }) as typeof fetch)
+  return { client, calls }
+}
+
+/** Decode the X-Bsv-Auth header a call carried. */
+function proofOf (call: Call): { action: string, identityKey: string } {
+  const header = (call.init?.headers as Record<string, string>)['X-Bsv-Auth']
+  return JSON.parse(Utils.toUTF8(Utils.toArray(header, 'base64')))
+}
+
+describe('BackupClient identity', () => {
+  it('authenticates as the backup pseudonym, never the wallet identity', async () => {
+    const { client, calls } = clientWith(() => jsonRes({ seq: 1, sha256: 'ab', size: 3 }, 201))
     await client.append(DEVICE, 1, 1, undefined, [1, 2, 3])
 
-    expect(calls[0].init.headers).toMatchObject({ 'Content-Type': 'application/octet-stream' })
-    expect(calls[0].init.body).toBeInstanceOf(Uint8Array)
-    expect(Array.from(calls[0].init.body as Uint8Array)).toEqual([1, 2, 3])
+    expect(proofOf(calls[0]).identityKey).toBe(backupPseudonym(KEY))
   })
 
-  it('carries seq and generation as query parameters', async () => {
-    const { client, calls } = clientWith(() => jsonRes({ status: 'success', seq: 4, sha256: 'cd' }, 201))
+  it('signs the request URI and the body digest into the action', async () => {
+    const { client, calls } = clientWith(() => jsonRes({ seq: 1, sha256: 'ab', size: 3 }, 201))
     await client.append(DEVICE, 3, 4, 'prevsha', [9])
 
-    expect(calls[0].url).toContain('seq=4')
-    expect(calls[0].url).toContain('generation=3')
-    expect(calls[0].url).toContain('prevSha256=prevsha')
-  })
-
-  it('omits prevSha256 for the first entry in a generation', async () => {
-    const { client, calls } = clientWith(() => jsonRes({ status: 'success', seq: 1, sha256: 'x' }, 201))
-    await client.append(DEVICE, 1, 1, undefined, [1])
-
-    expect(calls[0].url).not.toContain('prevSha256')
+    const digest = Utils.toHex(Hash.sha256([9]))
+    expect(proofOf(calls[0]).action).toBe(
+      `POST /v1/log/${DEVICE}?seq=4&generation=3&prevSha256=prevsha sha256=${digest}`
+    )
   })
 
   it('never sends an identity parameter on any route', async () => {
-    // The server derives the account from the authenticated session alone. Sending an
-    // identity would invite the cross-tenant bug this design exists to avoid — there is
-    // deliberately no field for one.
-    const { client, calls } = clientWith(() => jsonRes({ status: 'success', devices: [], entries: [] }))
+    // The server derives the account from the proof's identity key alone.
+    const { client, calls } = clientWith(() => jsonRes({ devices: [], entries: [] }))
     await client.manifest()
     await client.index(DEVICE, 1)
+    for (const c of calls) expect(c.url).not.toMatch(/identity/i)
+  })
+})
 
-    for (const call of calls) {
-      expect(call.url).not.toMatch(/identity|pseudonym|pubkey|account/i)
-      expect(call.init.body).toBeUndefined()
-    }
+describe('BackupClient bodies', () => {
+  it('accepts the codec number[] and posts raw octet-stream', async () => {
+    const { client, calls } = clientWith(() => jsonRes({ seq: 1, sha256: 'ab', size: 3 }, 201))
+    await client.append(DEVICE, 1, 1, undefined, [1, 2, 3])
+
+    expect((calls[0].init?.headers as Record<string, string>)['Content-Type']).toBe('application/octet-stream')
+    expect(calls[0].init?.body).toBeInstanceOf(Uint8Array)
+    expect(Array.from(calls[0].init?.body as Uint8Array)).toEqual([1, 2, 3])
   })
 
-  it('surfaces a sequence conflict with its code', async () => {
-    const { client } = clientWith(() =>
-      jsonRes({ status: 'error', code: ERR_SEQ_CONFLICT, description: 'expected seq 5, got 9' }, 409))
-
-    await expect(client.append(DEVICE, 1, 9, undefined, [1])).rejects.toThrow(/ERR_SEQ_CONFLICT/)
-    await expect(client.append(DEVICE, 1, 9, undefined, [1])).rejects.toBeInstanceOf(BackupHttpError)
+  it('returns blob ciphertext as bytes', async () => {
+    const { client } = clientWith(() => new Response(new Uint8Array([9, 8, 7]), { status: 200 }))
+    expect(Array.from(await client.blob(DEVICE, 1, 1))).toEqual([9, 8, 7])
   })
+})
 
-  it('exposes the status and code on errors', async () => {
+describe('BackupClient limits', () => {
+  it('exposes the server-published cap and caches it across requests', async () => {
+    const { client, calls } = clientWith(() => jsonRes({ devices: [] }))
+    expect((await client.limits()).maxBlobBytes).toBe(200 * 1024 * 1024)
+    await client.manifest()
+    await client.manifest()
+    // limits() answered from cache: only the two manifests hit the stub.
+    expect(calls).toHaveLength(2)
+  })
+})
+
+describe('BackupClient errors', () => {
+  it('surfaces the server error envelope as BackupHttpError', async () => {
     const { client } = clientWith(() =>
-      jsonRes({ status: 'error', code: 'ERR_BLOB_TOO_LARGE', description: 'too big' }, 413))
-
-    await expect(client.append(DEVICE, 1, 1, undefined, [1])).rejects.toMatchObject({
-      status: 413, code: 'ERR_BLOB_TOO_LARGE'
+      jsonRes({ code: ERR_SEQ_CONFLICT, description: 'expected seq 7' }, 409)
+    )
+    await expect(client.append(DEVICE, 1, 9, 'x', [1])).rejects.toMatchObject({
+      status: 409,
+      code: ERR_SEQ_CONFLICT
     })
   })
 
-  it('returns blob bytes as number[]', async () => {
-    const { client } = clientWith(() => new Response(new Uint8Array([9, 8, 7]), { status: 200 }))
-    expect(await client.blob(DEVICE, 1, 1)).toEqual([9, 8, 7])
-  })
-
-  it('treats a missing blob as an error, not empty bytes', async () => {
-    // Silently returning [] would let a restore believe it had finished early.
+  it('surfaces the pre-auth 413 directly — no auth-failure masking remains', async () => {
+    // The old BRC-103 transport reported the unsigned 413 as "missing auth
+    // headers"; the stateless protocol has no signed response envelope, so the
+    // real code arrives as itself.
     const { client } = clientWith(() =>
-      jsonRes({ status: 'error', code: 'ERR_BLOB_NOT_FOUND', description: 'no such blob' }, 404))
-
-    await expect(client.blob(DEVICE, 1, 5)).rejects.toMatchObject({ code: 'ERR_BLOB_NOT_FOUND' })
-  })
-
-  it('defaults absent collections to empty arrays', async () => {
-    const { client } = clientWith(() => jsonRes({ status: 'success' }))
-    expect(await client.manifest()).toEqual([])
-    expect(await client.index(DEVICE, 1)).toEqual([])
-  })
-
-  it('parses a manifest', async () => {
-    const { client } = clientWith(() => jsonRes({
-      status: 'success',
-      devices: [{
-        deviceId: DEVICE, generation: 2, headSeq: 7,
-        headSha256: 'abc', totalBytes: 1024, updatedAt: '2026-08-15T00:00:00Z'
-      }]
-    }))
-
-    const [d] = await client.manifest()
-    expect(d.deviceId).toBe(DEVICE)
-    expect(d.generation).toBe(2)
-    expect(d.headSeq).toBe(7)
-  })
-
-  it('handles a non-JSON error body without masking the status', async () => {
-    const { client } = clientWith(() => new Response('<html>502</html>', { status: 502 }))
-    await expect(client.manifest()).rejects.toMatchObject({ status: 502 })
-  })
-})
-
-describe('BackupClient request timeout', () => {
-  it('gives up on a request that never answers, instead of hanging the task forever', async () => {
-    // A monitor task awaiting a dead socket stays pending indefinitely, holding its slot
-    // and never rescheduling. Observed on device as BackupPush passes running past 100s.
-    jest.useFakeTimers()
-    try {
-      const client = new BackupClient(BASE, KEY, async () => await new Promise<Response>(() => {}))
-      const pending = client.manifest()
-      const assertion = expect(pending).rejects.toThrow(/timed out/i)
-      await jest.advanceTimersByTimeAsync(BACKUP_REQUEST_TIMEOUT_MS + 1_000)
-      await assertion
-    } finally {
-      jest.useRealTimers()
-    }
-  })
-})
-
-// AuthFetch never returns a Response for an oversize rejection: the server's size guard
-// runs BEFORE the auth middleware and refuses to read the body, so the 413 it sends cannot
-// be signed. AuthFetch therefore THROWS, and its message blames missing auth headers even
-// though authentication was never the problem. Branch on the status and envelope code it
-// carries in `details`, never on that message text.
-describe('BackupClient oversize rejection', () => {
-  const authFetchStyleError = (): Error =>
-    Object.assign(
-      new Error(
-        'Received HTTP 413 Request Entity Too Large from https://backup.test/v1/log/x ' +
-          'without valid BSV authentication (missing headers: x-bsv-auth-version, ' +
-          'x-bsv-auth-identity-key, x-bsv-auth-signature)'
-      ),
-      {
-        details: {
-          status: 413,
-          bodyPreview:
-            '{"status":"error","code":"ERR_BLOB_TOO_LARGE","description":"Blob exceeds the ' +
-            'maximum permitted size of 104857600 bytes. GET /v1/limits reports the current cap."}'
-        }
-      }
+      jsonRes({ code: ERR_BLOB_TOO_LARGE, description: 'blob exceeds cap' }, 413)
     )
-
-  it('reports an oversize rejection as such, not as an auth failure', async () => {
-    const client = new BackupClient(BASE, KEY, async () => { throw authFetchStyleError() })
-
-    await expect(client.manifest()).rejects.toMatchObject({
-      name: 'BackupHttpError',
+    await expect(client.append(DEVICE, 1, 1, undefined, [1])).rejects.toMatchObject({
       status: 413,
       code: ERR_BLOB_TOO_LARGE
     })
   })
 
-  it('leaves unrelated transport failures alone', async () => {
-    const client = new BackupClient(BASE, KEY, async () => { throw new Error('socket hang up') })
-    await expect(client.manifest()).rejects.toThrow('socket hang up')
+  it('falls back to the status text when the error body is not JSON', async () => {
+    const { client } = clientWith(() => new Response('<html>502</html>', { status: 502 }))
+    await expect(client.manifest()).rejects.toBeInstanceOf(BackupHttpError)
+  })
+})
+
+describe('BackupClient request timeout', () => {
+  it('rejects a request that never answers instead of holding the monitor', async () => {
+    jest.useFakeTimers()
+    try {
+      const never = new Promise<Response>(() => {})
+      const client = new BackupClient(BASE, KEY, (async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/limits')) return limitsRes()
+        return await never
+      }) as typeof fetch)
+
+      const pending = client.manifest()
+      const assertion = expect(pending).rejects.toThrow(`timed out after ${BACKUP_REQUEST_TIMEOUT_MS}ms`)
+      await jest.advanceTimersByTimeAsync(BACKUP_REQUEST_TIMEOUT_MS + 1)
+      await assertion
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

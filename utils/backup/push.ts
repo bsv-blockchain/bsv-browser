@@ -19,7 +19,7 @@ import type { StorageExpoSQLite } from '@/storage'
 import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
 import { BackupClient, BackupHttpError, ERR_SEQ_CONFLICT } from './client'
 import { encodeChunk, estimateEncodedBytes, isEmptyChunk } from './codec'
-import { GENERATION_CHUNK_THRESHOLD, MAX_BLOB_BYTES, MAX_ITEMS, MAX_ROUGH_SIZE } from './constants'
+import { GENERATION_CHUNK_THRESHOLD, MAX_ITEMS, MAX_ROUGH_SIZE } from './constants'
 import {
   ENTITY_NAMES,
   ENTITY_TO_CHUNK_ARRAY,
@@ -112,22 +112,22 @@ export async function pushOnce (deps: PushDeps): Promise<PushResult> {
   // Bail BEFORE the expensive part when the chunk cannot possibly be accepted.
   //
   // maxRoughSize bounds what the toolbox accumulates across records; it cannot bound ONE
-  // record. A single R1-K1 vault transaction is ~960 KB of rawTx — ~1.28 MB once
-  // base64-encoded — so it exceeds the server's 1 MiB cap on its own and no sizing tweak
-  // will ever make it fit.
+  // record. The cap is whatever the server publishes on GET /v1/limits (200 MiB since the
+  // transaction-storage-capacity work; cached by the client after the first call) — with
+  // records compressed at rest a chunk should never approach it, so tripping this gate
+  // now means something is genuinely wrong rather than merely large.
   //
-  // Ordering is the whole point. Encrypting and BRC-31-signing that payload is synchronous
-  // CPU work that blocked the JS thread for ~50s per attempt on device, freezing the app
-  // every retry, and the upload then failed anyway with a 400 whose message blamed missing
-  // auth headers (the server could not read the body to build the signature payload).
-  // Checking here makes a doomed pass nearly free instead of nearly a minute.
+  // Ordering is still the point. Encrypting and signing a doomed payload is synchronous
+  // CPU work that blocked the JS thread for ~50s per attempt on device; checking here
+  // makes a doomed pass nearly free instead of nearly a minute.
   const estimate = estimateEncodedBytes(chunk)
-  if (estimate > MAX_BLOB_BYTES) {
+  const { maxBlobBytes } = await client.limits()
+  if (estimate > maxBlobBytes) {
     // Interpolated, not printf-style: React Native's console does not substitute %d, so a
     // format string prints its own placeholders and pushes the numbers to the end.
     console.log(
       `[backup] chunk too large for the server, skipping push · estimate=${estimate} bytes · ` +
-        `cap=${MAX_BLOB_BYTES} · nothing was encrypted or uploaded. This wallet cannot back ` +
+        `cap=${maxBlobBytes} · nothing was encrypted or uploaded. This wallet cannot back ` +
         'up until the oversized record is handled.'
     )
     // Cursor deliberately untouched: advancing past this chunk would silently drop records
@@ -170,12 +170,24 @@ export async function pushOnce (deps: PushDeps): Promise<PushResult> {
   return { pushed: 1, bytes: ciphertext.length, windowClosed: false, rotated: false }
 }
 
+/**
+ * One client per (server, pseudonym), reused across passes. The client caches
+ * the server's /v1/limits document — needed for the oversize gate and for the
+ * identity key every auth proof signs toward — so constructing a fresh client
+ * each pass would re-fetch it every minute for no reason.
+ */
+let cachedClient: { key: string, client: BackupClient } | undefined
+
 function resolveClient (deps: PushDeps): BackupClient {
   if (deps.client != null) return deps.client
   if (deps.baseUrl == null || deps.baseUrl === '') {
     throw new Error('pushOnce requires either a client or a baseUrl')
   }
-  return new BackupClient(deps.baseUrl, deps.primaryKey)
+  const key = `${deps.baseUrl} ${backupPseudonym(deps.primaryKey)}`
+  if (cachedClient?.key !== key) {
+    cachedClient = { key, client: new BackupClient(deps.baseUrl, deps.primaryKey) }
+  }
+  return cachedClient.client
 }
 
 /** Per-entity consumed counts grow by what this chunk carried. */

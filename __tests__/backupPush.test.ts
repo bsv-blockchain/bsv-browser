@@ -45,10 +45,16 @@ function fakeStorage (chunk: SyncChunk): { getSyncChunk: jest.Mock } {
   return { getSyncChunk: jest.fn().mockResolvedValue(chunk) }
 }
 
-function fakeClient (over: Partial<Record<'append' | 'manifest', jest.Mock>> = {}): any {
+function fakeClient (over: Partial<Record<'append' | 'manifest' | 'limits', jest.Mock>> = {}): any {
   return {
-    append: over.append ?? jest.fn().mockResolvedValue({ seq: 1, sha256: 'newsha' }),
+    append: over.append ?? jest.fn().mockResolvedValue({ seq: 1, sha256: 'newsha', size: 1 }),
     manifest: over.manifest ?? jest.fn().mockResolvedValue([]),
+    // The oversize gate reads the cap from the server's limits document. The
+    // stub answers with the historic 1 MiB so the guard tests below keep a
+    // realistic threshold to trip.
+    limits:
+      over.limits ??
+      jest.fn().mockResolvedValue({ maxBlobBytes: 1 << 20, maxBodyBytes: 1 << 21, serverIdentityKey: '02'.padEnd(66, 'a') }),
     index: jest.fn().mockResolvedValue([]),
     blob: jest.fn(),
     pruneGeneration: jest.fn()
@@ -240,10 +246,11 @@ describe('pushOnce', () => {
 
 // ── oversize guard ────────────────────────────────────────────────────────
 //
-// A single R1-K1 vault transaction is ~960 KB of rawTx, which base64-encodes to
-// ~1.28 MB — over the server's 1 MiB blob cap on its own. maxRoughSize bounds
-// how much the toolbox ACCUMULATES, never the size of one record, so no tuning
-// makes such a chunk fit.
+// The cap now comes from the server's own limits document rather than a local
+// constant; the stub answers 1 MiB. A full-size R1-K1 rawTx (~960 KB, ~1.28 MB
+// base64) trips that on its own. maxRoughSize bounds how much the toolbox
+// ACCUMULATES, never the size of one record, so no tuning makes such a chunk
+// fit a cap it exceeds alone.
 //
 // Left unguarded this is not merely a failed push: encrypting and then
 // BRC-31-signing that payload blocked the JS thread for ~50s on device, every

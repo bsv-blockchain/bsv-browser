@@ -35,10 +35,11 @@
   },
   "dependencies": {
     "@bsv/air-gap": "^0.1.1",
+    "@bsv/backup-cache-client": "^0.1.0",
     "@bsv/btms": "^1.1.0",
     "@bsv/btms-permission-module": "^1.1.0",
     "@bsv/message-box-client": "^2.2.1",
-    "@bsv/sdk": "2.4.0",
+    "@bsv/sdk": "^2.4.1",
     "@bsv/templates": "^1.10.0",
     "@bsv/wallet-relay": "^0.2.1",
     "@bsv/wallet-toolbox-mobile": "^2.4.3",
@@ -173,12 +174,13 @@
       "<rootDir>/.claude/worktrees/"
     ],
     "moduleNameMapper": {
+      "^@bsv/backup-cache-client$": "<rootDir>/node_modules/@bsv/backup-cache-client/dist/index.js",
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
       "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js",
       "^expo-audio$": "<rootDir>/__tests__/__mocks__/expo-audio.js"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes)/)",
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/auth)/)",
       "/node_modules/react-native-reanimated/plugin/"
     ]
   }

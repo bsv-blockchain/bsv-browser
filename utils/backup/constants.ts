@@ -51,7 +51,15 @@ export const GENERATION_CHUNK_THRESHOLD = 200
  */
 export const MIN_PUSH_INTERVAL_MS = 60_000
 
-/** Server blob cap. Chunks are sized to stay well under it. */
+/**
+ * Historic server blob cap, kept as a conservative reference for tests.
+ *
+ * The live cap comes from the server itself — GET /v1/limits, surfaced as
+ * `client.limits().maxBlobBytes` (200 MiB since the transaction-storage-capacity
+ * work) — and the push gate uses that, not this. Chunk sizing still aims well
+ * under this old 1 MiB figure because small chunks are what a phone on
+ * cellular wants regardless of what the server would accept.
+ */
 export const MAX_BLOB_BYTES = 1 << 20
 
 /** AsyncStorage keys. */

@@ -1,7 +1,7 @@
 /**
  * Backup identity derivation.
  *
- * One derived key serves two purposes: it is the AuthFetch peer identity, so the server
+ * One derived key serves two purposes: it signs every auth proof, so the server
  * only ever sees a pseudonym rather than the wallet's real identity key; and it is the
  * encryption key, used with counterparty 'self' so the server cannot decrypt what it
  * stores. Both properties are chosen by the client — the server is merely unable to help.
