@@ -72,3 +72,5 @@ credentials.json
 
 # Local archive build derived data (see .easignore — keep the two in sync)
 ios/build-release/
+# Local xcodebuild output (e.g. ad-hoc Release simulator builds for screenshotting)
+/build_release
