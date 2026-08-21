@@ -216,6 +216,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: spacing.md,
+    // Keep long labels off the card edge / hairline divider so they wrap
+    // inside the button instead of touching (or escaping) the border.
+    paddingHorizontal: spacing.sm,
   },
   buttonRowItem: { flex: 1 },
   buttonText: { ...typography.body, textAlign: 'center' },
