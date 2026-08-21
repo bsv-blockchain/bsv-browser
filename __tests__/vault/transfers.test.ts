@@ -9,7 +9,7 @@
  * signs for real with a P-256 key (so the R1 template's own commitment
  * check inside the signing loop is exercised, not just mocked away).
  */
-import { Beef, HD, P2PKH, PublicKey, Transaction, UnlockingScript, Utils } from '@bsv/sdk'
+import { Beef, BigNumber, ECDSA, HD, P2PKH, PrivateKey, PublicKey, Spend, Transaction, UnlockingScript, Utils } from '@bsv/sdk'
 import { p256 } from '@noble/curves/nist.js'
 import {
   R1K1_R1_UNLOCK_LEN,
@@ -372,6 +372,144 @@ describe('depositToVault', () => {
     // sig push = 70 mock bytes + 0x41 hashtype
     expect(unlock.startsWith('47')).toBe(true)
     expect(unlock.slice(2 + 70 * 2, 2 + 71 * 2)).toBe('41')
+  })
+
+  /**
+   * The production 2026-08-21 failure: generateChange's UTXO-pool growth
+   * (targetNetCount) added a funding input and change outputs to tx2, and the
+   * staging signature — built with `otherInputs: []` — committed to a
+   * one-input transaction. Every broadcaster rejected the result with
+   * "false stack entry at end of script execution". The staging unlock must
+   * verify against the REAL interpreter for whatever transaction shape the
+   * toolbox hands back.
+   */
+  const realStagingWallet = (opts: { stagingFirst: boolean }) => {
+    const stagingPriv = PrivateKey.fromRandom()
+    const stagingPub = stagingPriv.toPublicKey().toString()
+    const stagingTotal = 250_000 + vaultDepositTx2Fee()
+    const stagingLock = new P2PKH().lock(stagingPriv.toPublicKey().toAddress())
+    const stagingSrc = new Transaction()
+    stagingSrc.addOutput({ satoshis: stagingTotal, lockingScript: stagingLock })
+    const fundPriv = PrivateKey.fromRandom()
+    const fundSrc = new Transaction()
+    fundSrc.addOutput({ satoshis: 12_730, lockingScript: new P2PKH().lock(fundPriv.toPublicKey().toAddress()) })
+
+    const stagingOut = {
+      outpoint: `${stagingSrc.id('hex')}.0`,
+      satoshis: stagingTotal,
+      customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: 'staging cafebabe' })
+    }
+    wallet.listOutputs.mockImplementation(async (args: any) =>
+      args?.basket === VAULT_STAGING_BASKET
+        ? { outputs: [stagingOut], BEEF: stitchBeef([{ src: stagingSrc }]) }
+        : { outputs: [] }
+    )
+    wallet.getPublicKey.mockImplementation(async (args: any) => ({
+      publicKey: args?.identityKey ? IDENTITY_KEY : stagingPub
+    }))
+    // Sign the digest for real: the wallet signs hashToDirectlySign raw, and
+    // the interpreter's OP_CHECKSIG later re-derives that digest itself.
+    wallet.createSignature.mockImplementation(async (args: any) => {
+      const sig = ECDSA.sign(new BigNumber(args.hashToDirectlySign), stagingPriv, true)
+      return { signature: sig.toDER() as number[] }
+    })
+
+    let signable: Transaction | undefined
+    wallet.createAction.mockImplementation(async (args: any) => {
+      const tx = new Transaction()
+      const addStaging = () =>
+        tx.addInput({ sourceTransaction: stagingSrc, sourceOutputIndex: 0, sequence: 0xffffffff, unlockingScript: new UnlockingScript([]) })
+      const addFunding = () =>
+        tx.addInput({ sourceTransaction: fundSrc, sourceOutputIndex: 0, sequence: 0xffffffff, unlockingScript: new UnlockingScript([]) })
+      if (opts.stagingFirst) {
+        addStaging()
+        addFunding()
+      } else {
+        addFunding()
+        addStaging()
+      }
+      tx.addOutput({
+        satoshis: args.outputs[0].satoshis,
+        lockingScript: new P2PKH().lock(Utils.toArray('11'.repeat(20), 'hex'))
+      })
+      // The change outputs the toolbox splits in (production had eight).
+      tx.addOutput({ satoshis: 5000, lockingScript: new P2PKH().lock(Utils.toArray('22'.repeat(20), 'hex')) })
+      tx.addOutput({ satoshis: 7000, lockingScript: new P2PKH().lock(Utils.toArray('33'.repeat(20), 'hex')) })
+      signable = tx
+      return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-dep' } }
+    })
+    return {
+      stagingSrc,
+      stagingTotal,
+      stagingLock,
+      tx: () => signable!
+    }
+  }
+
+  const validateStagingSpend = (f: ReturnType<typeof realStagingWallet>, expectedIndex: number) => {
+    const [signArgs] = wallet.signAction.mock.calls[0]
+    const keys = Object.keys(signArgs.spends)
+    expect(keys).toEqual([String(expectedIndex)])
+    const tx = f.tx()
+    const ok = new Spend({
+      sourceTXID: f.stagingSrc.id('hex'),
+      sourceOutputIndex: 0,
+      sourceSatoshis: f.stagingTotal,
+      lockingScript: f.stagingLock,
+      transactionVersion: tx.version,
+      otherInputs: tx.inputs.filter((_, i) => i !== expectedIndex),
+      inputIndex: expectedIndex,
+      unlockingScript: UnlockingScript.fromHex(signArgs.spends[expectedIndex].unlockingScript),
+      outputs: tx.outputs,
+      inputSequence: 0xffffffff,
+      lockTime: tx.lockTime
+    }).validate()
+    expect(ok).toBe(true)
+  }
+
+  it('signs a VALID tx2 when the toolbox adds a funding input and change outputs', async () => {
+    await seedMeta()
+    const f = realStagingWallet({ stagingFirst: true })
+    const { txid } = await depositToVault(wallet, ADMIN, 250_000)
+    expect(txid).toBe('feedface'.repeat(8))
+    validateStagingSpend(f, 0)
+  })
+
+  it('finds the staging input by outpoint even when it is not input 0', async () => {
+    await seedMeta()
+    const f = realStagingWallet({ stagingFirst: false })
+    await depositToVault(wallet, ADMIN, 250_000)
+    validateStagingSpend(f, 1)
+  })
+
+  it('tries the injected stranded-staging release before splitting again', async () => {
+    await seedMeta()
+    const stagingTotal = 250_000 + vaultDepositTx2Fee()
+    const stranded = {
+      outpoint: `${'cd'.repeat(32)}.0`,
+      satoshis: stagingTotal,
+      customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: 'staging cafebabe' })
+    }
+    // The heal makes the stranded output visible again (spendable=1), which
+    // the fake models by inserting it into the listable set.
+    const releaseStrandedStaging = jest.fn(async () => {
+      fakeStagingUtxos.push(stranded)
+      return 1
+    })
+    await depositToVault(wallet, ADMIN, 250_000, { releaseStrandedStaging })
+    expect(releaseStrandedStaging).toHaveBeenCalledTimes(1)
+    expect(splitCalls()).toHaveLength(0)
+    expect(vaultCalls()).toHaveLength(1)
+    expect(vaultCalls()[0].inputs[0].outpoint).toBe(stranded.outpoint)
+  })
+
+  it('splits anew when the stranded-staging release frees nothing', async () => {
+    await seedMeta()
+    const releaseStrandedStaging = jest.fn(async () => 0)
+    await depositToVault(wallet, ADMIN, 250_000, { releaseStrandedStaging })
+    expect(releaseStrandedStaging).toHaveBeenCalledTimes(1)
+    expect(splitCalls()).toHaveLength(1)
+    expect(vaultCalls()).toHaveLength(1)
   })
 
   it('builds an R1-K1 output with complete customInstructions', async () => {

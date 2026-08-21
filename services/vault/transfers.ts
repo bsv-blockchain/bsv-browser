@@ -141,6 +141,21 @@ export interface VaultTransferOptions {
    * reaches the offline drain" a testable invariant.
    */
   isOnline?: () => Promise<boolean>
+  /**
+   * Storage-backed release of staging outputs stranded by a definitively
+   * invalid tx2. Returns how many outputs were made spendable again.
+   *
+   * When tx2 fails at broadcast, the toolbox first restores its inputs
+   * (releaseInputsAllocatedToFailedTransaction) but then re-strands them:
+   * markStaleInputsAsSpent asks the indexers whether the staging outpoint is
+   * a UTXO seconds after tx1 was broadcast, and indexer lag answers "no" —
+   * so a coin that IS on chain gets spendable=0 with a 'failed' spentBy that
+   * abortAction refuses to touch ('failed' is in its unAbortable list). The
+   * release runs before a deposit splits anew, so the stranded coin is reused
+   * instead of carving a third one. See releaseVaultStagingStrandedByInvalidTx
+   * in StorageExpoSQLite for the exact (deliberately narrow) predicate.
+   */
+  releaseStrandedStaging?: () => Promise<number>
 }
 
 export interface VaultSpendResult {
@@ -522,6 +537,22 @@ export async function depositToVault(
     .map(o => ({ ...o, si: decodeStagingInstructions(o.customInstructions) }))
     .find((o): o is typeof o & { si: StagingInstructions } => o.si != null && o.satoshis === stagingTotal)
 
+  // A stranded staging output can be invisible here: a failed tx2 leaves it
+  // spendable=0 (see VaultTransferOptions.releaseStrandedStaging), and
+  // listOutputs only returns spendable coins. Release, then look again.
+  if (!stagingOut && opts?.releaseStrandedStaging) {
+    const released = await opts.releaseStrandedStaging().catch(e => {
+      console.log('[vault] stranded-staging release failed:', (e as Error)?.message)
+      return 0
+    })
+    if (released > 0) {
+      staged = await listStaging()
+      stagingOut = staged.outputs
+        .map(o => ({ ...o, si: decodeStagingInstructions(o.customInstructions) }))
+        .find((o): o is typeof o & { si: StagingInstructions } => o.si != null && o.satoshis === stagingTotal)
+    }
+  }
+
   if (!stagingOut) {
     const keyID = `staging ${Utils.toHex(randomBytes(8))}`
     const { publicKey: stagingPub } = await w.getPublicKey(
@@ -558,10 +589,23 @@ export async function depositToVault(
 
   // ── tx2: vault ──────────────────────────────────────────────────────────
   //
-  // Explicit single input, single vault output, no change. Funding covers the
-  // outputs plus exactly the feeModel's target fee (vaultDepositTx2Fee uses the
-  // same size formula), so generateChange's feeExcess is 0 and it neither adds
-  // a change output nor pulls in extra funding inputs.
+  // Explicit single input, single vault output, no change. Two mechanisms keep
+  // it that shape, and BOTH are required:
+  //  - funding covers the outputs plus exactly the feeModel's target fee
+  //    (vaultDepositTx2Fee uses the same size formula), so feeExcess is 0 and
+  //    generateChange has no excess to return as change;
+  //  - the 'vault-deposit' label suppresses the toolbox's UTXO-pool growth
+  //    (targetNetCount — see the patch in patches/@bsv+wallet-toolbox-mobile),
+  //    which would otherwise pull in extra funding inputs and split change
+  //    into this transaction EVEN at feeExcess 0. That is what produced the
+  //    2026-08-21 production failure — and any change output here would drag
+  //    the ~960 KB vault script into the inputBEEF of every later payment
+  //    spending it, defeating the whole two-transaction design.
+  //
+  // The signing below still tolerates extra toolbox-added inputs (it locates
+  // the staging input by outpoint and commits to the full input set), so a
+  // toolbox that ignores the label degrades to an ugly-but-valid deposit, not
+  // a broadcast rejection.
   const target = await nextDepositTarget()
   const created = await w.createAction(
     {
@@ -598,23 +642,40 @@ export async function depositToVault(
 
   const { tx: atomic, reference } = created.signableTransaction
   let unlockingScript: string
+  let stagingInputIndex: number
   try {
     const tx = Transaction.fromAtomicBEEF(atomic)
+    // The toolbox is free to add funding inputs and change outputs of its own
+    // (generateChange grows the UTXO pool toward numberOfDesiredUTXOs), so the
+    // staging input is located by outpoint, never assumed to be input 0 — and
+    // the signature below must commit to EVERY input via otherInputs, or the
+    // nodes reject the spend with "false stack entry at end of script
+    // execution" (the 2026-08-21 production deposit failure).
+    const [stagingTxid, stagingVoutStr] = stagingOut.outpoint.split('.')
+    const stagingVout = Number(stagingVoutStr)
+    stagingInputIndex = tx.inputs.findIndex(
+      i =>
+        (i.sourceTXID ?? i.sourceTransaction?.id('hex'))?.toLowerCase() === stagingTxid.toLowerCase() &&
+        i.sourceOutputIndex === stagingVout
+    )
+    if (stagingInputIndex < 0) {
+      throw new VaultError('no-transaction', 'Staging input missing from the signable transaction')
+    }
     const { publicKey: stagingPub } = await w.getPublicKey(
       { protocolID: STAGING_PROTOCOL, keyID: stagingOut.si.keyID, counterparty: 'self' },
       adminOriginator
     )
     const subscript = new P2PKH().lock(PublicKey.fromString(stagingPub).toAddress())
-    const input = tx.inputs[0]
+    const input = tx.inputs[stagingInputIndex]
     const scope = TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID
     const preimage = TransactionSignature.format({
-      sourceTXID: stagingOut.outpoint.split('.')[0],
+      sourceTXID: stagingTxid,
       sourceOutputIndex: input.sourceOutputIndex,
       sourceSatoshis: stagingOut.satoshis,
       transactionVersion: tx.version,
-      otherInputs: [],
+      otherInputs: tx.inputs.filter((_, i) => i !== stagingInputIndex),
       outputs: tx.outputs,
-      inputIndex: 0,
+      inputIndex: stagingInputIndex,
       inputSequence: input.sequence ?? 0xffffffff,
       subscript,
       lockTime: tx.lockTime,
@@ -641,7 +702,7 @@ export async function depositToVault(
   }
 
   const signed = await w.signAction(
-    { reference, spends: { 0: { unlockingScript } }, options: { acceptDelayedBroadcast: false } },
+    { reference, spends: { [stagingInputIndex]: { unlockingScript } }, options: { acceptDelayedBroadcast: false } },
     adminOriginator
   )
   const txid = signed.txid ?? (signed.tx ? Transaction.fromAtomicBEEF(signed.tx).id('hex') : undefined)

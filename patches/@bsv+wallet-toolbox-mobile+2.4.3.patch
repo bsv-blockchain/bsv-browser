@@ -263,3 +263,24 @@ index 4569453..032f38c 100644
  }
  //# sourceMappingURL=completeSignedTransaction.js.map
 \ No newline at end of file
+diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/src/storage/methods/createAction.js b/node_modules/@bsv/wallet-toolbox-mobile/out/src/storage/methods/createAction.js
+--- a/node_modules/@bsv/wallet-toolbox-mobile/out/src/storage/methods/createAction.js
++++ b/node_modules/@bsv/wallet-toolbox-mobile/out/src/storage/methods/createAction.js
+@@ -629,7 +629,16 @@
+         changeFirstSatoshis: Math.max(1, Math.round(ctx.changeBasket.minimumDesiredUTXOValue / 4)),
+         changeLockingScriptLength: 25,
+         changeUnlockingScriptLength: 107,
+-        targetNetCount: ctx.changeBasket.numberOfDesiredUTXOs - ctx.availableChangeCount,
++        // PATCH(bsv-browser): a vault deposit's tx2 is funded to its exact fee so
++        // it stays single-input/single-output — the point of the two-transaction
++        // deposit is that the ~960 KB vault script never gains spendable sibling
++        // outputs (any change here would drag the whole script into the inputBEEF
++        // of every later payment that spends it). UTXO-pool growth (targetNetCount)
++        // would add funding inputs and split change into this transaction, so it
++        // is suppressed for the vault-deposit label.
++        targetNetCount: (vargs.labels ?? []).includes('vault-deposit')
++            ? undefined
++            : ctx.changeBasket.numberOfDesiredUTXOs - ctx.availableChangeCount,
+         randomVals: vargs.randomVals
+     };
+     const noSendChange = [...ctx.noSendChangeIn];

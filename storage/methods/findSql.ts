@@ -237,6 +237,35 @@ export function spendingReferencesSql(pairCount: number): string {
   )
 }
 
+/**
+ * Release every input still held by a definitively-invalid vault deposit tx2.
+ *
+ * The predicate is deliberately narrow, every clause load-bearing:
+ *  - `t.status = 'failed'` AND its proven_tx_req is `'invalid'`: the network
+ *    REJECTED the spender outright — it can never be mined, so releasing its
+ *    inputs cannot enable a real double-spend. A 'failed' transaction without
+ *    an 'invalid' req (say, a broadcast that timed out but may still have
+ *    propagated) is NOT touched.
+ *  - the spender carries the 'vault-deposit' label: this heal exists for the
+ *    deposit flow and must not reinterpret failures of anything else.
+ *
+ * Why this exists: when tx2 fails, updateTransactionStatus('failed') restores
+ * its inputs, but markStaleInputsAsSpent then re-strands them — it asks the
+ * indexers whether tx1's staging output is a UTXO seconds after tx1 broadcast,
+ * and indexer lag answers "no". abortAction cannot fix it afterwards because
+ * 'failed' is in its unAbortable list.
+ */
+export const RELEASE_STRANDED_VAULT_STAGING_SQL = `
+  UPDATE outputs SET spendable = 1, spentBy = NULL
+  WHERE spendable = 0 AND spentBy IN (
+    SELECT t.transactionId FROM transactions t
+    JOIN proven_tx_reqs r ON r.txid = t.txid AND r.status = 'invalid'
+    JOIN tx_labels_map m ON m.transactionId = t.transactionId AND m.isDeleted = 0
+    JOIN tx_labels l ON l.txLabelId = m.txLabelId AND l.label = 'vault-deposit'
+    WHERE t.status = 'failed'
+  )
+`.trim()
+
 /** Split a `txid.vout` or `txid:vout` outpoint into its parts, or null. */
 export function splitOutpoint(outpoint: string): { txid: string; vout: number } | null {
   const m = /^([0-9a-fA-F]{64})[.:](\d+)$/.exec(outpoint.trim())
