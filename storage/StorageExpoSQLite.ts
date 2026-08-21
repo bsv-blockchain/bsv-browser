@@ -22,6 +22,7 @@ import {
   expandStoredScript,
   expandStoredTx
 } from './methods/expandStored'
+import { compressOneAtRest, type CompactionStep } from './methods/compressAtRest'
 import { StorageError, storageErrorFromSqlite } from './errors'
 import {
   RECLAIM_CANDIDATES_SQL,
@@ -1929,6 +1930,15 @@ export class StorageExpoSQLite extends StorageProvider {
       t.inputBEEF = await compressStoredBeef(t.inputBEEF)
     }
     return chunk
+  }
+
+  /**
+   * One step of the at-rest R1-K1 compaction — rewrites at most one oversize
+   * full-size blob into its compressed form. See storage/methods/compressAtRest.ts;
+   * driven by utils/monitor/TaskCompressAtRest.ts, one row per monitor pass.
+   */
+  async compressNextOversizeRow(): Promise<CompactionStep | undefined> {
+    return await compressOneAtRest(this.getDB())
   }
 
   // processSyncChunk — delegate to inherited implementation if available, stub otherwise
