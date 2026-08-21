@@ -427,6 +427,22 @@ function describeEntry(entry: TemplateRegistryEntry): TemplateVersion[] {
 }
 
 /**
+ * The first `length` bytes of a region's reference template.
+ *
+ * Exists for the container scan in txEnvelope.ts, which needs a cheap prefix
+ * filter before paying a full 959 K-byte compare. Derived from the vendored
+ * reference rather than hardcoded, so the template changing cannot leave a stale
+ * literal behind — and the prefix is chosen from the head of the script, which no
+ * variable run touches, so it is the same for every instance.
+ */
+export async function templatePrefix(region: TemplateRegion, length: number): Promise<Uint8Array> {
+  const entry = currentEntry()
+  const cache = ensureTemplateCache(entry.version)
+  const reference = region === 0x01 ? cache.region1 : cache.region2
+  return reference.subarray(0, length).slice()
+}
+
+/**
  * True only when `bytes` is exactly `v.totalLength` long AND every byte
  * outside `v.variableRuns` equals the cached reference template's byte at
  * that offset. Compares in place against the cached reference — no masked
