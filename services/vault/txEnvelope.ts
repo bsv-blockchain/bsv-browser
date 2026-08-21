@@ -40,21 +40,29 @@
 import { Hash, Utils } from '@bsv/sdk'
 import { VaultError } from './types'
 import {
-  R1K1_LOCK_LEN,
-  R1K1_R1_UNLOCK_LEN
-} from './r1k1'
-import {
   compressScriptBytes,
   compressScriptCodeBytes,
   describeCurrentVaultTemplate,
   expandScriptBytes,
-  matchesTemplate
+  matchesTemplate,
+  templatePrefix
 } from './templateCodec'
 
 /** First byte of an envelope. See the module doc for why not 0xff. */
 export const ENVELOPE_MAGIC = 0xfe
 
 export const ENVELOPE_VERSION = 1
+
+/**
+ * Flags bit: the 32-byte integrity field holds SHA-256 of the original blob
+ * rather than the transaction's txid.
+ *
+ * Set for CONTAINERS — inputBEEF, beef, AtomicBEEF — which hold several
+ * transactions and therefore have no single txid to verify against. The span and
+ * literal machinery is identical; only what the header commits to differs, and
+ * expansion checks whichever one the flag names.
+ */
+export const ENVELOPE_FLAG_DIGEST = 0x01
 
 /** magic + version + flags + txid(32) + origLength(4) + spanCount(1) */
 const HEADER_LEN = 1 + 1 + 1 + 32 + 4 + 1
@@ -76,6 +84,18 @@ const SPAN_HEADER_LEN = 4 + 1 + 2
  */
 const UNLOCK_SCRIPT_CODE_OFFSET = 246
 const SCRIPT_CODE_LEN = 959_572
+
+/**
+ * Script lengths, declared here rather than imported from r1k1.ts.
+ *
+ * r1k1.ts imports @bsv/templates, and this module is now in the STORAGE import
+ * graph — so importing it from here would pull the template library into app
+ * startup for the sake of two integers, on a wallet that already fights cold
+ * start. __tests__/vault/txEnvelope.test.ts asserts both against r1k1's
+ * exports, so the duplication cannot drift.
+ */
+const R1K1_LOCK_LEN = 959_632
+const R1K1_R1_UNLOCK_LEN = 959_871
 
 type Region = 0x01 | 0x02
 
@@ -199,6 +219,76 @@ async function discoverSpans(tx: Uint8Array): Promise<Span[] | null> {
 }
 
 /**
+ * Find template instances anywhere in a blob, by prefix scan then exact verify.
+ *
+ * For CONTAINERS (a BEEF, an AtomicBEEF) there is no framing this module can
+ * walk: BEEF interleaves BUMP structures whose length depends on their own tree
+ * geometry, and a v2 container adds txid-only entries. Parsing all of that
+ * correctly just to find two enormous byte ranges would be a large amount of
+ * fragile code for no benefit — so discovery here is a scan, made safe by the
+ * same exactness that makes the structural walk safe.
+ *
+ * Cheap filter first: a region-0x01 instance begins `76 00 9c ...` and a
+ * region-0x02 instance begins with region 0x01's bytes from offset 60, so a
+ * candidate is found by matching a short prefix and only then paying the full
+ * 959 K-byte compare. matchesTemplate cannot false-positive, so a spurious
+ * prefix hit costs work and never correctness.
+ *
+ * Region 0x01 is searched first and its range is then excluded, because region
+ * 0x02 is a byte-for-byte SUFFIX of region 0x01 — every locking script contains
+ * a scriptCode at offset 60, and reporting both would produce overlapping spans.
+ * Preferring the longer, earlier match makes the result deterministic.
+ */
+async function discoverSpansByScan(blob: Uint8Array): Promise<Span[] | null> {
+  const versions = await describeCurrentVaultTemplate()
+  const region1 = versions.find(v => v.region === 0x01)
+  const region2 = versions.find(v => v.region === 0x02)
+  if (!region1 || !region2) return null
+
+  const spans: Span[] = []
+  const claimed: { from: number; to: number }[] = []
+  const overlapsClaimed = (from: number, to: number): boolean =>
+    claimed.some(c => from < c.to && to > c.from)
+
+  const scan = async (
+    v: typeof region1,
+    region: Region,
+    prefix: Uint8Array,
+    compress: (bytes: Uint8Array) => Promise<Uint8Array>
+  ): Promise<void> => {
+    const last = blob.length - v.totalLength
+    for (let at = 0; at <= last; at++) {
+      if (blob[at] !== prefix[0]) continue
+      let prefixOk = true
+      for (let i = 1; i < prefix.length; i++) {
+        if (blob[at + i] !== prefix[i]) {
+          prefixOk = false
+          break
+        }
+      }
+      if (!prefixOk) continue
+      if (overlapsClaimed(at, at + v.totalLength)) continue
+
+      const window = blob.subarray(at, at + v.totalLength)
+      if (!matchesTemplate(window, v)) continue
+
+      spans.push({ offset: at, region, record: await compress(window), length: v.totalLength })
+      claimed.push({ from: at, to: at + v.totalLength })
+      at += v.totalLength - 1
+    }
+  }
+
+  await scan(region1, 0x01, await templatePrefix(0x01, PREFIX_LEN), compressScriptBytes)
+  await scan(region2, 0x02, await templatePrefix(0x02, PREFIX_LEN), compressScriptCodeBytes)
+
+  spans.sort((a, b) => a.offset - b.offset)
+  return spans
+}
+
+/** How many leading bytes of a template are used as the cheap scan filter. */
+const PREFIX_LEN = 8
+
+/**
  * Compress a transaction, or return it unchanged.
  *
  * Unchanged is returned for anything with no R1-K1 span, anything this module
@@ -214,8 +304,46 @@ export async function compressTransaction(rawTx: Uint8Array | number[], txid: st
   if (!/^[0-9a-fA-F]{64}$/.test(txid)) {
     throw new VaultError('template-invalid', 'compressTransaction needs the transaction txid to record')
   }
+  return assemble(tx, await discoverSpans(tx), txid, 0)
+}
 
-  const spans = await discoverSpans(tx)
+/**
+ * Compress a CONTAINER of transactions — inputBEEF, beef, AtomicBEEF.
+ *
+ * Same spans, same literal, same reconstruction. What differs is the integrity
+ * field: a container has no single txid, so the header commits to SHA-256 of the
+ * original blob and expansion checks that instead. Routing a container through
+ * compressTransaction would produce an envelope whose integrity check was
+ * meaningless, which is why this is a separate entry point rather than an
+ * optional argument.
+ *
+ * Discovery is a prefix scan rather than a structural walk, because BEEF framing
+ * interleaves BUMP structures whose length depends on their own tree geometry —
+ * see discoverSpansByScan.
+ *
+ * This is what takes a vault WITHDRAWAL's stored bytes under the backup server's
+ * blob cap: inputBEEF carries ~1.83 MB per vault input, several times more than
+ * the rawTx it accompanies.
+ */
+export async function compressContainer(blob: Uint8Array | number[]): Promise<Uint8Array> {
+  const bytes = asBytes(blob)
+  if (isEnvelope(bytes)) return bytes
+  const digest = Utils.toHex(Hash.sha256(Array.from(bytes)))
+  return assemble(bytes, await discoverSpansByScan(bytes), digest, ENVELOPE_FLAG_DIGEST)
+}
+
+/**
+ * Build an envelope from discovered spans, or return the original.
+ *
+ * Shared so the transaction and container paths cannot drift in how they lay
+ * bytes out — only in how they discover spans and what they commit to.
+ */
+async function assemble(
+  tx: Uint8Array,
+  spans: Span[] | null,
+  integrity: string,
+  flags: number
+): Promise<Uint8Array> {
   if (!spans || spans.length === 0) return tx
   if (spans.length > 255) return tx
 
@@ -239,8 +367,8 @@ export async function compressTransaction(rawTx: Uint8Array | number[], txid: st
   const literalLen = literalChunks.reduce((sum, c) => sum + c.length, 0)
 
   const chunks: Uint8Array[] = [
-    Uint8Array.from([ENVELOPE_MAGIC, ENVELOPE_VERSION, 0]),
-    Uint8Array.from(Utils.toArray(txid, 'hex')),
+    Uint8Array.from([ENVELOPE_MAGIC, ENVELOPE_VERSION, flags]),
+    Uint8Array.from(Utils.toArray(integrity, 'hex')),
     Uint8Array.from(writeUInt32BE(tx.length)),
     Uint8Array.from([spans.length])
   ]
@@ -289,7 +417,10 @@ function requireEnvelope(b: Uint8Array): void {
 }
 
 interface ParsedEnvelope {
+  /** The recorded integrity value: a txid, or a SHA-256 when digestMode. */
   txid: string
+  /** True when the integrity field is a SHA-256 of the original blob. */
+  digestMode: boolean
   origLength: number
   spans: { offset: number; region: Region; record: Uint8Array }[]
   literal: Uint8Array
@@ -298,6 +429,7 @@ interface ParsedEnvelope {
 function parseEnvelope(b: Uint8Array): ParsedEnvelope {
   requireEnvelope(b)
   const txid = Utils.toHex(Array.from(b.subarray(3, 35)))
+  const digestMode = (b[2] & ENVELOPE_FLAG_DIGEST) !== 0
   const origLength = readUInt32BE(b, 35)
   const spanCount = b[39]
 
@@ -324,7 +456,7 @@ function parseEnvelope(b: Uint8Array): ParsedEnvelope {
   if (at + literalLen !== b.length) {
     throw new VaultError('template-invalid', 'transaction envelope literal length disagrees with its size')
   }
-  return { txid, origLength, spans, literal: b.subarray(at) }
+  return { txid, digestMode, origLength, spans, literal: b.subarray(at) }
 }
 
 /**
@@ -368,11 +500,15 @@ export async function expandTransaction(envelope: Uint8Array | number[]): Promis
   }
   out.set(parsed.literal.subarray(literalAt), outAt)
 
-  const txid = Utils.toHex(Hash.hash256(Array.from(out)).reverse())
-  if (txid !== parsed.txid) {
+  const actual = parsed.digestMode
+    ? Utils.toHex(Hash.sha256(Array.from(out)))
+    : Utils.toHex(Hash.hash256(Array.from(out)).reverse())
+  if (actual !== parsed.txid) {
     throw new VaultError(
       'template-invalid',
-      `transaction envelope expands to txid ${txid} but records ${parsed.txid}`
+      `${parsed.digestMode ? 'container' : 'transaction'} envelope expands to ${
+        parsed.digestMode ? 'digest' : 'txid'
+      } ${actual} but records ${parsed.txid}`
     )
   }
   return out

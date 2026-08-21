@@ -64,9 +64,11 @@ function packBytes (value: unknown): unknown {
  * Cheap lower bound on a chunk's encoded size, in bytes.
  *
  * Walks the chunk applying packBytes' own byte-array rule and sums what those arrays cost
- * once base64-encoded, which is what dominates a chunk (see this file's header). Everything
- * else — keys, timestamps, numbers — is ignored, so the answer is an UNDERESTIMATE: a chunk
- * this says is too big definitely is.
+ * once base64-encoded, plus every string's own length — with the blob columns compressed at
+ * rest, the remaining way a single record goes oversize is a string (a pre-scrub
+ * proven_tx_reqs.history carrying megabytes of EF hex in error notes). Everything else —
+ * keys, timestamps, numbers — is ignored, so the answer is an UNDERESTIMATE: a chunk this
+ * says is too big definitely is.
  *
  * Exists to be run BEFORE encodeChunk. Encrypting and then BRC-31-signing an oversized
  * payload blocked the JS thread for ~50s per attempt on device; the point is to never do
@@ -75,6 +77,11 @@ function packBytes (value: unknown): unknown {
 export function estimateEncodedBytes (chunk: SyncChunk): number {
   let bytes = 0
   const walk = (value: unknown): void => {
+    if (typeof value === 'string') {
+      // JSON adds quotes and escapes, so the raw length stays a lower bound.
+      bytes += value.length
+      return
+    }
     if (Array.isArray(value)) {
       const isByteArray =
         value.length >= PACK_MIN_LENGTH &&

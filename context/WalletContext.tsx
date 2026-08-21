@@ -79,6 +79,7 @@ import { getOnline, subscribeOnline } from '@/utils/net/online'
 import { processPending } from '@/utils/localpay/pending'
 import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
 import { TaskBackupPush } from '@/utils/monitor/TaskBackupPush'
+import { TaskCompressAtRest } from '@/utils/monitor/TaskCompressAtRest'
 import { pushOnce } from '@/utils/backup/push'
 import { restoreOnImport } from '@/utils/backup/restoreOnImport'
 import { processOfflineActions } from '@/storage/methods/processOfflineActions'
@@ -1122,6 +1123,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
               // Pessimistic: one idle pass clears it if there is nothing to send.
               TaskBackupPush.noteChanged()
             }
+
+            // At-rest compaction: rewrites full-size R1-K1 blobs left by older
+            // builds into their compressed form, one row per pass. Independent
+            // of the backup URL — the invariant is about the device database,
+            // not just what gets pushed.
+            monitor.addTask(new TaskCompressAtRest(monitor, async () => await phoneStorage!.compressNextOversizeRow()))
+            // Pessimistic: a restore may have just replayed rows written by an
+            // older build; one empty pass clears it.
+            TaskCompressAtRest.notePossibleWork()
           }
           monitor.addDefaultTasks()
 
