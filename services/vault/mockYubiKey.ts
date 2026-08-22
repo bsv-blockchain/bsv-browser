@@ -3,15 +3,18 @@
  *
  * Implements VaultDriver against an in-memory P-256 keypair, emulating the
  * behaviours the real ceremony must survive: PIN retries and lockout, touch
- * timeouts, and key removal mid-operation. signEcdsa emits DER exactly like
- * both real platforms, so the whole vault stack runs end-to-end without
- * hardware.
+ * timeouts, and key removal mid-operation. ecdh mirrors the token's PIV
+ * KeyAgreement (32-byte x-coordinate) so a seal produced against the mock's
+ * public key unseals through the mock; signEcdsa emits DER exactly like both
+ * real platforms. Together they let the whole vault stack run end-to-end
+ * without hardware.
  *
  * DEV/test only. Never bundled into a path a production user reaches.
  */
 import { p256 } from '@noble/curves/nist.js'
 import { Utils } from '@bsv/sdk'
 import { VaultDriver, KeyEvent } from './driver'
+import { softwareEcdh } from './sealing'
 import { VaultError } from './types'
 
 type TouchBehavior = 'instant' | 'timeout'
@@ -134,6 +137,30 @@ export class MockYubiKey implements VaultDriver {
   async readVaultPublicKey(_slot: number): Promise<{ publicKey: string } | null> {
     this.requirePresent()
     return this.slotPub ? { publicKey: this.slotPub } : null
+  }
+
+  /** Software stand-in for the card's PIV KeyAgreement (on-token ECDH) — the
+   * touch-gated step that unwraps a sealed vault key (sealing.ts).
+   *
+   * pinPolicy=once: a prior verifyPin in this "session" satisfies it; if a
+   * PIN is supplied here and not yet verified, verify it inline — and check
+   * the result. A verifyPin call can fail (wrong PIN) without throwing; only
+   * a locked PIN throws. Discarding that `{ ok: false }` and proceeding
+   * anyway would make a wrong PIN indistinguishable from a correct one —
+   * the same trap signEcdsa's inline verify once fell into.
+   */
+  async ecdh(_slot: number, pin: string, peerPublicKey: string): Promise<{ secret: string }> {
+    this.requirePresent()
+    if (!this.pinVerified) {
+      if (!pin) throw new VaultError('pin-required', 'PIN required before ECDH')
+      const res = await this.verifyPin(pin)
+      if (!res.ok) throw new VaultError('pin-invalid', 'Wrong PIN', res.retriesLeft)
+    }
+    if (!this.slotPriv) throw new VaultError('no-key', 'No key in slot')
+    if (this.touch === 'timeout') throw new VaultError('touch-timeout', 'Touch not detected')
+
+    const secret = softwareEcdh(Utils.toHex(Array.from(this.slotPriv)), peerPublicKey)
+    return { secret }
   }
 
   /** Software stand-in for the card's GENERAL AUTHENTICATE.

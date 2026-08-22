@@ -8,6 +8,7 @@ import { Utils } from '@bsv/sdk'
 import { MockYubiKey } from '../../services/vault/mockYubiKey'
 import { getVaultDriver, setMockDriver } from '../../services/vault/driver'
 import { VaultError } from '../../services/vault/types'
+import { sealVaultKey, unsealVaultKey } from '../../services/vault/sealing'
 
 describe('MockYubiKey', () => {
   test('wrong PIN decrements retries then locks at zero', async () => {
@@ -185,9 +186,52 @@ describe('MockYubiKey.signEcdsa', () => {
   })
 })
 
-// ── generateVaultKey policy (task 7) ──
+// ── ecdh (task 2) ──
+describe('ecdh', () => {
+  it('computes the PIV shared secret after PIN verify', async () => {
+    const mock = new MockYubiKey()
+    mock.insertKey('31337')
+    await mock.generateVaultKey(0x82)
+    const cardPub = (await mock.readVaultPublicKey(0x82))!.publicKey
+    // seal to the card, then ask the mock to do the card-side ECDH
+    const blob = sealVaultKey([42, 42], cardPub, { slot: 0x82, serial: '31337' })
+    const { secret } = await mock.ecdh(0x82, '123456', blob.ePub)
+    expect(unsealVaultKey(blob, secret)).toEqual([42, 42])
+  })
+
+  it('refuses ECDH without PIN when not yet verified', async () => {
+    const mock = new MockYubiKey()
+    mock.insertKey('1'); await mock.generateVaultKey(0x82)
+    await expect(mock.ecdh(0x82, '', 'deadbeef')).rejects.toMatchObject({ code: 'pin-required' })
+  })
+
+  it('rejects a WRONG PIN, not silently satisfied', async () => {
+    // Same trap signEcdsa's inline verify used to fall into: discarding
+    // verifyPin's { ok: false } result and proceeding anyway. Guard it here
+    // too so a wrong PIN can never be indistinguishable from a correct one.
+    const mock = new MockYubiKey()
+    mock.insertKey('1')
+    await mock.generateVaultKey(0x82)
+    await expect(mock.ecdh(0x82, '000000', 'deadbeef')).rejects.toMatchObject({
+      code: 'pin-invalid',
+      retriesLeft: 2
+    })
+    const { pinRetries } = await mock.getKeyInfo()
+    expect(pinRetries).toBe(2)
+  })
+
+  it('reports touch-timeout when touch is not delivered', async () => {
+    const mock = new MockYubiKey()
+    mock.insertKey('1'); await mock.generateVaultKey(0x82)
+    await mock.verifyPin('123456')
+    mock.setTouchBehavior('timeout')
+    await expect(mock.ecdh(0x82, '', 'deadbeef')).rejects.toMatchObject({ code: 'touch-timeout' })
+  })
+})
+
+// ── generateVaultKey policy (task 7; touch policy revised task 2) ──
 describe('generateVaultKey policy', () => {
-  it('generates with touch policy cached and pin policy once', async () => {
+  it('generates with touch policy always and pin policy once', async () => {
     const calls: unknown[][] = []
     const native = {
       isSupported: () => true,
@@ -212,7 +256,10 @@ describe('generateVaultKey policy', () => {
 
     await getVaultDriver()!.generateVaultKey(0x82)
 
-    // R1-K1 signs once per input; 'always' would cost one physical touch each.
-    expect(calls[0]).toEqual([0x82, 'cached', 'once'])
+    // The YubiKey is now an ECDH unwrap oracle: one on-token ECDH per
+    // ceremony recovers the vault key, then every R1-K1 input signs in
+    // software — no per-input touch to spare, so 'always' is affordable and
+    // is the stronger policy for new enrollments.
+    expect(calls[0]).toEqual([0x82, 'always', 'once'])
   })
 })

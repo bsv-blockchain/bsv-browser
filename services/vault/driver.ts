@@ -35,6 +35,11 @@ export interface VaultDriver {
   changePin(oldPin: string, newPin: string): Promise<{ ok: boolean; retriesLeft: number }>
   generateVaultKey(slot: number): Promise<{ publicKey: string }>
   readVaultPublicKey(slot: number): Promise<{ publicKey: string } | null>
+  /** On-token ECDH (PIV KeyAgreement): derive the shared secret between the
+   * slot's P-256 key and a peer (ephemeral) public key. Returns the 32-byte
+   * x-coordinate as hex — the touch-gated step that unwraps a sealed vault
+   * key (see sealing.ts's seal/unseal pair). TOUCH-gated, PIN-gated. */
+  ecdh(slot: number, pin: string, peerPublicKey: string): Promise<{ secret: string }>
   /** Sign a pre-computed 32-byte digest (64 hex chars) with the slot's P-256
    * key. Returns a DER signature as hex. TOUCH-gated, PIN-gated. */
   signEcdsa(slot: number, pin: string, digest: string): Promise<{ signature: string }>
@@ -53,6 +58,7 @@ interface NativeYubiKeyPiv {
   changePin(oldPin: string, newPin: string): Promise<string>
   generateVaultKey(slot: number, touchPolicy: string, pinPolicy: string): Promise<string>
   readVaultPublicKey(slot: number): Promise<string>
+  ecdh(slot: number, pin: string, peerPublicKey: string): Promise<string>
   signEcdsa(slot: number, pin: string, digest: string): Promise<string>
 }
 
@@ -119,14 +125,19 @@ function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
     getKeyInfo: () => parse(native.getKeyInfo()),
     verifyPin: pin => parse(native.verifyPin(pin)),
     changePin: (o, n) => parse(native.changePin(o, n)),
-    // 'cached' (not 'always'): R1-K1 needs one signature per input, so 'always'
-    // would demand a separate physical touch for every vault UTXO in a
-    // withdrawal. 'cached' satisfies the touch once per ~15s window.
-    generateVaultKey: slot => parse(native.generateVaultKey(slot, 'cached', 'once')),
+    // 'always' (not 'cached'): the YubiKey is now an ECDH unwrap oracle — one
+    // on-token ECDH per ceremony recovers the vault key, then every R1-K1
+    // input signs in software from that recovered key, so there's no longer
+    // a per-input touch to spare. A single per-op touch is affordable and is
+    // the stronger policy (no cached-touch window an attacker with a stolen,
+    // still-inserted key could ride). Existing enrolled keys keep whatever
+    // policy they were generated under — this only affects new enrollments.
+    generateVaultKey: slot => parse(native.generateVaultKey(slot, 'always', 'once')),
     readVaultPublicKey: async slot => {
       const r = await parse<{ publicKey: string | null }>(native.readVaultPublicKey(slot))
       return r.publicKey ? { publicKey: r.publicKey } : null
     },
+    ecdh: (slot, pin, peer) => parse(native.ecdh(slot, pin, peer)),
     signEcdsa: (slot, pin, digest) => parse(native.signEcdsa(slot, pin, digest))
   }
 }
