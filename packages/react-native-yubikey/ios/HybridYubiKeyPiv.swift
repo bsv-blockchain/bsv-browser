@@ -229,6 +229,65 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     return promise
   }
 
+  func ecdh(slot: Double, pin: String, peerPublicKey: String) throws -> Promise<String> {
+    let promise = Promise<String>()
+    guard let pivSlot = YKFPIVSlot(rawValue: UInt(slot)) else {
+      promise.reject(withError: Self.vaultError("no-key", "bad slot"))
+      return promise
+    }
+    // Decode BEFORE any card command so a malformed peer key never burns a PIN
+    // retry. The explicit 65-byte / 0x04 shape check runs first so an off-length
+    // or compressed point is named as such, rather than surfacing as whatever
+    // SecKeyCreateWithData happens to report for it.
+    guard let peerData = Data(hexString: peerPublicKey),
+          peerData.count == 65, peerData.first == 0x04 else {
+      promise.reject(withError: Self.vaultError(
+        "template-invalid", "peer public key must be 65-byte SEC1 uncompressed (0x04 || X || Y)"))
+      return promise
+    }
+    guard let peerKey = Self.sec1HexToSecKey(peerData) else {
+      promise.reject(withError: Self.vaultError("template-invalid", "peer public key is not a valid P-256 point"))
+      return promise
+    }
+
+    // calculateSecretKeyInSlot: itself `return`s after every early completion
+    // (unlike signWithKeyInSlot:, whose padding-error path falls through — see
+    // SettleGuard), so a double settle is not expected here. The guard is kept
+    // anyway: it also covers the nested verifyPin completion, costs one atomic
+    // flag, and a double settle on a Nitro Promise is a hard crash.
+    let settled = SettleGuard()
+    withSession(promise) { session in
+      // pin-policy ONCE gate: neither YubiKit nor the card verifies for us, and
+      // withSession may hand back a session on which nothing has been verified.
+      session.verifyPin(pin) { _, error in
+        if let error { return settled.reject(promise, Self.mapError(error)) }
+        // TOUCH-gated when the slot's key was generated with TouchPolicy.ALWAYS
+        // (which is what generateVaultKey now uses): this blocks until the user
+        // taps, and an unmet touch surfaces as touch-timeout via mapError.
+        //
+        // The result is the RAW x-coordinate of the shared point — 32 bytes, no
+        // KDF, no hashing. YubiKit returns exactly what the card's GENERAL
+        // AUTHENTICATE (exponentiation) returns and this passes it through
+        // unmodified; the vault's sealing layer owns any derivation.
+        // NOTE the argument label: the ObjC selector is
+        // calculateSecretKeyInSlot:peerPublicKey:, which the Swift importer
+        // splits to `calculateSecretKey(in:peerPublicKey:)` — `inSlot:` does
+        // NOT compile (verified against the installed 4.4.0 pod headers).
+        session.calculateSecretKey(in: pivSlot, peerPublicKey: peerKey) { secret, error in
+          if let error { return settled.reject(promise, Self.mapError(error)) }
+          guard let secret, secret.count == 32 else {
+            // A nil/short result without an error should not resolve as a
+            // "secret" — an under-length x-coordinate would silently produce a
+            // wrong seal key. Mirrors signEcdsa's empty-signature guard.
+            return settled.reject(promise, Self.vaultError("touch-timeout", "no shared secret returned"))
+          }
+          settled.resolve(promise, "{\"secret\":\"\(secret.hexString)\"}")
+        }
+      }
+    }
+    return promise
+  }
+
   func signEcdsa(slot: Double, pin: String, digest: String) throws -> Promise<String> {
     let promise = Promise<String>()
     guard let pivSlot = YKFPIVSlot(rawValue: UInt(slot)) else {
@@ -371,6 +430,22 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     var error: Unmanaged<CFError>?
     guard let data = SecKeyCopyExternalRepresentation(key, &error) as Data? else { return nil }
     return data.hexString
+  }
+
+  /// SEC1 uncompressed EC point (0x04 || X || Y, already decoded to bytes) ->
+  /// public `SecKey`. The inverse of `secKeyToSec1Hex`: Security's external
+  /// representation for an EC public key IS ANSI X9.63 uncompressed, so the
+  /// bytes go in as-is. Returns nil when Security will not accept the bytes as a
+  /// P-256 public key, which is the last line of defence for `ecdh`'s peer key
+  /// (the 65-byte / 0x04 shape is checked by the caller first).
+  private static func sec1HexToSecKey(_ data: Data) -> SecKey? {
+    let attrs: [String: Any] = [
+      kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+      kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
+      kSecAttrKeySizeInBits as String: 256
+    ]
+    var error: Unmanaged<CFError>?
+    return SecKeyCreateWithData(data as CFData, attrs as CFDictionary, &error)
   }
 
   /// Firmware-default PIV management key (0x0102…08 ×3, 24 bytes).

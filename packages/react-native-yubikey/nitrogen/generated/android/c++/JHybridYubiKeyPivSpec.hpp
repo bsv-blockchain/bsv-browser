@@ -64,6 +64,7 @@ namespace margelo::nitro::yubikeypiv {
     std::shared_ptr<Promise<std::string>> changePin(const std::string& oldPin, const std::string& newPin) override;
     std::shared_ptr<Promise<std::string>> generateVaultKey(double slot, const std::string& touchPolicy, const std::string& pinPolicy) override;
     std::shared_ptr<Promise<std::string>> readVaultPublicKey(double slot) override;
+    std::shared_ptr<Promise<std::string>> ecdh(double slot, const std::string& pin, const std::string& peerPublicKey) override;
     std::shared_ptr<Promise<std::string>> signEcdsa(double slot, const std::string& pin, const std::string& digest) override;
 
   private:

@@ -13,6 +13,7 @@ import com.yubico.yubikit.android.transport.nfc.NfcYubiKeyDevice
 import com.yubico.yubikit.android.transport.usb.UsbConfiguration
 import com.yubico.yubikit.android.transport.usb.UsbYubiKeyDevice
 import com.yubico.yubikit.core.YubiKeyDevice
+import com.yubico.yubikit.core.keys.EllipticCurveValues
 import com.yubico.yubikit.core.keys.PublicKeyValues
 import com.yubico.yubikit.core.smartcard.ApduException
 import com.yubico.yubikit.core.smartcard.SmartCardConnection
@@ -229,6 +230,62 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
         // Empty slot (reference-data-not-found) is not an error here.
         "{\"publicKey\":null}"
       }
+    }
+    return promise
+  }
+
+  override fun ecdh(slot: Double, pin: String, peerPublicKey: String): Promise<String> {
+    val promise = Promise<String>()
+    // Decode + shape-check BEFORE any card command so a malformed peer key never
+    // burns a PIN retry — the same discipline as signEcdsa's digest check.
+    val peerBytes = try {
+      hexToBytes(peerPublicKey)
+    } catch (t: Throwable) {
+      promise.reject(vaultError("template-invalid", "peer public key ${t.message ?: "must be hex"}"))
+      return promise
+    }
+    // fromEncodedPoint derives the coordinate width from the ARRAY length
+    // ((len - 1) / 2), not from the curve, so an off-length blob does not fail —
+    // it silently yields differently-sized X/Y and therefore a different key.
+    // It does reject a missing 0x04 marker, but only by throwing
+    // IllegalArgumentException, which inside the block below would land AFTER
+    // verifyPin and burn a retry. Both checks therefore happen here.
+    if (peerBytes.size != 65 || peerBytes[0] != 0x04.toByte()) {
+      promise.reject(
+        vaultError(
+          "template-invalid",
+          "peer public key must be 65-byte SEC1 uncompressed (0x04 || X || Y), got ${peerBytes.size} bytes"
+        )
+      )
+      return promise
+    }
+
+    withPiv(promise) { piv ->
+      // withPiv opens a FRESH PivSession per call, so the PIN must be verified
+      // inside every operation — this is not redundant with an earlier verify.
+      piv.verifyPin(pin.toCharArray())
+      // calculateSecret takes PublicKeyValues, not a java.security ECPublicKey.
+      // Verified with javap against the PINNED piv-3.1.0.jar:
+      //   public byte[] calculateSecret(Slot, PublicKeyValues)
+      // (3.1.0's piv/core jars are in fact byte-identical to 3.2.0's — same
+      // SHA-1 — so only the AAR's minCompileSdk metadata differs, which is why
+      // this file's 3.2.0-era API usage is correct on the 3.1.0 pin.)
+      val peer = PublicKeyValues.Ec.fromEncodedPoint(EllipticCurveValues.SECP256R1, peerBytes)
+      // TOUCH-gated by the slot's touch policy (generateVaultKey now enrolls with
+      // ALWAYS): this blocks until the user taps, and an unmet touch surfaces as
+      // SW 0x6982/0x6985, which mapError folds into touch-timeout.
+      //
+      // The result is the RAW x-coordinate of the shared point — 32 bytes, no
+      // KDF and no hashing on either side. The vault's sealing layer owns any
+      // derivation, so this returns the card's bytes unmodified.
+      val secret = piv.calculateSecret(Slot.fromValue(slot.toInt()), peer)
+      if (secret.size != 32) {
+        // Mirrors iOS and signEcdsa: a short/empty result without a thrown error
+        // must not resolve as a "secret" — an under-length x-coordinate would
+        // silently derive a wrong seal key.
+        throw VaultException("touch-timeout", "no shared secret returned")
+      }
+      "{\"secret\":\"${secret.toHex()}\"}"
     }
     return promise
   }
