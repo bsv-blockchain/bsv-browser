@@ -144,7 +144,18 @@ export async function enrollVault(args: {
   let meta: VaultMetaV4
   let seal: SealedBlob
   try {
-    seal = sealVaultKey(seed, publicKey, { slot: VAULT_SLOT, serial: info.serial })
+    try {
+      seal = sealVaultKey(seed, publicKey, { slot: VAULT_SLOT, serial: info.serial })
+    } catch {
+      // sealVaultKey's ECDH throws a raw @noble/curves error (no .code) on a
+      // malformed SEC1 point — a card bug or a foreign PIV slot's key.
+      // Recode it so callers get a stable, coded failure; never forward the
+      // underlying message, which could echo the bad key material back out.
+      throw new VaultError('template-invalid', 'YubiKey returned invalid key material')
+    }
+    // Sealing is done with the seed — zero it now rather than waiting for
+    // the outer `finally`, which stays as a backstop for every other exit.
+    seed.fill(0)
     meta = {
       v: 4,
       enrolledAt: Date.now(),
@@ -193,7 +204,23 @@ export async function recoverVaultHD(mnemonic: string, passphrase: string): Prom
  * the mnemonic + passphrase itself (rather than taking an already-derived HD
  * node) and seals it fresh to the new card's public key. Preserves
  * nextKeyIndex so deposit indices are never reissued, and zeroizes the seed
- * in `finally` exactly like enrollVault.
+ * as soon as sealing succeeds, with `finally` as a backstop for every other
+ * exit — exactly like enrollVault.
+ *
+ * `verifyHD`, if given, gates the whole operation: BIP39 passphrases carry no
+ * checksum, so a mistyped one derives a different, valid, EMPTY vault node
+ * with no error of its own. Without a check, that typo would overwrite the
+ * ONLY seal that opens the real vault with one nobody can ever unwrap back to
+ * the real funds — the old physical key is gone (that is the point of
+ * resealing) and the new seal is wrong. The check therefore runs as early as
+ * the tap flow allows: seed and HD are derived first (no card needed for
+ * that), verified BEFORE `driver.getKeyInfo()` — i.e. before the tap begins
+ * at all — so a failed verification never burns a PIN attempt, never risks
+ * the slot-occupied refusal, and above all never reaches `generateVaultKey`
+ * (which would irreversibly overwrite the slot) or the `vaultStore` writes.
+ * A caller that omits `verifyHD` keeps today's behavior: it is on the caller
+ * to verify the passphrase itself before calling this, whenever the vault
+ * may hold funds (the recover UI wires this in a later task).
  *
  * Outputs created under the OLD key do NOT become spendable via the R1
  * branch again — not with the new key (it never held the old key's private
@@ -213,23 +240,40 @@ export async function resealToNewKey(
   mnemonic: string,
   passphrase: string,
   nickname: string,
-  getPin: () => Promise<string>
+  getPin: () => Promise<string>,
+  verifyHD?: (hd: HD) => Promise<boolean>
 ): Promise<void> {
   const driver = getVaultDriver()
   if (!driver) throw new VaultError('driver-unavailable')
-  const info = await driver.getKeyInfo()
-  if (info.pinRetries === 0) throw new VaultError('pin-locked', 'PIN is blocked')
-  if (await driver.readVaultPublicKey(VAULT_SLOT)) {
-    throw new VaultError('slot-occupied', `PIV slot ${VAULT_SLOT.toString(16)} already holds a key`)
-  }
-  const pin = await getPin()
-  const verified = await driver.verifyPin(pin)
-  if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)
-  const { publicKey } = await driver.generateVaultKey(VAULT_SLOT)
 
   const seed = deriveVaultSeed(mnemonic, passphrase)
   try {
-    const seal = sealVaultKey(seed, publicKey, { slot: VAULT_SLOT, serial: info.serial })
+    // Fail closed BEFORE any card interaction: see this function's doc
+    // comment for why this has to be the earliest possible point.
+    if (verifyHD && !(await verifyHD(HD.fromSeed(seed)))) {
+      throw new VaultError('bad-passphrase', 'Passphrase does not match this vault')
+    }
+
+    const info = await driver.getKeyInfo()
+    if (info.pinRetries === 0) throw new VaultError('pin-locked', 'PIN is blocked')
+    if (await driver.readVaultPublicKey(VAULT_SLOT)) {
+      throw new VaultError('slot-occupied', `PIV slot ${VAULT_SLOT.toString(16)} already holds a key`)
+    }
+    const pin = await getPin()
+    const verified = await driver.verifyPin(pin)
+    if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)
+    const { publicKey } = await driver.generateVaultKey(VAULT_SLOT)
+
+    let seal: SealedBlob
+    try {
+      seal = sealVaultKey(seed, publicKey, { slot: VAULT_SLOT, serial: info.serial })
+    } catch {
+      // See enrollVault's identical wrap: never forward the raw error text.
+      throw new VaultError('template-invalid', 'YubiKey returned invalid key material')
+    }
+    // Sealing is done with the seed — zero it now; `finally` is a backstop.
+    seed.fill(0)
+
     // Preserve nextKeyIndex across the re-enrollment so deposit indices are
     // never reissued to a second address.
     const prev = await vaultStore.getMeta()

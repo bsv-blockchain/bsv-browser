@@ -129,13 +129,17 @@ describe('enrollVault', () => {
 
   test('zeroes the vault seed even when sealing fails on malformed card key material', async () => {
     // A card bug (or a compromised/foreign PIV slot) could return something
-    // that is not a well-formed SEC1 point; sealVaultKey's ECDH then throws.
-    // That throw happens AFTER the seed has been derived, so it must not skip
-    // the zeroing step — the seed is exactly the secret this whole function
-    // exists to keep off disk and out of memory once done with it.
+    // that is not a well-formed SEC1 point; sealVaultKey's ECDH then throws a
+    // raw @noble/curves error with no .code. enrollVault recodes that into
+    // VaultError('template-invalid') without echoing the underlying message
+    // (which could otherwise leak details about the malformed input back to
+    // a caller). That throw happens AFTER the seed has been derived, so it
+    // must not skip the zeroing step — the seed is exactly the secret this
+    // whole function exists to keep off disk and out of memory once done
+    // with it.
     jest.spyOn(mock, 'generateVaultKey').mockResolvedValueOnce({ publicKey: '04aabb' })
     const fillSpy = jest.spyOn(Array.prototype, 'fill')
-    await expect(enrollVault(args())).rejects.toBeTruthy()
+    await expect(enrollVault(args())).rejects.toMatchObject({ code: 'template-invalid' })
     const zeroedA64ByteArray = fillSpy.mock.calls.some(
       ([value], i) => value === 0 && (fillSpy.mock.instances[i] as unknown[]).length === 64
     )
@@ -353,6 +357,69 @@ describe('resealToNewKey', () => {
     expect(() => unsealVaultKey(newSeal, oldCardSecret)).toThrow(
       expect.objectContaining({ code: 'seal-corrupt' })
     )
+  })
+
+  describe('verifyHD gate', () => {
+    test('verifyHD returning false refuses to reseal: nothing written, nothing generated', async () => {
+      // BIP39 passphrases have no checksum, so a mistyped one would otherwise
+      // silently overwrite the ONLY seal that opens the real vault with one
+      // sealed to a node nobody can spend from — the old physical key is
+      // gone by design (that's what reseal is for), so this is the last
+      // chance to catch the typo before it becomes unrecoverable.
+      const { pending } = await enrollVault(args())
+      await finalizeEnrollment(pending)
+      const oldSeal = pending.seal
+      const oldMeta = await vaultStore.getMeta()
+
+      const fresh = new MockYubiKey()
+      fresh.insertKey('MOCK-2')
+      setMockDriver(fresh)
+      const infoSpy = jest.spyOn(fresh, 'getKeyInfo')
+      const genSpy = jest.spyOn(fresh, 'generateVaultKey')
+
+      await expect(
+        resealToNewKey(MNEMONIC, PASSPHRASE, 'k', async () => '123456', async () => false)
+      ).rejects.toMatchObject({ code: 'bad-passphrase' })
+
+      // Verification runs BEFORE the tap even begins.
+      expect(infoSpy).not.toHaveBeenCalled()
+      expect(genSpy).not.toHaveBeenCalled()
+      // The slot on the new card was never touched.
+      expect(await fresh.readVaultPublicKey(VAULT_SLOT)).toBeNull()
+
+      // vaultStore is untouched — the OLD seal is exactly as it was, and
+      // still opens (via the OLD card) to the OLD HD.
+      expect(await vaultStore.getMeta()).toEqual(oldMeta)
+      expect(await vaultStore.getSeal()).toEqual(oldSeal)
+      const { secret } = await mock.ecdh(oldSeal.slot, DEFAULT_PIN_AFTER_CHANGE, oldSeal.ePub)
+      const seed = unsealVaultKey(oldSeal, secret)
+      expect(HD.fromSeed(seed).toString()).toBe(deriveVaultHD(MNEMONIC, PASSPHRASE).toString())
+    })
+
+    test('verifyHD returning true lets the reseal proceed as before', async () => {
+      const { pending } = await enrollVault(args())
+      await finalizeEnrollment(pending)
+
+      const fresh = new MockYubiKey()
+      fresh.insertKey('MOCK-2')
+      setMockDriver(fresh)
+      let verifiedWith: string | null = null
+
+      await resealToNewKey(MNEMONIC, PASSPHRASE, 'k', async () => '123456', async hd => {
+        verifiedWith = hd.toString()
+        return true
+      })
+
+      // verifyHD was actually called with the HD the new seal now wraps.
+      expect(verifiedWith).toBe(deriveVaultHD(MNEMONIC, PASSPHRASE).toString())
+
+      const after = await vaultStore.getMeta()
+      expect(after!.yubiSerial).toBe('MOCK-2')
+      const seal = (await vaultStore.getSeal())!
+      const { secret } = await fresh.ecdh(seal.slot, '123456', seal.ePub)
+      const seed = unsealVaultKey(seal, secret)
+      expect(HD.fromSeed(seed).toString()).toBe(deriveVaultHD(MNEMONIC, PASSPHRASE).toString())
+    })
   })
 })
 
