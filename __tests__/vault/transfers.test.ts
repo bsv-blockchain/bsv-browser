@@ -1,22 +1,22 @@
 /**
  * Vault transfers tests.
  *
- * The cryptographic arbiter for the R1-K1 script itself lives in
- * r1k1.test.ts (real Spend-interpreter validation, both branches, high-S
- * acceptance). This file is orchestration: deposit args, output selection,
- * partial re-vault, abort-on-failure, signer release, and double-spend-heal
- * — validated against a fake VaultWallet plus a fake VaultR1Signer that
- * signs for real with a P-256 key (so the R1 template's own commitment
- * check inside the signing loop is exercised, not just mocked away).
+ * The cryptographic arbiter for the K1 script itself lives in k1.test.ts
+ * (codec fail-closed behaviour, P2PKH lock shape). This file is
+ * orchestration: the tap gate on both directions, deposit args, output
+ * selection, partial re-vault, abort-on-failure, key release, and
+ * double-spend-heal — validated against a fake VaultWallet plus a real HD
+ * node, so the signatures the withdraw path produces are checked against the
+ * real script interpreter rather than mocked away.
  */
 import { Beef, BigNumber, ECDSA, HD, P2PKH, PrivateKey, PublicKey, Spend, Transaction, UnlockingScript, Utils } from '@bsv/sdk'
-import { p256 } from '@noble/curves/nist.js'
 import {
-  R1K1_R1_UNLOCK_LEN,
+  K1_LOCK_LEN,
+  K1_UNLOCK_LEN,
   buildVaultLockingScript,
   decodeVaultInstructions,
   encodeVaultInstructions
-} from '@/services/vault/r1k1'
+} from '@/services/vault/k1'
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
@@ -37,15 +37,15 @@ jest.mock('expo-secure-store', () => ({
 // module-scope consts declared later in the file — avoids TDZ issues with
 // jest's hoisting of jest.mock() above imports.
 jest.mock('@/services/vault/ceremonyHost', () => ({
-  requestVaultSigner: jest.fn(),
+  requestVaultKey: jest.fn(),
   noteVaultProgress: jest.fn()
 }))
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { vaultStore } from '@/services/vault/vaultStore'
 import { backupAttestation } from '@/services/vault/backupAttestation'
-import { bip32KeyID, depositPkhFromXpub } from '@/services/vault/vaultDerivation'
-import { requestVaultSigner, noteVaultProgress } from '@/services/vault/ceremonyHost'
+import { bip32KeyID, depositPubKeyHash } from '@/services/vault/vaultDerivation'
+import { requestVaultKey, noteVaultProgress } from '@/services/vault/ceremonyHost'
 import { VaultError } from '@/services/vault/types'
 import {
   VAULT_BASKET,
@@ -63,26 +63,23 @@ import {
 
 const ADMIN = 'admin.com'
 const IDENTITY_KEY = '02' + 'f'.repeat(62)
+const REASON = 'Move to vault'
 
 // One vault enrollment's worth of fixture material, generated once for the
-// whole file: a real P-256 keypair for the R1 leg, and a real HD node for
-// the K1 leg (so tests exercise the actual template commitment checks
-// rather than mocking them away).
-const R1_PRIV = p256.utils.randomSecretKey()
-const R1_PUBLIC_KEY = Utils.toHex(Array.from(p256.getPublicKey(R1_PRIV, true)))
-const VAULT_HD = HD.fromSeed(Array.from(crypto.getRandomValues(new Uint8Array(64))))
-const XPUB = VAULT_HD.toPublic().toString()
+// whole file: the real HD node a tap would unwrap, plus a second, unrelated
+// node standing in for "wrong YubiKey" / "wrong vault passphrase".
+const randomSeed = () => Array.from(crypto.getRandomValues(new Uint8Array(64)))
+const VAULT_HD = HD.fromSeed(randomSeed())
+const OTHER_HD = HD.fromSeed(randomSeed())
 
 async function seedMeta(): Promise<void> {
   await vaultStore.setMeta({
-    v: 3,
+    v: 4,
     enrolledAt: 1,
     yubiSerial: 's',
     nickname: 'n',
     slot: 0x82,
-    nextKeyIndex: 0,
-    xpub: XPUB,
-    r1PublicKey: R1_PUBLIC_KEY
+    nextKeyIndex: 0
   })
 }
 
@@ -90,43 +87,40 @@ interface Fixture {
   outpoint: string
   satoshis: number
   customInstructions: string
+  lockingScript: ReturnType<typeof buildVaultLockingScript>
   src: Transaction
 }
 
 /** A BEEF carrying every fixture's raw source transaction, as listOutputs
- * with `include: 'entire transactions'` returns. createAction's signer layer
- * (buildSignableTransaction) resolves each input's sourceTransaction ONLY
- * from this BEEF — a mocked wallet boundary can't catch a missing inputBEEF,
- * but it CAN catch a missing BEEF here if we actually assert on it. */
+ * with `include: 'entire transactions'` returns. It is load-bearing twice
+ * over: createAction's signer layer (buildSignableTransaction) resolves each
+ * input's sourceTransaction ONLY from this BEEF, and spendVaultOutputs reads
+ * each vault output's REAL locking script out of it for the wrong-key check. */
 const stitchBeef = (fx: { src: Transaction }[]): number[] => {
   const beef = new Beef()
   for (const { src } of fx) beef.mergeRawTx(src.toBinary())
   return beef.toBinary()
 }
 
-/** Seed `n` real R1-K1 vault outputs (fresh salt each) and wire the fake
+/** The signable transaction the fake wallet last fabricated — the object the
+ * real interpreter checks each unlocking script against. */
+let lastSignable: Transaction | undefined
+
+/** Seed `n` real K1 vault outputs (one BIP32 child each) and wire the fake
  * wallet's listOutputs/createAction to serve them, fabricating a signable
  * transaction from whatever inputs/outputs the code under test asks for. */
 async function seedVaultOutputs(n: number, sats = 300_000): Promise<Fixture[]> {
   await seedMeta()
   const fx: Fixture[] = []
   for (let index = 0; index < n; index++) {
-    const salt = Utils.toHex(Array.from(crypto.getRandomValues(new Uint8Array(32))))
-    const k1PublicKeyHash = Utils.toArray(depositPkhFromXpub(XPUB, index), 'hex')
-    const lockingScript = await buildVaultLockingScript({ r1PublicKey: R1_PUBLIC_KEY, salt, k1PublicKeyHash })
+    const lockingScript = buildVaultLockingScript({ k1PublicKeyHash: depositPubKeyHash(VAULT_HD, index) })
     const src = new Transaction()
     src.addOutput({ satoshis: sats, lockingScript })
     fx.push({
       outpoint: `${src.id('hex')}.0`,
       satoshis: sats,
-      customInstructions: encodeVaultInstructions({
-        v: 2,
-        type: 'R1K1',
-        keyID: bip32KeyID(index),
-        salt,
-        r1PublicKey: R1_PUBLIC_KEY,
-        slot: 0x82
-      }),
+      customInstructions: encodeVaultInstructions({ v: 3, type: 'K1', keyID: bip32KeyID(index) }),
+      lockingScript,
       src
     })
   }
@@ -135,7 +129,10 @@ async function seedVaultOutputs(n: number, sats = 300_000): Promise<Fixture[]> {
   const meta = await vaultStore.getMeta()
   await vaultStore.setMeta({ ...meta!, nextKeyIndex: n })
 
-  wallet.listOutputs.mockResolvedValue({ outputs: fx.map(({ src: _s, ...o }) => o), BEEF: stitchBeef(fx) })
+  wallet.listOutputs.mockResolvedValue({
+    outputs: fx.map(({ src: _s, lockingScript: _l, ...o }) => o),
+    BEEF: stitchBeef(fx)
+  })
   wallet.createAction.mockImplementation(async (args: any) => {
     const tx = new Transaction()
     for (const inp of args.inputs) {
@@ -150,6 +147,7 @@ async function seedVaultOutputs(n: number, sats = 300_000): Promise<Fixture[]> {
     for (const out of args.outputs) {
       tx.addOutput({ satoshis: out.satoshis, lockingScript: new P2PKH().lock(Utils.toArray('11'.repeat(20), 'hex')) })
     }
+    lastSignable = tx
     return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-1' } }
   })
   return fx
@@ -171,13 +169,20 @@ let wallet: VaultWallet & {
  * consumed when a vault tx2 lists one as its input. */
 let fakeStagingUtxos: { outpoint: string; satoshis: number; customInstructions?: string }[]
 
-let signerRelease: jest.Mock
-let mockSigner: { publicKey: number[]; sign: jest.Mock; release: () => void }
+let keyRelease: jest.Mock
+
+/** Arm the mocked ceremony with a given HD node — the successor of the old
+ * mock signer. A handle is just `{ hd, release }`; the spend path reads `hd`
+ * at its point of use and releases in a finally. */
+const armWith = (hd: HD) => {
+  ;(requestVaultKey as jest.Mock).mockImplementation(async () => ({ hd, release: keyRelease }))
+}
 
 beforeEach(async () => {
   await AsyncStorage.clear()
   for (const k of Object.keys(secureItems)) delete secureItems[k]
 
+  lastSignable = undefined
   fakeStagingUtxos = []
   let stagingSeq = 0
   wallet = {
@@ -217,66 +222,21 @@ beforeEach(async () => {
   // tests below, so every other deposit test starts from an attested wallet.
   await backupAttestation.set(IDENTITY_KEY, 'phrase')
 
-  signerRelease = jest.fn()
-  // A concurrency guard mirroring the real CeremonyController's `signing`
-  // flag (services/vault/ceremony.ts) — NOT exercised by the current
-  // sequential for-loop, but load-bearing as a regression guard: without it,
-  // a future rewrite to Promise.all/an unlockingScriptTemplate would keep
-  // this suite green and silently reopen the landmine (VaultR1Signer.sign()
-  // rejecting fast on overlap is what actually breaks a parallel fan-out on
-  // real hardware — the mock must reproduce that, not just the happy path).
-  // The `await Promise.resolve()` before doing any work is required for the
-  // guard to mean anything: without an internal await point, two back-to-
-  // back synchronous calls (as Promise.all would issue) would each run to
-  // completion before the next one starts, and `signing` would never
-  // observe an overlap.
-  let signing = false
-  mockSigner = {
-    publicKey: Utils.toArray(R1_PUBLIC_KEY, 'hex'),
-    sign: jest.fn(async (digest: Uint8Array) => {
-      if (signing) {
-        throw new VaultError('template-invalid', 'Concurrent sign() calls on one signer are not supported')
-      }
-      signing = true
-      try {
-        await Promise.resolve()
-        const sig = p256.Signature.fromBytes(p256.sign(digest, R1_PRIV, { prehash: false }))
-        return Array.from(sig.toBytes('der'))
-      } finally {
-        signing = false
-      }
-    }),
-    release: signerRelease
-  }
+  keyRelease = jest.fn()
   ;(noteVaultProgress as jest.Mock).mockClear()
-  ;(requestVaultSigner as jest.Mock).mockClear()
-  ;(requestVaultSigner as jest.Mock).mockImplementation(async () => mockSigner)
-})
-
-// Pins the harness's own fidelity to the real VaultR1Signer contract: this is
-// what makes the multi-input withdraw tests below double as a regression
-// guard for the sequential-signing landmine. If this test ever stopped
-// passing, the "spends every vault output"/"actually signs every input"
-// tests below would no longer catch a Promise.all/unlockingScriptTemplate
-// regression in spendVaultOutputs — they'd just be exercising a mock that
-// happens to tolerate concurrency the real ceremony does not.
-describe('mockSigner fidelity: mirrors VaultR1Signer\'s no-overlap contract', () => {
-  it('rejects an overlapping sign() call the same way the real ceremony does', async () => {
-    const d1 = new Uint8Array(32).fill(1)
-    const d2 = new Uint8Array(32).fill(2)
-    const [r1, r2] = await Promise.allSettled([mockSigner.sign(d1), mockSigner.sign(d2)])
-    expect(r1.status).toBe('fulfilled')
-    expect(r2.status).toBe('rejected')
-    expect((r2 as PromiseRejectedResult).reason).toMatchObject({ code: 'template-invalid' })
-  })
+  ;(requestVaultKey as jest.Mock).mockClear()
+  armWith(VAULT_HD)
 })
 
 // ── deposit ───────────────────────────────────────────────────────────────
 
 describe('depositToVault', () => {
-  it('rejects below the 200,000 sat floor', async () => {
-    await expect(depositToVault(wallet, ADMIN, VAULT_DEPOSIT_MIN - 1)).rejects.toMatchObject({ code: 'below-dust' })
+  it('rejects below the 10,000 sat floor, without asking for a key', async () => {
+    await expect(depositToVault(wallet, ADMIN, VAULT_DEPOSIT_MIN - 1, REASON)).rejects.toMatchObject({
+      code: 'below-dust'
+    })
     expect(wallet.createAction).not.toHaveBeenCalled()
+    expect(requestVaultKey).not.toHaveBeenCalled()
   })
 
   /** The createAction calls that carry the vault output (deposit tx2). */
@@ -288,7 +248,7 @@ describe('depositToVault', () => {
 
   it('splits first: tx1 stages deposit + tx2 fee, tx2 spends only that input with no change', async () => {
     await seedMeta()
-    await depositToVault(wallet, ADMIN, 250_000)
+    await depositToVault(wallet, ADMIN, 250_000, REASON)
 
     const [split] = splitCalls()
     const [vault] = vaultCalls()
@@ -308,9 +268,36 @@ describe('depositToVault', () => {
     expect(vault.outputs[0].basket).toBe(VAULT_BASKET)
   })
 
+  it('taps once and releases the key when the deposit is done', async () => {
+    await seedMeta()
+    await depositToVault(wallet, ADMIN, 250_000, REASON)
+
+    expect(requestVaultKey).toHaveBeenCalledTimes(1)
+    expect(requestVaultKey).toHaveBeenCalledWith(REASON)
+    expect(keyRelease).toHaveBeenCalled()
+  })
+
+  it('derives nothing without the ceremony — a refused tap costs no index and no money', async () => {
+    await seedMeta()
+    ;(requestVaultKey as jest.Mock).mockRejectedValueOnce(new VaultError('user-cancelled'))
+
+    await expect(depositToVault(wallet, ADMIN, 250_000, REASON)).rejects.toMatchObject({ code: 'user-cancelled' })
+    // takeNextIndex never ran: no vault address exists without an unwrap.
+    expect((await vaultStore.getMeta())!.nextKeyIndex).toBe(0)
+    // And no money moved: the tap gates the split as well as the derivation.
+    expect(wallet.createAction).not.toHaveBeenCalled()
+  })
+
+  it('releases the key even when the deposit throws', async () => {
+    await seedMeta()
+    wallet.createAction.mockRejectedValueOnce(new Error('boom'))
+    await expect(depositToVault(wallet, ADMIN, 250_000, REASON)).rejects.toThrow('boom')
+    expect(keyRelease).toHaveBeenCalled()
+  })
+
   it('reuses a stranded staging output of the same amount instead of splitting again', async () => {
     await seedMeta()
-    await depositToVault(wallet, ADMIN, 250_000)
+    await depositToVault(wallet, ADMIN, 250_000, REASON)
     // Simulate tx2 having failed: put the consumed staging output back.
     const [split] = splitCalls()
     fakeStagingUtxos.push({
@@ -319,7 +306,7 @@ describe('depositToVault', () => {
       customInstructions: split.outputs[0].customInstructions
     })
     wallet.createAction.mockClear()
-    await depositToVault(wallet, ADMIN, 250_000)
+    await depositToVault(wallet, ADMIN, 250_000, REASON)
     expect(splitCalls()).toHaveLength(0)
     expect(vaultCalls()).toHaveLength(1)
   })
@@ -354,7 +341,7 @@ describe('depositToVault', () => {
       return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-dep' } }
     })
 
-    const { txid } = await depositToVault(wallet, ADMIN, 250_000)
+    const { txid } = await depositToVault(wallet, ADMIN, 250_000, REASON)
     expect(txid).toBe('feedface'.repeat(8))
 
     // The digest handed to the wallet is a real 32-byte sighash under the
@@ -470,7 +457,7 @@ describe('depositToVault', () => {
   it('signs a VALID tx2 when the toolbox adds a funding input and change outputs', async () => {
     await seedMeta()
     const f = realStagingWallet({ stagingFirst: true })
-    const { txid } = await depositToVault(wallet, ADMIN, 250_000)
+    const { txid } = await depositToVault(wallet, ADMIN, 250_000, REASON)
     expect(txid).toBe('feedface'.repeat(8))
     validateStagingSpend(f, 0)
   })
@@ -478,7 +465,7 @@ describe('depositToVault', () => {
   it('finds the staging input by outpoint even when it is not input 0', async () => {
     await seedMeta()
     const f = realStagingWallet({ stagingFirst: false })
-    await depositToVault(wallet, ADMIN, 250_000)
+    await depositToVault(wallet, ADMIN, 250_000, REASON)
     validateStagingSpend(f, 1)
   })
 
@@ -496,7 +483,7 @@ describe('depositToVault', () => {
       fakeStagingUtxos.push(stranded)
       return 1
     })
-    await depositToVault(wallet, ADMIN, 250_000, { releaseStrandedStaging })
+    await depositToVault(wallet, ADMIN, 250_000, REASON, { releaseStrandedStaging })
     expect(releaseStrandedStaging).toHaveBeenCalledTimes(1)
     expect(splitCalls()).toHaveLength(0)
     expect(vaultCalls()).toHaveLength(1)
@@ -506,47 +493,39 @@ describe('depositToVault', () => {
   it('splits anew when the stranded-staging release frees nothing', async () => {
     await seedMeta()
     const releaseStrandedStaging = jest.fn(async () => 0)
-    await depositToVault(wallet, ADMIN, 250_000, { releaseStrandedStaging })
+    await depositToVault(wallet, ADMIN, 250_000, REASON, { releaseStrandedStaging })
     expect(releaseStrandedStaging).toHaveBeenCalledTimes(1)
     expect(splitCalls()).toHaveLength(1)
     expect(vaultCalls()).toHaveLength(1)
   })
 
-  it('builds an R1-K1 output with complete customInstructions', async () => {
+  it('locks the deposit to a child of the tapped key, with v3 customInstructions', async () => {
     await seedMeta()
-    await depositToVault(wallet, ADMIN, 250_000)
+    await depositToVault(wallet, ADMIN, 250_000, REASON)
 
     const [args] = vaultCalls()
     const out = args.outputs[0]
 
     expect(out.basket).toBe(VAULT_BASKET)
     expect(out.satoshis).toBe(250_000)
-    expect(Utils.toArray(out.lockingScript, 'hex').length).toBe(959_632)
+    // A plain 25-byte P2PKH lock — and specifically the one belonging to
+    // child 0 of the node the ceremony handed over, which is the whole point
+    // of the tap gate.
+    expect(Utils.toArray(out.lockingScript, 'hex').length).toBe(K1_LOCK_LEN)
+    expect(out.lockingScript).toBe(
+      buildVaultLockingScript({ k1PublicKeyHash: depositPubKeyHash(VAULT_HD, 0) }).toHex()
+    )
 
     const ci = decodeVaultInstructions(out.customInstructions)!
-    expect(ci.v).toBe(2)
-    expect(ci.type).toBe('R1K1')
+    expect(ci.v).toBe(3)
+    expect(ci.type).toBe('K1')
     expect(ci.keyID).toBe('bip32/0')
-    expect(ci.slot).toBe(0x82)
-    expect(ci.salt).toHaveLength(64)
-  })
-
-  it('uses a fresh salt for every deposit', async () => {
-    await seedMeta()
-    await depositToVault(wallet, ADMIN, 250_000)
-    await depositToVault(wallet, ADMIN, 250_000)
-
-    const salts = vaultCalls().map((a: any) => decodeVaultInstructions(a.outputs[0].customInstructions)!.salt)
-    expect(salts[0]).not.toBe(salts[1])
-    // One YubiKey key serves the whole vault, so identical salts would give
-    // identical commitments and make every output trivially linkable.
-    expect(new Set(salts).size).toBe(2)
   })
 
   it('advances the deposit index on every deposit, never reusing one', async () => {
     await seedMeta()
-    await depositToVault(wallet, ADMIN, 250_000)
-    await depositToVault(wallet, ADMIN, 250_000)
+    await depositToVault(wallet, ADMIN, 250_000, REASON)
+    await depositToVault(wallet, ADMIN, 250_000, REASON)
 
     const keyIDs = vaultCalls().map((a: any) => decodeVaultInstructions(a.outputs[0].customInstructions)!.keyID)
     expect(keyIDs).toEqual(['bip32/0', 'bip32/1'])
@@ -556,22 +535,23 @@ describe('depositToVault', () => {
     await seedMeta()
     await backupAttestation.clear(IDENTITY_KEY)
 
-    await expect(depositToVault(wallet, ADMIN, 250_000)).rejects.toMatchObject({
+    await expect(depositToVault(wallet, ADMIN, 250_000, REASON)).rejects.toMatchObject({
       code: 'backup-required'
     })
     expect(wallet.createAction).not.toHaveBeenCalled()
   })
 
-  it('checks the backup before spending the deposit index', async () => {
-    // A refused deposit must not burn a deposit index: the index is monotonic
-    // and never reused, so a gate that ran late would leak addresses on every
-    // blocked attempt.
+  it('checks the backup BEFORE the tap, and before spending the deposit index', async () => {
+    // A refused deposit must not burn a deposit index (the index is monotonic
+    // and never reused), and must not ask the user to present a key for a
+    // transfer that was never going to proceed.
     await seedMeta()
     await backupAttestation.clear(IDENTITY_KEY)
 
-    await expect(depositToVault(wallet, ADMIN, 250_000)).rejects.toMatchObject({
+    await expect(depositToVault(wallet, ADMIN, 250_000, REASON)).rejects.toMatchObject({
       code: 'backup-required'
     })
+    expect(requestVaultKey).not.toHaveBeenCalled()
     expect((await vaultStore.getMeta())!.nextKeyIndex).toBe(0)
   })
 
@@ -580,9 +560,22 @@ describe('depositToVault', () => {
     await backupAttestation.clear(IDENTITY_KEY)
     await backupAttestation.set('02' + '9'.repeat(62), 'phrase')
 
-    await expect(depositToVault(wallet, ADMIN, 250_000)).rejects.toMatchObject({
+    await expect(depositToVault(wallet, ADMIN, 250_000, REASON)).rejects.toMatchObject({
       code: 'backup-required'
     })
+  })
+
+  it('reports preparing then broadcasting so the armed sheet shows activity', async () => {
+    // Each note also refreshes the retention window, so a slow staging
+    // broadcast cannot have the armed key relocked out from under the deposit
+    // before it reaches nextDepositTarget.
+    await seedMeta()
+    realStagingWallet({ stagingFirst: true })
+    await depositToVault(wallet, ADMIN, 250_000, REASON)
+
+    const phases = (noteVaultProgress as jest.Mock).mock.calls.map(([p]) => p.phase)
+    expect(phases[0]).toBe('preparing')
+    expect(phases).toContain('broadcasting')
   })
 })
 
@@ -614,27 +607,57 @@ describe('withdrawFromVault', () => {
     expect(caArgs.options.trustSelf).toBe('known')
   })
 
-  it('spends every vault output with the exact R1 unlocking length', async () => {
+  it('spends every vault output, declaring the K1 unlocking length', async () => {
     await seedVaultOutputs(3)
     await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')
 
     const [caArgs] = wallet.createAction.mock.calls[0]
     expect(caArgs.inputs).toHaveLength(3)
     for (const i of caArgs.inputs) {
-      expect(i.unlockingScriptLength).toBe(R1K1_R1_UNLOCK_LEN)
+      expect(i.unlockingScriptLength).toBe(K1_UNLOCK_LEN)
     }
   })
 
-  it('actually signs every input via the R1 branch (real template validation)', async () => {
-    await seedVaultOutputs(2)
+  it('signs every input with the tapped node — validated by the real interpreter', async () => {
+    const fx = await seedVaultOutputs(2)
     await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')
 
+    const [caArgs] = wallet.createAction.mock.calls[0]
     const [saArgs] = wallet.signAction.mock.calls[0]
     expect(Object.keys(saArgs.spends)).toHaveLength(2)
-    for (const spend of Object.values(saArgs.spends) as { unlockingScript: string }[]) {
-      expect(Utils.toArray(spend.unlockingScript, 'hex').length).toBe(R1K1_R1_UNLOCK_LEN)
-    }
-    expect(mockSigner.sign).toHaveBeenCalledTimes(2)
+
+    const tx = lastSignable!
+    caArgs.inputs.forEach((inp: any, i: number) => {
+      const f = fx.find(x => x.outpoint === inp.outpoint)!
+      const unlockingScript = UnlockingScript.fromHex(saArgs.spends[i].unlockingScript)
+      // A real P2PKH unlock: <sig+hashtype> <compressed pubkey>. The DER
+      // signature varies 70-72 bytes, so K1_UNLOCK_LEN is the declared
+      // ceiling, not the exact size.
+      expect(unlockingScript.toBinary().length).toBeLessThanOrEqual(K1_UNLOCK_LEN)
+      const ok = new Spend({
+        sourceTXID: f.src.id('hex'),
+        sourceOutputIndex: 0,
+        sourceSatoshis: f.satoshis,
+        lockingScript: f.lockingScript,
+        transactionVersion: tx.version,
+        otherInputs: tx.inputs.filter((_, j) => j !== i),
+        inputIndex: i,
+        unlockingScript,
+        outputs: tx.outputs,
+        inputSequence: 0xffffffff,
+        lockTime: tx.lockTime
+      }).validate()
+      expect(ok).toBe(true)
+    })
+  })
+
+  it('taps once for the whole withdrawal, remainder included', async () => {
+    await seedVaultOutputs(2, 500_000)
+    await withdrawFromVault(wallet, ADMIN, 600_000, 'Withdraw')
+
+    expect(requestVaultKey).toHaveBeenCalledTimes(1)
+    expect(requestVaultKey).toHaveBeenCalledWith('Withdraw')
+    expect(keyRelease).toHaveBeenCalledTimes(1)
   })
 
   it('re-vaults the remainder as one output when it clears the floor', async () => {
@@ -645,14 +668,19 @@ describe('withdrawFromVault', () => {
     expect(caArgs.outputs).toHaveLength(1)
     expect(caArgs.outputs[0].satoshis).toBe(400_000)
     expect(caArgs.outputs[0].basket).toBe(VAULT_BASKET)
+    // Locked to the next index of the SAME node the tap produced — no second
+    // ceremony for the change output.
+    expect(caArgs.outputs[0].lockingScript).toBe(
+      buildVaultLockingScript({ k1PublicKeyHash: depositPubKeyHash(VAULT_HD, 2) }).toHex()
+    )
   })
 
   it('folds a sub-floor remainder into the withdrawal', async () => {
-    await seedVaultOutputs(1, 250_000)
-    await withdrawFromVault(wallet, ADMIN, 100_000, 'Withdraw')
+    await seedVaultOutputs(1, 15_000)
+    await withdrawFromVault(wallet, ADMIN, 10_000, 'Withdraw')
 
-    // 150,000 remainder is below the 200,000 floor — re-vaulting it would
-    // create an output not worth moving.
+    // 5,000 remainder is below the 10,000 floor — re-vaulting it would create
+    // an output not worth moving.
     const [caArgs] = wallet.createAction.mock.calls[0]
     expect(caArgs.outputs).toHaveLength(0)
   })
@@ -664,51 +692,60 @@ describe('withdrawFromVault', () => {
     })
   })
 
-  it('releases the signer even when signAction throws', async () => {
+  it('releases the key even when signAction throws', async () => {
     await seedVaultOutputs(1)
     wallet.signAction.mockRejectedValueOnce(new Error('boom'))
     await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toThrow('boom')
 
-    expect(signerRelease).toHaveBeenCalled()
+    expect(keyRelease).toHaveBeenCalled()
     // NOT aborted: by signAction the transaction is already signed, and the
     // network may have it. See "does NOT abort the action when the broadcast
     // itself fails" below — abort now covers only pre-signature failures.
     expect(wallet.abortAction).not.toHaveBeenCalled()
   })
 
-  it('releases the signer even when the vault is empty (no ceremony needed to fail)', async () => {
+  it('releases the key even when the vault is empty', async () => {
     wallet.listOutputs.mockResolvedValueOnce({ outputs: [] })
     await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toMatchObject({ code: 'vault-empty' })
-    expect(signerRelease).toHaveBeenCalled()
+    expect(keyRelease).toHaveBeenCalled()
   })
 
-  it('skips outputs whose customInstructions are not R1-K1 v2', async () => {
+  it('skips outputs whose customInstructions are not K1 v3', async () => {
     await seedVaultOutputs(1)
+    // A v2 R1-K1 row: structurally well-formed, but a different script family
+    // this build cannot spend. decodeVaultInstructions fails closed, so it is
+    // filtered out rather than fed to a K1 signer.
     wallet.listOutputs.mockResolvedValueOnce({
       outputs: [
-        { outpoint: 'aa.0', satoshis: 250_000, customInstructions: JSON.stringify({ v: 1, keyID: 'bip32/0' }) }
+        {
+          outpoint: `${'aa'.repeat(32)}.0`,
+          satoshis: 250_000,
+          customInstructions: JSON.stringify({
+            v: 2,
+            type: 'R1K1',
+            keyID: 'bip32/0',
+            salt: 'ab'.repeat(32),
+            r1PublicKey: '02' + 'cd'.repeat(32),
+            slot: 0x82
+          })
+        }
       ]
     })
     await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toMatchObject({ code: 'vault-empty' })
   })
 
-  // F8: the "wrong YubiKey" signal spec §11 documents has to be a real
-  // comparison against the ARMED signer, not a self-consistency check
-  // against values `buildVaultLockingScript` reconstructs from the SAME
-  // output's own customInstructions (which can never disagree with itself).
-  it('rejects with wrong-key when the armed signer is not the one this output was locked to', async () => {
+  it('rejects with wrong-key when the tapped key does not open this output', async () => {
+    // A different, real HD node standing in for "the wrong physical YubiKey"
+    // — e.g. a card re-enrolled against a different seed.
     await seedVaultOutputs(1)
-    // A different, real P-256 key standing in for "the wrong physical
-    // YubiKey" — e.g. a card from a different (or since-re-enrolled) vault.
-    const otherPriv = p256.utils.randomSecretKey()
-    mockSigner.publicKey = Utils.toArray(Utils.toHex(Array.from(p256.getPublicKey(otherPriv, true))), 'hex')
+    armWith(OTHER_HD)
 
     await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toMatchObject({ code: 'wrong-key' })
-    // Caught before any signature is attempted or broadcast — "costs no tap".
-    expect(mockSigner.sign).not.toHaveBeenCalled()
+    // Caught before anything is reserved, let alone signed.
+    expect(wallet.createAction).not.toHaveBeenCalled()
     expect(wallet.signAction).not.toHaveBeenCalled()
     // Still released, exactly like any other mid-withdrawal failure.
-    expect(signerRelease).toHaveBeenCalled()
+    expect(keyRelease).toHaveBeenCalled()
   })
 
   it('a partial withdrawal still re-vaults its remainder with no attestation', async () => {
@@ -754,58 +791,47 @@ describe('withdrawFromVault', () => {
 
   it('still aborts when the failure happens BEFORE the transaction is signed', async () => {
     // The reservation must not be left dangling when nothing was ever signed —
-    // that is what wedges the vault UTXO as unspendable.
+    // that is what wedges the vault UTXO as unspendable. Modelled with a
+    // signable transaction whose bytes do not parse, which is exactly the
+    // window the abort covers: after createAction reserved the coin, before
+    // any unlocking script exists.
     await seedVaultOutputs(1, 250_000)
-    mockSigner.sign.mockRejectedValueOnce(new VaultError('key-removed-mid-op', 'gone'))
-
-    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toMatchObject({
-      code: 'key-removed-mid-op'
+    wallet.createAction.mockResolvedValueOnce({
+      signableTransaction: { tx: [0, 0, 0, 0], reference: 'ref-corrupt' }
     })
-    expect(wallet.abortAction).toHaveBeenCalled()
+
+    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toThrow()
+    expect(wallet.abortAction).toHaveBeenCalledWith({ reference: 'ref-corrupt' }, ADMIN)
     expect(wallet.signAction).not.toHaveBeenCalled()
   })
 
   // ── progress reporting ─────────────────────────────────────────────────
   //
-  // The user is looking at a frozen-looking screen for seconds while a ~960 KB
-  // script is built per input. Without visible activity they kill the app
-  // mid-withdrawal, so each stage has to be announced.
-  it('reports preparing → signing → broadcasting as it goes', async () => {
+  // The armed ceremony sheet is on screen for the whole withdrawal, and both
+  // ends of it block: assembling the transaction, then the network. Each note
+  // also refreshes the retention window, so an operation that outruns it is
+  // not relocked mid-flight.
+  it('reports preparing → broadcasting as it goes', async () => {
     await seedVaultOutputs(2, 500_000)
     await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')
 
     const phases = (noteVaultProgress as jest.Mock).mock.calls.map(([p]) => p.phase)
     expect(phases.indexOf('preparing')).toBeGreaterThanOrEqual(0)
-    expect(phases.indexOf('preparing')).toBeLessThan(phases.indexOf('signing'))
-    expect(phases.indexOf('signing')).toBeLessThan(phases.indexOf('broadcasting'))
-  })
-
-  it('counts the signatures so the sheet can say which one it is on', async () => {
-    await seedVaultOutputs(2, 500_000)
-    await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')
-
-    const signing = (noteVaultProgress as jest.Mock).mock.calls
-      .map(([p]) => p)
-      .filter(p => p.phase === 'signing')
-    expect(signing).toEqual([
-      { phase: 'signing', index: 1, total: 2 },
-      { phase: 'signing', index: 2, total: 2 }
-    ])
+    expect(phases.indexOf('preparing')).toBeLessThan(phases.indexOf('broadcasting'))
+    // No per-signature variant any more: K1 signing is software and fast.
+    expect(phases).not.toContain('signing')
   })
 })
 
 // ── sweep (K1 recovery, no YubiKey) ────────────────────────────────────────
 
 describe('sweepVaultWithHD', () => {
-  // B2: the K1 path used to read the xpub from vaultStore even though
-  // spend.hd (the caller's own HD node) already yields the identical value
-  // via vaultXpub(spend.hd) — a device-local dependency in exactly the
-  // recovery path that is supposed to work when everything except the
-  // mnemonic and passphrase is gone. Proven here by clearing vaultStore
-  // entirely (simulating a device restore with no local vault state at all)
-  // AFTER the outputs exist on "chain" and confirming the sweep still
-  // succeeds using only the HD node handed in.
-  it('derives the xpub from the HD node directly, not from vaultStore — sweep survives vaultStore being empty', async () => {
+  // The recovery path has to work when everything except the mnemonic and the
+  // vault passphrase is gone. Proven by clearing vaultStore entirely
+  // (simulating a device restore with no local vault state at all) AFTER the
+  // outputs exist on "chain" and confirming the sweep still succeeds using
+  // only the HD node handed in.
+  it('sweeps from the HD node alone — survives vaultStore being empty', async () => {
     await seedVaultOutputs(2)
     await vaultStore.clear()
     expect(await vaultStore.getMeta()).toBeNull()
@@ -816,14 +842,14 @@ describe('sweepVaultWithHD', () => {
     expect(Object.keys(saArgs.spends)).toHaveLength(2)
   })
 
-  it('spends every output via K1, signed locally with the HD node, never re-vaulting', async () => {
+  it('spends every output, signed locally with the HD node, never re-vaulting', async () => {
     await seedVaultOutputs(2)
     const res = await sweepVaultWithHD(wallet, ADMIN, VAULT_HD, 'Recover vault')
     expect(res?.txid).toBeDefined()
 
     const [caArgs] = wallet.createAction.mock.calls[0]
     expect(caArgs.outputs).toHaveLength(0) // never re-vaulted — full recovery sweep
-    expect(requestVaultSigner).not.toHaveBeenCalled() // no YubiKey involved
+    expect(requestVaultKey).not.toHaveBeenCalled() // no YubiKey involved
 
     const [saArgs] = wallet.signAction.mock.calls[0]
     expect(Object.keys(saArgs.spends)).toHaveLength(2)
@@ -833,39 +859,34 @@ describe('sweepVaultWithHD', () => {
     expect(await sweepVaultWithHD(wallet, ADMIN, VAULT_HD, 'Recover vault')).toBeNull()
   })
 
+  it('refuses to sign when the derived child does not match the output script (wrong passphrase)', async () => {
+    // The passphrase typo guard. A wrong passphrase yields a different HD
+    // node, so EVERY output's pkh mismatches — which must be a loud error,
+    // never a silent "your vault is empty" sweep that signs nothing.
+    await seedVaultOutputs(2)
+
+    await expect(sweepVaultWithHD(wallet, ADMIN, OTHER_HD, 'Recover vault')).rejects.toMatchObject({
+      code: 'wrong-key'
+    })
+    expect(wallet.createAction).not.toHaveBeenCalled()
+    expect(wallet.signAction).not.toHaveBeenCalled()
+  })
+
   it('fails loudly on a legacy non-BIP32 keyID rather than signing with the wrong key', async () => {
     await seedMeta()
     // A real vault output (so the atomic BEEF the fake createAction fabricates
     // has a genuine source transaction to reference), but with a malformed
     // keyID that decodeVaultInstructions still accepts structurally, and
     // indexFromKeyID cannot parse.
-    const salt = Utils.toHex(Array.from(crypto.getRandomValues(new Uint8Array(32))))
-    const k1PublicKeyHash = Utils.toArray(depositPkhFromXpub(XPUB, 0), 'hex')
-    const lockingScript = await buildVaultLockingScript({ r1PublicKey: R1_PUBLIC_KEY, salt, k1PublicKeyHash })
+    const lockingScript = buildVaultLockingScript({ k1PublicKeyHash: depositPubKeyHash(VAULT_HD, 0) })
     const src = new Transaction()
     src.addOutput({ satoshis: 300_000, lockingScript })
     const outpoint = `${src.id('hex')}.0`
-    const ci = encodeVaultInstructions({
-      v: 2,
-      type: 'R1K1',
-      keyID: 'bip32/not-a-number',
-      salt,
-      r1PublicKey: R1_PUBLIC_KEY,
-      slot: 0x82
-    })
+    const ci = encodeVaultInstructions({ v: 3, type: 'K1', keyID: 'bip32/not-a-number' })
 
-    wallet.listOutputs.mockResolvedValueOnce({ outputs: [{ outpoint, satoshis: 300_000, customInstructions: ci }] })
-    wallet.createAction.mockImplementationOnce(async (args: any) => {
-      const tx = new Transaction()
-      for (let i = 0; i < args.inputs.length; i++) {
-        tx.addInput({
-          sourceTransaction: src,
-          sourceOutputIndex: 0,
-          sequence: 0xffffffff,
-          unlockingScript: new UnlockingScript([])
-        })
-      }
-      return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-legacy' } }
+    wallet.listOutputs.mockResolvedValueOnce({
+      outputs: [{ outpoint, satoshis: 300_000, customInstructions: ci }],
+      BEEF: stitchBeef([{ src }])
     })
 
     await expect(sweepVaultWithHD(wallet, ADMIN, VAULT_HD, 'Recover vault')).rejects.toMatchObject({
@@ -980,12 +1001,13 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
     expect(aborted).toEqual(['ref-orphan'])
   })
 
-  test('refuses a deposit while offline', async () => {
+  test('refuses a deposit while offline, before arming the key', async () => {
     await seedMeta()
     await expect(
-      depositToVault(wallet, ADMIN, 300_000, { isOnline: async () => false })
+      depositToVault(wallet, ADMIN, 300_000, REASON, { isOnline: async () => false })
     ).rejects.toMatchObject({ code: 'requires-online' })
     expect(wallet.createAction).not.toHaveBeenCalled()
+    expect(requestVaultKey).not.toHaveBeenCalled()
   })
 
   test('refuses a withdrawal while offline, before arming the key', async () => {
@@ -995,7 +1017,7 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
     ).rejects.toMatchObject({ code: 'requires-online' })
     // No ceremony: an offline user is never asked to present a YubiKey for a
     // transfer that cannot proceed.
-    expect(requestVaultSigner).not.toHaveBeenCalled()
+    expect(requestVaultKey).not.toHaveBeenCalled()
     expect(wallet.createAction).not.toHaveBeenCalled()
   })
 
@@ -1007,20 +1029,19 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
   })
 
   test('spends at most VAULT_MAX_INPUTS and re-vaults the remainder', async () => {
-    // 10 outputs of 300,000 = 3,000,000 in the vault. 'all' now means "as much
-    // as fits in one safe transaction", because ~1.83 MB of inputBEEF per input
-    // is a measured 146 MB Hermes array at 20 inputs, and toEF() re-embeds each
-    // input's source script on the wire regardless of how it is stored.
-    await seedVaultOutputs(10)
+    // 34 outputs of 300,000 in the vault. 'all' means "as much as one
+    // transaction can comfortably carry" — see VAULT_MAX_INPUTS — and the
+    // untouched outputs stay put for the next pass.
+    await seedVaultOutputs(VAULT_MAX_INPUTS + 2)
 
     const r = await withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw all')
     expect(r.txid).toBeDefined()
-    expect(r.remainingInputs).toBe(10 - VAULT_MAX_INPUTS)
+    expect(r.remainingInputs).toBe(2)
 
     const args = wallet.createAction.mock.calls.at(-1)![0] as any
     expect(args.inputs.length).toBe(VAULT_MAX_INPUTS)
     expect(args.inputs.length).toBeLessThanOrEqual(VAULT_HARD_MAX_INPUTS)
-  })
+  }, 60_000)
 
   test('reports nothing remaining when the whole vault fits', async () => {
     await seedVaultOutputs(3)
@@ -1029,15 +1050,15 @@ describe('withdraw self-heals a double-spend from stuck reservations', () => {
   })
 
   test('refuses before signing when the amount cannot be funded within the cap', async () => {
-    // 10 x 300,000 is plenty of money, but 6 inputs only reach 1,800,000 — so
+    // 34 x 300,000 is plenty of money, but 32 inputs only reach 9,600,000 — so
     // this is an input-count problem, not an insufficient-funds one, and it must
     // say so rather than blaming the balance.
-    await seedVaultOutputs(10)
-    await expect(withdrawFromVault(wallet, ADMIN, 2_400_000, 'Withdraw')).rejects.toMatchObject({
+    await seedVaultOutputs(VAULT_MAX_INPUTS + 2)
+    await expect(withdrawFromVault(wallet, ADMIN, 10_000_000, 'Withdraw')).rejects.toMatchObject({
       code: 'too-many-inputs'
     })
     expect(wallet.signAction).not.toHaveBeenCalled()
-  })
+  }, 60_000)
 
   test('still reports amount-exceeds-balance when the vault really is too small', async () => {
     await seedVaultOutputs(2)

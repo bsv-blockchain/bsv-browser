@@ -1,51 +1,58 @@
 /**
  * Vault transfers — internal movements between the `default` change basket
- * and the `admin vault` basket, over the R1-K1 half-multisig script.
+ * and the `admin vault` basket, over plain K1 (secp256k1) P2PKH outputs.
  *
- * Deposit: an ordinary wallet payment whose output is R1-K1-locked — an R1
- * (P-256/YubiKey) branch salted per-output, and a K1 (secp256k1) branch keyed
- * to a public BIP32 child of the vault xpub. Funded and change-managed by the
- * toolbox from the default basket. No YubiKey required to deposit.
+ * Deposit: ONE YubiKey tap. The card unwraps the vault key; the next deposit
+ * index derives that node's child public-key hash, which IS the P2PKH lock.
+ * Nothing here can produce a vault address without the tap — no xpub is
+ * stored anywhere, so the unwrapped node is the only source of the material.
+ * Funding and change stay with the toolbox, out of the default basket.
  *
- * Withdraw: spend EVERY vault output through the R1 branch (there is no input
- * cap — see spendVaultOutputs). The toolbox returns the withdrawn value (minus
- * fee, minus any re-vaulted remainder) as change into the default basket —
- * that change IS the internal transfer. Vault inputs carry a custom
- * unlockingScriptLength the toolbox cannot itself produce, so we build each
- * unlocking script ourselves via the R1K1 template and finalize with
- * signAction.
+ * Withdraw: ONE tap for the whole transaction. The same unwrapped node derives
+ * the child private key each selected input names, and signs it in software.
+ * The toolbox returns the withdrawn value (minus fee, minus any re-vaulted
+ * remainder) as change into the default basket — that change IS the internal
+ * transfer. Vault inputs carry a custom unlockingScriptLength the toolbox
+ * cannot itself produce, so we build each unlocking script ourselves and
+ * finalize with signAction.
  *
- * Sweep: recovery path via the K1 branch, signed locally from the vault HD
- * node (derived from the main mnemonic + vault passphrase) — no YubiKey.
- * Always empties the ENTIRE vault and never re-vaults.
+ * Sweep: recovery for a lost YubiKey, signed from the SAME HD node reached
+ * the other way — main mnemonic + vault passphrase (see vaultDerivation.ts).
+ * No card, no ceremony. Always empties the vault (subject to the input cap)
+ * and never re-vaults.
+ *
+ * Two rails built for the ~960 KB R1-K1 script survive it on their own merits
+ * and are unchanged: the two-transaction deposit (tx1 stages exact funding,
+ * tx2 spends only that — see depositToVault) and the deferred-broadcast
+ * finish on withdrawal (see the PAST THE POINT OF NO ABORT comment).
  *
  * The `admin vault` basket name is admin-reserved: WalletPermissionsManager
  * blocks any non-admin originator (web pages) from listing, inserting into, or
  * relinquishing it. All calls here use the admin originator.
  *
- * SECURITY: no key material passes through this module for the R1 path —
- * signing happens on the YubiKey via VaultR1Signer; we only ever hold hashes,
- * public keys, salts, and signatures. The K1 sweep path does handle a private
- * key (the vault HD node), but never logs it.
+ * SECURITY: the vault HD node passes through this module for the length of ONE
+ * operation and is never stored. It arrives either as a VaultKeyHandle — read
+ * at its point of use, released in a finally — or, on the sweep, as a node the
+ * caller owns; neither is ever put in module state, a cache, or a closure that
+ * outlives the call. Nothing key-shaped is logged: not the node, not a child
+ * key, not a seed.
  */
-import { HD, Hash, P2PKH, PublicKey, Transaction, TransactionSignature, UnlockingScript, Utils } from '@bsv/sdk'
-import { R1K1Wallet } from '@bsv/templates'
+import { Beef, HD, Hash, LockingScript, P2PKH, PublicKey, Transaction, TransactionSignature, UnlockingScript, Utils } from '@bsv/sdk'
 import { vaultStore } from './vaultStore'
 import { VaultError } from './types'
 import { backupAttestation } from './backupAttestation'
-import { VaultR1Signer } from './ceremony'
-import { noteVaultProgress, requestVaultSigner } from './ceremonyHost'
+import { VaultKeyHandle } from './ceremony'
+import { noteVaultProgress, requestVaultKey } from './ceremonyHost'
 import { randomBytes } from './random'
-import { bip32KeyID, indexFromKeyID, depositPkhFromXpub, depositPrivKey, vaultXpub } from './vaultDerivation'
+import { bip32KeyID, indexFromKeyID, depositPrivKey, depositPubKeyHash } from './vaultDerivation'
 import {
-  R1K1_LOCK_LEN,
-  R1K1_R1_UNLOCK_LEN,
-  R1K1_K1_UNLOCK_LEN,
+  K1_LOCK_LEN,
+  K1_UNLOCK_LEN,
   buildVaultLockingScript,
   decodeVaultInstructions,
   encodeVaultInstructions,
   VaultInstructions
-} from './r1k1'
+} from './k1'
 
 export const VAULT_BASKET = 'admin vault'
 
@@ -86,7 +93,7 @@ function txSizeBytes(inputScriptLens: number[], outputScriptLens: number[]): num
 
 /** The exact fee the vault-creating tx2 needs under the wallet's fee model. */
 export function vaultDepositTx2Fee(satsPerKb: number = VAULT_SATS_PER_KB): number {
-  return Math.ceil((txSizeBytes([STAGING_UNLOCK_LEN], [R1K1_LOCK_LEN]) / 1000) * satsPerKb)
+  return Math.ceil((txSizeBytes([STAGING_UNLOCK_LEN], [K1_LOCK_LEN]) / 1000) * satsPerKb)
 }
 
 interface StagingInstructions {
@@ -171,36 +178,46 @@ export interface VaultSpendResult {
 }
 
 /**
- * Economic-dust floor for a vault output — a hard minimum, not a caution.
+ * Minimum vault deposit — now a product floor, not an economic one.
  *
- * An R1 spend pays the ~960 KB script twice — once to create the output, once
- * to push the preimage that spends it — at the wallet's fee rate. An output
- * below this is not worth what it costs to move, so deposits below it are
- * rejected outright and a sub-floor withdrawal remainder is folded into the
- * withdrawal rather than re-vaulted.
+ * The old 200,000 figure was R1 fee economics: a ~960 KB script paid for
+ * twice, once to create the output and once to push the preimage that spent
+ * it, made anything smaller not worth moving. A K1 vault output costs 25 bytes
+ * to create and ~107 to spend, so at the wallet's fee rate moving one is a
+ * couple of satoshis and the script no longer argues for any floor at all.
+ *
+ * What remains is dust hygiene. A vault made of tiny outputs burns a deposit
+ * index each, pushes every later withdrawal toward the input cap, and gives
+ * the user a balance built from coins not worth selecting. Deposits below the
+ * floor are refused outright, and a sub-floor withdrawal remainder is folded
+ * into the withdrawal rather than re-vaulted, for the same reason.
  */
-export const VAULT_DEPOSIT_MIN = 200_000
+export const VAULT_DEPOSIT_MIN = 10_000
 
 /**
  * Vault inputs per withdrawal.
  *
- * This used to be "spend EVERY output — there is no input cap", which is the
- * single largest OOM risk in the app and is not fixed by storing scripts
- * compressed. Each input contributes ~1.83 MB of inputBEEF (a measured 146 MB
- * Hermes array at 20 inputs), and Extended Format re-embeds every input's SOURCE
- * locking script, so the leanest possible wire payload is ~188 MB at 20 inputs
- * however the bytes are stored at rest.
+ * Nothing about the SCRIPTS bounds this any more. The old cap of 6 was
+ * defending against ~1.83 MB of inputBEEF per input (a measured 146 MB Hermes
+ * array at 20 inputs) and Arcade's 10 MB transaction policy — both artifacts of
+ * the R1-K1 script. A K1 input contributes an ordinary source transaction and a
+ * ~107-byte unlocking script; 32 of them is a few kilobytes on the wire.
  *
- * 6 sits inside all three independent constraints: measured memory (~110-150 MB
- * at 6 versus ~350 MB at 20), Arcade's 10 MB MaxTxSizePolicy (~10 inputs) and
- * its 32 MiB single-transaction endpoint (~18 inputs). The hard ceiling is the
- * value no future tuning may exceed without redoing that arithmetic.
+ * What still bounds it is createAction ergonomics. Every input is one more coin
+ * to reserve atomically and release if anything fails, one more sighash
+ * preimage formatted over a transaction that itself grows with each input (the
+ * signing loop below is O(n²) in preimage bytes), and one more chance for a
+ * stuck reservation to wedge the whole withdrawal. 32 drains any realistic
+ * vault in one pass while staying well inside all of that; the hard ceiling is
+ * the value no future tuning may exceed without redoing that reasoning. (It is
+ * also the vault-side control services/walletArgLimits.ts refers to — the vault
+ * bypasses the wallet-argument caps structurally, so this IS its bound.)
  *
  * Consolidation is automatic: a capped withdrawal re-vaults its remainder as one
  * output, so repeated withdrawals converge on a single vault UTXO.
  */
-export const VAULT_MAX_INPUTS = 6
-export const VAULT_HARD_MAX_INPUTS = 8
+export const VAULT_MAX_INPUTS = 32
+export const VAULT_HARD_MAX_INPUTS = 48
 
 /** The subset of the wallet interface transfers depends on (injected so the
  * whole module is testable without the toolbox). */
@@ -245,36 +262,25 @@ interface ListOutputsResult {
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
-/** Reserve the next deposit slot: a fresh BIP32 index for the K1 leg and a
- * fresh salt for the R1 leg. Used by both depositToVault and the withdraw
- * path's re-vaulted-remainder output. */
-async function nextDepositTarget(): Promise<{
+/**
+ * Reserve the next deposit slot: take the next BIP32 index and lock to that
+ * child of the vault node. Used by both depositToVault and the withdraw path's
+ * re-vaulted-remainder output.
+ *
+ * `hd` is caller-owned and operation-scoped — read from the armed handle at
+ * the call site, never held here. There is no stored xpub to fall back on:
+ * without a node in hand this function cannot produce an address at all, which
+ * is exactly the property that makes every deposit a deliberate tap.
+ */
+async function nextDepositTarget(hd: HD): Promise<{
   instructions: VaultInstructions
   lockingScript: string
 }> {
-  const meta = await vaultStore.getMeta()
-  if (!meta) throw new VaultError('not-enrolled', 'Vault is not set up')
   const index = await vaultStore.takeNextIndex()
   if (index == null) throw new VaultError('not-enrolled', 'Vault is not set up')
-
-  // Fresh per output: one YubiKey key serves the whole vault, so a reused salt
-  // would give every output the same R1 commitment and link them all.
-  const salt = Utils.toHex(randomBytes(32))
-  const k1PublicKeyHash = Utils.toArray(depositPkhFromXpub(meta.xpub, index), 'hex')
-  const script = await buildVaultLockingScript({
-    r1PublicKey: meta.r1PublicKey,
-    salt,
-    k1PublicKeyHash
-  })
+  const script = buildVaultLockingScript({ k1PublicKeyHash: depositPubKeyHash(hd, index) })
   return {
-    instructions: {
-      v: 2,
-      type: 'R1K1',
-      keyID: bip32KeyID(index),
-      salt,
-      r1PublicKey: meta.r1PublicKey,
-      slot: meta.slot
-    },
+    instructions: { v: 3, type: 'K1', keyID: bip32KeyID(index) },
     lockingScript: script.toHex()
   }
 }
@@ -488,10 +494,21 @@ export async function getVaultBalance(w: VaultWallet, adminOriginator: string): 
 
 // ── deposit ─────────────────────────────────────────────────────────────
 
+/**
+ * Move `satoshis` from the default basket into the vault.
+ *
+ * Costs exactly one tap, and every refusal is checked BEFORE it: a user must
+ * never be asked to present a key for a transfer that was never going to
+ * proceed, and — because the tap gates the funding split as well as the
+ * derivation — cancelling it leaves no money staged behind.
+ *
+ * `reason` is what the ceremony sheet shows while the key is armed.
+ */
 export async function depositToVault(
   w: VaultWallet,
   adminOriginator: string,
   satoshis: number,
+  reason: string,
   opts?: VaultTransferOptions
 ): Promise<{ txid: string }> {
   await requireOnline(opts)
@@ -507,20 +524,54 @@ export async function depositToVault(
   // funnel for every vault-basket output: partial withdrawals re-vault their
   // remainder through it, so a check there would block withdrawals.
   //
-  // Checked BEFORE nextDepositTarget so a refusal does not burn a deposit index.
+  // Checked BEFORE the tap (and so before nextDepositTarget) so a refusal
+  // neither raises a ceremony nor burns a deposit index.
   const { publicKey: identityKey } = await w.getPublicKey({ identityKey: true }, adminOriginator)
   if (!(await backupAttestation.get(identityKey))) {
     throw new VaultError('backup-required', 'Back up this wallet before depositing')
   }
 
+  // ── the tap ─────────────────────────────────────────────────────────────
+  //
+  // A deposit address is a child of the vault node and there is no stored
+  // xpub, so this is the only way to produce one. release() in the finally is
+  // what drops the key and (on iOS) dismisses the NFC sheet — it must fire
+  // whether the deposit succeeds, fails to stage, or fails to sign.
+  const handle = await requestVaultKey(reason)
+  try {
+    return await stageAndLockDeposit(w, adminOriginator, satoshis, handle, opts)
+  } finally {
+    handle.release()
+  }
+}
+
+/**
+ * The two-transaction deposit itself, run inside an armed ceremony.
+ *
+ * `handle` is operation-scoped: `hd` is read once, at the point of use, and
+ * neither the handle nor the node is stored anywhere that outlives this call
+ * (see VaultKeyHandle).
+ */
+async function stageAndLockDeposit(
+  w: VaultWallet,
+  adminOriginator: string,
+  satoshis: number,
+  handle: VaultKeyHandle,
+  opts?: VaultTransferOptions
+): Promise<{ txid: string }> {
+  // Announce work before starting it: the ceremony sheet is on screen for the
+  // whole deposit, and this also refreshes the retention window so a slow
+  // staging broadcast cannot have the key relocked out from under it.
+  noteVaultProgress({ phase: 'preparing' })
+
   // ── tx1: split ──────────────────────────────────────────────────────────
   //
   // Carve deposit + tx2's exact fee into a staging output, with the wallet's
   // normal change machinery keeping the rest in the default basket. tx2 then
-  // spends ONLY that output into the vault script, so the ~960 KB vault output
-  // never appears as a sibling output in any later payment's source
-  // transaction — without the split, the first ordinary payment after a
-  // deposit has to carry the whole vault script inside its inputBEEF.
+  // spends ONLY that output into the vault script, so no deposit change output
+  // is ever a sibling of the vault output. Built for the ~960 KB R1-K1 script
+  // and kept for K1: it is what keeps a vault deposit's change out of the
+  // inputBEEF (and the coin selection) of every later ordinary payment.
   const fee = vaultDepositTx2Fee()
   const stagingTotal = satoshis + fee
 
@@ -598,15 +649,19 @@ export async function depositToVault(
   //    (targetNetCount — see the patch in patches/@bsv+wallet-toolbox-mobile),
   //    which would otherwise pull in extra funding inputs and split change
   //    into this transaction EVEN at feeExcess 0. That is what produced the
-  //    2026-08-21 production failure — and any change output here would drag
-  //    the ~960 KB vault script into the inputBEEF of every later payment
-  //    spending it, defeating the whole two-transaction design.
+  //    2026-08-21 production failure — and any change output here would put a
+  //    default-basket coin in the same transaction as the vault output,
+  //    defeating the whole two-transaction design.
   //
   // The signing below still tolerates extra toolbox-added inputs (it locates
   // the staging input by outpoint and commits to the full input set), so a
   // toolbox that ignores the label degrades to an ugly-but-valid deposit, not
   // a broadcast rejection.
-  const target = await nextDepositTarget()
+  //
+  // `handle.hd` is read HERE, at its only point of use, rather than being
+  // hoisted into a local at the top of the deposit — a released or relocked
+  // handle must be able to refuse.
+  const target = await nextDepositTarget(handle.hd)
   const created = await w.createAction(
     {
       description: 'Move to vault',
@@ -701,6 +756,10 @@ export async function depositToVault(
     throw e
   }
 
+  // Unlike the withdrawal below, this broadcast is undelayed: the deposit is
+  // two chained transactions, and letting tx2 sit in the monitor's queue would
+  // leave the staged coin looking spent while nothing had actually landed.
+  noteVaultProgress({ phase: 'broadcasting' })
   const signed = await w.signAction(
     { reference, spends: { [stagingInputIndex]: { unlockingScript } }, options: { acceptDelayedBroadcast: false } },
     adminOriginator
@@ -712,28 +771,100 @@ export async function depositToVault(
 
 // ── withdraw / sweep (shared spend core) ─────────────────────────────────
 
-/** Which branch of the R1-K1 script this spend uses. */
-type SpendPath = { path: 'r1'; signer: VaultR1Signer } | { path: 'k1'; hd: HD }
+/**
+ * The vault key, however this spend reached it: unwrapped by a tap
+ * (withdrawal) or re-derived from mnemonic + passphrase (recovery sweep).
+ * There is only one key and only one script family, so there is nothing left
+ * to discriminate on — both routes hand over the same node.
+ */
+interface SpendKey {
+  hd: HD
+}
+
+/** One selected vault input, resolved against the key that will spend it. */
+interface PreparedSpend<T> {
+  o: T
+  /** BIP32 child index this output's keyID names. */
+  index: number
+  /** The output's REAL locking script, read from the listed BEEF. */
+  lockingScript: LockingScript
+}
+
+/**
+ * Resolve every selected input's derivation index and prevout script, and
+ * prove the key in hand actually opens it.
+ *
+ * THE WRONG-KEY CHECK, and it runs before the caller reserves, burns, or signs
+ * anything: not one createAction has been issued when this throws, so a
+ * mismatch costs no reservation to unwind and no deposit index. That matters
+ * twice over.
+ *
+ *  - On a withdrawal it is the "wrong YubiKey" signal: a card enrolled against
+ *    a different seed unwraps a different node, whose children hash to
+ *    different addresses than the ones these outputs are locked to.
+ *  - On the recovery sweep it is the PASSPHRASE-TYPO guard. A mistyped vault
+ *    passphrase yields a valid-looking HD node that simply is not this vault's,
+ *    so EVERY output mismatches. Without this the sweep would happily build a
+ *    transaction signed with the wrong keys — or, worse, a future
+ *    "skip what we can't sign" refinement would report an empty vault and let
+ *    the user believe their funds were gone. It has to be loud.
+ *
+ * The comparison is against the script the output is ACTUALLY locked with (out
+ * of the BEEF the same listOutputs call returned), never a script rebuilt from
+ * the output's own customInstructions — a rebuild is self-consistent by
+ * construction and can never disagree with itself.
+ */
+function prepareSpends<T extends { outpoint: string; satoshis: number; ci: VaultInstructions }>(
+  selected: T[],
+  hd: HD,
+  beefBytes?: number[]
+): PreparedSpend<T>[] {
+  const sources = beefBytes?.length ? Beef.fromBinary(beefBytes) : undefined
+  return selected.map(o => {
+    const index = indexFromKeyID(o.ci.keyID)
+    if (index == null) throw new VaultError('bad-derivation-index', `Not a BIP32 vault output: ${o.ci.keyID}`)
+
+    const [txid, voutStr] = o.outpoint.split('.')
+    // Beef indexes by exact txid string; storage writes lowercase, but so does
+    // every other txid comparison in this file — match them rather than trust it.
+    const lockingScript = sources?.findTxid(txid.toLowerCase())?.tx?.outputs[Number(voutStr)]?.lockingScript
+    if (!lockingScript) {
+      // Fail closed rather than sign blind: without the prevout script there is
+      // nothing to check the derived child against — and createAction would
+      // refuse this input moments later anyway (see the listOutputs comment).
+      throw new VaultError('no-transaction', `No source transaction for vault output ${o.outpoint}`)
+    }
+
+    const mine = buildVaultLockingScript({ k1PublicKeyHash: depositPubKeyHash(hd, index) })
+    if (mine.toHex() !== lockingScript.toHex()) {
+      throw new VaultError(
+        'wrong-key',
+        'This vault output was locked to a different key — wrong YubiKey, or wrong vault passphrase'
+      )
+    }
+    return { o, index, lockingScript }
+  })
+}
 
 async function spendVaultOutputs(
   w: VaultWallet,
   adminOriginator: string,
   amount: number | 'all',
   reason: string,
-  spend: SpendPath,
+  spend: SpendKey,
   opts: { revaultRemainder: boolean } & VaultTransferOptions
 ): Promise<VaultSpendResult> {
   // Announce work BEFORE starting it, then hand the JS thread back once so
-  // React can actually paint the sheet. Everything below — a ~1.83 MB
-  // listOutputs, then createAction over a ~960 KB-per-input transaction —
-  // blocks the thread for seconds; without this yield the phase change is
+  // React can actually paint the sheet. listOutputs and createAction both cross
+  // the bridge and touch the database; without this yield the phase change is
   // queued behind that work and the user stares at a frozen screen anyway.
   noteVaultProgress({ phase: 'preparing' })
   await new Promise<void>(resolve => setTimeout(resolve, 0))
 
-  // `include: 'entire transactions'` IS required, despite costing ~1.83 MB per
-  // vault input: every input here carries unlockingScriptLength but no
-  // unlockingScript, so @bsv/sdk's validateCreateActionArgs sets
+  // `include: 'entire transactions'` IS required, and for two reasons.
+  //
+  // The first is structural: every input here carries unlockingScriptLength but
+  // no unlockingScript, so @bsv/sdk's validateCreateActionArgs sets
   // isSignAction=true for this createAction call. buildSignableTransaction
   // then resolves each input's sourceTransaction ONLY from args.inputBEEF
   // (buildSignableTransaction.js:14,101) — trustSelf and storage's own
@@ -744,12 +875,18 @@ async function spendVaultOutputs(
   // WERR_INTERNAL('Every signableTransaction input must have a
   // sourceTransaction') on the very first input, before signing ever starts.
   // (This does not apply to depositToVault: it supplies no explicit inputs,
-  // so isSignAction is false there and no BEEF is ever needed.) The memory
-  // cost is real but not a NEW one: broadcasting already pays ~1.83 MB per
-  // input in extended format regardless, so this list call just front-loads
-  // a cost the wallet incurs either way. includeCustomInstructions IS also
-  // required — listOutputs omits that field unless asked, and without it
-  // every output filters out as unreadable.
+  // so isSignAction is false there and no BEEF is ever needed.)
+  //
+  // The second is the wrong-key check below: the BEEF is where each vault
+  // output's REAL locking script comes from, which is what the derived child
+  // is compared against. `include` is one-of ('locking scripts' OR 'entire
+  // transactions' — see the SDK's validateListOutputsArgs), so this call
+  // cannot ask for both, and the BEEF is the one that is mandatory anyway.
+  //
+  // Under K1 the whole payload is ordinary-sized — a vault source transaction
+  // is a few hundred bytes, not the ~1.83 MB per input the R1-K1 script cost.
+  // includeCustomInstructions IS also required: listOutputs omits that field
+  // unless asked, and without it every output filters out as unreadable.
   const list = await w.listOutputs(
     { basket: VAULT_BASKET, include: 'entire transactions', includeCustomInstructions: true, limit: 1000 },
     adminOriginator
@@ -765,11 +902,8 @@ async function spendVaultOutputs(
     throw new VaultError('amount-exceeds-balance', 'Withdrawal exceeds vault balance')
   }
 
-  // Bounded input count. Each input's ~960 KB R1 unlocking script is built and
-  // signed one at a time (the sequential loop below), which bounds TRANSIENT
-  // working memory to roughly one input at a time — but the `spends` payload
-  // handed to signAction, and the Extended Format that goes on the wire, are
-  // both O(inputs) and unavoidable. See VAULT_MAX_INPUTS.
+  // Bounded input count — see VAULT_MAX_INPUTS for what the bound is defending
+  // against now that the scripts are 25/~107 bytes rather than ~960 KB.
   //
   // Largest first (already sorted), so the fewest inputs cover the most value.
   const cap = Math.min(VAULT_MAX_INPUTS, VAULT_HARD_MAX_INPUTS)
@@ -791,14 +925,22 @@ async function spendVaultOutputs(
     )
   }
 
+  // Resolve every selected input against the key in hand BEFORE anything is
+  // reserved, burned, or signed — see prepareSpends.
+  const prepared = prepareSpends(selected, spend.hd, list.BEEF)
+
   const outputs: unknown[] = []
   const remainder = acc - want
   // A sub-floor remainder is folded into the withdrawal rather than re-vaulted:
   // an output below VAULT_DEPOSIT_MIN is not worth what it costs to move. It
   // still reaches the user — as part of the toolbox's own default-basket
   // change alongside the withdrawn amount — it is just not re-vaulted.
+  //
+  // The SAME node the inputs were checked against locks it: one tap covers a
+  // withdrawal and its own change output, and a wrong-key failure above has
+  // already aborted without burning an index here.
   if (opts.revaultRemainder && remainder >= VAULT_DEPOSIT_MIN) {
-    const target = await nextDepositTarget()
+    const target = await nextDepositTarget(spend.hd)
     outputs.push({
       satoshis: remainder,
       lockingScript: target.lockingScript,
@@ -809,12 +951,11 @@ async function spendVaultOutputs(
     })
   }
 
-  const unlockLen = spend.path === 'r1' ? R1K1_R1_UNLOCK_LEN : R1K1_K1_UNLOCK_LEN
   const caArgs = {
     description: reason,
     inputs: selected.map(o => ({
       outpoint: o.outpoint,
-      unlockingScriptLength: unlockLen,
+      unlockingScriptLength: K1_UNLOCK_LEN,
       inputDescription: 'Vault withdrawal'
     })),
     outputs,
@@ -859,81 +1000,29 @@ async function spendVaultOutputs(
   let builtSpends: Record<number, { unlockingScript: string }>
   try {
     const tx = Transaction.fromAtomicBEEF(atomic)
-    const template = new R1K1Wallet()
     const spends: Record<number, { unlockingScript: string }> = {}
 
-    // Read once, not per input — takeNextIndex above may have rewritten meta,
-    // but xpub is immutable for the life of an enrollment. On the K1
-    // recovery path we already hold the HD node in hand, and vaultXpub(hd)
-    // is the IDENTICAL value vault meta's xpub would give — deriving it
-    // locally means the path that is supposed to work when everything except
-    // the mnemonic and passphrase is gone does not also depend on
-    // vaultStore/device-local state still being intact.
-    const xpub = spend.path === 'k1' ? vaultXpub(spend.hd) : (await vaultStore.getMeta())?.xpub
-    if (!xpub) throw new VaultError('not-enrolled', 'Vault is not set up')
-
-    // SEQUENTIAL BY DESIGN — do not "simplify" this into an
-    // unlockingScriptTemplate + tx.sign(), and do not parallelise with
-    // Promise.all/map. @bsv/sdk's Transaction.sign() fans every
-    // unlockingScriptTemplate.sign() call out through Promise.all
-    // (dist/cjs/src/transaction/Transaction.js), which would invoke
-    // VaultR1Signer.sign() concurrently for every input. VaultR1Signer signs
-    // one digest at a time and rejects an overlapping call fast (see the
-    // `signing` guard in ceremony.ts) rather than corrupting its shared
-    // retry/session state — so a parallel fan-out fails every input after the
-    // first with 'template-invalid'. This for-loop calling unlocker.sign()
-    // directly and assigning spends[i] keeps every sign() call strictly
-    // one-at-a-time.
-    for (let i = 0; i < selected.length; i++) {
-      // Yield before each input as well as reporting it: building this input's
-      // unlocking script is the blocking part, so the count only reaches the
-      // screen if React gets a frame first.
-      noteVaultProgress({ phase: 'signing', index: i + 1, total: selected.length })
+    // SEQUENTIAL BY DESIGN, still — do not "simplify" this into an
+    // unlockingScriptTemplate + tx.sign(). @bsv/sdk's Transaction.sign() fans
+    // every template's sign() out through Promise.all
+    // (dist/cjs/src/transaction/Transaction.js) and takes ownership of the
+    // whole input set; this loop keeps each input's script ours to build, in a
+    // known order, with the derived key never leaving the iteration that used
+    // it. The yield is what keeps the JS thread from disappearing for the
+    // length of the loop: one ECDSA signature is fast, but the preimage is
+    // re-formatted over the entire transaction for every input, so the cost
+    // grows with the square of the input count.
+    for (let i = 0; i < prepared.length; i++) {
       await new Promise<void>(resolve => setTimeout(resolve, 0))
 
-      const o = selected[i]
-      const index = indexFromKeyID(o.ci.keyID)
-      if (index == null) throw new VaultError('bad-derivation-index', `Not a BIP32 vault output: ${o.ci.keyID}`)
-
-      // Rebuild the prevout script rather than fetching the source transaction.
-      const lockingScript = await buildVaultLockingScript({
-        r1PublicKey: o.ci.r1PublicKey,
-        salt: o.ci.salt,
-        k1PublicKeyHash: Utils.toArray(depositPkhFromXpub(xpub, index), 'hex')
-      })
-
-      // The real "wrong YubiKey" check, done BEFORE any signing: the
-      // commitment `unlockR1` verifies is built from this exact output's own
-      // r1PublicKey/salt (immediately above), so it can never actually catch
-      // a mismatch — it is self-consistent by construction, not a check
-      // against what is physically inserted. The armed signer's own public
-      // key (read from the card, via ceremony.ts's makeSigner) is the only
-      // thing that can genuinely differ from the key an output was locked
-      // to — e.g. after a re-enrollment, when older outputs still carry the
-      // OLD r1PublicKey. Comparing the two here is what spec §11 describes
-      // as "caught before any APDU" — an output that fails this never reaches
-      // signEcdsa at all.
-      if (spend.path === 'r1' && Utils.toHex(spend.signer.publicKey).toLowerCase() !== o.ci.r1PublicKey.toLowerCase()) {
-        throw new VaultError('wrong-key', 'This output was locked to a different YubiKey')
-      }
-
-      const unlocker =
-        spend.path === 'r1'
-          ? template.unlockR1({
-              publicKey: o.ci.r1PublicKey,
-              salt: o.ci.salt,
-              sourceSatoshis: o.satoshis,
-              lockingScript,
-              // The template hands us HASH256(preimage), already double-hashed.
-              // The card signs it raw — no further hashing on either side.
-              signDigest: digest => spend.signer.sign(digest)
-            })
-          : template.unlockK1({
-              privateKey: depositPrivKey(spend.hd, index),
-              sourceSatoshis: o.satoshis,
-              lockingScript
-            })
-
+      const { o, index, lockingScript } = prepared[i]
+      const unlocker = new P2PKH().unlock(
+        depositPrivKey(spend.hd, index),
+        'all',
+        false,
+        o.satoshis,
+        lockingScript
+      )
       spends[i] = { unlockingScript: (await unlocker.sign(tx, i)).toHex() }
     }
 
@@ -969,10 +1058,13 @@ async function spendVaultOutputs(
   return { txid, remainingInputs }
 }
 
-/** Withdraw via the YubiKey (R1 branch). Arms one signing session for the whole
- * transaction and always releases it in a finally — on iOS that is what
- * dismisses the system NFC sheet, and it must fire whether the withdrawal
- * succeeds, fails to build, or fails to sign. */
+/**
+ * Withdraw from the vault. ONE tap covers the whole transaction — every input
+ * AND the re-vaulted remainder derive from the same unwrapped node — and the
+ * key is always released in a finally: on iOS that is what dismisses the
+ * system NFC sheet, and it must fire whether the withdrawal succeeds, fails to
+ * build, or fails to sign.
+ */
 export async function withdrawFromVault(
   w: VaultWallet,
   adminOriginator: string,
@@ -982,21 +1074,28 @@ export async function withdrawFromVault(
 ): Promise<VaultSpendResult> {
   // Before the ceremony: no key prompt for a transfer that cannot proceed.
   await requireOnline(opts)
-  const signer = await requestVaultSigner(reason)
+  const handle = await requestVaultKey(reason)
   try {
-    return await spendVaultOutputs(w, adminOriginator, amount, reason, { path: 'r1', signer }, {
+    // `handle.hd` read here, at the point of use, and handed straight into an
+    // operation that finishes inside the armed window — the shape
+    // VaultKeyHandle documents. Never stored.
+    return await spendVaultOutputs(w, adminOriginator, amount, reason, { hd: handle.hd }, {
       revaultRemainder: true,
       ...opts
     })
   } finally {
-    signer.release()
+    handle.release()
   }
 }
 
 /**
- * Recovery via the K1 branch: sweep the ENTIRE vault to the default basket,
+ * Recovery for a lost YubiKey: sweep the ENTIRE vault to the default basket,
  * signing with the HD node derived from the main mnemonic + vault passphrase.
- * No YubiKey. Returns null when the vault is already empty.
+ *
+ * The same key the tap would have unwrapped, reached the other way — so this
+ * needs no card, no ceremony, and no device-local vault state at all. A
+ * mistyped passphrase is caught by prepareSpends, loudly. Returns null when
+ * the vault is already empty.
  */
 export async function sweepVaultWithHD(
   w: VaultWallet,
@@ -1007,7 +1106,7 @@ export async function sweepVaultWithHD(
 ): Promise<VaultSpendResult | null> {
   await requireOnline(opts)
   try {
-    return await spendVaultOutputs(w, adminOriginator, 'all', reason, { path: 'k1', hd }, {
+    return await spendVaultOutputs(w, adminOriginator, 'all', reason, { hd }, {
       revaultRemainder: false,
       ...opts
     })
