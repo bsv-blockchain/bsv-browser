@@ -2,12 +2,17 @@
  * VaultKeyService — enrollment, recovery, disable. Driven against the mock
  * YubiKey and the real (AsyncStorage/SecureStore-mocked) vaultStore.
  *
- * There is no sealing anymore: the YubiKey signs directly, so enrollment's
- * only job is to generate the PIV key, record its compressed public key, and
- * write v3 meta.
+ * The YubiKey is now an unwrap oracle: enrollment seals the 64-byte vault
+ * seed to the card's public key and writes v4 meta (no xpub, no
+ * r1PublicKey — see VaultKeyService.ts's header). These tests therefore
+ * prove the seal is USABLE — the enrolled (or re-enrolled, or adopted) card's
+ * ECDH must open it back to the exact HD node the mnemonic + passphrase route
+ * derives — rather than inspecting a public key field that no longer exists.
+ *
+ * The ceremony's own ceremony.ts (which still speaks the per-output
+ * r1PublicKey vocabulary — Task 8's job to rewrite) is intentionally not
+ * exercised here; VaultKeyService no longer has anything to do with it.
  */
-import { CeremonyController } from '../../services/vault/ceremony'
-
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 )
@@ -24,6 +29,7 @@ jest.mock('expo-secure-store', () => ({
 }))
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { HD, Hash, Utils } from '@bsv/sdk'
 import { MockYubiKey } from '../../services/vault/mockYubiKey'
 import { setMockDriver } from '../../services/vault/driver'
 import { vaultStore } from '../../services/vault/vaultStore'
@@ -32,11 +38,11 @@ import {
   finalizeEnrollment,
   recoverVaultHD,
   disableVault,
-  resealHDToNewKey,
+  resealToNewKey,
   VAULT_SLOT
 } from '../../services/vault/VaultKeyService'
-import { deriveVaultHD, vaultXpub } from '../../services/vault/vaultDerivation'
-import { compressP256 } from '../../services/vault/r1k1'
+import { deriveVaultHD } from '../../services/vault/vaultDerivation'
+import { unsealVaultKey } from '../../services/vault/sealing'
 
 let mock: MockYubiKey
 
@@ -54,18 +60,22 @@ const MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const PASSPHRASE = 'correct horse battery staple anchor'
 
-/** Enrollment args with the v3 requirements filled in. */
+// args().getPin returns this and no requestPinChange is supplied in these
+// tests, so the card's PIN never actually changes during enrollment.
+const DEFAULT_PIN_AFTER_CHANGE = '123456'
+
+/** Enrollment args with the v4 requirements filled in. */
 const args = (over: Record<string, unknown> = {}) => ({
   nickname: 'k',
   mnemonic: MNEMONIC,
   passphrase: PASSPHRASE,
   onPhase: () => {},
-  getPin: async () => '123456',
+  getPin: async () => DEFAULT_PIN_AFTER_CHANGE,
   ...over
 })
 
 describe('enrollVault', () => {
-  test('produces v3 meta with the compressed R1 public key and persists nothing until finalize', async () => {
+  test('produces v4 meta and persists nothing until finalize', async () => {
     const phases: string[] = []
     const { pending } = await enrollVault(args({ nickname: 'Work key', onPhase: (p: string) => phases.push(p) }))
 
@@ -75,51 +85,57 @@ describe('enrollVault', () => {
     // Nothing on disk yet — a user who backs out is simply not enrolled.
     expect(await vaultStore.isEnrolled()).toBe(false)
     expect(await vaultStore.getMeta()).toBeNull()
+    expect(await vaultStore.getSeal()).toBeNull()
 
-    expect(pending.meta.v).toBe(3)
+    expect(pending.meta.v).toBe(4)
     expect(pending.meta.slot).toBe(0x82)
     expect(pending.meta.nickname).toBe('Work key')
     expect(pending.meta.yubiSerial).toBe('MOCK-1')
     expect(pending.meta.nextKeyIndex).toBe(0)
-    // 33-byte compressed, not the 65-byte SEC1 the driver returns.
-    expect(pending.meta.r1PublicKey).toMatch(/^0[23][0-9a-f]{64}$/)
-    expect(pending.meta.xpub.startsWith('xpub')).toBe(true)
+    expect((pending.meta as any).xpub).toBeUndefined()
+    expect((pending.meta as any).r1PublicKey).toBeUndefined()
+    expect(pending.seal.v).toBe(1)
+    expect(pending.seal.slot).toBe(0x82)
+    expect(pending.seal.yubiSerial).toBe('MOCK-1')
 
     await finalizeEnrollment(pending)
     expect(await vaultStore.isEnrolled()).toBe(true)
     const meta = await vaultStore.getMeta()
-    expect(meta!.r1PublicKey).toBe(pending.meta.r1PublicKey)
-
-    // The stored xpub is exactly what the mnemonic + passphrase derives, so
-    // the second recovery path reaches the same addresses.
-    expect(meta!.xpub).toBe(vaultXpub(deriveVaultHD(MNEMONIC, PASSPHRASE)))
+    expect(meta!.nickname).toBe('Work key')
+    expect(await vaultStore.getSeal()).toEqual(pending.seal)
   })
 
-  test('records the key the card actually generated, not a stray or default value', async () => {
+  test('persists a v4 meta with no xpub and a seal the enrolled card can open', async () => {
     const { pending } = await enrollVault(args())
-    const onCard = (await mock.readVaultPublicKey(VAULT_SLOT))!.publicKey
-    // onCard is the raw 65-byte uncompressed SEC1 point the mock (like the
-    // real card) returns; compressing it independently must match what
-    // enrollment stored.
-    expect(onCard.length).toBe(130) // 65 bytes, hex
-    expect(pending.meta.r1PublicKey).toBe(compressP256(onCard))
+    await finalizeEnrollment(pending)
+    const meta = await vaultStore.getMeta()
+    expect(meta).toMatchObject({ v: 4, nextKeyIndex: expect.any(Number) })
+    expect((meta as any).xpub).toBeUndefined()
+    expect((meta as any).r1PublicKey).toBeUndefined()
+    const seal = await vaultStore.getSeal()
+    expect(seal?.v).toBe(1)
+    // The mock card opens it, and the seed inside derives the same HD as the
+    // mnemonic + passphrase route.
+    const { secret } = await mock.ecdh(seal!.slot, DEFAULT_PIN_AFTER_CHANGE, seal!.ePub)
+    const seed = unsealVaultKey(seal!, secret)
+    expect(HD.fromSeed(seed).toString()).toBe(deriveVaultHD(MNEMONIC, PASSPHRASE).toString())
   })
 
   test('enrollment returns no second mnemonic to back up', async () => {
-    // The entire point of v2/v3: one phrase, not two.
+    // The entire point of v2/v3/v4: one phrase, not two.
     const result = await enrollVault(args())
     expect(result).not.toHaveProperty('backupMnemonic')
   })
 
-  test('zeroes the vault seed even when the card returns malformed key material', async () => {
+  test('zeroes the vault seed even when sealing fails on malformed card key material', async () => {
     // A card bug (or a compromised/foreign PIV slot) could return something
-    // that is not a well-formed SEC1 point; compressP256 throws template-invalid
-    // for it. That throw happens AFTER the seed has been derived, so it must
-    // not skip the zeroing step — the seed is exactly the secret this whole
-    // function exists to keep off disk and out of memory once done with it.
+    // that is not a well-formed SEC1 point; sealVaultKey's ECDH then throws.
+    // That throw happens AFTER the seed has been derived, so it must not skip
+    // the zeroing step — the seed is exactly the secret this whole function
+    // exists to keep off disk and out of memory once done with it.
     jest.spyOn(mock, 'generateVaultKey').mockResolvedValueOnce({ publicKey: '04aabb' })
     const fillSpy = jest.spyOn(Array.prototype, 'fill')
-    await expect(enrollVault(args())).rejects.toMatchObject({ code: 'template-invalid' })
+    await expect(enrollVault(args())).rejects.toBeTruthy()
     const zeroedA64ByteArray = fillSpy.mock.calls.some(
       ([value], i) => value === 0 && (fillSpy.mock.instances[i] as unknown[]).length === 64
     )
@@ -212,9 +228,13 @@ describe('enrollVault', () => {
     expect(genSpy).not.toHaveBeenCalled()
     expect(phases).toContain('adopting')
     expect(phases).not.toContain('generating')
-    expect(pending.meta.r1PublicKey).toBe(compressP256(existing))
-    // Same wallet phrase + passphrase means the SAME vault as the other device.
-    expect(pending.meta.xpub).toBe(vaultXpub(deriveVaultHD(MNEMONIC, PASSPHRASE)))
+    // The seal was built against the key ALREADY on the card, not a fresh
+    // one — proven by its yubiPubSha256 matching that key's hash, and (the
+    // stronger check) by the card's own ECDH actually opening it.
+    expect(pending.seal.yubiPubSha256).toBe(Utils.toHex(Hash.sha256(Utils.toArray(existing, 'hex'))))
+    const { secret } = await mock.ecdh(pending.seal.slot, DEFAULT_PIN_AFTER_CHANGE, pending.seal.ePub)
+    const seed = unsealVaultKey(pending.seal, secret)
+    expect(HD.fromSeed(seed).toString()).toBe(deriveVaultHD(MNEMONIC, PASSPHRASE).toString())
     // Still nothing on disk until finalize.
     expect(await vaultStore.isEnrolled()).toBe(false)
   })
@@ -273,77 +293,66 @@ describe('recoverVaultHD', () => {
   test('rejects an invalid phrase', async () => {
     await expect(recoverVaultHD('not a valid mnemonic phrase at all', PASSPHRASE)).rejects.toBeDefined()
   })
-
-  test('rejects a mistyped passphrase against the stored xpub', async () => {
-    // BIP39 passphrases have no checksum, so without the xpub check a typo would
-    // silently open a different, EMPTY vault and look like lost funds.
-    const xpub = vaultXpub(deriveVaultHD(MNEMONIC, PASSPHRASE))
-    await expect(
-      recoverVaultHD(MNEMONIC, 'correct horse battery staple anchoe', xpub)
-    ).rejects.toMatchObject({ code: 'bad-passphrase' })
-  })
 })
 
-describe('resealHDToNewKey', () => {
-  test('writes v3 meta for the new key, preserving nextKeyIndex', async () => {
+describe('resealToNewKey', () => {
+  test('writes v4 meta for the new key, preserving nextKeyIndex', async () => {
     // Enroll and finalize under the FIRST key.
     const { pending } = await enrollVault(args())
     await finalizeEnrollment(pending)
-    const oldR1PublicKey = pending.meta.r1PublicKey
+    const oldSeal = pending.seal
 
     // Simulate a couple of deposits having advanced the counter.
     await vaultStore.takeNextIndex()
     await vaultStore.takeNextIndex()
     expect((await vaultStore.getMeta())!.nextKeyIndex).toBe(2)
 
-    // Lose the key; enroll a fresh one via resealHDToNewKey.
+    // Lose the key; enroll a fresh one via resealToNewKey.
     const fresh = new MockYubiKey()
     fresh.insertKey('MOCK-2')
     setMockDriver(fresh)
-    const hd = deriveVaultHD(MNEMONIC, PASSPHRASE)
-    await resealHDToNewKey(hd, 'k', async () => '123456')
+    await resealToNewKey(MNEMONIC, PASSPHRASE, 'k', async () => '123456')
 
     const after = await vaultStore.getMeta()
-    expect(after!.v).toBe(3)
+    expect(after!.v).toBe(4)
     expect(after!.yubiSerial).toBe('MOCK-2')
-    expect(after!.r1PublicKey).not.toBe(oldR1PublicKey)
     // The counter must never be reissued to a second address.
     expect(after!.nextKeyIndex).toBe(2)
+
+    const newSeal = (await vaultStore.getSeal())!
+    expect(newSeal).not.toEqual(oldSeal)
+    // The seal now opens through the NEW card, to the same HD node the
+    // mnemonic + passphrase derive.
+    const { secret } = await fresh.ecdh(newSeal.slot, '123456', newSeal.ePub)
+    const seed = unsealVaultKey(newSeal, secret)
+    expect(HD.fromSeed(seed).toString()).toBe(deriveVaultHD(MNEMONIC, PASSPHRASE).toString())
   })
 
-  // F2: this used to be "asserted" by rebuilding a locking script from the
-  // same three arguments and checking it equals itself — a determinism check
-  // on a pure function, not a spendability guarantee. The real claim (see
-  // VaultKeyService.ts's and r1k1.ts's corrected doc comments) is the
-  // opposite of what the old comment said: R1 spendability does NOT survive
-  // a re-enrollment. Proven here directly against the ceremony: the OLD
-  // physical key, presented against the vault's NOW-current meta (whose
-  // yubiSerial is the NEW key's), is rejected by the serial check before any
-  // signing is attempted — exactly the mechanism that makes outputs from the
-  // old key unspendable via R1 afterward, leaving the K1 recovery sweep
-  // (transfers.ts's sweepVaultWithHD, which never touches a YubiKey) as the
-  // only way to move them.
-  test('the OLD physical key is rejected by the ceremony after re-enrollment — R1 does not survive, only K1 recovery does', async () => {
+  test('the OLD physical key can no longer open the seal after re-enrollment', async () => {
+    // Outputs locked under the OLD key do not become spendable via the R1
+    // ceremony again after a reseal — that guarantee lives in ceremony.ts's
+    // serial check (Task 8, not exercised here). What VaultKeyService itself
+    // guarantees is narrower but just as load-bearing: the OLD card's ECDH no
+    // longer opens the CURRENT seal at all, because resealToNewKey overwrites
+    // it with one sealed to the NEW card's key.
     const { pending } = await enrollVault(args())
     await finalizeEnrollment(pending)
-    const oldMock = mock // still "physically present" with its original serial
+    const oldMock = mock // still "physically present" with its original key
 
     const fresh = new MockYubiKey()
     fresh.insertKey('MOCK-2')
     setMockDriver(fresh)
-    const hd = deriveVaultHD(MNEMONIC, PASSPHRASE)
-    await resealHDToNewKey(hd, 'k', async () => '123456')
+    await resealToNewKey(MNEMONIC, PASSPHRASE, 'k', async () => '123456')
 
     const after = (await vaultStore.getMeta())!
     expect(after.yubiSerial).toBe('MOCK-2')
     expect(after.yubiSerial).not.toBe(pending.meta.yubiSerial)
 
-    const ceremony = new CeremonyController({
-      getDriver: () => oldMock,
-      store: { getMeta: async () => ({ slot: after.slot, yubiSerial: after.yubiSerial, r1PublicKey: after.r1PublicKey }) },
-      retentionMs: 120_000
-    })
-    await expect(ceremony.requestSigner('withdraw')).rejects.toMatchObject({ code: 'serial-mismatch' })
+    const newSeal = (await vaultStore.getSeal())!
+    const { secret: oldCardSecret } = await oldMock.ecdh(newSeal.slot, '123456', newSeal.ePub)
+    expect(() => unsealVaultKey(newSeal, oldCardSecret)).toThrow(
+      expect.objectContaining({ code: 'seal-corrupt' })
+    )
   })
 })
 
@@ -353,4 +362,5 @@ test('disableVault clears all vault state', async () => {
   await disableVault()
   expect(await vaultStore.isEnrolled()).toBe(false)
   expect(await vaultStore.getMeta()).toBeNull()
+  expect(await vaultStore.getSeal()).toBeNull()
 })

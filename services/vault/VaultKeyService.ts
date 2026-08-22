@@ -5,18 +5,27 @@
  * domain-separated by a non-empty vault passphrase (BIP39 toSeed). The user
  * therefore backs up ONE phrase, not two. See vaultDerivation.ts.
  *
- * The YubiKey is a SIGNING device, not a key-wrapping one: its PIV slot 0x82
- * holds a P-256 key that never leaves the card. Enrollment's job is just to
- * generate that key, record its compressed public key, and store v3 meta —
- * there is nothing to seal.
+ * The YubiKey is now an UNWRAP ORACLE, not a signing device: its PIV slot
+ * 0x82 holds a P-256 key used only for on-token ECDH (see sealing.ts).
+ * Enrollment's job is to derive the 64-byte vault seed, seal it to that
+ * card's public key, and store the result — a SealedBlob plus a bare
+ * `nextKeyIndex` counter (vaultStore's v4 meta). Nothing about the vault is
+ * ever public at rest: there is no xpub, no r1PublicKey, nothing that lets
+ * anyone reach a vault address without either the physical card or the
+ * mnemonic + passphrase.
  *
- * Deposit addresses are BIP32 children of the stored xpub, so deposits never
- * need the YubiKey and never run out. (An earlier design cached 64 key
- * hashes and needed a privileged ceremony to refill them.)
+ * Because deposit addresses are BIP32 children of the PRIVATE vault HD node
+ * — there is no public xpub to derive them from anymore — a tap is now
+ * needed to hand out a fresh deposit address too. Deposits and withdrawals
+ * both go through the same unseal; neither is free of the YubiKey. (An
+ * earlier design cached 64 key hashes ahead of time so deposits never
+ * touched the card; that cache and its refill ceremony are gone along with
+ * the xpub that made it possible.)
  *
  * Recovery paths, and there are exactly two:
- *   1. YubiKey + PIN               — signs directly, nothing to unseal
- *   2. main mnemonic + passphrase  — deriveVaultHD
+ *   1. YubiKey unseal (the ceremony's on-token ECDH) — recovers the seed
+ *      directly, nothing to type
+ *   2. main mnemonic + passphrase  — deriveVaultSeed/deriveVaultHD, offline
  * There is no third path.
  *
  * SECURITY: never log V, the seed, the mnemonic, or the passphrase.
@@ -24,15 +33,16 @@
 import { HD } from '@bsv/sdk'
 import { getVaultDriver } from './driver'
 import { withKeySession } from './session'
-import { vaultStore, VaultMetaV3 } from './vaultStore'
-import { VaultError } from './types'
-import { deriveVaultSeed, deriveVaultHD, vaultXpub, randomDepositStartIndex } from './vaultDerivation'
+import { vaultStore, VaultMetaV4 } from './vaultStore'
+import { VaultError, SealedBlob } from './types'
+import { deriveVaultSeed, deriveVaultHD, randomDepositStartIndex } from './vaultDerivation'
 import { checkVaultPassphrase } from './vaultPassphrase'
-import { compressP256 } from './r1k1'
+import { sealVaultKey } from './sealing'
 
 /** An enrollment that has touched the key but not yet disk. */
 export interface PendingEnrollment {
-  meta: VaultMetaV3
+  meta: VaultMetaV4
+  seal: SealedBlob
 }
 
 export const VAULT_SLOT = 0x82
@@ -49,10 +59,11 @@ export async function enrollVault(args: {
    * Enroll against the key ALREADY in the PIV slot instead of refusing it.
    *
    * This is how one YubiKey serves the same vault on several devices: the slot
-   * key is what locks the R1 branch, and everything a second device needs to
-   * use it is public (the slot's P-256 public key, the serial, and an xpub the
-   * mnemonic + passphrase re-derive). Nothing is generated, so every output the
-   * first device created stays spendable.
+   * key is what locks the R1 branch, and a second device reaches the SAME
+   * vault seed the same two ways the first one could — the physical card
+   * (its ECDH unwraps the seal this device writes) or the mnemonic +
+   * passphrase (deriveVaultSeed re-derives it offline). Nothing is generated,
+   * so every output the first device created stays spendable.
    *
    * Only ever set from an explicit user choice: 0x82 is a *retired* PIV slot,
    * so the key sitting there may belong to something else entirely (an
@@ -126,15 +137,16 @@ export async function enrollVault(args: {
 
   // The vault seed comes from the user's EXISTING wallet mnemonic plus their
   // passphrase — no second phrase, nothing new to write down. It never leaves
-  // this function: only the PUBLIC node is persisted. The `finally` below
-  // zeroes it on every exit, including a compressP256 throw on malformed card
+  // this function: only the SEALED blob is persisted. The `finally` below
+  // zeroes it on every exit, including a sealVaultKey throw on malformed card
   // key material — the seed must never survive this function on ANY path.
   const seed = deriveVaultSeed(args.mnemonic, args.passphrase)
-  let meta: VaultMetaV3
+  let meta: VaultMetaV4
+  let seal: SealedBlob
   try {
-    const hd = HD.fromSeed(seed)
+    seal = sealVaultKey(seed, publicKey, { slot: VAULT_SLOT, serial: info.serial })
     meta = {
-      v: 3,
+      v: 4,
       enrolledAt: Date.now(),
       yubiSerial: info.serial,
       nickname: args.nickname,
@@ -142,45 +154,46 @@ export async function enrollVault(args: {
       // An adopted key is already in use by another device whose deposit
       // counter this one cannot see, so starting at zero would reissue that
       // device's addresses. See randomDepositStartIndex.
-      nextKeyIndex: adopted ? randomDepositStartIndex() : 0,
-      xpub: vaultXpub(hd),
-      // The driver returns a 65-byte uncompressed SEC1 point; the template
-      // needs 33-byte compressed.
-      r1PublicKey: compressP256(publicKey)
+      nextKeyIndex: adopted ? randomDepositStartIndex() : 0
     }
   } finally {
     seed.fill(0)
   }
 
   args.onPhase('done')
-  return { pending: { meta } }
+  return { pending: { meta, seal } }
 }
 
 /** Commit an enrollment produced by enrollVault. Only here does anything reach
- * disk. */
+ * disk. The seal is written first: if the process dies between the two
+ * writes, `isEnrolled()` (which requires BOTH) still reads false either way,
+ * so a half-committed enrollment never looks complete. */
 export async function finalizeEnrollment(pending: PendingEnrollment): Promise<void> {
+  await vaultStore.setSeal(pending.seal)
   await vaultStore.setMeta(pending.meta)
 }
 
 /**
- * Recover a v3 vault from the MAIN wallet mnemonic plus the vault passphrase.
+ * Recover the vault HD node from the MAIN wallet mnemonic plus the vault
+ * passphrase — the second of the two recovery paths (see this file's header).
  *
- * `expectedXpub` (from vault meta, when present) catches a mistyped
- * passphrase: BIP39 passphrases have no checksum, so without this check a typo
- * silently derives a different, valid, EMPTY vault and the user concludes
- * their funds are gone.
+ * BIP39 passphrases have no checksum, so a mistyped one silently derives a
+ * different, valid, EMPTY vault node rather than throwing. There used to be a
+ * stored xpub here to catch that early; v4 meta stores no key material at
+ * all, so that check now happens where it can actually verify something —
+ * the spend path's pkh match (transfers.ts) — rather than here.
  */
-export async function recoverVaultHD(mnemonic: string, passphrase: string, expectedXpub?: string): Promise<HD> {
-  const hd = deriveVaultHD(mnemonic, passphrase) // throws on empty/invalid
-  if (expectedXpub && vaultXpub(hd) !== expectedXpub) {
-    throw new VaultError('bad-passphrase', 'That passphrase does not match this vault')
-  }
-  return hd
+export async function recoverVaultHD(mnemonic: string, passphrase: string): Promise<HD> {
+  return deriveVaultHD(mnemonic, passphrase) // throws on empty/invalid
 }
 
 /** Re-enroll an existing vault to a fresh YubiKey, e.g. after a lost key.
  *
- * Preserves nextKeyIndex so deposit indices are never reissued.
+ * The seal always wraps the 64-byte seed, so reseal re-derives the seed from
+ * the mnemonic + passphrase itself (rather than taking an already-derived HD
+ * node) and seals it fresh to the new card's public key. Preserves
+ * nextKeyIndex so deposit indices are never reissued, and zeroizes the seed
+ * in `finally` exactly like enrollVault.
  *
  * Outputs created under the OLD key do NOT become spendable via the R1
  * branch again — not with the new key (it never held the old key's private
@@ -189,13 +202,19 @@ export async function recoverVaultHD(mnemonic: string, passphrase: string, expec
  * serial does not match the newly-stored yubiSerial, before any signing is
  * attempted). Those outputs remain spendable ONLY via the K1 recovery sweep
  * (transfers.ts's sweepVaultWithHD), which never touches a YubiKey at all.
- * r1PublicKey is still stored per output rather than read from meta — that is
- * what lets buildVaultLockingScript reconstruct every output's exact locking
- * script regardless of which key enrolled it, and what lets the R1 spend path
- * detect and reject a signer/output key mismatch (transfers.ts's wrong-key
- * check) before ever attempting to sign.
+ * r1PublicKey is still stored per OUTPUT (in customInstructions, see r1k1.ts)
+ * rather than read from meta — that is what lets buildVaultLockingScript
+ * reconstruct every output's exact locking script regardless of which key
+ * enrolled it, and what lets the R1 spend path detect and reject a
+ * signer/output key mismatch (transfers.ts's wrong-key check) before ever
+ * attempting to sign.
  */
-export async function resealHDToNewKey(hd: HD, nickname: string, getPin: () => Promise<string>): Promise<void> {
+export async function resealToNewKey(
+  mnemonic: string,
+  passphrase: string,
+  nickname: string,
+  getPin: () => Promise<string>
+): Promise<void> {
   const driver = getVaultDriver()
   if (!driver) throw new VaultError('driver-unavailable')
   const info = await driver.getKeyInfo()
@@ -208,19 +227,25 @@ export async function resealHDToNewKey(hd: HD, nickname: string, getPin: () => P
   if (!verified.ok) throw new VaultError('pin-invalid', 'PIN not accepted', verified.retriesLeft)
   const { publicKey } = await driver.generateVaultKey(VAULT_SLOT)
 
-  // Preserve nextKeyIndex across the re-enrollment so deposit indices are
-  // never reissued to a second address.
-  const prev = await vaultStore.getMeta()
-  await vaultStore.setMeta({
-    v: 3,
-    enrolledAt: Date.now(),
-    yubiSerial: info.serial,
-    nickname,
-    slot: VAULT_SLOT,
-    nextKeyIndex: prev?.nextKeyIndex ?? 0,
-    xpub: vaultXpub(hd),
-    r1PublicKey: compressP256(publicKey)
-  })
+  const seed = deriveVaultSeed(mnemonic, passphrase)
+  try {
+    const seal = sealVaultKey(seed, publicKey, { slot: VAULT_SLOT, serial: info.serial })
+    // Preserve nextKeyIndex across the re-enrollment so deposit indices are
+    // never reissued to a second address.
+    const prev = await vaultStore.getMeta()
+    const meta: VaultMetaV4 = {
+      v: 4,
+      enrolledAt: Date.now(),
+      yubiSerial: info.serial,
+      nickname,
+      slot: VAULT_SLOT,
+      nextKeyIndex: prev?.nextKeyIndex ?? 0
+    }
+    await vaultStore.setSeal(seal)
+    await vaultStore.setMeta(meta)
+  } finally {
+    seed.fill(0)
+  }
 }
 
 /** Remove all vault state. Callers must sweep funds to the default basket
