@@ -87,6 +87,12 @@ describe('vaultStore v4', () => {
     expect(await vaultStore.isEnrolled()).toBe(true)
   })
 
+  it('isEnrolled is false with a seal but no meta', async () => {
+    // Clean slate from beforeEach — genuinely seal-only, no prior setMeta.
+    await vaultStore.setSeal(SEAL)
+    expect(await vaultStore.isEnrolled()).toBe(false)
+  })
+
   it('takes consecutive indices and persists them', async () => {
     await vaultStore.setMeta(META)
     expect(await vaultStore.takeNextIndex()).toBe(0)
