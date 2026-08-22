@@ -6,12 +6,15 @@
  * vault.
  *
  * Requires the wallet's own recovery phrase (already on this device) plus the
- * vault passphrase chosen at enrollment. The stored xpub verifies the
- * passphrase before anything is signed, because BIP39 passphrases have no
- * checksum and a typo would otherwise derive a different, empty vault and
- * look exactly like lost funds.
+ * vault passphrase chosen at enrollment. BIP39 passphrases have no checksum,
+ * so a typo silently derives a different, valid, empty vault node rather than
+ * throwing. v4 vault meta stores no key material to catch that here anymore —
+ * the sweep itself catches it instead: every vault output mismatches a wrong
+ * key (transfers.ts's prepareSpends), and the resulting
+ * VaultError('wrong-key') is mapped below to the passphrase copy the user
+ * actually needs to see.
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { View, Text, StyleSheet, TextInput, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
@@ -23,10 +26,8 @@ import { showToast } from '@/components/ui/Toast'
 import { haptics } from '@/hooks/useHaptics'
 import { useWallet } from '@/context/WalletContext'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
-import { vaultStore, type VaultMeta } from '@/services/vault/vaultStore'
 import { disableVault, recoverVaultHD } from '@/services/vault/VaultKeyService'
 import { sweepVaultWithHD, type VaultWallet } from '@/services/vault/transfers'
-import { verifyVaultPassphrase } from '@/services/vault/vaultDerivation'
 import { VaultError } from '@/services/vault/types'
 import i18n from '@/context/i18n/translations'
 
@@ -38,14 +39,9 @@ export default function VaultRecoverScreen() {
   const { managers, adminOriginator } = useWallet()
   const { getMnemonic } = useLocalStorage()
 
-  const [meta, setMeta] = useState<VaultMeta | null>(null)
   const [passphrase, setPassphrase] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    void vaultStore.getMeta().then(setMeta)
-  }, [])
 
   const run = useCallback(async () => {
     const pm = managers?.permissionsManager
@@ -55,13 +51,7 @@ export default function VaultRecoverScreen() {
     try {
       const mnemonic = await getMnemonic()
       if (!mnemonic) throw new VaultError('bad-mnemonic', t('vault_requires_mnemonic'))
-      const xpub = meta?.xpub
-      // Verify BEFORE signing so a typo reports "wrong passphrase" instead of
-      // silently sweeping an empty vault and reporting success.
-      if (xpub && !verifyVaultPassphrase(mnemonic, passphrase, xpub)) {
-        throw new VaultError('bad-passphrase', t('vault_recover_wrong_passphrase'))
-      }
-      const hd = await recoverVaultHD(mnemonic, passphrase, xpub)
+      const hd = await recoverVaultHD(mnemonic, passphrase)
       await sweepVaultWithHD(pm as unknown as VaultWallet, adminOriginator, hd, t('vault_recover_reason'))
 
       await disableVault()
@@ -70,14 +60,25 @@ export default function VaultRecoverScreen() {
       setPassphrase('')
       router.back()
     } catch (e) {
+      const code = e instanceof VaultError ? e.code : undefined
+      // The sweep's prepareSpends throws 'wrong-key' when every vault output
+      // mismatches the derived key — on this screen that always means the
+      // typed passphrase does not match the one this vault was enrolled
+      // with (there is no YubiKey involved here to be the "wrong" one), so
+      // show the passphrase-specific copy rather than the sweep's own
+      // generic wrong-key message.
       const msg =
-        e instanceof VaultError ? e.message || t(`vault_err_${e.code.replace(/-/g, '_')}`) : t('vault_recover_failed')
+        code === 'wrong-key'
+          ? t('vault_recover_wrong_passphrase')
+          : e instanceof VaultError
+            ? e.message || t(`vault_err_${e.code.replace(/-/g, '_')}`)
+            : t('vault_recover_failed')
       setError(msg)
       haptics.error()
     } finally {
       setBusy(false)
     }
-  }, [passphrase, meta, managers?.permissionsManager, adminOriginator, getMnemonic])
+  }, [passphrase, managers?.permissionsManager, adminOriginator, getMnemonic])
 
   const canRun = passphrase.length > 0
 

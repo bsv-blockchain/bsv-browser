@@ -3,10 +3,12 @@
  *
  * Direction comes from the `direction` search param ('deposit' | 'withdraw').
  *
- * Deposit runs immediately and needs no hardware key: addresses are BIP32
- * children of the stored xpub. Withdraw signs directly with the YubiKey (the
- * R1 branch signs the digest on the card — nothing to unwrap), so the
- * ceremony sheet takes over for insert/PIN/touch — that one stays a sheet
+ * Both directions run the ceremony sheet. A deposit address is a BIP32 child
+ * of the vault's PRIVATE HD node — there is no stored xpub to derive one
+ * from without it — so even a deposit needs one YubiKey tap to unwrap that
+ * node. Withdraw derives every input's key (and any re-vaulted remainder)
+ * from the same unwrapped node and signs in software. Either way the ceremony
+ * sheet takes over for insert/PIN/touch — that one stays a sheet
  * deliberately, because it fires from any screen as a system prompt.
  */
 import React, { useState, useCallback } from 'react'
@@ -31,7 +33,6 @@ import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { depositToVault, withdrawFromVault, type VaultWallet } from '@/services/vault/transfers'
 import { getOnline } from '@/utils/net/online'
 import { VaultError } from '@/services/vault/types'
-import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
 import { showToast } from '@/components/ui/Toast'
 import { showAlert } from '@/components/ui/AlertCard'
@@ -65,8 +66,10 @@ export default function VaultTransferScreen() {
 
   // Send max is a sentinel value, not a number: the withdraw path takes 'all'
   // and lets the toolbox work out the fee, which is the only way to empty the
-  // vault exactly. Pre-computing "balance minus fee" here cannot work — the R1
-  // spend's fee depends on the input count and its ~960 KB unlocking script.
+  // vault exactly. Pre-computing "balance minus fee" here cannot work — a K1
+  // withdrawal's fee depends on how many vault inputs it takes to cover the
+  // amount (each input is an ordinary ~108-byte unlock), not on any one
+  // script's size, and that count is not known until the outputs are selected.
   const isMax = amount === SEND_MAX_VALUE
 
   const run = useCallback(async () => {
@@ -79,15 +82,14 @@ export default function VaultTransferScreen() {
     try {
       const w = pm as unknown as VaultWallet
       if (isDeposit) {
-        await depositToVault(w, adminOriginator, sats, {
+        await depositToVault(w, adminOriginator, sats, t('vault_deposit_reason', { amount: sats }), {
           isOnline: getOnline,
           // A failed tx2 leaves its staging coin spendable=0 even though it is
           // live on chain (see VaultTransferOptions.releaseStrandedStaging);
           // this lets the retry reuse that coin instead of splitting again.
           releaseStrandedStaging: storage ? () => storage.releaseVaultStagingStrandedByInvalidTx() : undefined
         })
-        sounds.confirmation()
-        haptics.success()
+        // vaultOpen/haptic already fired by the ceremony's onArmed
         showToast(t('vault_deposit_done'), { type: 'success' })
       } else {
         const result = await withdrawFromVault(

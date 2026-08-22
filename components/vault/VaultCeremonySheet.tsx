@@ -61,7 +61,7 @@ const ERROR_COPY: Record<string, string> = {
 const RETRYABLE_ERRORS = new Set<string>(['touch-timeout', 'nfc-lost'])
 
 /** Swallows the sheet's dismiss while work is in flight — `Sheet` requires an
- * onClose, and cancelling mid-signature is the thing we are preventing. */
+ * onClose, and cancelling mid-operation is the thing we are preventing. */
 const noop = (): void => {}
 
 const PhaseIcon: Record<CeremonyPhase, keyof typeof Ionicons.glyphMap> = {
@@ -71,7 +71,6 @@ const PhaseIcon: Record<CeremonyPhase, keyof typeof Ionicons.glyphMap> = {
   'pin-entry': 'keypad-outline',
   'awaiting-touch': 'finger-print-outline',
   preparing: 'lock-open-outline',
-  signing: 'create-outline',
   broadcasting: 'paper-plane-outline',
   armed: 'lock-open',
   error: 'alert-circle-outline'
@@ -92,12 +91,12 @@ export const VaultCeremonySheet: React.FC = () => {
    * Work is under way and there is nothing for the user to do but wait.
    *
    * The sheet is deliberately NOT dismissable here. A backdrop tap runs
-   * cancel(), which mid-signature is the abandonment this progress display
+   * cancel(), which mid-operation is the abandonment this progress display
    * exists to prevent — and a cancelled withdrawal can leave the vault UTXO
    * reserved. Cancel stays available while we are waiting on the user
    * (waiting-for-key, pin-entry).
    */
-  const busy = phase === 'preparing' || phase === 'signing' || phase === 'broadcasting'
+  const busy = phase === 'preparing' || phase === 'broadcasting'
 
   // Pulse the icon while waiting for the user to act (insert / touch).
   const pulse = useSharedValue(1)
@@ -106,7 +105,6 @@ export const VaultCeremonySheet: React.FC = () => {
       phase === 'waiting-for-key' ||
       phase === 'awaiting-touch' ||
       phase === 'preparing' ||
-      phase === 'signing' ||
       phase === 'broadcasting'
     if (active && !reducedMotion) {
       pulse.value = withRepeat(
@@ -148,8 +146,6 @@ export const VaultCeremonySheet: React.FC = () => {
         return nfc ? t('vault_keep_holding_nfc') : t('vault_touch_contact')
       case 'preparing':
         return t('vault_unlocking_funds')
-      case 'signing':
-        return t('vault_unlocking_funds')
       case 'broadcasting':
         return t('vault_sending_to_network')
       case 'error':
@@ -176,21 +172,12 @@ export const VaultCeremonySheet: React.FC = () => {
 
         <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
 
-        {/* The whole point of the busy phases: say the work is real, say not to
-            leave, and — when there is more than one signature — say how far
-            along it is, so a long wait reads as progress rather than a hang. */}
+        {/* The whole point of the busy phases: say the work is real and say
+            not to leave, so a wait for tx assembly or the network reads as
+            progress rather than a hang. */}
         {busy && (
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
             {phase === 'broadcasting' ? t('vault_sending_sub') : t('vault_unlocking_sub')}
-          </Text>
-        )}
-
-        {state.signing && state.signing.total > 1 && phase !== 'broadcasting' && (
-          <Text style={[styles.subtitle, { color: colors.textTertiary }]}>
-            {t('vault_signature_progress', {
-              index: state.signing.index,
-              total: state.signing.total
-            })}
           </Text>
         )}
 

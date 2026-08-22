@@ -58,10 +58,12 @@ export default function VaultScreen() {
   }, [reload, refresh])
 
   const confirmDisable = useCallback(async () => {
-    // Refuse to disable while funds remain: disabling removes the key gate —
-    // there is no seal to worry about, the YubiKey signs directly — and any
-    // vault UTXO left behind would be locked to a key with no in-app signer.
-    // Force a withdrawal (or recovery sweep) first.
+    // Refuse to disable while funds remain: there IS a seal (disableVault's
+    // vaultStore.clear deletes it along with the meta), and disabling before
+    // a sweep would leave any vault UTXO reachable only the slow way — the
+    // main mnemonic + vault passphrase, via the recovery sweep — with no more
+    // in-app YubiKey ceremony to reach it directly. Force a withdrawal (or
+    // recovery sweep) first.
     if ((balance ?? 0) > 0) {
       await showAlert({
         title: t('vault_disable_blocked_title'),
