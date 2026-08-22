@@ -126,7 +126,7 @@ function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
     verifyPin: pin => parse(native.verifyPin(pin)),
     changePin: (o, n) => parse(native.changePin(o, n)),
     // 'always' (not 'cached'): the YubiKey is now an ECDH unwrap oracle — one
-    // on-token ECDH per ceremony recovers the vault key, then every R1-K1
+    // on-token ECDH per ceremony recovers the vault key, then every vault
     // input signs in software from that recovered key, so there's no longer
     // a per-input touch to spare. A single per-op touch is affordable and is
     // the stronger policy (no cached-touch window an attacker with a stolen,

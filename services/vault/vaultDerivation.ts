@@ -112,9 +112,28 @@ export function randomDepositStartIndex(): number {
   return ADOPT_INDEX_MIN + (r % ADOPT_INDEX_SPAN)
 }
 
-/** The vault's private HD node. */
+/**
+ * The vault's private HD node.
+ *
+ * The seed derived here is this function's OWN copy — enrollVault and
+ * resealToNewKey zeroize the separate arrays they derive for sealing, and
+ * neither of them can reach this one. Without the wipe below, every call
+ * (recoverVaultHD, the sweep path, the spend-proof script) would hand a live
+ * 64-byte seed to the garbage collector instead of overwriting it.
+ *
+ * Wiping is safe because `HD.fromSeed` does not retain the array: it
+ * immediately HMAC-SHA512s it into the chain code and private key
+ * (@bsv/sdk's compat/HD `fromSeed`) and keeps no reference. The `finally`
+ * covers the throwing path too — `HD.fromSeed` rejects a seed outside
+ * 16..64 bytes, and a seed must not survive that refusal either.
+ */
 export function deriveVaultHD(mnemonic: string, passphrase: string): HD {
-  return HD.fromSeed(deriveVaultSeed(mnemonic, passphrase))
+  const seed = deriveVaultSeed(mnemonic, passphrase)
+  try {
+    return HD.fromSeed(seed)
+  } finally {
+    seed.fill(0)
+  }
 }
 
 /** Private key for deposit index n. Requires the private node. */

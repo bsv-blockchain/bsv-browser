@@ -85,12 +85,20 @@ export type CeremonyPhase =
  */
 export type VaultProgress = { phase: 'preparing' } | { phase: 'broadcasting' }
 
+/**
+ * Everything the ceremony publishes to React (see context/VaultContext.tsx).
+ *
+ * Kept to exactly these four fields on purpose: codes, a phase, a deadline and
+ * the caller's own reason string. No key material, no PIN, no serial — see this
+ * module's SECURITY note, and the "nothing key-shaped reaches the React-visible
+ * ceremony state" case in __tests__/vault/ceremony.test.ts, which pins the key
+ * set so a new field cannot be added here without a deliberate decision.
+ */
 export interface CeremonyState {
   phase: CeremonyPhase
   reason?: string
   error?: { code: VaultErrorCode; retriesLeft?: number }
   armedUntil?: number
-  keySerial?: string
 }
 
 /**

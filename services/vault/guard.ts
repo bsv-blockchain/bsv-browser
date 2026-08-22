@@ -4,11 +4,11 @@
  * PrivilegedKeyManager's key universe is the wallet's master HD root key — a
  * strictly more sensitive key than the per-app `primaryKey` (m/0'/0') that
  * every ordinary, non-privileged operation signs with. That is true whether
- * or not a vault is enrolled: the R1-K1 vault does not route through this
- * manager at all (the YubiKey signs the R1 branch directly, and the K1 branch
- * is signed from the vault's own HD node — derived from the main mnemonic
- * plus a vault passphrase that the root key cannot reach, since BIP39's
- * `toSeed` is one-way and passphrase-dependent). The toolbox routes every
+ * or not a vault is enrolled: the vault does not route through this manager
+ * at all (vault inputs are signed from the vault's own HD node — the
+ * YubiKey-unwrapped seed, equivalently derived from the main mnemonic plus a
+ * vault passphrase that the root key cannot reach, since BIP39's `toSeed` is
+ * one-way and passphrase-dependent). The toolbox routes every
  * BRC-100 `privileged: true` op through PrivilegedKeyManager regardless, and
  * this app runs with `seekProtocolPermissionsForSigning` / public-key-
  * revelation permissions OFF, so nothing else gates them. That let any web

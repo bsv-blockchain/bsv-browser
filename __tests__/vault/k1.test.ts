@@ -8,10 +8,14 @@ describe('K1 vault module', () => {
   const priv = PrivateKey.fromRandom()
   const pkh = Hash.hash160(priv.toPublicKey().encode(true) as number[])
 
-  it('builds a 25-byte P2PKH locking script', () => {
+  it('builds a 25-byte P2PKH locking script for the key hash, and for its address', () => {
     const lock = buildVaultLockingScript({ k1PublicKeyHash: pkh })
     expect(lock.toBinary().length).toBe(K1_LOCK_LEN)
     expect(lock.toHex()).toBe(new P2PKH().lock(pkh).toHex())
+    // The lock a deposit hands out is the ordinary address form of the derived
+    // child — the property that makes a vault output an ordinary payment on
+    // chain, and the one an operator checks a deposit against by eye.
+    expect(lock.toHex()).toBe(new P2PKH().lock(priv.toPublicKey().toAddress()).toHex())
   })
 
   it('a real unlock fits K1_UNLOCK_LEN and verifies under the Spend interpreter', async () => {

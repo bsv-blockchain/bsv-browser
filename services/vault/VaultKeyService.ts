@@ -222,19 +222,21 @@ export async function recoverVaultHD(mnemonic: string, passphrase: string): Prom
  * to verify the passphrase itself before calling this, whenever the vault
  * may hold funds (the recover UI wires this in a later task).
  *
- * Outputs created under the OLD key do NOT become spendable via the R1
- * branch again — not with the new key (it never held the old key's private
- * material) and not with the old physical key either (the ceremony's serial
- * check in armViaReader/openTapSession, ceremony.ts, rejects any card whose
- * serial does not match the newly-stored yubiSerial, before any signing is
- * attempted). Those outputs remain spendable ONLY via the K1 recovery sweep
- * (transfers.ts's sweepVaultWithHD), which never touches a YubiKey at all.
- * r1PublicKey is still stored per OUTPUT (in customInstructions)
- * rather than read from meta — that is what lets buildVaultLockingScript
- * reconstruct every output's exact locking script regardless of which key
- * enrolled it, and what lets the R1 spend path detect and reject a
- * signer/output key mismatch (transfers.ts's wrong-key check) before ever
- * attempting to sign.
+ * Outputs created under the OLD key stay spendable, and this is the whole
+ * point of the K1-only custody model: there is ONE vault key reached two
+ * ways, so the replacement card unwraps the SAME seed the old one did and
+ * every existing output's child key derives from it exactly as before. No
+ * sweep is required after replacing a YubiKey. (The old physical card stops
+ * working nonetheless — the ceremony's serial check in
+ * armViaReader/openTapSession, ceremony.ts, refuses any card whose serial
+ * does not match the newly-stored yubiSerial.)
+ *
+ * What protects against resealing to a node that is NOT this vault's is
+ * `verifyHD` above, plus the per-input pkh comparison in transfers.ts's
+ * prepareSpends: each output's locking script is rebuilt from the key
+ * actually in hand and compared against the real script out of the listed
+ * BEEF, so a wrong key or a mistyped passphrase fails loudly before anything
+ * is reserved or signed.
  */
 export async function resealToNewKey(
   mnemonic: string,

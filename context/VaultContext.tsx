@@ -37,8 +37,12 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => ceremony.subscribe(setState), [])
 
-  // Effects of a completed ceremony: the open cue. (v3 derives deposit keys
-  // from the xpub on demand — there is no queue left to replenish here.)
+  // Effects of a completed ceremony: the open cue, and nothing else. `onArmed`
+  // deliberately ignores its VaultKeyHandle argument — the unwrapped node must
+  // never reach React state or a closure that outlives the operation (see
+  // VaultKeyHandle in services/vault/ceremony.ts). There is no key queue to
+  // replenish here either: deposit addresses derive from the private node on
+  // demand, and no xpub is stored anywhere.
   useEffect(() => {
     ceremony.onArmed = () => {
       haptics.success()

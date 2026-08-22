@@ -87,6 +87,49 @@ describe('deriveVaultHD', () => {
   it('returns a private node', () => {
     expect(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE).isPrivate()).toBe(true)
   })
+
+  it('zeroizes its own copy of the seed once the node is built', () => {
+    // deriveVaultSeed hands back a fresh 64-byte array on every call, so this
+    // one is NOT the array enrollVault/resealToNewKey wipe — nothing else can
+    // reach it. Left unwiped, every recovery (recoverVaultHD), every sweep,
+    // and every proof-script run would release a live vault seed to the GC.
+    // Same fill-spy shape as vaultKeyService.test.ts's enrollment case.
+    const fillSpy = jest.spyOn(Array.prototype, 'fill')
+    let zeroedA64ByteArray: boolean
+    try {
+      deriveVaultHD(TEST_MNEMONIC, PASSPHRASE)
+      zeroedA64ByteArray = fillSpy.mock.calls.some(
+        ([value], i) => value === 0 && (fillSpy.mock.instances[i] as unknown[]).length === 64
+      )
+    } finally {
+      // A spy on Array.prototype leaks into every later test in the file if a
+      // failure above skips the restore.
+      fillSpy.mockRestore()
+    }
+    expect(zeroedA64ByteArray).toBe(true)
+  })
+
+  it('zeroizes the seed even when HD.fromSeed rejects it', () => {
+    // The `finally`, not the happy path. HD.fromSeed refuses anything outside
+    // 16..64 bytes; a seed must not survive that refusal any more than it
+    // survives success. Forced by making fromSeed throw, since deriveVaultSeed
+    // itself always produces a valid 64-byte seed.
+    const fromSeedSpy = jest.spyOn(HD, 'fromSeed').mockImplementation(() => {
+      throw new Error('Need more than 128 bits of entropy')
+    })
+    const fillSpy = jest.spyOn(Array.prototype, 'fill')
+    let zeroedA64ByteArray: boolean
+    try {
+      expect(() => deriveVaultHD(TEST_MNEMONIC, PASSPHRASE)).toThrow()
+      zeroedA64ByteArray = fillSpy.mock.calls.some(
+        ([value], i) => value === 0 && (fillSpy.mock.instances[i] as unknown[]).length === 64
+      )
+    } finally {
+      fillSpy.mockRestore()
+      fromSeedSpy.mockRestore()
+    }
+    expect(zeroedA64ByteArray).toBe(true)
+  })
 })
 
 describe('depositPubKeyHash', () => {

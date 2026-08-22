@@ -8,8 +8,9 @@
  *   the YubiKey ceremony is the gate for anything the seal protects.
  * - UI metadata (serial, nickname, deposit-index counter) → AsyncStorage
  *   ('vault_meta_v1'). Nothing secret lives here, and no key material either:
- *   v4 carries neither the xpub nor the YubiKey's R1 public key — those live
- *   only inside the sealed blob, opened only through the YubiKey ceremony.
+ *   v4 carries no xpub and no card public key. The only thing that can
+ *   produce a vault address is the private HD node, which exists solely for
+ *   the length of a ceremony (or a mnemonic + passphrase recovery).
  *
  * v1-v3 records are not readable — `getMeta` returns null for anything whose
  * `v` isn't 4, so an un-migrated install reads as "not enrolled" rather than
@@ -26,15 +27,15 @@ const META_KEY = 'vault_meta_v1'
  * Current enrollment.
  *
  * K1-only vault: at rest this is just the sealed blob plus this plaintext
- * counter. No xpub, no r1PublicKey — both would-be key materials live only
- * inside the sealed blob.
+ * counter. No xpub and no card public key: the one secret at rest is the
+ * seed inside the sealed blob, and nothing here narrows the search for it.
  */
 export interface VaultMetaV4 {
   v: 4
   enrolledAt: number
   yubiSerial: string
   nickname: string
-  /** PIV slot holding the R1 key (0x82). */
+  /** PIV slot holding the card's P-256 ECDH key (0x82). */
   slot: number
   /** Next unused deposit index — monotonic, never reused. */
   nextKeyIndex: number
