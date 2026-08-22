@@ -9,9 +9,10 @@
  * ECDH must open it back to the exact HD node the mnemonic + passphrase route
  * derives — rather than inspecting a public key field that no longer exists.
  *
- * The ceremony's own ceremony.ts (which still speaks the per-output
- * r1PublicKey vocabulary — Task 8's job to rewrite) is intentionally not
- * exercised here; VaultKeyService no longer has anything to do with it.
+ * The ceremony's own ceremony.ts (rewritten under Task 8 to the same
+ * unwrap-oracle model — no per-output r1PublicKey vocabulary left) is
+ * intentionally not exercised here; VaultKeyService no longer has anything
+ * to do with it.
  */
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')

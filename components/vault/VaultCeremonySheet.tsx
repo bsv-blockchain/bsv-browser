@@ -84,7 +84,8 @@ export const VaultCeremonySheet: React.FC = () => {
 
   const phase = state.phase
   // 'armed' stays hidden: it persists for the whole retention window, so
-  // showing it would leave the sheet up for minutes after a withdrawal is done.
+  // showing it would leave the sheet up for minutes after a transfer is done
+  // — deposit and withdrawal both arm the same way and are treated alike here.
   const visible = phase !== 'idle' && phase !== 'armed'
 
   /**

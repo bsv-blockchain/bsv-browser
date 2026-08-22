@@ -35,9 +35,11 @@ export type VaultErrorCode =
   /** unsealVaultKey could not open a SealedBlob — wrong shared secret,
    * tampered ciphertext, or a malformed blob. Never distinguishes which. */
   | 'seal-corrupt'
-  /** A vault key digest or key material failed a structural check. Programmer
-   * error or a corrupted dependency — never something a user can cause or
-   * fix. Distinct from 'wrong-key', which vaultErrorFromNative may
+  /** A vault key digest or key material failed a structural check. Usually a
+   * corrupted dependency or a native bug, but a user CAN cause this: choosing
+   * to adopt a foreign PIV slot (VaultKeyService's `adoptExisting`) whose key
+   * material isn't a compatible EC point makes sealVaultKey's ECDH reject it
+   * the same way. Distinct from 'wrong-key', which vaultErrorFromNative may
    * reclassify to 'nfc-lost'. */
   | 'template-invalid'
   | 'serial-mismatch'

@@ -68,7 +68,7 @@ export default function VaultTransferScreen() {
   // and lets the toolbox work out the fee, which is the only way to empty the
   // vault exactly. Pre-computing "balance minus fee" here cannot work — a K1
   // withdrawal's fee depends on how many vault inputs it takes to cover the
-  // amount (each input is an ordinary ~108-byte unlock), not on any one
+  // amount (each input is an ordinary ~107-byte unlock), not on any one
   // script's size, and that count is not known until the outputs are selected.
   const isMax = amount === SEND_MAX_VALUE
 
@@ -154,7 +154,7 @@ export default function VaultTransferScreen() {
     } finally {
       setBusy(false)
     }
-  }, [amount, isMax, balance, isDeposit, managers?.permissionsManager, adminOriginator, refresh])
+  }, [amount, isMax, balance, isDeposit, managers?.permissionsManager, adminOriginator, refresh, storage])
 
   const sats = parseInt(amount, 10)
   const valid = isMax || (Number.isFinite(sats) && sats > 0)

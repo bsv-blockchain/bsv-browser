@@ -52,7 +52,23 @@ export default function VaultRecoverScreen() {
       const mnemonic = await getMnemonic()
       if (!mnemonic) throw new VaultError('bad-mnemonic', t('vault_requires_mnemonic'))
       const hd = await recoverVaultHD(mnemonic, passphrase)
-      await sweepVaultWithHD(pm as unknown as VaultWallet, adminOriginator, hd, t('vault_recover_reason'))
+
+      // sweepVaultWithHD caps at VAULT_MAX_INPUTS per call (see transfers.ts) and
+      // reports how many vault outputs it left behind. A vault holding more than
+      // that cap needs several sweeps, so repeat until either call reports
+      // nothing left to do: `null` means the vault was already empty when that
+      // sweep ran, and `remainingInputs === 0` means the sweep that just ran
+      // cleared the last of it. Each successful iteration strictly reduces the
+      // number of vault outputs still held (it spends min(remaining,
+      // VAULT_MAX_INPUTS) > 0 of them), so remainingInputs decreases every pass
+      // and the loop is guaranteed to terminate at 0 or null. A thrown error
+      // (e.g. 'wrong-key' from a mismatched passphrase) exits the loop and the
+      // catch below runs instead — disableVault() is never reached, and the
+      // vault is left exactly as it was before the failed iteration.
+      let result = await sweepVaultWithHD(pm as unknown as VaultWallet, adminOriginator, hd, t('vault_recover_reason'))
+      while (result !== null && result.remainingInputs > 0) {
+        result = await sweepVaultWithHD(pm as unknown as VaultWallet, adminOriginator, hd, t('vault_recover_reason'))
+      }
 
       await disableVault()
       haptics.success()

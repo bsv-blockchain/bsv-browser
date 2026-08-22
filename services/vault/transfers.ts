@@ -891,8 +891,12 @@ async function spendVaultOutputs(
   // Omit it and createAction.js's makeSignableTransactionBeef throws
   // WERR_INTERNAL('Every signableTransaction input must have a
   // sourceTransaction') on the very first input, before signing ever starts.
-  // (This does not apply to depositToVault: it supplies no explicit inputs,
-  // so isSignAction is false there and no BEEF is ever needed.)
+  // (depositToVault's tx2 is in the same boat, not exempt from it: its
+  // staging input also carries an unlockingScriptLength with no
+  // unlockingScript, so isSignAction is true there too. It needs no separate
+  // note here because it already threads `staged.BEEF` through as inputBEEF
+  // for exactly this reason — see the createAction call below the staging
+  // input is built from.)
   //
   // The second is the wrong-key check below: the BEEF is where each vault
   // output's REAL locking script comes from, which is what the derived child
