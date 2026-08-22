@@ -1,4 +1,5 @@
 import React, {
+import { classifyAddressInput, buildWeb3TabUrl, web3SplashPage, refreshTlds, DEFAULT_CONFIG } from '@/utils/web3names/browser'
   forwardRef,
   useCallback,
   useDeferredValue,
@@ -433,8 +434,39 @@ export const AddressBar = observer(
     /*                              ADDRESS HANDLING                              */
     /* -------------------------------------------------------------------------- */
 
+    // Monotonic token so a slow resolution can never overwrite a newer navigation.
+    const web3NavSeq = useRef(0)
+
+    // Keep the recognised web3 TLD set fresh (snapshot covers offline starts).
+    useEffect(() => {
+      void refreshTlds(DEFAULT_CONFIG.resolverUrl, DEFAULT_CONFIG.tldRefreshMs)
+    }, [])
+
     const onAddressSubmit = useCallback(() => {
       let entry = addressText.trim()
+
+      // Web3 names (ODNCA TLD set): earthlog.web3 resolves to its verified
+      // on-chain site instead of a dead https:// DNS error. Conservative by
+      // design — anything not in the recognised TLD set falls through to the
+      // existing URL/search behaviour untouched.
+      const web3 = classifyAddressInput(entry)
+      if (web3.kind === 'web3') {
+        addressEditing.current = false
+        cancelableNewTabId.current = null
+        const tabId = tabStore.activeTabId
+        const nav = ++web3NavSeq.current
+        // Instant feedback: the address bar keeps showing the NAME (url) while
+        // sourceUrl — which alone drives the WebView — shows a resolving splash
+        // and then the verified content. History and bookmarks stay readable.
+        const displayUrl = `https://${web3.name}`
+        tabStore.updateTab(tabId, { url: displayUrl, sourceUrl: web3SplashPage(web3.name) })
+        void buildWeb3TabUrl(web3.address, web3.name).then((sourceUrl) => {
+          if (web3NavSeq.current !== nav) return // a newer navigation superseded this one
+          tabStore.updateTab(tabId, { url: displayUrl, sourceUrl })
+        })
+        return
+      }
+
       const hasProtocol = /^[a-z]+:\/\//i.test(entry)
       const isIpAddress = /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/.*)?$/i.test(entry)
       const isProbablyUrl = hasProtocol || /^(www\.|([A-Za-z0-9\-]+\.)+[A-Za-z]{2,})(\/|$)/i.test(entry) || isIpAddress

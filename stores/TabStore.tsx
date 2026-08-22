@@ -299,8 +299,11 @@ export class TabStore {
         // updateTab is only ever called for explicit navigation (address bar,
         // homepage, deep link) — never from passive nav-state events, which write
         // tab.url directly. So an updateTab URL change is a real load request:
-        // sync sourceUrl too, which is what drives the WebView source.
-        patch.sourceUrl = patch.url
+        // sync sourceUrl too, which is what drives the WebView source — unless
+        // the caller supplied an explicit sourceUrl (verified inline content,
+        // e.g. utils/web3names), which then feeds the WebView while `url`
+        // stays the readable address for the bar, history, and bookmarks.
+        if (!('sourceUrl' in patch)) patch.sourceUrl = patch.url
       }
 
       const newUrl = patch.url
