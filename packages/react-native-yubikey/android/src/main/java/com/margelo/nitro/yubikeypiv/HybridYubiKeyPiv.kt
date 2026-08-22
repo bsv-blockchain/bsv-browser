@@ -25,6 +25,11 @@ import com.yubico.yubikit.piv.PivSession
 import com.yubico.yubikit.piv.Slot
 import com.yubico.yubikit.piv.TouchPolicy
 import java.io.IOException
+import java.math.BigInteger
+import java.security.AlgorithmParameters
+import java.security.spec.ECFieldFp
+import java.security.spec.ECGenParameterSpec
+import java.security.spec.ECParameterSpec
 
 /**
  * YubiKeyPiv over YubiKit-Android's PIV application (CCID).
@@ -259,6 +264,21 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
       )
       return promise
     }
+    // Invalid-curve defence. Neither the shape check above nor fromEncodedPoint
+    // below establishes that the point actually lies ON secp256r1, and handing
+    // an off-curve point to a KeyAgreement is the classic invalid-curve attack:
+    // the card ends up computing in a small group of the attacker's choosing and
+    // the resulting "secret" leaks bits of the slot's private key. The card is
+    // expected to reject it as well, but that is the card's guarantee to keep —
+    // this one is ours (iOS gets it for free from SecKeyCreateWithData) and it
+    // costs two 256-bit modular exponentiations, once per unlock. Runs BEFORE
+    // the PIN so a bad point never burns a retry either.
+    try {
+      requireOnCurveP256(peerBytes)
+    } catch (_: Throwable) {
+      promise.reject(vaultError("template-invalid", "peer public key is not a point on secp256r1"))
+      return promise
+    }
 
     withPiv(promise) { piv ->
       // withPiv opens a FRESH PivSession per call, so the PIN must be verified
@@ -408,6 +428,48 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
     }
     is IOException -> Error("VAULT_ERR:key-removed-mid-op:${t.message}")
     else -> Error("VAULT_ERR:wrong-key:${t.message}")
+  }
+
+  /**
+   * Throw unless `point` (65-byte SEC1 uncompressed, already shape-checked) is a
+   * point on secp256r1.
+   *
+   * The equation is checked HERE, in explicit BigInteger arithmetic, rather than
+   * by round-tripping the coordinates through
+   * `KeyFactory.generatePublic(ECPublicKeySpec)`. That is deliberate and was
+   * measured, not assumed: the JCE does NOT promise on-curve validation at
+   * key-spec construction, and the JDK's own SunEC provider demonstrably
+   * performs none — it accepts a bit-flipped off-curve point and even all-zero
+   * coordinates. Conscrypt happens to be stricter, but a security check must not
+   * rest on which provider a given OS image ships. Doing the arithmetic makes
+   * the guarantee ours on every provider and every API level.
+   *
+   * Only p, a and b are taken from the JCE (via a named curve, so the domain
+   * parameters are never hard-coded here). secp256r1 has cofactor 1, so
+   * "on the curve and not the identity" is exactly "in the prime-order
+   * subgroup" — no scalar multiplication is needed. The identity has no
+   * uncompressed 0x04 encoding, and (0, 0) fails the equation because b != 0.
+   *
+   * Throws IllegalArgumentException (the same failure mode as `hexToBytes`);
+   * the caller maps ANY throwable to template-invalid, so this fails closed.
+   */
+  private fun requireOnCurveP256(point: ByteArray) {
+    val params = AlgorithmParameters.getInstance("EC").run {
+      init(ECGenParameterSpec("secp256r1"))
+      getParameterSpec(ECParameterSpec::class.java)
+    }
+    val curve = params.curve
+    val p = (curve.field as ECFieldFp).p
+    val x = BigInteger(1, point.copyOfRange(1, 33))
+    val y = BigInteger(1, point.copyOfRange(33, 65))
+    // Coordinates must be field elements. BigInteger(1, ..) is never negative,
+    // so this is really the upper bound — it rejects e.g. an all-0xff blob.
+    require(x < p && y < p) { "coordinate not in the field" }
+    // y^2 == x^3 + ax + b  (mod p). BigInteger.TWO is API 31+ and minSdk is 24,
+    // so both constants go through valueOf.
+    val lhs = y.modPow(BigInteger.valueOf(2), p)
+    val rhs = x.modPow(BigInteger.valueOf(3), p).add(curve.a.multiply(x)).add(curve.b).mod(p)
+    require(lhs == rhs) { "point is not on the curve" }
   }
 
   private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

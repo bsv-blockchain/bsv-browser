@@ -245,8 +245,15 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
         "template-invalid", "peer public key must be 65-byte SEC1 uncompressed (0x04 || X || Y)"))
       return promise
     }
+    // Invalid-curve defence: an off-curve point handed to a KeyAgreement lets an
+    // attacker pull the computation into a small group and leak bits of the
+    // slot's private key. SecKeyCreateWithData IS the on-curve check here —
+    // verified empirically against the Security framework, which rejects a
+    // bit-flipped coordinate, all-zero coordinates, out-of-field values and a
+    // transposed X/Y, while accepting real keys. (Android has no equivalent
+    // free check and does the curve equation by hand — see requireOnCurveP256.)
     guard let peerKey = Self.sec1HexToSecKey(peerData) else {
-      promise.reject(withError: Self.vaultError("template-invalid", "peer public key is not a valid P-256 point"))
+      promise.reject(withError: Self.vaultError("template-invalid", "peer public key is not a point on secp256r1"))
       return promise
     }
 
@@ -259,8 +266,31 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
     withSession(promise) { session in
       // pin-policy ONCE gate: neither YubiKit nor the card verifies for us, and
       // withSession may hand back a session on which nothing has been verified.
-      session.verifyPin(pin) { _, error in
-        if let error { return settled.reject(promise, Self.mapError(error)) }
+      //
+      // The retry count MUST be read from the completion's first argument, not
+      // inferred from the error. YubiKit does not surface the card's 0x63Cx
+      // status word here — it swallows it and hands back its own NSError
+      // (YKFPIVErrorDomain, InvalidPin = 5 / PinLocked = 6), which `mapError`'s
+      // status-word cases cannot recognise and would fold into `wrong-key`,
+      // losing the count. What the block DOES carry (YKFPIVSession.m:594-619,
+      // and the header's "retries left or -1 if an error occured") is:
+      //   > 0  wrong PIN, that many attempts remain
+      //   == 0 PIN blocked
+      //   == -1 neither — a transport/APDU fault, which mapError does classify.
+      // The detail strings are byte-identical to the Android side's
+      // (`pin-invalid:retries=N` / `pin-locked:no attempts remaining`) so
+      // vaultErrorFromNative's /retries=(\d+)/ populates VaultError.retriesLeft
+      // identically on both platforms.
+      session.verifyPin(pin) { retries, error in
+        if let error {
+          if retries > 0 {
+            return settled.reject(promise, Self.vaultError("pin-invalid", "retries=\(retries)"))
+          }
+          if retries == 0 {
+            return settled.reject(promise, Self.vaultError("pin-locked", "no attempts remaining"))
+          }
+          return settled.reject(promise, Self.mapError(error))
+        }
         // TOUCH-gated when the slot's key was generated with TouchPolicy.ALWAYS
         // (which is what generateVaultKey now uses): this blocks until the user
         // taps, and an unmet touch surfaces as touch-timeout via mapError.
@@ -436,8 +466,9 @@ final class HybridYubiKeyPiv: HybridYubiKeyPivSpec {
   /// public `SecKey`. The inverse of `secKeyToSec1Hex`: Security's external
   /// representation for an EC public key IS ANSI X9.63 uncompressed, so the
   /// bytes go in as-is. Returns nil when Security will not accept the bytes as a
-  /// P-256 public key, which is the last line of defence for `ecdh`'s peer key
-  /// (the 65-byte / 0x04 shape is checked by the caller first).
+  /// P-256 public key — which includes points that are not ON the curve, making
+  /// this `ecdh`'s invalid-curve guard (the 65-byte / 0x04 shape is checked by
+  /// the caller first).
   private static func sec1HexToSecKey(_ data: Data) -> SecKey? {
     let attrs: [String: Any] = [
       kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
