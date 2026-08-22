@@ -12,29 +12,31 @@
  *   - the second random 24-word mnemonic (the user now backs up ONE phrase)
  *   - the precomputed queue of 64 deposit key hashes in vault meta
  *
- * Persisting the xpub plus a single `nextKeyIndex` counter is strictly better
- * than the queue: address n derives on demand, forever, with no YubiKey. The
- * queue failed closed at 64 addresses and required a privileged ceremony to
- * refill, so deposits could break until the user produced their key.
+ * There is no xpub anywhere in this design, and nothing about the vault is
+ * ever public at rest: the vault stores a YubiKey-sealed seed and a bare
+ * `nextKeyIndex` counter, nothing else. Deposit address n derives from the
+ * private HD node, which exists only transiently, after one of the two
+ * recovery routes below reaches it.
  *
  * Recovery paths, and there are exactly two:
- *   1. YubiKey + PIN               — signs directly, nothing to unseal
- *   2. main mnemonic + passphrase  — via this file
- * There is no third path. Nobody can reset it.
- *
- * PRIVACY: the stored xpub lets anyone with device access enumerate every
- * vault address. It cannot spend, but it does link them. The previous design
- * leaked 64 addresses the same way; this leaks all of them.
+ *   1. YubiKey-unseal of the sealed seed  — the YubiKey unwraps the seed,
+ *      which reconstructs this same HD node; nothing to type.
+ *   2. main mnemonic + passphrase          — via this file; the same
+ *      mnemonic and passphrase reconstruct the same HD node offline.
+ * Both routes reach the identical HD node. There is no third path. Nobody
+ * can reset it. Deposit address n derives on demand from that node, once
+ * per unseal, however many indices are needed — unlike the old 64-key
+ * queue, which failed closed until a privileged ceremony refilled it.
  *
  * SECURITY: never log the seed, the HD node, the mnemonic, or the passphrase.
  */
-import { PrivateKey, HD, Mnemonic } from '@bsv/sdk'
+import { PrivateKey, HD, Mnemonic, Hash } from '@bsv/sdk'
 import { normalizeVaultPassphrase } from './vaultPassphrase'
 import { randomBytes } from './random'
 import { VaultError } from './types'
 
-/** BIP32 hardened-index boundary. Hardened children cannot be derived from an
- * xpub, so every deposit index must sit below this. */
+/** BIP32 hardened-index boundary. Deposit indices stay below this so the
+ * derivation path is uniform and predictable across every call site. */
 const HARDENED = 0x80000000
 
 function assertNonHardened(index: number): void {
@@ -96,9 +98,10 @@ const ADOPT_INDEX_SPAN = 1 << 28
  * A random, non-hardened starting deposit index.
  *
  * Used when a device adopts a YubiKey that is already enrolled elsewhere: both
- * devices derive from the SAME xpub, and a device-local counter is the only
- * thing choosing indices, so two devices starting at zero would hand out the
- * same deposit addresses. Reusing an address does not risk funds — it links
+ * devices reach the SAME HD node (via the same mnemonic+passphrase, or the
+ * same unsealed seed), and a device-local counter is the only thing choosing
+ * indices, so two devices starting at zero would hand out the same deposit
+ * addresses. Reusing an address does not risk funds — it links
  * two deposits and confuses the history — and coordinating counters across
  * devices would need a channel the vault deliberately does not have. A random
  * start in a 2^28-wide span makes a collision negligible instead.
@@ -114,11 +117,6 @@ export function deriveVaultHD(mnemonic: string, passphrase: string): HD {
   return HD.fromSeed(deriveVaultSeed(mnemonic, passphrase))
 }
 
-/** Public-only serialisation of the vault node — safe to persist. */
-export function vaultXpub(hd: HD): string {
-  return hd.toPublic().toString()
-}
-
 /** Private key for deposit index n. Requires the private node. */
 export function depositPrivKey(hd: HD, index: number): PrivateKey {
   assertNonHardened(index)
@@ -126,28 +124,10 @@ export function depositPrivKey(hd: HD, index: number): PrivateKey {
 }
 
 /**
- * Deposit address hash160 for index n, from the xpub alone.
- *
- * This is the call that keeps the YubiKey out of the deposit path.
+ * Deposit address hash160 for index n. Requires the private node — there is
+ * no xpub to derive this from without it.
  */
-export function depositPkhFromXpub(xpub: string, index: number): string {
+export function depositPubKeyHash(hd: HD, index: number): number[] {
   assertNonHardened(index)
-  return HD.fromString(xpub).deriveChild(index).pubKey.toHash('hex') as string
-}
-
-/**
- * Check a candidate passphrase offline against the stored xpub.
- *
- * The xpub doubles as the typo verifier: BIP39 passphrases carry no checksum,
- * so without this a typo silently opens a different, valid, EMPTY vault.
- *
- * Never throws — the enrollment and recovery UIs call this while the user is
- * still typing.
- */
-export function verifyVaultPassphrase(mnemonic: string, passphrase: string, expectedXpub: string): boolean {
-  try {
-    return vaultXpub(deriveVaultHD(mnemonic, passphrase)) === expectedXpub
-  } catch {
-    return false
-  }
+  return Hash.hash160(hd.deriveChild(index).pubKey.encode(true) as number[])
 }

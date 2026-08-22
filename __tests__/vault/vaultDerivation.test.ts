@@ -6,25 +6,21 @@
  *   vault HD node  : HD.fromSeed(Mnemonic.toSeed(vaultPassphrase))
  *   deposit addr n : vaultHD.deriveChild(n)
  *
- * Persistence is a single counter (`nextKeyIndex`) plus the vault xpub — no
- * precomputed queue of key hashes. The xpub is what lets deposits derive
- * address n on demand with no YubiKey and no replenishment ceremony.
+ * There is no xpub anywhere in this design: nothing public is ever at rest.
+ * Deposit addresses derive from the private HD node, which exists only after
+ * one of the two recovery routes below reaches it.
  *
  * Recovery paths, and there are exactly two:
- *   1. YubiKey + PIN               — signs directly, nothing to unseal
- *   2. main mnemonic + passphrase  (this file)
- *
- * The passphrase has NO checksum, so a typo silently yields a different,
- * valid, EMPTY vault. The stored xpub doubles as the offline verifier.
+ *   1. YubiKey-unseal of the sealed seed  — nothing to derive from a phrase
+ *   2. main mnemonic + passphrase          (this file)
+ * Both reach the same HD node; deposits derive post-unseal either way.
  */
-import { Mnemonic, HD } from '@bsv/sdk'
+import { Mnemonic, HD, Hash } from '@bsv/sdk'
 import {
   deriveVaultSeed,
   deriveVaultHD,
-  vaultXpub,
-  depositPkhFromXpub,
   depositPrivKey,
-  verifyVaultPassphrase,
+  depositPubKeyHash,
   bip32KeyID,
   indexFromKeyID,
   randomDepositStartIndex
@@ -50,9 +46,9 @@ describe('deriveVaultSeed', () => {
 
   it('is a 64-byte BIP39 seed, so the HD chain code supports BIP32 child derivation', () => {
     // A bare 32-byte private key carries no chain code. deriveVaultHD /
-    // depositPkhFromXpub / depositPrivKey all need to deriveChild(n) — both
-    // for ordinary deposits (derived from the xpub, no YubiKey involved) and
-    // for the K1 recovery sweep — so the seed must be the full 64 bytes.
+    // depositPubKeyHash / depositPrivKey all need to deriveChild(n) — both
+    // for ordinary deposits and for the K1 recovery sweep — so the seed must
+    // be the full 64 bytes.
     expect(deriveVaultSeed(TEST_MNEMONIC, PASSPHRASE)).toHaveLength(64)
   })
 
@@ -93,60 +89,34 @@ describe('deriveVaultHD', () => {
   })
 })
 
-describe('vaultXpub', () => {
-  it('is public-only, so storing it can never leak spend authority', () => {
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    expect(HD.fromString(xpub).isPrivate()).toBe(false)
-  })
-
-  it('is stable for the same mnemonic and passphrase', () => {
-    expect(vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))).toBe(
-      vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    )
-  })
-
-  it('differs for a different passphrase', () => {
-    expect(vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))).not.toBe(
-      vaultXpub(deriveVaultHD(TEST_MNEMONIC, 'a completely different passphrase here'))
-    )
-  })
-})
-
-describe('depositPkhFromXpub', () => {
-  it('derives address n from the xpub alone, with no private key present', () => {
-    // This is what removes the YubiKey from the deposit path entirely: no
-    // precomputed queue, no replenishment ceremony, unlimited addresses.
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    expect(depositPkhFromXpub(xpub, 0)).toMatch(/^[0-9a-f]{40}$/)
-  })
-
-  it('agrees with the private derivation at the same index', () => {
-    // The load-bearing BIP32 property. If public and private derivation ever
-    // disagreed, funds would be sent to addresses the vault cannot spend.
+describe('depositPubKeyHash', () => {
+  it("matches the hash of depositPrivKey's public key", () => {
     const hd = deriveVaultHD(TEST_MNEMONIC, PASSPHRASE)
-    const xpub = vaultXpub(hd)
+    const pkh = depositPubKeyHash(hd, 7)
+    const fromPriv = Hash.hash160(depositPrivKey(hd, 7).toPublicKey().encode(true) as number[])
+    expect(pkh).toEqual(fromPriv)
+  })
+
+  it('agrees with the private derivation at every index', () => {
+    // The load-bearing BIP32 property. If the two ever disagreed, deposits
+    // would be sent to addresses the vault cannot spend.
+    const hd = deriveVaultHD(TEST_MNEMONIC, PASSPHRASE)
     for (const n of [0, 1, 7, 64, 1000]) {
-      const fromPublic = depositPkhFromXpub(xpub, n)
-      const fromPrivate = depositPrivKey(hd, n).toPublicKey().toHash('hex') as string
-      expect(fromPublic).toBe(fromPrivate)
+      const pkh = depositPubKeyHash(hd, n)
+      const fromPriv = Hash.hash160(depositPrivKey(hd, n).toPublicKey().encode(true) as number[])
+      expect(pkh).toEqual(fromPriv)
     }
   })
 
-  it('gives a different address for each index', () => {
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    const seen = new Set([0, 1, 2, 3, 4, 5].map(n => depositPkhFromXpub(xpub, n)))
+  it('gives a different hash for each index', () => {
+    const hd = deriveVaultHD(TEST_MNEMONIC, PASSPHRASE)
+    const seen = new Set([0, 1, 2, 3, 4, 5].map(n => depositPubKeyHash(hd, n).join(',')))
     expect(seen.size).toBe(6)
   })
 
-  it('derives an index far beyond the old 64-key queue', () => {
-    // The queue design failed closed at 64 addresses until another ceremony.
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    expect(depositPkhFromXpub(xpub, 5000)).toMatch(/^[0-9a-f]{40}$/)
-  })
-
-  it('uses non-hardened indices, since hardened cannot derive from an xpub', () => {
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    expect(() => depositPkhFromXpub(xpub, 0x80000000)).toThrow()
+  it('rejects hardened indices', () => {
+    const hd = deriveVaultHD(TEST_MNEMONIC, PASSPHRASE)
+    expect(() => depositPubKeyHash(hd, 0x80000000)).toThrow()
   })
 })
 
@@ -168,43 +138,6 @@ describe('bip32 keyID encoding', () => {
   })
 })
 
-describe('verifyVaultPassphrase', () => {
-  it('accepts the passphrase the vault was created with', () => {
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    expect(verifyVaultPassphrase(TEST_MNEMONIC, PASSPHRASE, xpub)).toBe(true)
-  })
-
-  it('rejects a single-character typo', () => {
-    // The headline hazard: without this a typo silently opens a different,
-    // empty vault and the user believes their funds are gone.
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    expect(verifyVaultPassphrase(TEST_MNEMONIC, 'correct horse battery staple anchoe', xpub)).toBe(
-      false
-    )
-  })
-
-  it('rejects a correct passphrase against the wrong mnemonic', () => {
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    const other = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
-    expect(verifyVaultPassphrase(other, PASSPHRASE, xpub)).toBe(false)
-  })
-
-  it('returns false rather than throwing on an empty passphrase', () => {
-    // The UI calls this while the user is still typing; it must not throw.
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    expect(verifyVaultPassphrase(TEST_MNEMONIC, '', xpub)).toBe(false)
-  })
-
-  it('returns false rather than throwing on a malformed mnemonic', () => {
-    const xpub = vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE))
-    expect(verifyVaultPassphrase('garbage', PASSPHRASE, xpub)).toBe(false)
-  })
-
-  it('returns false rather than throwing on a malformed xpub', () => {
-    expect(verifyVaultPassphrase(TEST_MNEMONIC, PASSPHRASE, 'not-an-xpub')).toBe(false)
-  })
-})
-
 describe('randomDepositStartIndex', () => {
   it('stays inside the non-hardened range with room to increment', () => {
     for (let i = 0; i < 200; i++) {
@@ -216,9 +149,7 @@ describe('randomDepositStartIndex', () => {
       // deposits can never walk into it.
       expect(n).toBeLessThan(0x40000000)
       // Derivable, which is the whole point — a hardened index would not be.
-      expect(depositPkhFromXpub(vaultXpub(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE)), n)).toMatch(
-        /^[0-9a-f]{40}$/
-      )
+      expect(depositPubKeyHash(deriveVaultHD(TEST_MNEMONIC, PASSPHRASE), n)).toHaveLength(20)
     }
   })
 
