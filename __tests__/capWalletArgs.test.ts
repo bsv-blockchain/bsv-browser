@@ -37,7 +37,7 @@ describe('capWalletArgs', () => {
     expect(w.createAction).not.toHaveBeenCalled()
   })
 
-  it('refuses a vault-sized internalizeAction from a page', async () => {
+  it('refuses an oversize internalizeAction from a page', async () => {
     const w = wallet()
     await expect(
       capWalletArgs(w as any, L).internalizeAction({ tx: new Array(2_000_000).fill(0) }, 'page.com')

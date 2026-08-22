@@ -23,11 +23,13 @@
  * Nothing here serialises anything. Every size is summed from a length that is
  * already materialised, so a check is O(#inputs + #outputs) integer reads.
  *
- * THE VAULT IS NOT SUBJECT TO THESE. Its deposit sends a 1,919,264-char hex
- * locking script and its withdrawal sends ~1.83 MB of inputBEEF per input. The
- * exemption is structural — the vault calls the permissions manager directly and
- * never passes through the wrapper in capWalletArgs.ts — and it is paired with
- * the vault's own input cap in services/vault/transfers.ts.
+ * THE VAULT IS NOT SUBJECT TO THESE. Its K1 traffic is ordinary-sized today —
+ * a 25-byte P2PKH locking script and a ~107-byte unlocking script per input —
+ * comfortably inside every limit below. The exemption is structural rather
+ * than sized to fit current vault traffic: the vault calls the permissions
+ * manager directly and never passes through the wrapper in capWalletArgs.ts,
+ * so it stays insulated from any future tightening of these limits. It is
+ * paired with the vault's own input cap in services/vault/transfers.ts.
  */
 import type { DeviceTier } from '@/utils/deviceTier'
 
@@ -112,10 +114,7 @@ const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
  * A locking script beginning with 0xff is refused outright.
  *
  * OP_INVALIDOPCODE makes the output provably unspendable, so no legitimate
- * caller wants one — and it is the marker the vault's compressed-script codec
- * uses, so accepting page-supplied bytes that start with it would let a page
- * plant a value that a later expand-on-read path has to reason about. Cheap to
- * refuse, and nothing is lost.
+ * caller wants one. Cheap to refuse, and nothing is lost.
  */
 const startsWithInvalidOpcode = (script: unknown): boolean =>
   typeof script === 'string' && /^ff/i.test(script.trim())

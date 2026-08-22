@@ -1,3 +1,5 @@
+> **SUPERSEDED** by [2026-08-21-k1-vault-design.md](./2026-08-21-k1-vault-design.md)
+
 # R1-K1 Vault — design
 
 Date: 2026-08-15

@@ -1,3 +1,5 @@
+> **SUPERSEDED** by [2026-08-21-k1-vault-design.md](./2026-08-21-k1-vault-design.md)
+
 # Compressed-at-rest R1-K1 transactions, size caps, and storage pressure
 
 **Date:** 2026-08-19

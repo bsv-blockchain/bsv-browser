@@ -93,7 +93,6 @@
     "expo-symbols": "~55.0.9",
     "expo-system-ui": "~55.0.18",
     "expo-web-browser": "~55.0.16",
-    "fflate": "^0.8.3",
     "fuse.js": "^7.1.0",
     "i18next": "^25.2.1",
     "idb": "^8.0.3",

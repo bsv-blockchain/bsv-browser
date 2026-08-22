@@ -1,3 +1,5 @@
+> **SUPERSEDED** by [2026-08-21-k1-vault-design.md](./2026-08-21-k1-vault-design.md)
+
 # Vault script template compression
 
 **Status:** approved by the project owner 2026-08-18

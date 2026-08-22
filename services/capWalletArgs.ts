@@ -7,10 +7,11 @@
  * neither a permission prompt nor a storage touch.
  *
  * WHERE THIS MUST NOT GO. Not in guardVaultAccess, not in SimpleWalletManager,
- * not in WalletPermissionsManager, and not in the toolbox. The vault's own
- * traffic dwarfs every limit here — a deposit sends a 1,919,264-char hex locking
- * script and a withdrawal sends ~1.83 MB of inputBEEF per input — so a cap on
- * any shared path breaks it outright.
+ * not in WalletPermissionsManager, and not in the toolbox. The vault's K1
+ * traffic is ordinary-sized today — a 25-byte P2PKH locking script and a
+ * ~107-byte unlocking script per input — and would pass any limit here
+ * unmodified. The exemption is kept anyway so the vault stays insulated from
+ * any future tightening of these limits on the shared path.
  *
  * The vault is exempt STRUCTURALLY rather than by an originator comparison: it
  * calls managers.permissionsManager directly and never receives a capped wallet.
