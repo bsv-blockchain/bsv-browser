@@ -334,14 +334,21 @@ describe('ceremony key handle', () => {
     // copy of the vault seed would linger for the whole session.
     const { ceremony, mock } = await makeCeremony()
     const fillSpy = jest.spyOn(Array.prototype, 'fill')
-    const p = ceremony.requestKey('x')
-    mock.insertKey(DEFAULT_SERIAL)
-    ceremony.submitPin('123456')
-    const handle = await p
-    const zeroedA64ByteArray = fillSpy.mock.calls.some(
-      ([value], i) => value === 0 && (fillSpy.mock.instances[i] as unknown[]).length === 64
-    )
-    fillSpy.mockRestore()
+    let zeroedA64ByteArray: boolean
+    let handle
+    try {
+      const p = ceremony.requestKey('x')
+      mock.insertKey(DEFAULT_SERIAL)
+      ceremony.submitPin('123456')
+      handle = await p
+      zeroedA64ByteArray = fillSpy.mock.calls.some(
+        ([value], i) => value === 0 && (fillSpy.mock.instances[i] as unknown[]).length === 64
+      )
+    } finally {
+      // A spy on Array.prototype leaks into every later test in the suite if a
+      // failure above skips the restore.
+      fillSpy.mockRestore()
+    }
     expect(zeroedA64ByteArray).toBe(true)
     handle.release()
   })
@@ -611,6 +618,109 @@ describe('CeremonyController: one singleton, sequential ceremonies', () => {
 
     handleB.release()
   })
+
+  test('an attempt cancelled while its ECDH is in flight cannot arm behind the successor that replaced it', async () => {
+    // The resurrection race. cancel() sets running=false while attempt #1 is
+    // still parked inside driver.ecdh — a real NFC tap can land seconds after
+    // the user gives up — and the requestKey() that follows both starts
+    // attempt #2 AND resets `cancelled` to false. When #1's tap finally lands,
+    // every "am I still wanted?" flag reads clean. Without the generation
+    // check, #1 then installs its own handle over #2's, arms a second timer,
+    // and fires onArmed with a key nobody asked for: two unwrapped vault keys
+    // live at once, one of them owned by no caller and released by nothing.
+    const { ceremony: c, mock, expectedHd } = await makeCeremony()
+    const armedHandles: unknown[] = []
+    c.onArmed = h => armedHandles.push(h)
+
+    // Park attempt #1 inside the ECDH until we say so.
+    const realEcdh = mock.ecdh.bind(mock)
+    let landTap: (() => void) | undefined
+    jest
+      .spyOn(mock, 'ecdh')
+      .mockImplementationOnce(
+        (slot, pin, peer) =>
+          new Promise(resolve => {
+            landTap = () => resolve(realEcdh(slot, pin, peer))
+          })
+      )
+
+    const p1 = c.requestKey('op 1')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    await flush()
+    expect(c.state.phase).toBe('awaiting-touch')
+    expect(landTap).toBeDefined() // #1 is genuinely parked mid-ECDH
+
+    // The user gives up. #1 is still holding an open tap.
+    const rejected = expect(p1).rejects.toMatchObject({ code: 'user-cancelled' })
+    c.cancel()
+    await rejected
+
+    // A second ceremony starts immediately — this one gets the real ecdh.
+    const p2 = c.requestKey('op 2')
+    c.submitPin('123456')
+    const handle2 = await p2
+    expect(c.state.phase).toBe('armed')
+    expect(armedHandles).toEqual([handle2])
+
+    // *** #1's abandoned tap lands here, well after it was replaced. ***
+    landTap!()
+    await flush()
+
+    // Nothing changed hands: #2 is still the one and only armed session, and
+    // #1's key never reached a caller, a timer, or onArmed.
+    expect(armedHandles).toEqual([handle2])
+    expect(c.state.phase).toBe('armed')
+    expect(handle2.hd.toString()).toBe(expectedHd.toString())
+    // #1 also cleaned up after itself: no orphaned key-event listener. (A
+    // persistent reader's ceremony drops its own listener once armed, so an
+    // armed, tidy controller holds none at all.)
+    expect((mock as unknown as { listeners: Set<unknown> }).listeners.size).toBe(0)
+
+    // And #2 still owns the controller's state: its release relocks.
+    handle2.release()
+    expect(c.state.phase).toBe('idle')
+    expect(() => handle2.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
+  })
+
+  test('a superseded attempt that FAILS never rejects the successor waiting behind it', async () => {
+    // Same race, error arm: #1's abandoned tap comes back as a hard failure
+    // instead of a secret. Its rejection belongs to a ceremony nobody is
+    // waiting on any more, so it must not reject #2's caller or repaint the
+    // phase out from under an armed session.
+    const { ceremony: c, mock } = await makeCeremony()
+    const realEcdh = mock.ecdh.bind(mock)
+    let failTap: (() => void) | undefined
+    jest.spyOn(mock, 'ecdh').mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          failTap = () => reject(new VaultError('pin-locked', 'PIN is blocked'))
+        })
+    )
+
+    const p1 = c.requestKey('op 1')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    await flush()
+    const rejected = expect(p1).rejects.toMatchObject({ code: 'user-cancelled' })
+    c.cancel()
+    await rejected
+
+    ;(mock.ecdh as jest.Mock).mockImplementation(realEcdh)
+    const p2 = c.requestKey('op 2')
+    c.submitPin('123456')
+    const handle2 = await p2
+    expect(c.state.phase).toBe('armed')
+
+    failTap!()
+    await flush()
+
+    // #2 is untouched: still armed, still usable, no error painted.
+    expect(c.state.phase).toBe('armed')
+    expect(c.state.error).toBeUndefined()
+    expect(handle2.hd).toBeDefined()
+    handle2.release()
+  })
 })
 
 describe('CeremonyController: post-arm progress', () => {
@@ -687,7 +797,9 @@ describe('CeremonyController: retention timeout robustness', () => {
 
   test('reported progress refreshes the retention window instead of letting the original deadline expire underneath an active withdrawal', async () => {
     jest.useFakeTimers()
-    const { ceremony: c, mock } = await makeCeremony({ retentionMs: 1000 })
+    // 10s window → the 3x absolute ceiling sits at t=30_000, well clear of
+    // everything this test exercises; the ceiling gets its own test below.
+    const { ceremony: c, mock } = await makeCeremony({ retentionMs: 10_000 })
     const relocks: string[] = []
     c.onRelock = why => relocks.push(why)
     const p = c.requestKey('x')
@@ -697,21 +809,69 @@ describe('CeremonyController: retention timeout robustness', () => {
     const firstDeadline = c.state.armedUntil!
 
     // Report progress well before the window elapses...
-    await jest.advanceTimersByTimeAsync(600)
+    await jest.advanceTimersByTimeAsync(6_000)
     c.noteProgress({ phase: 'preparing' })
     expect(c.state.armedUntil!).toBeGreaterThan(firstDeadline) // the deadline moved
 
-    // ...then advance past the ORIGINAL deadline (t=1000) AND the grace recheck
-    // that follows it (t=6000) — i.e. the exact instant an unrefreshed window
-    // would have relocked — without ever going idle. Proves the progress note
-    // rescheduled the timer rather than leaving the original one-shot deadline
-    // to fire underneath a live withdrawal.
-    await jest.advanceTimersByTimeAsync(5_500) // t = 6100
+    // ...then advance past the ORIGINAL deadline (t=10_000) AND the grace
+    // recheck that would have followed it (t=15_000) — i.e. the exact instant
+    // an unrefreshed window would have relocked — without ever going idle.
+    // Proves the progress note rescheduled the timer rather than leaving the
+    // original one-shot deadline to fire underneath a live withdrawal.
+    await jest.advanceTimersByTimeAsync(12_000) // t = 18_000
     expect(c.state.phase).toBe('preparing')
     expect(relocks).toEqual([])
     expect(handle.hd).toBeDefined()
 
     handle.release()
+  })
+
+  test('the absolute ceiling relocks a session that keeps renewing itself with progress notes', async () => {
+    // The refresh above must not become a lease a caller can renew forever:
+    // that would make the retention window no boundary at all, and the
+    // unwrapped vault key would live for as long as the spend path felt like
+    // reporting. Past armedAt + 3x retention the relock fires regardless.
+    jest.useFakeTimers()
+    const { ceremony: c, mock } = await makeCeremony({ retentionMs: 1000 })
+    const relocks: string[] = []
+    c.onRelock = why => relocks.push(why)
+    const p = c.requestKey('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const handle = await p
+    expect(c.state.phase).toBe('armed')
+
+    // A note every 200ms — never letting a full window elapse — for well past
+    // the 3x ceiling at t=3000.
+    for (let t = 0; t < 6_000; t += 200) {
+      await jest.advanceTimersByTimeAsync(200)
+      c.noteProgress({ phase: 'broadcasting' })
+    }
+
+    expect(relocks).toEqual(['timeout'])
+    expect(c.state.phase).toBe('idle')
+    expect(() => handle.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
+  })
+
+  test('the ceiling is anchored per ceremony, so a fresh arm gets a full new life', async () => {
+    jest.useFakeTimers()
+    const { ceremony: c, mock } = await makeCeremony({ retentionMs: 1000 })
+    const p1 = c.requestKey('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const h1 = await p1
+    await jest.advanceTimersByTimeAsync(4_000) // past ceremony 1's ceiling
+    expect(c.state.phase).toBe('idle')
+    expect(() => h1.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
+
+    // Ceremony 2 on the same controller starts its own clock.
+    const p2 = c.requestKey('y')
+    c.submitPin('123456')
+    const h2 = await p2
+    expect(c.state.phase).toBe('armed')
+    await jest.advanceTimersByTimeAsync(900)
+    expect(c.state.phase).toBe('armed') // not inheriting ceremony 1's exhausted ceiling
+    h2.release()
   })
 })
 

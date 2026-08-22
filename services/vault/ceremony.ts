@@ -37,11 +37,22 @@
  * The retention window is now a ZEROIZATION BOUNDARY, not a convenience timer.
  * While a handle is armed, the vault key is live in JS memory; release() (or
  * the retention timeout, or a detach) drops the reference so the runtime can
- * collect it. The seed bytes ARE wiped (fill(0)) the moment the HD node is
- * built, but the node itself cannot be zeroized — @bsv/sdk's HD holds the key
- * as BigNumber/array internals with no wipe API, and Hermes may have copied
- * them anyway. Dropping the reference is the best the runtime allows; this is
- * the accepted residual risk the K1-only design documents.
+ * collect it.
+ *
+ * Two caveats on that word "boundary", both deliberate and both bounded:
+ *   - The window is refreshable. A post-arm progress note restarts it (see
+ *     noteProgress), so an operation that legitimately outruns one window is
+ *     not cut off mid-flight. It is NOT an open-ended lease: ARM_MAX_MULTIPLE
+ *     caps a session's total life at 3× the window measured from `armedAt`,
+ *     after which the relock fires however fresh the progress is. The
+ *     boundary is therefore "at most 3× retention", not "exactly retention".
+ *   - What gets dropped is a REFERENCE, not the bytes. The seed IS wiped
+ *     (fill(0)) the moment the HD node is built, but the node itself cannot
+ *     be zeroized — @bsv/sdk's HD holds the key as BigNumber/array internals
+ *     with no wipe API, and Hermes may have copied them anyway. Dropping the
+ *     reference is the best the runtime allows; this is the accepted residual
+ *     risk the K1-only design documents. And the ceremony can only drop its
+ *     OWN reference — see VaultKeyHandle on why callers must not keep one.
  *
  * SECURITY: the PIN lives in the arm flow's closure until release(), and the
  * unwrapped key lives in the handle for the same span. Never log the PIN, the
@@ -92,7 +103,18 @@ export interface CeremonyState {
  *
  * Reading `hd` after release (or after a timeout/detach relock) throws
  * `key-removed-mid-op` rather than handing back a key the ceremony has
- * declared dead — the same contract the old signer's sign() had.
+ * declared dead. That check happens PER READ and nowhere else: it can refuse
+ * to hand the node out again, but it cannot reach into a reference a caller
+ * already took. A variable holding `handle.hd` keeps working — and keeps the
+ * key alive — for as long as the caller holds it, whatever the ceremony
+ * thinks.
+ *
+ * So: read `handle.hd` at each point of use. Passing it straight into a
+ * derive/spend operation that completes inside the armed window, with
+ * `release()` in a finally, is the intended shape. NEVER stash it in module
+ * state, React state, a closure that outlives the operation, or any cache —
+ * the ceremony has no way to revoke that, and the whole point of the
+ * retention window is that the key does not outlive one operation.
  */
 export interface VaultKeyHandle {
   readonly hd: HD
@@ -153,6 +175,15 @@ export class CeremonyController {
   private running = false
   private reason = ''
 
+  /** Monotonic id of the newest arm attempt. `running` alone cannot tell an
+   * attempt that it has been replaced: cancel() sets running=false while the
+   * cancelled attempt is still parked inside an await (a tap can still land
+   * seconds later), and the requestKey() that follows starts a fresh attempt
+   * AND resets `cancelled`. Every run() captures its own generation and
+   * re-checks it before touching any shared state, so a late-returning attempt
+   * can only ever clean itself up. */
+  private generation = 0
+
   /** The handle for the currently-armed session, if any. Set once arming
    * succeeds. Cleared by VaultKeyHandle.release() itself (identity-checked
    * against this field — see makeHandle) rather than by whoever calls
@@ -169,11 +200,24 @@ export class CeremonyController {
   private attachWaiter?: Deferred<void>
   private cancelled = false
   private armTimer?: ReturnType<typeof setTimeout>
+  /** When the current session armed. The anchor for the absolute ceiling — see
+   * ARM_MAX_MULTIPLE — so a stream of progress notes cannot renew the retention
+   * window forever. */
+  private armedAt = 0
 
   /** Grace period given to an operation that is still reporting progress when
    * the retention window elapses, before the timeout is enforced regardless of
    * phase. See checkArmTimeout. */
   private static readonly ARM_GRACE_MS = 5_000
+
+  /** Hard ceiling on a session's life, as a multiple of the retention window.
+   * A progress note refreshes the window (see noteProgress), which on its own
+   * would make the retention period a lease the caller can renew indefinitely —
+   * i.e. no zeroization boundary at all. Past `armedAt + this × retentionMs` the
+   * relock fires no matter how fresh the progress is, and the grace window is
+   * clamped to it too, so the key's maximum lifetime is bounded by construction
+   * rather than by caller good behaviour. */
+  private static readonly ARM_MAX_MULTIPLE = 3
 
   constructor(
     private deps: {
@@ -215,9 +259,12 @@ export class CeremonyController {
    * the single ECDH is spent at arm time, so without this an operation that
    * legitimately outlives the window (a slow broadcast) would have the key
    * pulled out from under it mid-flight. This is the direct successor of the
-   * old design's "every signature re-arms" refresh, and it is bounded the same
-   * way — progress must keep arriving, or checkArmTimeout's grace path
-   * relocks.
+   * old design's "every signature re-arms" refresh.
+   *
+   * The refresh is bounded twice over, so it cannot become an unbounded lease
+   * a caller renews at will: progress must keep arriving (or checkArmTimeout's
+   * grace path relocks), AND no refresh may push the relock past
+   * `armedAt + ARM_MAX_MULTIPLE × retentionMs` — see startArmTimer.
    */
   noteProgress(p: VaultProgress): void {
     if (!this.activeHandle || this.running) return
@@ -311,6 +358,8 @@ export class CeremonyController {
   }
 
   private async run(): Promise<void> {
+    // This attempt's identity for the rest of its life — see `generation`.
+    const gen = ++this.generation
     const driver = this.deps.getDriver()
     if (!driver) {
       this.failAll(new VaultError('driver-unavailable'))
@@ -327,6 +376,9 @@ export class CeremonyController {
     // NOT this.activeHandle, which is controller-wide — see the finally guard
     // below for why that distinction is load-bearing.
     let armed = false
+    // Set when this attempt discovers it has been superseded: it has already
+    // torn its own session down, so the finally must not do it twice.
+    let superseded = false
     try {
       // Both halves of an enrollment, read before any hardware prompt: a
       // half-enrolled install (meta but no seal, or the reverse) has nothing
@@ -343,6 +395,28 @@ export class CeremonyController {
         ? await this.armViaTap(driver, meta, seal, session)
         : await this.armViaReader(driver, meta, seal, session)
       this.throwIfCancelled()
+
+      // Have we been superseded while parked on the tap? `cancelled` cannot
+      // answer this: cancel() sets it, but the very next requestKey() resets it
+      // to false for the NEW attempt, so by the time a cancelled-then-replaced
+      // attempt's ECDH lands, the flag reads clean again. Only the generation
+      // does. Without this check that attempt would install ITS handle as
+      // activeHandle over the successor's, arm a second timer, and hand its own
+      // key to whoever is waiting on the successor — two unwrapped keys live,
+      // one of them owned by nobody.
+      if (gen !== this.generation) {
+        superseded = true
+        // Drop THIS attempt's listener box first (release() only unsubscribes
+        // on a session-based transport, and the post-arm unsubscribe below is
+        // never reached from here — without this a cancelled-and-replaced
+        // attempt would leave a live listener behind on every persistent-reader
+        // ceremony), then drop its key and close its session. The identity
+        // check inside release() means none of the controller's shared state
+        // (the successor's activeHandle, timer or phase) is touched.
+        this.unsubscribeKeyEvents(session)
+        handle.release()
+        return
+      }
 
       this.activeHandle = handle
       armed = true
@@ -361,6 +435,12 @@ export class CeremonyController {
       // dropped, otherwise an unrelated failure is indistinguishable from a
       // genuinely absent driver.
       const err = e instanceof VaultError ? e : new VaultError('driver-unavailable', String(e))
+      // Same generation guard as the success path, for the same reason: a
+      // superseded attempt's failure is not the CURRENT attempt's failure, and
+      // must not reject the successor's waiters or paint its phase. Its own
+      // waiters were already failed by the cancel() that superseded it, so
+      // there is nobody left to tell. The finally still closes its session.
+      if (gen !== this.generation) return
       if (err.code === 'user-cancelled') {
         this.set({ phase: 'idle' })
       } else {
@@ -368,7 +448,11 @@ export class CeremonyController {
       }
       this.failAll(err)
     } finally {
-      this.running = false
+      // Only the CURRENT attempt owns `running`. A superseded attempt clearing
+      // it would declare the successor's still-in-flight ceremony finished, so
+      // the next requestKey() would start a third attempt alongside it instead
+      // of joining the second.
+      if (gen === this.generation) this.running = false
       // `armed` (this attempt's own outcome), NOT this.activeHandle (whoever
       // the CONTROLLER currently considers active): an unreleased predecessor
       // ceremony leaves this.activeHandle truthy for the whole time this
@@ -376,9 +460,11 @@ export class CeremonyController {
       // wrongly conclude "some handle must already own this session/
       // subscription" and skip closing its own — the predecessor's activeHandle
       // has nothing to do with whether this attempt itself succeeded.
-      if (!armed) {
+      if (!armed && !superseded) {
         // Arming never completed: no handle exists to own the subscription
         // or the session, so close both now — nothing else ever will.
+        // (A superseded attempt DID build a handle and released it above,
+        // which already did exactly this teardown — don't repeat it.)
         // Unsubscribe BEFORE any stop so a session-end detach echo cannot
         // relock a session that was already dead.
         this.unsubscribeKeyEvents(session)
@@ -595,9 +681,11 @@ export class CeremonyController {
    *
    * `hd` is read through a getter that refuses once released: whichever path
    * ends the session (the caller finishing normally, or the controller's own
-   * cancel/detach/timeout relock) makes every later read throw
+   * cancel/detach/timeout relock) makes every later READ throw
    * `key-removed-mid-op` instead of handing back a key the ceremony considers
-   * dead. That check is what the old signer's `sign()` did per call.
+   * dead. It is only a read barrier — a reference the caller already took is
+   * beyond its reach, which is why VaultKeyHandle's docblock tells callers to
+   * read `hd` at each point of use and never to store it.
    *
    * `release()` drops the only reference this module keeps to the node, so the
    * runtime can collect it. It CANNOT zeroize it: @bsv/sdk's HD exposes no wipe
@@ -680,18 +768,31 @@ export class CeremonyController {
   }
 
   private arm(): void {
+    // Anchor the absolute ceiling BEFORE the first startArmTimer, which clamps
+    // against it.
+    this.armedAt = now()
     this.set({ phase: 'armed', armedUntil: this.startArmTimer(), error: undefined })
   }
 
+  /** The instant past which this session may not live, whatever it reports.
+   * See ARM_MAX_MULTIPLE. */
+  private armCeiling(): number {
+    return this.armedAt + CeremonyController.ARM_MAX_MULTIPLE * this.deps.retentionMs
+  }
+
   /** (Re)start the retention countdown and report the new deadline. Shared by
-   * the initial arm and every progress note that refreshes it. */
+   * the initial arm and every progress note that refreshes it. The deadline is
+   * clamped to the absolute ceiling, so a refresh can only ever move it
+   * forward WITHIN the session's maximum life, never extend that maximum. */
   private startArmTimer(): number {
     this.clearArmTimer()
-    this.armTimer = setTimeout(() => this.checkArmTimeout(), this.deps.retentionMs)
+    const t = now()
+    const deadline = Math.min(t + this.deps.retentionMs, this.armCeiling())
+    this.armTimer = setTimeout(() => this.checkArmTimeout(), Math.max(0, deadline - t))
     // Don't let a pending relock timer keep a Node/Jest event loop alive; RN
     // timers have no unref, so guard for it.
     ;(this.armTimer as { unref?: () => void }).unref?.()
-    return nowPlus(this.deps.retentionMs)
+    return deadline
   }
 
   /**
@@ -702,16 +803,25 @@ export class CeremonyController {
    * that fires once and never reschedules would leave the vault key resident in
    * memory indefinitely once the timer happens to land mid-operation), give the
    * in-flight operation one short grace window to finish. A further progress
-   * note calls startArmTimer, which cancels this and starts a fresh full
-   * window; if the operation still hasn't reported by the grace deadline,
-   * enforce the timeout regardless of phase.
+   * note calls startArmTimer, which cancels this and starts a fresh window; if
+   * the operation still hasn't reported by the grace deadline, enforce the
+   * timeout regardless of phase.
+   *
+   * The grace is clamped to the absolute ceiling as well. Without that clamp
+   * the ceiling would be trivially escapable: each note past it would schedule
+   * a fresh 5 s grace, and the two would trade off forever.
    */
   private checkArmTimeout(): void {
     if (!this.activeHandle) return // already released by some other path
     if (this.state.phase !== 'armed') {
-      this.armTimer = setTimeout(() => this.enforceArmTimeout(), CeremonyController.ARM_GRACE_MS)
-      ;(this.armTimer as { unref?: () => void }).unref?.()
-      return
+      const t = now()
+      const graceEnd = Math.min(t + CeremonyController.ARM_GRACE_MS, this.armCeiling())
+      if (graceEnd > t) {
+        this.armTimer = setTimeout(() => this.enforceArmTimeout(), graceEnd - t)
+        ;(this.armTimer as { unref?: () => void }).unref?.()
+        return
+      }
+      // Ceiling already reached — no more grace to give.
     }
     this.enforceArmTimeout()
   }
@@ -756,8 +866,9 @@ export class CeremonyController {
   }
 }
 
-// setTimeout-free "now" so the module never trips the Date.now ban in other
-// runtimes; here Date.now is fine (RN app + jest), isolated to one spot.
-function nowPlus(ms: number): number {
-  return Date.now() + ms
+// Wall-clock "now" for the arm timer's deadlines and its absolute ceiling.
+// Kept as one named helper so the module's use of Date.now stays auditable in
+// a single place; here Date.now is fine (RN app + jest).
+function now(): number {
+  return Date.now()
 }
