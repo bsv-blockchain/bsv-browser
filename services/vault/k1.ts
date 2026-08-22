@@ -5,9 +5,7 @@
  * Every K1 detail lives here so no other module needs to know the template's
  * shape. A K1 vault output is a plain P2PKH output — no R1/YubiKey leg, no
  * template contract — locked to a BIP32 child key derived per
- * services/vault/vaultDerivation.ts. This module is the successor to
- * services/vault/r1k1.ts (to be deleted once callers migrate); it does not
- * modify or depend on that file.
+ * services/vault/vaultDerivation.ts.
  *
  * SECURITY: nothing secret passes through this module — only public keys,
  * hashes, and script bytes.
@@ -20,17 +18,17 @@ export const K1_LOCK_LEN = 25
 
 /** Conservative estimate, not exact: a real P2PKH unlock measures ~107 bytes
  * (push(≤72-byte DER sig) + push(33-byte compressed pubkey)), matching the
- * proven staging-unlock shape used elsewhere in the vault (see
- * R1K1_K1_UNLOCK_LEN in r1k1.ts). DER signatures vary between 70 and 72
- * bytes, so this pins the ceiling rather than the exact length. */
+ * proven staging-unlock shape used elsewhere in the vault. DER signatures
+ * vary between 70 and 72 bytes, so this pins the ceiling rather than the
+ * exact length. */
 export const K1_UNLOCK_LEN = 108
 
 /**
  * What a K1 vault output records about itself.
  *
  * `v` is the customInstructions format version and is a hard fork from the
- * R1-K1 line: v2 records (`type: 'R1K1'`) are a DIFFERENT, unrelated shape
- * and must never decode as v3 — see decodeVaultInstructions.
+ * old template-based line: v2 records carry a different type discriminator
+ * entirely and must never decode as v3 — see decodeVaultInstructions.
  */
 export interface VaultInstructions {
   v: 3
@@ -69,8 +67,8 @@ export function decodeVaultInstructions(ci?: string): VaultInstructions | null {
 }
 
 /** Build a K1 vault locking script: a plain P2PKH lock to the given public
- * key hash. Synchronous — unlike r1k1.ts's buildVaultLockingScript, there is
- * no template to await; callers may still `await` this without effect. */
+ * key hash. Synchronous — there is no template to await; callers may still
+ * `await` this without effect. */
 export function buildVaultLockingScript(a: { k1PublicKeyHash: number[] }): LockingScript {
   return new P2PKH().lock(a.k1PublicKeyHash)
 }

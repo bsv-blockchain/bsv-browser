@@ -229,7 +229,7 @@ export async function recoverVaultHD(mnemonic: string, passphrase: string): Prom
  * serial does not match the newly-stored yubiSerial, before any signing is
  * attempted). Those outputs remain spendable ONLY via the K1 recovery sweep
  * (transfers.ts's sweepVaultWithHD), which never touches a YubiKey at all.
- * r1PublicKey is still stored per OUTPUT (in customInstructions, see r1k1.ts)
+ * r1PublicKey is still stored per OUTPUT (in customInstructions)
  * rather than read from meta — that is what lets buildVaultLockingScript
  * reconstruct every output's exact locking script regardless of which key
  * enrolled it, and what lets the R1 spend path detect and reject a

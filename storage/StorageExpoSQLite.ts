@@ -5,25 +5,12 @@ import {
   PROVEN_HEIGHTS_SQL,
   buildFindSql,
   columnsExcluding,
-  fullReadSql,
   rangeReadSql,
   RELEASE_STRANDED_VAULT_STAGING_SQL,
   spendingReferencesSql,
   splitOutpoint
 } from './methods/findSql'
 import { scrubHistoryJson } from './methods/historyNotes'
-import { compressScriptBytes, isCompressed } from '@/services/vault/templateCodec'
-import {
-  COMPRESS_PROVEN_TX_RAWTX,
-  assertExpanded,
-  compressOutputScript,
-  compressStoredBeef,
-  compressStoredTx,
-  expandStoredRange,
-  expandStoredScript,
-  expandStoredTx
-} from './methods/expandStored'
-import { compressOneAtRest, type CompactionStep } from './methods/compressAtRest'
 import { StorageError, storageErrorFromSqlite } from './errors'
 import {
   RECLAIM_CANDIDATES_SQL,
@@ -580,10 +567,6 @@ export class StorageExpoSQLite extends StorageProvider {
   async insertProvenTx(tx: TableProvenTx, trx?: TrxToken): Promise<number> {
     const e = await this.validateEntityForInsert(tx, trx)
     if (e.provenTxId === 0) delete e.provenTxId
-    // Gated: this row is the merkle evidence, and Beef.verifyBumpIndexLeaves binds
-    // hash256(rawTx) to a chain-committed leaf inside @bsv/sdk where no subclass
-    // can intercept. See COMPRESS_PROVEN_TX_RAWTX.
-    if (COMPRESS_PROVEN_TX_RAWTX) e.rawTx = (await compressStoredTx(e.rawTx, e.txid)) as number[]
     const id = await this.sqlInsert('proven_txs', e, 'provenTxId')
     tx.provenTxId = id
     return id
@@ -595,12 +578,6 @@ export class StorageExpoSQLite extends StorageProvider {
     // See methods/historyNotes.ts: provider error notes carry the full EF/rawTx
     // hex and reach this column untruncated.
     e.history = scrubHistoryJson(e.history)
-    // Compress-on-write. A vault transaction's rawTx is ~960 KB of template that
-    // reconstructs from ~40 bytes; this is the column TaskSendWaiting re-reads in
-    // full on every sweep and the one that pushed a backup chunk over the
-    // server's 1 MiB cap.
-    e.rawTx = await compressStoredTx(e.rawTx, e.txid)
-    e.inputBEEF = await compressStoredBeef(e.inputBEEF)
     const id = await this.sqlInsert('proven_tx_reqs', e, 'provenTxReqId')
     tx.provenTxReqId = id
     return id
@@ -647,7 +624,6 @@ export class StorageExpoSQLite extends StorageProvider {
   async insertOutput(output: TableOutput, trx?: TrxToken): Promise<number> {
     const e = await this.validateEntityForInsert(output, trx)
     if (e.outputId === 0) delete (e as any).outputId
-    e.lockingScript = await compressOutputScript(e.lockingScript)
     const id = await this.sqlInsert('outputs', e, 'outputId')
     output.outputId = id
     return id
@@ -685,8 +661,6 @@ export class StorageExpoSQLite extends StorageProvider {
   async insertTransaction(tx: TableTransaction, trx?: TrxToken): Promise<number> {
     const e = await this.validateEntityForInsert(tx, trx)
     if (e.transactionId === 0) delete (e as any).transactionId
-    e.rawTx = await compressStoredTx(e.rawTx, e.txid)
-    e.inputBEEF = await compressStoredBeef(e.inputBEEF)
     const id = await this.sqlInsert('transactions', e, 'transactionId')
     tx.transactionId = id
     return id
@@ -716,12 +690,6 @@ export class StorageExpoSQLite extends StorageProvider {
 
   async updateProvenTx(id: number, update: Partial<TableProvenTx>, trx?: TrxToken): Promise<number> {
     const u = this.validatePartialForUpdate(update) as any
-    if (COMPRESS_PROVEN_TX_RAWTX && u.rawTx) {
-      const row = (await this.getDB().getFirstAsync('SELECT txid FROM proven_txs WHERE provenTxId = ?', [
-        id
-      ])) as { txid?: string } | null
-      u.rawTx = await compressStoredTx(u.rawTx, u.txid ?? row?.txid)
-    }
     return await this.sqlUpdate('proven_txs', id, u, 'provenTxId')
   }
 
@@ -733,26 +701,7 @@ export class StorageExpoSQLite extends StorageProvider {
   async updateProvenTxReq(id: number | number[], update: Partial<TableProvenTxReq>, trx?: TrxToken): Promise<number> {
     const u = this.validatePartialForUpdate(update) as any
     if ('history' in u) u.history = scrubHistoryJson(u.history)
-    // An update carrying rawTx must know which transaction it is, or the envelope
-    // could not self-verify on the way out. When the txid is not part of the same
-    // update, read it back rather than storing an unverifiable envelope.
-    if (u.rawTx) {
-      const txid = u.txid ?? (await this.txidOfProvenTxReq(id))
-      u.rawTx = await compressStoredTx(u.rawTx, txid)
-    }
-    if (u.inputBEEF) u.inputBEEF = await compressStoredBeef(u.inputBEEF)
     return await this.sqlUpdate('proven_tx_reqs', id, u, 'provenTxReqId')
-  }
-
-  /** The txid of a single proven_tx_req, for a compress-on-update that did not
-   * carry one. Returns undefined for a multi-row update, which then stores raw. */
-  private async txidOfProvenTxReq(id: number | number[]): Promise<string | undefined> {
-    if (Array.isArray(id)) return undefined
-    const row = (await this.getDB().getFirstAsync(
-      'SELECT txid FROM proven_tx_reqs WHERE provenTxReqId = ?',
-      [id]
-    )) as { txid?: string } | null
-    return row?.txid
   }
 
   async updateCertificate(id: number, update: Partial<TableCertificate>, trx?: TrxToken): Promise<number> {
@@ -782,7 +731,6 @@ export class StorageExpoSQLite extends StorageProvider {
 
   async updateOutput(id: number, update: Partial<TableOutput>, trx?: TrxToken): Promise<number> {
     const u = this.validatePartialForUpdate(update) as any
-    if (u.lockingScript) u.lockingScript = await compressOutputScript(u.lockingScript)
     return await this.sqlUpdate('outputs', id, u, 'outputId')
   }
 
@@ -813,22 +761,7 @@ export class StorageExpoSQLite extends StorageProvider {
 
   async updateTransaction(id: number | number[], update: Partial<TableTransaction>, trx?: TrxToken): Promise<number> {
     const u = this.validatePartialForUpdate(update) as any
-    if (u.rawTx) {
-      const txid = u.txid ?? (await this.txidOfTransaction(id))
-      u.rawTx = await compressStoredTx(u.rawTx, txid)
-    }
-    if (u.inputBEEF) u.inputBEEF = await compressStoredBeef(u.inputBEEF)
     return await this.sqlUpdate('transactions', id, u, 'transactionId')
-  }
-
-  /** The txid of a single transaction row, for a compress-on-update that did not
-   * carry one. Undefined for a multi-row update, which then stores raw. */
-  private async txidOfTransaction(id: number | number[]): Promise<string | undefined> {
-    if (Array.isArray(id)) return undefined
-    const row = (await this.getDB().getFirstAsync('SELECT txid FROM transactions WHERE transactionId = ?', [
-      id
-    ])) as { txid?: string } | null
-    return row?.txid
   }
 
   async updateTxLabel(id: number, update: Partial<TableTxLabel>, trx?: TrxToken): Promise<number> {
@@ -957,9 +890,9 @@ export class StorageExpoSQLite extends StorageProvider {
     const partial = { ...args.partial } as any
 
     // `noScript` callers throw the script away the moment it arrives, so do not
-    // fetch it at all: an R1-K1 vault output's lockingScript is 959,632 bytes,
-    // and `SELECT *` copies every one of them out of SQLite and across the
-    // bridge into JS — on the JS thread — only to be discarded below.
+    // fetch it at all: `SELECT *` would copy every matching output's
+    // lockingScript out of SQLite and across the bridge into JS — on the JS
+    // thread — only to be discarded below, which adds up across a page of them.
     const columns = args.noScript
       ? (await this.tableColumns('outputs')).filter(c => c !== 'lockingScript')
       : undefined
@@ -979,13 +912,6 @@ export class StorageExpoSQLite extends StorageProvider {
 
     for (const o of results) {
       if (!args.noScript) {
-        // E3 of the expansion boundary, BEFORE validateOutputScript: that
-        // function short-circuits when lockingScript.length equals scriptLength
-        // and otherwise re-slices from rawTx, so expanding after it would let a
-        // compressed value be silently accepted on createAction-born outputs
-        // (vault deposits, change) while breaking internalize-born ones — green
-        // on a vault wallet, broken on someone else's.
-        o.lockingScript = await expandStoredScript(o.lockingScript)
         await this.validateOutputScript(o, args.trx)
       } else {
         o.lockingScript = undefined
@@ -1087,9 +1013,6 @@ export class StorageExpoSQLite extends StorageProvider {
 
     for (const t of results) {
       if (!args.noRawTx) {
-        // E4 of the expansion boundary.
-        t.rawTx = await expandStoredTx(t.rawTx)
-        t.inputBEEF = await expandStoredTx(t.inputBEEF)
         await this.validateRawTransaction(t, args.trx)
       } else {
         t.rawTx = undefined
@@ -1142,15 +1065,6 @@ export class StorageExpoSQLite extends StorageProvider {
       extraConditions.length > 0 ? { conditions: extraConditions, params: extraParams } : undefined
     )
     const reqs = this.validateEntities(rows, undefined, ['notified', 'wasBroadcast'])
-    // E5 of the expansion boundary. proven_tx_reqs is where the monitor's txid
-    // tripwire reads from (TaskCheckForProofs re-hashes rawTx and flips the row
-    // to status='invalid' on a mismatch — irreversible, and it cascades to every
-    // notified transaction), and it is also the row mergeReqToBeefToShareExternally
-    // turns into a broadcast payload.
-    for (const req of reqs) {
-      req.rawTx = await expandStoredTx(req.rawTx)
-      req.inputBEEF = await expandStoredTx(req.inputBEEF)
-    }
     return reqs
   }
 
@@ -1159,14 +1073,6 @@ export class StorageExpoSQLite extends StorageProvider {
     if ((args.partial as any).merklePath) throw new Error('ProvenTxs may not be found by merklePath value.')
     const rows = await this.sqlFind<any>('proven_txs', args, 'provenTxId')
     const proven = this.validateEntities(rows)
-    // E6 of the expansion boundary. proven_txs.rawTx is the merkle evidence:
-    // Beef.verifyBumpIndexLeaves requires hash256(rawTx) to equal a chain-committed
-    // BUMP leaf, and that check lives in @bsv/sdk where no subclass can intercept
-    // it — so anything leaving here must already be real bytes.
-    for (const p of proven) {
-      p.rawTx = await expandStoredTx(p.rawTx)
-      assertExpanded(p.rawTx, `proven_txs.rawTx for ${p.txid}`)
-    }
     return proven
   }
 
@@ -1333,20 +1239,9 @@ export class StorageExpoSQLite extends StorageProvider {
   // ============================================================================
 
   /**
-   * DELIBERATELY OUTSIDE the expansion boundary — do not add an expansion hook.
-   *
-   * This and getProvenTxReqsForUser below are what getSyncChunk reads, and a
-   * sync chunk is the ONE consumer that wants bytes in their stored form: the
-   * whole point of compressing at rest is that a vault record fits inside the
-   * backup server's 1 MiB blob cap. Expanding here would put ~960 KB back into
-   * every chunk carrying a vault transaction and reinstate exactly the wedge
-   * this work exists to clear.
-   *
-   * Both issue their own SQL and so bypass the find* hooks anyway, which is what
-   * makes the exception expressible at all — but it is an exception, and the
-   * restore side has to know: processSyncChunk feeds these bytes back through
-   * insertProvenTxReq/insertOutput, where the compress-on-write hooks must be
-   * idempotent (isEnvelope/isCompressed guards) rather than double-wrapping.
+   * Own SQL rather than a call through findProvenTxs, so this and
+   * getProvenTxReqsForUser below can join straight on userId. Both are what
+   * getSyncChunk reads to build a backup chunk.
    */
   async getProvenTxsForUser(args: FindForUserSincePagedArgs): Promise<TableProvenTx[]> {
     const db = this.getDB()
@@ -1452,46 +1347,10 @@ export class StorageExpoSQLite extends StorageProvider {
     return await this.insertCertificate(certificate)
   }
 
-  /**
-   * E7 of the expansion boundary: the one place stored bytes become a network
-   * payload.
-   *
-   * `attemptToPostReqsToNetwork` builds its beef exclusively through here, and
-   * every broadcaster — ARC, Arcade, WhatsOnChain, Bitails — reads out of that
-   * beef, so this is the convergence point for the wire. Reqs loaded through
-   * findProvenTxReqs are already expanded by E5, which makes this a belt rather
-   * than the mechanism; it exists because a caller can hand over a req obtained
-   * some other way (getProvenTxReqsForUser deliberately returns stored form),
-   * and posting a compressed payload is not a recoverable mistake: ARC rejects
-   * it, the req goes `invalid`, `reviewStatus` is a stub so it never becomes
-   * `failed`, and `releaseStuckReservations` only frees outputs whose spender is
-   * `failed` — so vault UTXOs stay reserved against a dead txid with nothing
-   * surfaced.
-   */
-  async mergeReqToBeefToShareExternally(
-    req: TableProvenTxReq,
-    mergeToBeef: Beef,
-    knownTxids: string[],
-    trx?: TrxToken
-  ): Promise<void> {
-    const expanded: TableProvenTxReq = {
-      ...req,
-      rawTx: await expandStoredTx(req.rawTx),
-      inputBEEF: await expandStoredTx(req.inputBEEF)
-    }
-    assertExpanded(expanded.rawTx, `broadcast rawTx for ${req.txid}`)
-    assertExpanded(expanded.inputBEEF, `broadcast inputBEEF for ${req.txid}`)
-    return await super.mergeReqToBeefToShareExternally(expanded, mergeToBeef, knownTxids, trx)
-  }
-
   // Data retrieval
   /**
-   * E1 of the expansion boundary (see storage/methods/expandStored.ts).
-   *
    * Every identity-deriving and BEEF-assembling consumer in the toolbox reaches
-   * bytes through here, including three that bypass the find* hooks entirely, so
-   * this is the load-bearing one: a compressed value escaping here becomes a
-   * WRONG TXID rather than an error.
+   * bytes through here, including three that bypass the find* hooks entirely.
    */
   async getProvenOrRawTx(txid: string, trx?: TrxToken): Promise<ProvenOrRawTx> {
     const r: ProvenOrRawTx = { proven: undefined, rawTx: undefined, inputBEEF: undefined }
@@ -1505,15 +1364,6 @@ export class StorageExpoSQLite extends StorageProvider {
         r.inputBEEF = req.inputBEEF
       }
     }
-    // findProvenTxs/findProvenTxReqs already expand (E4/E5), so these are
-    // normally no-ops. Kept unconditional because this method is what the
-    // bypassing consumers call, and an assertion is cheaper than reasoning about
-    // which of them arrived by which route.
-    r.rawTx = await expandStoredTx(r.rawTx)
-    r.inputBEEF = await expandStoredTx(r.inputBEEF)
-    if (r.proven) r.proven.rawTx = (await expandStoredTx(r.proven.rawTx)) as number[]
-    assertExpanded(r.rawTx, `proven_tx_reqs.rawTx for ${txid}`)
-    assertExpanded(r.proven?.rawTx, `proven_txs.rawTx for ${txid}`)
     return r
   }
 
@@ -1676,10 +1526,9 @@ export class StorageExpoSQLite extends StorageProvider {
 
     // Range reads are served in SQL. The caller here is almost always
     // validateOutputScript re-slicing one output's locking script out of its
-    // source transaction, and with maxOutputScript = 1024 the outputs that take
-    // that path are exactly the ~960 KB vault scripts. Loading the whole rawTx
-    // to slice it meant reading ~960 KB off disk and Array.from-ing it into an
-    // ~960 K-element JS array to keep a few hundred bytes.
+    // source transaction — doing the slice in SQL means a large rawTx never
+    // has to be loaded whole and Array.from-ed into JS just to keep a few
+    // hundred bytes of it.
     //
     // Table order and the status filter mirror getProvenOrRawTx exactly (see
     // rangeReadSql), so a range read can never see a row the full read refuses.
@@ -1687,25 +1536,12 @@ export class StorageExpoSQLite extends StorageProvider {
       const db = this.getDB()
       // substr is 1-indexed over bytes; a JS offset of n starts at n + 1.
       const args = [offset + 1, length, txid]
-      type RangeRow = { marker?: Uint8Array; chunk?: Uint8Array } | null
-      let table: 'proven_txs' | 'proven_tx_reqs' = 'proven_txs'
+      type RangeRow = { chunk?: Uint8Array } | null
       let row = (await db.getFirstAsync(rangeReadSql('proven_txs'), args)) as RangeRow
       if (!row) {
-        table = 'proven_tx_reqs'
         row = (await db.getFirstAsync(rangeReadSql('proven_tx_reqs'), args)) as RangeRow
       }
       if (!row?.chunk) return undefined
-
-      // E2 of the expansion boundary. Slicing a stored envelope is the silent
-      // fund-eviction path (see storage/methods/expandStored.ts), so a marked row
-      // is re-read whole and the range served from its span list.
-      if (row.marker?.[0] === 0xfe) {
-        const full = (await db.getFirstAsync(fullReadSql(table), [txid])) as { rawTx?: Uint8Array } | null
-        if (!full?.rawTx) return undefined
-        const range = await expandStoredRange(Array.from(full.rawTx), offset, length)
-        assertExpanded(range, `range of rawTx for ${txid}`)
-        return range
-      }
       return Array.from(row.chunk)
     }
 
@@ -1968,73 +1804,19 @@ export class StorageExpoSQLite extends StorageProvider {
   }
 
   /**
-   * Keep sync chunks in stored form.
+   * Backup defense for pre-scrub rows.
    *
-   * getSyncChunk reads outputs through findOutputs WITHOUT noScript, so two
-   * things happen that make a chunk enormous: E3 expands any compressed script,
-   * and validateOutputScript re-slices the full ~960 KB script out of rawTx for
-   * vault outputs whose column is NULL (maxOutputScript is 1024, so it is always
-   * NULL for them). The result is that a chunk carrying one vault output exceeds
-   * the backup server's 1 MiB blob cap even though the database itself stores
-   * almost nothing for it.
-   *
-   * So the chunk is re-compressed on the way out. This is the deliberate
-   * exception to the expansion boundary — the one consumer that wants stored
-   * form — and it is safe because the receiving side is symmetric:
-   * processSyncChunk writes through the insert hooks, which are idempotent, and
-   * every read path expands.
-   *
-   * IF PEER SYNC IS EVER ENABLED (storageUrl is 'local' today, so the only
-   * consumer is our own encrypted backup), this needs a capability flag first:
-   * the toolbox's portable layer base64s byte columns verbatim and neither
-   * getSyncChunk nor processSyncChunk inspects them, so envelopes would replicate
-   * to a peer with no signal, and byte-for-byte entity diffs would make a mixed
-   * fleet see every record as changed and re-push forever.
+   * Rows written before the write-time scrub landed (2026-08-19) can carry the
+   * full EF/rawTx hex in provider error notes. getProvenTxReqsForUser is a
+   * SELECT *, so without this a single pre-scrub row would carry that hex
+   * straight into a backup chunk.
    */
   async getSyncChunk(args: RequestSyncChunkArgs): Promise<SyncChunk> {
     const chunk = await super.getSyncChunk(args)
-
-    for (const o of chunk.outputs ?? []) {
-      if (o.lockingScript && !isCompressed(o.lockingScript)) {
-        const compressed = await compressScriptBytes(Uint8Array.from(o.lockingScript))
-        if (compressed.length < o.lockingScript.length) o.lockingScript = Array.from(compressed)
-      }
-    }
     for (const req of chunk.provenTxReqs ?? []) {
-      req.rawTx = await compressStoredTx(req.rawTx, req.txid)
-      req.inputBEEF = await compressStoredBeef(req.inputBEEF)
-      // Rows written before the write-time scrub landed (2026-08-19) can carry
-      // the full EF/rawTx HEX in provider error notes — the same forbidden
-      // R1-K1 bytes at twice the size, as text. getProvenTxReqsForUser is a
-      // SELECT *, so without this a single pre-scrub row re-wedges the backup
-      // right after the rawTx compression clears it.
       req.history = scrubHistoryJson(req.history) as typeof req.history
     }
-    // proven_txs is the row that actually wedged the first mainnet vault wallet:
-    // its rawTx is the full mined transaction (~960 KB for a deposit), it is read
-    // for the chunk via getProvenTxsForUser in stored form, and nothing below the
-    // envelope can split one record across blobs. Whatever COMPRESS_PROVEN_TX_RAWTX
-    // says about the AT-REST column, the sync form must always be compressed or a
-    // single vault deposit blocks every backup that follows it.
-    for (const p of chunk.provenTxs ?? []) {
-      p.rawTx = (await compressStoredTx(p.rawTx, p.txid)) as number[]
-    }
-    for (const t of chunk.transactions ?? []) {
-      t.rawTx = await compressStoredTx(t.rawTx, t.txid)
-      t.inputBEEF = await compressStoredBeef(t.inputBEEF)
-    }
     return chunk
-  }
-
-  /**
-   * One step of the at-rest R1-K1 compaction — rewrites at most one oversize
-   * full-size blob into its compressed form. See storage/methods/compressAtRest.ts;
-   * driven by utils/monitor/TaskCompressAtRest.ts, one row per monitor pass.
-   */
-  async compressNextOversizeRow(): Promise<CompactionStep | undefined> {
-    // Scoped by database name so the in-process skip set of one wallet's
-    // database can never suppress a colliding row id in another's.
-    return await compressOneAtRest(this.getDB(), this.dbName)
   }
 
   // processSyncChunk — delegate to inherited implementation if available, stub otherwise

@@ -35,17 +35,11 @@ export type VaultErrorCode =
   /** unsealVaultKey could not open a SealedBlob — wrong shared secret,
    * tampered ciphertext, or a malformed blob. Never distinguishes which. */
   | 'seal-corrupt'
-  /** The R1-K1 template artifact, a locking script, or a digest failed a
-   * structural check. Programmer error or a corrupted dependency — never
-   * something a user can cause or fix. Distinct from 'wrong-key', which
-   * vaultErrorFromNative may reclassify to 'nfc-lost'. */
+  /** A vault key digest or key material failed a structural check. Programmer
+   * error or a corrupted dependency — never something a user can cause or
+   * fix. Distinct from 'wrong-key', which vaultErrorFromNative may
+   * reclassify to 'nfc-lost'. */
   | 'template-invalid'
-  /** A compressed script's header names a version/region this build's codec
-   * has no template for — e.g. written by a newer build, or corrupted beyond
-   * the header's own internal consistency (see 'template-invalid' for the
-   * case where the version/region IS known but the header disagrees with
-   * what that version reconstructs). */
-  | 'template-unknown'
   | 'serial-mismatch'
   | 'user-cancelled'
   | 'not-enrolled'

@@ -182,30 +182,17 @@ export function buildFindSql(opts: FindSqlOptions): string {
  *
  * `substr` on a BLOB is byte-based and 1-INDEXED, so a JS offset n is passed as
  * n + 1. Doing the range in SQL is what stops a caller that wants one output's
- * locking script from materialising a whole ~960 KB vault transaction (and then
- * an ~960 K-element JS array) to slice it.
+ * locking script from materialising the whole rawTx (and then a JS array over
+ * every byte of it) to slice it.
  *
  * The proven_tx_reqs variant carries the same status filter getProvenOrRawTx
  * applies, so the two paths cannot disagree about which rows are usable.
  */
 export function rangeReadSql(table: 'proven_txs' | 'proven_tx_reqs'): string {
   const usable = "AND status IN ('unsent','unmined','unconfirmed','sending','nosend','completed')"
-  // The marker byte comes back alongside the range so one query can tell whether
-  // slicing was even legitimate. A stored transaction envelope begins 0xfe, and
-  // slicing THAT at an offset into the uncompressed transaction returns
-  // plausible-looking wrong bytes with no error — which downstream becomes a
-  // hashed script, a "not a UTXO" answer and a persisted spendable = false. So
-  // the caller re-reads the whole row and serves the range from the envelope's
-  // span list instead. Ordinary rows keep the cheap path.
-  return `SELECT substr(rawTx, 1, 1) AS marker, substr(rawTx, ?, ?) AS chunk FROM "${table}" WHERE txid = ? ${
+  return `SELECT substr(rawTx, ?, ?) AS chunk FROM "${table}" WHERE txid = ? ${
     table === 'proven_tx_reqs' ? usable : ''
   }`.trimEnd()
-}
-
-/** Whole rawTx for one txid — the envelope path's fallback. */
-export function fullReadSql(table: 'proven_txs' | 'proven_tx_reqs'): string {
-  const usable = "AND status IN ('unsent','unmined','unconfirmed','sending','nosend','completed')"
-  return `SELECT rawTx FROM "${table}" WHERE txid = ? ${table === 'proven_tx_reqs' ? usable : ''}`.trimEnd()
 }
 
 /**
