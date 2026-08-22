@@ -1,32 +1,36 @@
 /**
  * Vault persistence.
  *
- * Only AsyncStorage metadata now — nothing secret. The YubiKey signs directly,
- * so there is no sealed key to protect and the SecureStore entry is gone.
- * Deposit pkhs and the xpub become public the moment they are used on-chain,
- * and the R1 public key is published in every output's customInstructions.
+ * - Sealed blob → expo-secure-store ('vault_seal_v1'), same Keychain
+ *   accessibility class as the wallet mnemonic. The seal alone is useless
+ *   without the physical YubiKey; SecureStore here is defense-in-depth, and
+ *   it is deliberately NOT behind LocalStorageProvider's biometric latch —
+ *   the YubiKey ceremony is the gate for anything the seal protects.
+ * - UI metadata (serial, nickname, deposit-index counter) → AsyncStorage
+ *   ('vault_meta_v1'). Nothing secret lives here, and no key material either:
+ *   v4 carries neither the xpub nor the YubiKey's R1 public key — those live
+ *   only inside the sealed blob, opened only through the YubiKey ceremony.
  *
- * `clear()` still deletes the legacy seal entry so an upgraded install does not
- * leave dead key material in the Keychain.
+ * v1-v3 records are not readable — `getMeta` returns null for anything whose
+ * `v` isn't 4, so an un-migrated install reads as "not enrolled" rather than
+ * deserialising into something this code would misuse.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as SecureStore from 'expo-secure-store'
+import { SealedBlob } from './types'
 
-/** Legacy SecureStore key. Written by no current code path — deleted on clear()
- * so an upgraded install sheds the old sealed blob. */
-const LEGACY_SEAL_KEY = 'vault_seal_v1'
+const SEAL_KEY = 'vault_seal_v1'
 const META_KEY = 'vault_meta_v1'
 
 /**
  * Current enrollment.
  *
- * v3 drops the sealed blob and the v1 deposit-key queue, and adds the YubiKey's
- * P-256 public key. v1 and v2 records are not readable — `getMeta` returns null
- * for them, so an un-migrated install reads as "not enrolled" rather than
- * deserialising into something this code would misuse.
+ * K1-only vault: at rest this is just the sealed blob plus this plaintext
+ * counter. No xpub, no r1PublicKey — both would-be key materials live only
+ * inside the sealed blob.
  */
-export interface VaultMetaV3 {
-  v: 3
+export interface VaultMetaV4 {
+  v: 4
   enrolledAt: number
   yubiSerial: string
   nickname: string
@@ -35,17 +39,30 @@ export interface VaultMetaV3 {
   /** Next unused deposit index — monotonic, never reused. */
   nextKeyIndex: number
   lastUsedAt?: number
-  /** Public-only vault node. Derives every K1 deposit key; cannot spend. */
-  xpub: string
-  /** The YubiKey's P-256 public key, 33-byte compressed, hex. */
-  r1PublicKey: string
 }
 
-export type VaultMeta = VaultMetaV3
+export type VaultMeta = VaultMetaV4
+
+const secureOpts = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY }
 
 export const vaultStore = {
   async isEnrolled(): Promise<boolean> {
-    return (await vaultStore.getMeta()) != null
+    const [meta, seal] = await Promise.all([vaultStore.getMeta(), vaultStore.getSeal()])
+    return meta != null && seal != null
+  },
+
+  async getSeal(): Promise<SealedBlob | null> {
+    const raw = await SecureStore.getItemAsync(SEAL_KEY, secureOpts)
+    if (!raw) return null
+    try {
+      return JSON.parse(raw) as SealedBlob
+    } catch {
+      return null
+    }
+  },
+
+  async setSeal(b: SealedBlob): Promise<void> {
+    await SecureStore.setItemAsync(SEAL_KEY, JSON.stringify(b), secureOpts)
   },
 
   async getMeta(): Promise<VaultMeta | null> {
@@ -53,7 +70,7 @@ export const vaultStore = {
     if (!raw) return null
     try {
       const parsed = JSON.parse(raw) as { v?: unknown }
-      return parsed?.v === 3 ? (parsed as VaultMeta) : null
+      return parsed?.v === 4 ? (parsed as VaultMeta) : null
     } catch {
       return null
     }
@@ -77,9 +94,10 @@ export const vaultStore = {
     return index
   },
 
-  /** Remove everything, including the legacy sealed blob. */
+  /** Remove everything, including the sealed blob — used by disable +
+   * recovery flows. */
   async clear(): Promise<void> {
-    await SecureStore.deleteItemAsync(LEGACY_SEAL_KEY).catch(() => {})
+    await SecureStore.deleteItemAsync(SEAL_KEY).catch(() => {})
     await AsyncStorage.removeItem(META_KEY)
   }
 }
