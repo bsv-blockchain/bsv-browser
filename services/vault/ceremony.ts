@@ -392,8 +392,8 @@ export class CeremonyController {
       // A persistent USB reader can interleave PIN entry and the serial/PIN
       // checks.
       const handle = driver.sessionBased
-        ? await this.armViaTap(driver, meta, seal, session)
-        : await this.armViaReader(driver, meta, seal, session)
+        ? await this.armViaTap(driver, meta, seal, session, gen)
+        : await this.armViaReader(driver, meta, seal, session, gen)
       this.throwIfCancelled()
 
       // Have we been superseded while parked on the tap? `cancelled` cannot
@@ -493,8 +493,10 @@ export class CeremonyController {
     driver: VaultDriver,
     meta: CeremonyMeta,
     seal: SealedBlob,
-    session: KeyEventSession
+    session: KeyEventSession,
+    gen: number
   ): Promise<VaultKeyHandle> {
+    this.throwIfStale(gen)
     this.set({ phase: 'connecting' })
     let info = await this.safeKeyInfo(driver)
     if (!info) {
@@ -502,7 +504,7 @@ export class CeremonyController {
       const waiter = (this.attachWaiter = defer<void>())
       driver.start()
       await waiter.promise
-      this.throwIfCancelled()
+      this.throwIfStale(gen)
       this.set({ phase: 'connecting' })
       info = await this.safeKeyInfo(driver)
     }
@@ -510,8 +512,8 @@ export class CeremonyController {
     if (info.serial !== meta.yubiSerial) {
       throw new VaultError('serial-mismatch', `Expected key ${meta.yubiSerial}`)
     }
-    const pin = await this.collectPin(driver)
-    return this.makeHandle(driver, meta, seal, pin, session)
+    const pin = await this.collectPin(driver, gen)
+    return this.makeHandle(driver, meta, seal, pin, session, gen)
   }
 
   /** Errors from a single tap/touch attempt that are worth retrying without
@@ -530,11 +532,12 @@ export class CeremonyController {
     driver: VaultDriver,
     meta: CeremonyMeta,
     seal: SealedBlob,
-    session: KeyEventSession
+    session: KeyEventSession,
+    gen: number
   ): Promise<VaultKeyHandle> {
-    const pin = await this.collectPinValue()
-    await this.openTapSession(driver, meta, pin, session)
-    return this.makeHandle(driver, meta, seal, pin, session)
+    const pin = await this.collectPinValue(gen)
+    await this.openTapSession(driver, meta, pin, session, gen)
+    return this.makeHandle(driver, meta, seal, pin, session, gen)
   }
 
   /** Open (or reopen) an NFC session and get as far as a verified PIN. Used
@@ -551,28 +554,32 @@ export class CeremonyController {
     driver: VaultDriver,
     meta: CeremonyMeta,
     pin: string,
-    session: KeyEventSession
+    session: KeyEventSession,
+    gen: number
   ): Promise<void> {
-    this.throwIfCancelled()
+    this.throwIfStale(gen)
     this.subscribeKeyEvents(driver, session)
     this.set({ phase: 'waiting-for-key' })
     const waiter = (this.attachWaiter = defer<void>())
     driver.start()
     await waiter.promise
-    this.throwIfCancelled()
+    this.throwIfStale(gen)
     this.set({ phase: 'connecting' })
     const info = await driver.getKeyInfo()
+    // getKeyInfo is a native call cancel() cannot interrupt.
+    this.throwIfStale(gen)
     if (info.serial !== meta.yubiSerial) {
       throw new VaultError('serial-mismatch', `Expected key ${meta.yubiSerial}`)
     }
     const res = await driver.verifyPin(pin)
+    this.throwIfStale(gen)
     if (!res.ok) throw new VaultError('pin-invalid', 'Wrong PIN', res.retriesLeft)
   }
 
   /** Collect a PIN value from the UI only (no token verify) — used by the NFC
    * path, which must gather the PIN before the tap. */
-  private async collectPinValue(): Promise<string> {
-    this.throwIfCancelled()
+  private async collectPinValue(gen: number): Promise<string> {
+    this.throwIfStale(gen)
     this.set({ phase: 'pin-entry' })
     if (this.queuedPin !== undefined) {
       const p = this.queuedPin
@@ -583,9 +590,9 @@ export class CeremonyController {
     return this.pinWaiter.promise
   }
 
-  private async collectPin(driver: VaultDriver): Promise<string> {
+  private async collectPin(driver: VaultDriver, gen: number): Promise<string> {
     for (;;) {
-      this.throwIfCancelled()
+      this.throwIfStale(gen)
       this.set({ phase: 'pin-entry', error: this.state.error })
       let pin: string
       if (this.queuedPin !== undefined) {
@@ -596,6 +603,11 @@ export class CeremonyController {
         pin = await this.pinWaiter.promise
       }
       const res = await driver.verifyPin(pin)
+      // verifyPin is a native call cancel() cannot interrupt: without this, an
+      // attempt superseded while parked in it would resume and repaint the
+      // SUCCESSOR's phase back to 'pin-entry' over its armed session, then walk
+      // on to spend a second, unwanted touch on the card.
+      this.throwIfStale(gen)
       if (res.ok) {
         this.set({ phase: 'pin-entry', error: undefined })
         return pin
@@ -628,11 +640,18 @@ export class CeremonyController {
     meta: CeremonyMeta,
     seal: SealedBlob,
     pin: string,
-    session: KeyEventSession
+    session: KeyEventSession,
+    gen: number
   ): Promise<HD> {
     let secret: string
     for (;;) {
-      this.throwIfCancelled()
+      // Redundant by construction today — every path into this loop (first
+      // entry via collectPin/openTapSession, re-entry via the retry branch
+      // below) has already checked. Kept anyway, and deliberately not
+      // load-bearing: this loop's body spends a TOUCH on the card, so it
+      // guards itself rather than trusting each caller to have done it. No
+      // test can distinguish it; nothing reaches here stale.
+      this.throwIfStale(gen)
       this.set({ phase: 'awaiting-touch' })
       try {
         secret = (await driver.ecdh(meta.slot, pin, seal.ePub)).secret
@@ -646,10 +665,19 @@ export class CeremonyController {
           // touch" forever.
           throw err
         }
+        // driver.ecdh is the one park point cancel() cannot interrupt, so a
+        // superseded attempt lands HERE with `cancelled` already reset to false
+        // by the requestKey() that replaced it. Both statements below are
+        // shared state: `set` would flip the SUCCESSOR's visible phase to
+        // 'error' while its handle is legitimately armed — inviting a cancel()
+        // that releases the successor's live vault key mid-operation — and
+        // `retryWaiter` would hand the successor's retry()/cancel() a deferred
+        // belonging to a dead ceremony. Bail before either.
+        this.throwIfStale(gen)
         this.set({ phase: 'error', error: { code: err.code } })
         this.retryWaiter = defer<void>()
         await this.retryWaiter.promise // resolves on retry(); rejects on cancel/detach
-        this.throwIfCancelled()
+        this.throwIfStale(gen)
         if (driver.sessionBased) {
           // Unsubscribe BEFORE our own stop() so its session-end detach echo
           // cannot be mistaken for a real one and abort the ceremony we are
@@ -661,7 +689,7 @@ export class CeremonyController {
           } catch {
             /* best-effort */
           }
-          await this.openTapSession(driver, meta, pin, session)
+          await this.openTapSession(driver, meta, pin, session, gen)
         }
         // loop: retry the same ECDH
       }
@@ -719,9 +747,10 @@ export class CeremonyController {
     meta: CeremonyMeta,
     seal: SealedBlob,
     pin: string,
-    session: KeyEventSession
+    session: KeyEventSession,
+    gen: number
   ): Promise<VaultKeyHandle> {
-    let hd: HD | undefined = await this.unwrapVaultKey(driver, meta, seal, pin, session)
+    let hd: HD | undefined = await this.unwrapVaultKey(driver, meta, seal, pin, session, gen)
     let released = false
     const handle: VaultKeyHandle = {
       get hd(): HD {
@@ -844,6 +873,30 @@ export class CeremonyController {
 
   private throwIfCancelled(): void {
     if (this.cancelled) throw new VaultError('user-cancelled')
+  }
+
+  /**
+   * The guard every step of an arm attempt resumes behind.
+   *
+   * `cancelled` alone is not enough, and this is the whole subtlety of the
+   * resurrection class: cancel() sets it, but the requestKey() that follows
+   * resets it to false for the NEW attempt. An attempt parked in a native call
+   * that cancel() cannot interrupt — `driver.ecdh`, `driver.verifyPin`,
+   * `driver.getKeyInfo` — therefore comes back to a flag that reads clean, and
+   * would carry on painting phases, installing waiters, and talking to the card
+   * on behalf of a ceremony that no longer exists. Only the generation can tell
+   * it apart, so every resumption point in the arm flow checks BOTH.
+   *
+   * Throwing (rather than returning) is deliberate: it unwinds to run()'s catch,
+   * which is generation-guarded and so swallows a superseded attempt's failure
+   * without touching the successor's waiters or phase, while its finally still
+   * closes this attempt's own session.
+   */
+  private throwIfStale(gen: number): void {
+    if (gen !== this.generation) {
+      throw new VaultError('user-cancelled', 'Superseded by a newer ceremony')
+    }
+    this.throwIfCancelled()
   }
 
   private resolveAll(handle: VaultKeyHandle): void {

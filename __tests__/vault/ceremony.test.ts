@@ -721,6 +721,111 @@ describe('CeremonyController: one singleton, sequential ceremonies', () => {
     expect(handle2.hd).toBeDefined()
     handle2.release()
   })
+
+  test("a superseded attempt whose tap drops RETRYABLY never hijacks the successor's retry prompt", async () => {
+    // The third face of the same race, and the nastiest, because a retryable
+    // tap error does not unwind — it parks. Attempt #1's abandoned ECDH comes
+    // back as a touch-timeout, which lands in unwrapVaultKey's retry branch
+    // with `cancelled` already reset to false by the requestKey() that replaced
+    // it. Unguarded, that branch flips the visible phase to 'error' over the
+    // SUCCESSOR's armed session (inviting a cancel() that releases the
+    // successor's live vault key) and installs a retryWaiter belonging to a
+    // dead ceremony — so the successor's own Retry button would resume #1's
+    // ECDH loop and spend another touch on the card.
+    const { ceremony: c, mock, expectedHd } = await makeCeremony()
+    const realEcdh = mock.ecdh.bind(mock)
+    let dropTap: (() => void) | undefined
+    const ecdhSpy = jest.spyOn(mock, 'ecdh').mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          dropTap = () => reject(new VaultError('touch-timeout', 'Touch not detected'))
+        })
+    )
+
+    const p1 = c.requestKey('op 1')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    await flush()
+    expect(c.state.phase).toBe('awaiting-touch')
+    expect(dropTap).toBeDefined()
+
+    const rejected = expect(p1).rejects.toMatchObject({ code: 'user-cancelled' })
+    c.cancel()
+    await rejected
+
+    ecdhSpy.mockImplementation(realEcdh)
+    const p2 = c.requestKey('op 2')
+    c.submitPin('123456')
+    const handle2 = await p2
+    expect(c.state.phase).toBe('armed')
+    expect(ecdhSpy).toHaveBeenCalledTimes(2)
+
+    // *** #1's abandoned tap drops, long after it was replaced. ***
+    dropTap!()
+    await flush()
+
+    // No error prompt over the successor's armed session.
+    expect(c.state.phase).toBe('armed')
+    expect(c.state.error).toBeUndefined()
+    expect(handle2.hd.toString()).toBe(expectedHd.toString())
+
+    // And no retryWaiter was installed on #1's behalf: the successor's Retry
+    // is inert rather than resuming a dead ceremony's ECDH loop and burning
+    // another touch.
+    c.retry()
+    await flush()
+    expect(c.state.phase).toBe('armed')
+    expect(ecdhSpy).toHaveBeenCalledTimes(2)
+    expect((mock as unknown as { listeners: Set<unknown> }).listeners.size).toBe(0)
+
+    // A natural cancel() now does exactly what it should: relock the
+    // successor's own session, and nothing else.
+    c.cancel()
+    expect(c.state.phase).toBe('idle')
+    expect(() => handle2.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
+  })
+
+  test('an attempt superseded while parked in verifyPin never repaints the successor or re-taps the card', async () => {
+    // Same class, different park point: driver.verifyPin is a native call
+    // cancel() cannot interrupt either. Resuming unguarded, attempt #1 would
+    // set the phase back to 'pin-entry' over the successor's armed session and
+    // then walk on to spend a second, unwanted touch on the card.
+    const { ceremony: c, mock } = await makeCeremony()
+    const realVerify = mock.verifyPin.bind(mock)
+    let answerPin: (() => void) | undefined
+    const verifySpy = jest.spyOn(mock, 'verifyPin').mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          answerPin = () => resolve({ ok: true, retriesLeft: 3 })
+        })
+    )
+    const ecdhSpy = jest.spyOn(mock, 'ecdh')
+
+    const p1 = c.requestKey('op 1')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    await flush()
+    expect(answerPin).toBeDefined() // #1 is parked inside verifyPin
+
+    const rejected = expect(p1).rejects.toMatchObject({ code: 'user-cancelled' })
+    c.cancel()
+    await rejected
+
+    verifySpy.mockImplementation(realVerify)
+    const p2 = c.requestKey('op 2')
+    c.submitPin('123456')
+    const handle2 = await p2
+    expect(c.state.phase).toBe('armed')
+    expect(ecdhSpy).toHaveBeenCalledTimes(1)
+
+    answerPin!() // #1's PIN check finally answers
+    await flush()
+
+    expect(c.state.phase).toBe('armed')
+    expect(ecdhSpy).toHaveBeenCalledTimes(1) // no second touch spent
+    expect(handle2.hd).toBeDefined()
+    handle2.release()
+  })
 })
 
 describe('CeremonyController: post-arm progress', () => {
@@ -782,8 +887,11 @@ describe('CeremonyController: retention timeout robustness', () => {
     c.noteProgress({ phase: 'broadcasting' })
     expect(c.state.phase).toBe('broadcasting')
 
-    // Advance past the full retention window plus the grace recheck the
-    // busy-path fallback schedules.
+    // Advance well past the point of no return. The busy-path fallback fires
+    // the first check at t=1000, finds the phase is not 'armed', and schedules
+    // a grace recheck — clamped to the 3x ceiling at t=3000, since with a 1s
+    // window the ceiling lands inside the nominal 5s grace. Either way the
+    // relock is due long before this advance ends.
     await jest.advanceTimersByTimeAsync(1000 + 5_000 + 10)
 
     // The bug this guards against: the ORIGINAL one-shot timer's callback was
