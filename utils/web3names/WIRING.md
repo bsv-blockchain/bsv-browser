@@ -32,7 +32,9 @@ async function openWeb3Name (address: string) {
   const deps = bsvSdkCryptoDeps()
   const answer = await resolveName(DEFAULT_CONFIG.resolverUrl, address)
   if (!answer.ok) return showInlineError(answer.error)          // never a blocking alert
-  const verdict = verifyAnswer(answer, deps, { resolverPubKey: DEFAULT_CONFIG.resolverPubKey })
+  // expectName binds the answer to the question: a valid signature over some
+  // other name is still a valid signature, not an answer.
+  const verdict = verifyAnswer(answer, deps, { resolverPubKey: DEFAULT_CONFIG.resolverPubKey, expectName: address })
   if (!verdict.valid) return showInlineError(`verification failed: ${verdict.reason}`)
   // content: raw tx from any source the app already uses (WOC is wired in env);
   // integrity is content-addressed — bytes must hash to the SIGNED txid.
@@ -66,7 +68,7 @@ const hit = classifyAddressInput(recipientInput)
 if (hit.kind === 'web3') {
   const answer = await resolveName(DEFAULT_CONFIG.resolverUrl, hit.address)
   if (!answer.ok) return showInlineError(answer.error)
-  const verdict = verifyAnswer(answer, deps, { resolverPubKey: DEFAULT_CONFIG.resolverPubKey })
+  const verdict = verifyAnswer(answer, deps, { resolverPubKey: DEFAULT_CONFIG.resolverPubKey, expectName: hit.address })
   if (!verdict.valid) return showInlineError(`verification failed: ${verdict.reason}`)
   if (answer.fallback) showInlineNote(`mailbox unknown — payment goes to the holder of ${answer.name}`)
   return payToLockingScript(answer.holder_script) // + optional liveness check on answer.current

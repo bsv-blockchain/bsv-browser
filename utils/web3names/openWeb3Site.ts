@@ -34,7 +34,7 @@ export async function buildWeb3TabUrl (address: string, name: string): Promise<s
           : `The resolver answered: ${answer.error}.`
       return web3ErrorPage(name, reason)
     }
-    const verdict = verifyAnswer(answer, deps, { resolverPubKey: DEFAULT_CONFIG.resolverPubKey })
+    const verdict = verifyAnswer(answer, deps, { resolverPubKey: DEFAULT_CONFIG.resolverPubKey, expectName: address })
     if (!verdict.valid) {
       return web3ErrorPage(name, `Answer failed local verification (${verdict.reason}) — refusing to render.`)
     }

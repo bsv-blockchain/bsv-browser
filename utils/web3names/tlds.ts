@@ -12,19 +12,28 @@ export const SNAPSHOT_TLDS = ['web3', 'bitcoin', 'crypto', 'blockchain', 'ordnet
 export const SNAPSHOT_RETIRED_TLDS = ['bsv', 'bitcoinsv']
 
 /**
- * Client-side guards on the refreshed list. The /health list is not yet a
- * signed document (a signed TLD registry is on the ODNCA roadmap), so the
- * browser never lets a refresh widen interception into the web2 namespace:
- * additions must match a conservative shape, common web2 TLDs are refused
- * outright, and the total set is capped. The build-time snapshot can never
- * be removed by a refresh.
+ * Client-side guards on the refreshed list.
+ *
+ * This WAS a denylist of 32 web2 TLDs. A denylist of 32 against roughly 1500
+ * delegated gTLDs is not a defence: a hostile /health could add `bank`, `shop`,
+ * `online`, `email` or `be` and the address bar would intercept real web2
+ * domains — for a regulated gTLD like .bank that is exactly the harm this file
+ * says it exists to prevent, and the pollution survived a refresh.
+ *
+ * It is now an ALLOWLIST. A refresh can only re-state TLDs that are already in
+ * the build-time snapshot; it can mark them retired, and it can drop nothing.
+ * Genuinely new TLDs arrive through a release of this module — which is the
+ * honest trade-off until the ODNCA root registry is a signed document that a
+ * client can verify for itself (on the roadmap; see STD-004).
+ *
+ * The shape check and the cap stay as belt-and-braces.
  */
-const WEB2_TLD_BLOCKLIST = new Set([
-  'com', 'net', 'org', 'io', 'co', 'app', 'dev', 'xyz', 'info', 'me', 'tv', 'ai', 'us', 'uk', 'de',
-  'nl', 'fr', 'es', 'it', 'ru', 'cn', 'jp', 'in', 'br', 'au', 'ca', 'ch', 'se', 'no', 'eu', 'gov', 'edu'
-])
 const TLD_SHAPE = /^[a-z0-9]{2,12}$/
 const MAX_TLDS = 32
+
+/** The only TLDs this module will ever treat as web3, regardless of what a
+ *  resolver claims. Additions require a release. */
+const TLD_ALLOWLIST = new Set([...SNAPSHOT_TLDS, ...SNAPSHOT_RETIRED_TLDS])
 
 interface TldState {
   active: Set<string>
@@ -54,10 +63,13 @@ export async function refreshTlds (resolverUrl: string, refreshMs: number, fetch
     const body = await res.json()
     const tlds = Array.isArray(body.tlds) ? body.tlds : []
     const retired = Array.isArray(body.retired_tlds) ? body.retired_tlds : []
-    const additions = [...tlds, ...retired]
+    // Only names already in the allowlist survive. A resolver cannot widen the
+    // web3 namespace by answering /health differently — it can only confirm
+    // what this build already knows.
+    const confirmed = [...tlds, ...retired]
       .map((t: string) => String(t).toLowerCase())
-      .filter((t: string) => TLD_SHAPE.test(t) && !WEB2_TLD_BLOCKLIST.has(t))
-    const merged = new Set([...SNAPSHOT_TLDS, ...SNAPSHOT_RETIRED_TLDS, ...additions])
+      .filter((t: string) => TLD_SHAPE.test(t) && TLD_ALLOWLIST.has(t))
+    const merged = new Set([...SNAPSHOT_TLDS, ...SNAPSHOT_RETIRED_TLDS, ...confirmed])
     if (merged.size > 0 && merged.size <= MAX_TLDS) {
       state.active = merged
       state.fetchedAt = now

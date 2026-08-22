@@ -37,7 +37,7 @@ normal URL pass through untouched.
 ## Files
 
 - `names.ts` — address parsing/normalization (STD-001 §2; non-ASCII = exact bytes)
-- `tlds.ts` — snapshot + live TLD set from resolver `/health`
+- `tlds.ts` — built-in TLD allowlist; resolver `/health` can confirm or retire shipped TLDs, never add
 - `resolve.ts` — one-GET transport to any conformant resolver
 - `verify.ts` — signature scheme, frozen conformance vector reproduced in tests
 - `liveness.ts` — the unspent check over the chain data this app already uses

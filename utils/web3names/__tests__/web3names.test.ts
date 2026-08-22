@@ -12,6 +12,7 @@ const deps: CryptoDeps = {
 }
 
 // The frozen ODNCA-STD-001 §6 conformance vector.
+const ASK = 'alexander@ordnet.web3' // what the caller actually asked for
 const vector: ResolveAnswer = {
   ok: true,
   v: 1,
@@ -80,12 +81,99 @@ describe('verify (ODNCA-STD-001 §6)', () => {
     expect(bytesToHex(signedPreimage(changed))).toBe(bytesToHex(signedPreimage(vector)))
   })
   it('rejects expired answers before touching the signature', () => {
-    const verdict = verifyAnswer(vector, deps, { resolverPubKey: vector.signer, nowSeconds: vector.expires + 1 })
+    const verdict = verifyAnswer(vector, deps, { resolverPubKey: vector.signer, nowSeconds: vector.expires + 1, expectName: ASK })
     expect(verdict).toEqual({ valid: false, reason: 'expired' })
   })
   it('rejects an unknown signer against the pinned key', () => {
-    const verdict = verifyAnswer(vector, deps, { resolverPubKey: '02' + 'ab'.repeat(32), nowSeconds: 0 })
+    const verdict = verifyAnswer(vector, deps, { resolverPubKey: '02' + 'ab'.repeat(32), nowSeconds: 0, expectName: ASK })
     expect(verdict).toEqual({ valid: false, reason: 'unknown_signer' })
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * H3 — an answer must be bound to the question that was asked.
+ *
+ * A signature covers the answer's OWN name, so a correctly signed,
+ * unexpired answer for one name verifies against a request for another
+ * unless the caller states what it asked for. Every cache, proxy or relay
+ * in the path is otherwise a substitution point.
+ * ------------------------------------------------------------------ */
+describe('verify / expiry actually expires', () => {
+  // `a.expires <= now` is false for every non-numeric value, so a missing,
+  // NaN or string expires meant "never expires" — with a valid signature
+  // over it. The whole freshness model rests on this one field.
+  const YEAR_2100 = 4102444800
+  const opts = { resolverPubKey: vector.signer, nowSeconds: YEAR_2100, expectName: ASK }
+
+  for (const [label, value] of [
+    ['missing', undefined],
+    ['null', null],
+    ['NaN', NaN],
+    ['a string', 'not-a-number'],
+    ['an object', {}],
+    ['Infinity', Infinity],
+    ['a numeric string', '9999999999']
+  ] as Array<[string, any]>) {
+    it(`rejects ${label} expires as expired`, () => {
+      const a: any = { ...vector }
+      if (value === undefined) delete a.expires; else a.expires = value
+      expect(verifyAnswer(a, deps, opts)).toEqual({ valid: false, reason: 'expired' })
+    })
+  }
+
+  it('a genuine future timestamp still verifies', () => {
+    const verdict = verifyAnswer(vector, deps, { ...opts, nowSeconds: vector.expires - 1 })
+    expect((verdict as any).reason).not.toBe('expired')
+  })
+})
+
+describe('verify / answer binding', () => {
+  const fresh = { resolverPubKey: vector.signer, nowSeconds: 0 }
+
+  it('rejects a signed answer for a DIFFERENT name', () => {
+    expect(verifyAnswer(vector, deps, { ...fresh, expectName: 'victim.web3' }))
+      .toEqual({ valid: false, reason: 'name_mismatch' })
+  })
+  it('catches the substitution before the signature is even consulted', () => {
+    const verdict = verifyAnswer(vector, deps, { ...fresh, expectName: 'victim.web3' })
+    expect(verdict.valid).toBe(false)
+    expect((verdict as any).reason).not.toBe('bad_signature')
+  })
+  it('fails closed when no question is stated', () => {
+    expect(verifyAnswer(vector, deps, { ...fresh, expectName: '' }))
+      .toEqual({ valid: false, reason: 'no_expected_name' })
+  })
+  it('fails closed on an unparseable question', () => {
+    expect(verifyAnswer(vector, deps, { ...fresh, expectName: 'not-an-address' }))
+      .toEqual({ valid: false, reason: 'no_expected_name' })
+  })
+  it('normalizes the question before comparing (STD-001 §2)', () => {
+    const verdict = verifyAnswer(vector, deps, { ...fresh, expectName: 'sns:Alexander@ORDNET.web3' })
+    expect((verdict as any).reason).not.toBe('name_mismatch')
+  })
+  it('refuses an ok:false body before reading anything else', () => {
+    expect(verifyAnswer({ ...vector, ok: false } as any, deps, { ...fresh, expectName: ASK }))
+      .toEqual({ valid: false, reason: 'not_ok' })
+  })
+  it('refuses a body with no ok field at all', () => {
+    expect(verifyAnswer({ ...vector, ok: undefined } as any, deps, { ...fresh, expectName: ASK }))
+      .toEqual({ valid: false, reason: 'not_ok' })
+  })
+  it('refuses null without throwing', () => {
+    expect(verifyAnswer(null as any, deps, { ...fresh, expectName: ASK }))
+      .toEqual({ valid: false, reason: 'malformed' })
+  })
+  it('allows a domain-holder answer to a mailbox question when fallback is declared', () => {
+    const verdict = verifyAnswer(vector, deps, { ...fresh, expectName: ASK })
+    expect((verdict as any).reason).not.toBe('mailbox_mismatch')
+  })
+  it('rejects a different mailbox when fallback is NOT declared', () => {
+    expect(verifyAnswer({ ...vector, mailbox: 'someone-else', fallback: false }, deps, { ...fresh, expectName: ASK }))
+      .toEqual({ valid: false, reason: 'mailbox_mismatch' })
+  })
+  it('rejects a mailbox answer to a bare-domain question', () => {
+    expect(verifyAnswer(vector, deps, { ...fresh, expectName: 'ordnet.web3' }))
+      .toEqual({ valid: false, reason: 'mailbox_mismatch' })
   })
 })
 
@@ -169,14 +257,55 @@ describe('openWeb3Site helpers', () => {
 
 
 describe('tld refresh guards', () => {
+  // The gate is an ALLOWLIST. It was a denylist of 32 entries, which is no
+  // defence at all against ~1500 delegated gTLDs: a hostile /health could add
+  // `bank`, `shop`, `online`, `email` or `be` and the address bar would
+  // intercept real web2 domains — permanently, since the pollution survived a
+  // refresh. A resolver can now only CONFIRM what this build already ships.
+
   it('refuses web2 TLDs and junk shapes from a hostile /health', async () => {
     const { refreshTlds, isKnownTld } = await import('../tlds')
-    const hostile = async () => ({ ok: true, json: async () => ({ tlds: ['com', 'ORG', 'x', 'evil$', 'sats'], retired_tlds: [] }) }) as any
+    const hostile = async () => ({ ok: true, json: async () => ({ tlds: ['com', 'ORG', 'x', 'evil$'], retired_tlds: [] }) }) as any
     await refreshTlds('https://x', 0, hostile as any)
     expect(isKnownTld('com')).toBe(false)
     expect(isKnownTld('org')).toBe(false)
-    expect(isKnownTld('sats')).toBe(true)
     expect(isKnownTld('web3')).toBe(true)
+  })
+
+  it('refuses the regulated and popular gTLDs a denylist of 32 would have missed', async () => {
+    const { refreshTlds, isKnownTld } = await import('../tlds')
+    // Every one of these was accepted before, and .bank is a strictly
+    // regulated gTLD — intercepting it is the exact harm this file exists
+    // to prevent.
+    const targets = ['bank', 'shop', 'online', 'email', 'be', 'insurance', 'pharmacy', 'law', 'health', 'finance']
+    const hostile = async () => ({ ok: true, json: async () => ({ tlds: targets, retired_tlds: [] }) }) as any
+    await refreshTlds('https://x', 0, hostile as any)
+    for (const t of targets) expect(isKnownTld(t)).toBe(false)
+  })
+
+  it('a resolver cannot invent a new web3 TLD either', async () => {
+    const { refreshTlds, isKnownTld } = await import('../tlds')
+    // Shape-valid and not a web2 name, so the old filter let it through.
+    // Adding a genuine TLD now requires a release of this module.
+    const hostile = async () => ({ ok: true, json: async () => ({ tlds: ['sats', 'metanet'], retired_tlds: [] }) }) as any
+    await refreshTlds('https://x', 0, hostile as any)
+    expect(isKnownTld('sats')).toBe(false)
+    expect(isKnownTld('metanet')).toBe(false)
+  })
+
+  it('a refresh can never remove a shipped TLD', async () => {
+    const { refreshTlds, isKnownTld, SNAPSHOT_TLDS } = await import('../tlds')
+    const empty = async () => ({ ok: true, json: async () => ({ tlds: [], retired_tlds: [] }) }) as any
+    await refreshTlds('https://x', 0, empty as any)
+    for (const t of SNAPSHOT_TLDS) expect(isKnownTld(t)).toBe(true)
+  })
+
+  it('confirms shipped TLDs that the resolver does report', async () => {
+    const { refreshTlds, isKnownTld } = await import('../tlds')
+    const good = async () => ({ ok: true, json: async () => ({ tlds: ['web3', 'ordnet'], retired_tlds: ['bsv'] }) }) as any
+    await refreshTlds('https://x', 0, good as any)
+    expect(isKnownTld('web3')).toBe(true)
+    expect(isKnownTld('bsv')).toBe(true)
   })
 })
 
