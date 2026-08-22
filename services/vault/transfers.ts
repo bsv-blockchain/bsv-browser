@@ -772,14 +772,26 @@ async function stageAndLockDeposit(
 // ── withdraw / sweep (shared spend core) ─────────────────────────────────
 
 /**
- * The vault key, however this spend reached it: unwrapped by a tap
- * (withdrawal) or re-derived from mnemonic + passphrase (recovery sweep).
- * There is only one key and only one script family, so there is nothing left
- * to discriminate on — both routes hand over the same node.
+ * How a spend reaches the vault key: a thunk, read at every point of use.
+ *
+ * There is only one key and only one script family left, so there is nothing to
+ * discriminate on — a withdrawal (tap-unwrapped) and a recovery sweep
+ * (mnemonic + passphrase) hand over the same node. What differs is REVOCABILITY,
+ * and that is why this is a thunk rather than the node itself.
+ *
+ * A withdrawal passes `() => handle.hd`, so every read goes back through
+ * VaultKeyHandle's getter — the one thing that can refuse. Dereferencing once
+ * up front would hand this module a raw node that outlives the ceremony's
+ * opinion of it: cancel(), a key detaching, and the retention ceiling
+ * (armedAt + 3×) would all become advisory mid-withdrawal, exactly the
+ * "a reference the caller already took is beyond its reach" case
+ * VaultKeyHandle's docblock warns about. With the thunk, a relock lands on the
+ * next derive and unwinds through the abort path below.
+ *
+ * The sweep wraps its caller-owned node as `() => hd`: no ceremony exists to
+ * revoke it, so the thunk is transparent there.
  */
-interface SpendKey {
-  hd: HD
-}
+type VaultKeySource = () => HD
 
 /** One selected vault input, resolved against the key that will spend it. */
 interface PreparedSpend<T> {
@@ -813,10 +825,15 @@ interface PreparedSpend<T> {
  * of the BEEF the same listOutputs call returned), never a script rebuilt from
  * the output's own customInstructions — a rebuild is self-consistent by
  * construction and can never disagree with itself.
+ *
+ * `getHd()` is called per input rather than once: a relock partway through
+ * refuses on the next input instead of quietly finishing the pass with a key
+ * the ceremony has already declared dead. Nothing has been reserved yet, so
+ * that refusal costs nothing at all.
  */
 function prepareSpends<T extends { outpoint: string; satoshis: number; ci: VaultInstructions }>(
   selected: T[],
-  hd: HD,
+  getHd: VaultKeySource,
   beefBytes?: number[]
 ): PreparedSpend<T>[] {
   const sources = beefBytes?.length ? Beef.fromBinary(beefBytes) : undefined
@@ -835,7 +852,7 @@ function prepareSpends<T extends { outpoint: string; satoshis: number; ci: Vault
       throw new VaultError('no-transaction', `No source transaction for vault output ${o.outpoint}`)
     }
 
-    const mine = buildVaultLockingScript({ k1PublicKeyHash: depositPubKeyHash(hd, index) })
+    const mine = buildVaultLockingScript({ k1PublicKeyHash: depositPubKeyHash(getHd(), index) })
     if (mine.toHex() !== lockingScript.toHex()) {
       throw new VaultError(
         'wrong-key',
@@ -851,7 +868,7 @@ async function spendVaultOutputs(
   adminOriginator: string,
   amount: number | 'all',
   reason: string,
-  spend: SpendKey,
+  getHd: VaultKeySource,
   opts: { revaultRemainder: boolean } & VaultTransferOptions
 ): Promise<VaultSpendResult> {
   // Announce work BEFORE starting it, then hand the JS thread back once so
@@ -927,7 +944,7 @@ async function spendVaultOutputs(
 
   // Resolve every selected input against the key in hand BEFORE anything is
   // reserved, burned, or signed — see prepareSpends.
-  const prepared = prepareSpends(selected, spend.hd, list.BEEF)
+  const prepared = prepareSpends(selected, getHd, list.BEEF)
 
   const outputs: unknown[] = []
   const remainder = acc - want
@@ -938,9 +955,11 @@ async function spendVaultOutputs(
   //
   // The SAME node the inputs were checked against locks it: one tap covers a
   // withdrawal and its own change output, and a wrong-key failure above has
-  // already aborted without burning an index here.
+  // already aborted without burning an index here. Read through the thunk (and
+  // BEFORE takeNextIndex, inside nextDepositTarget) so a relock at this instant
+  // refuses without burning an index either.
   if (opts.revaultRemainder && remainder >= VAULT_DEPOSIT_MIN) {
-    const target = await nextDepositTarget(spend.hd)
+    const target = await nextDepositTarget(getHd())
     outputs.push({
       satoshis: remainder,
       lockingScript: target.lockingScript,
@@ -1012,12 +1031,18 @@ async function spendVaultOutputs(
     // length of the loop: one ECDSA signature is fast, but the preimage is
     // re-formatted over the entire transaction for every input, so the cost
     // grows with the square of the input count.
+    //
+    // getHd() per input, never hoisted: the loop yields between inputs, so a
+    // cancel(), a detached key, or the retention ceiling can land BETWEEN two
+    // signatures. Reading through the thunk turns that into a refusal on the
+    // next input, which unwinds into the catch below and aborts the reservation
+    // — a half-signed `spends` map never reaches signAction.
     for (let i = 0; i < prepared.length; i++) {
       await new Promise<void>(resolve => setTimeout(resolve, 0))
 
       const { o, index, lockingScript } = prepared[i]
       const unlocker = new P2PKH().unlock(
-        depositPrivKey(spend.hd, index),
+        depositPrivKey(getHd(), index),
         'all',
         false,
         o.satoshis,
@@ -1076,10 +1101,17 @@ export async function withdrawFromVault(
   await requireOnline(opts)
   const handle = await requestVaultKey(reason)
   try {
-    // `handle.hd` read here, at the point of use, and handed straight into an
-    // operation that finishes inside the armed window — the shape
-    // VaultKeyHandle documents. Never stored.
-    return await spendVaultOutputs(w, adminOriginator, amount, reason, { hd: handle.hd }, {
+    // A THUNK, not `handle.hd` — see VaultKeySource. The spend reads it afresh
+    // at every derive and every signature, so each read goes back through the
+    // handle's getter and a relock (cancel, key detached, retention ceiling)
+    // refuses on the next one. A normal withdrawal finishes inside the armed
+    // window, but the ceiling makes that expected rather than guaranteed, so
+    // "finishes in time" is not something this code may assume: a relock
+    // mid-spend surfaces as key-removed-mid-op and unwinds through
+    // spendVaultOutputs' abort path, leaving no reservation behind. Nothing is
+    // stored here either way — the thunk closes over the handle, which dies
+    // with this call.
+    return await spendVaultOutputs(w, adminOriginator, amount, reason, () => handle.hd, {
       revaultRemainder: true,
       ...opts
     })
@@ -1106,7 +1138,10 @@ export async function sweepVaultWithHD(
 ): Promise<VaultSpendResult | null> {
   await requireOnline(opts)
   try {
-    return await spendVaultOutputs(w, adminOriginator, 'all', reason, { hd }, {
+    // The node is the caller's own and no ceremony can revoke it, so the thunk
+    // is transparent here — it exists for the withdrawal's handle (see
+    // VaultKeySource).
+    return await spendVaultOutputs(w, adminOriginator, 'all', reason, () => hd, {
       revaultRemainder: false,
       ...opts
     })

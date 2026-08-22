@@ -46,6 +46,7 @@ import { vaultStore } from '@/services/vault/vaultStore'
 import { backupAttestation } from '@/services/vault/backupAttestation'
 import { bip32KeyID, depositPubKeyHash } from '@/services/vault/vaultDerivation'
 import { requestVaultKey, noteVaultProgress } from '@/services/vault/ceremonyHost'
+import type { VaultKeyHandle } from '@/services/vault/ceremony'
 import { VaultError } from '@/services/vault/types'
 import {
   VAULT_BASKET,
@@ -170,12 +171,38 @@ let wallet: VaultWallet & {
 let fakeStagingUtxos: { outpoint: string; satoshis: number; customInstructions?: string }[]
 
 let keyRelease: jest.Mock
+/** The handle the mocked ceremony last vended, so a test can relock it
+ * mid-operation the way cancel()/detach/the retention ceiling would. */
+let lastHandle: VaultKeyHandle | undefined
 
-/** Arm the mocked ceremony with a given HD node — the successor of the old
- * mock signer. A handle is just `{ hd, release }`; the spend path reads `hd`
- * at its point of use and releases in a finally. */
+/**
+ * Arm the mocked ceremony with a given HD node — the successor of the old mock
+ * signer.
+ *
+ * Deliberately reproduces the REAL VaultKeyHandle contract rather than a plain
+ * `{hd, release}` object: `hd` is a getter that throws key-removed-mid-op once
+ * released, and release() is idempotent (services/vault/ceremony.ts's
+ * makeHandle). That getter is the whole point of the spend path taking a thunk
+ * — a mock that handed back a raw node would let a "reads hd once up front"
+ * regression pass unnoticed.
+ */
 const armWith = (hd: HD) => {
-  ;(requestVaultKey as jest.Mock).mockImplementation(async () => ({ hd, release: keyRelease }))
+  ;(requestVaultKey as jest.Mock).mockImplementation(async () => {
+    let released = false
+    const handle: VaultKeyHandle = {
+      get hd(): HD {
+        if (released) throw new VaultError('key-removed-mid-op', 'Vault key handle already released')
+        return hd
+      },
+      release: () => {
+        if (released) return
+        released = true
+        keyRelease()
+      }
+    }
+    lastHandle = handle
+    return handle
+  })
 }
 
 beforeEach(async () => {
@@ -183,6 +210,7 @@ beforeEach(async () => {
   for (const k of Object.keys(secureItems)) delete secureItems[k]
 
   lastSignable = undefined
+  lastHandle = undefined
   fakeStagingUtxos = []
   let stagingSeq = 0
   wallet = {
@@ -787,6 +815,28 @@ describe('withdrawFromVault', () => {
 
     await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toThrow()
     expect(wallet.abortAction).not.toHaveBeenCalled()
+  })
+
+  it('aborts cleanly when the key relocks between createAction and signing', async () => {
+    // cancel(), a key detaching, or the retention ceiling can fire at any point
+    // in a withdrawal. The spend path reads the node through a thunk for
+    // exactly this reason: a relock after the coin is reserved but before the
+    // signing loop must REFUSE — not sail on with a node the ceremony has
+    // already declared dead — and unwind through the same abort path as any
+    // other pre-signature failure.
+    await seedVaultOutputs(2, 500_000)
+    const realCreateAction = wallet.createAction.getMockImplementation()!
+    wallet.createAction.mockImplementation(async (...args: any[]) => {
+      const created = await realCreateAction(...args)
+      lastHandle!.release() // the relock lands here, mid-withdrawal
+      return created
+    })
+
+    await expect(withdrawFromVault(wallet, ADMIN, 'all', 'Withdraw')).rejects.toMatchObject({
+      code: 'key-removed-mid-op'
+    })
+    expect(wallet.abortAction).toHaveBeenCalledWith({ reference: 'ref-1' }, ADMIN)
+    expect(wallet.signAction).not.toHaveBeenCalled()
   })
 
   it('still aborts when the failure happens BEFORE the transaction is signed', async () => {
