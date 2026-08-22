@@ -58,12 +58,23 @@ export async function enrollVault(args: {
   /**
    * Enroll against the key ALREADY in the PIV slot instead of refusing it.
    *
-   * This is how one YubiKey serves the same vault on several devices: the slot
-   * key is what locks the R1 branch, and a second device reaches the SAME
-   * vault seed the same two ways the first one could — the physical card
-   * (its ECDH unwraps the seal this device writes) or the mnemonic +
-   * passphrase (deriveVaultSeed re-derives it offline). Nothing is generated,
-   * so every output the first device created stays spendable.
+   * This is how one YubiKey serves the same vault on several devices. The slot
+   * key is the ECDH unwrap oracle (see this file's header), i.e. the wrap
+   * TARGET a seal is built against — so adopting it seals THIS device's own
+   * copy of the vault seed to the card the user already carries, and the one
+   * physical tap then opens either device's blob.
+   *
+   * Generating instead is the destructive move: it would overwrite the slot's
+   * private key and strand the FIRST device's seal, which was wrapped to the
+   * key being replaced — that device would be left with a blob no tap can
+   * open, recoverable only via mnemonic + passphrase. Adoption generates
+   * nothing.
+   *
+   * The seed is re-derived here, never copied between devices, so both reach
+   * the SAME vault key the same two ways: the physical card (its ECDH unwraps
+   * whichever seal that device wrote) or the mnemonic + passphrase
+   * (deriveVaultSeed, offline). Every output the first device created stays
+   * spendable.
    *
    * Only ever set from an explicit user choice: 0x82 is a *retired* PIV slot,
    * so the key sitting there may belong to something else entirely (an
