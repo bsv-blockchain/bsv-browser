@@ -1,31 +1,44 @@
 /**
- * Ceremony controller — the UI-free state machine that turns "a vault signer
- * is needed" into an insert → PIN → arm flow and back into a VaultR1Signer
- * that can sign digests for as long as its session stays open. Driven
- * entirely by the mock driver + a fake meta store.
+ * Ceremony controller — the UI-free state machine that turns "the vault key is
+ * needed" into an insert → PIN → tap flow and back into a VaultKeyHandle: the
+ * unwrapped vault HD node, held for the retention window and dropped on
+ * release. Driven entirely by the mock driver plus a fake store view that
+ * vends the enrollment meta and a seal built against the mock card's own slot
+ * key, so one tap really does have to unwrap something.
  */
-import { Utils } from '@bsv/sdk'
+import { HD, Utils } from '@bsv/sdk'
 import { CeremonyController } from '../../services/vault/ceremony'
 import { MockYubiKey } from '../../services/vault/mockYubiKey'
-import { compressP256 } from '../../services/vault/r1k1'
-import { VaultError } from '../../services/vault/types'
+import { sealVaultKey } from '../../services/vault/sealing'
+import { SealedBlob, VaultError } from '../../services/vault/types'
 
 const VAULT_SLOT = 0x82
 const RETENTION = 120_000
 const DEFAULT_SERIAL = '12345678'
 
+/** A fixed, throwaway 64-byte vault seed. NEVER a real wallet's seed — it is a
+ * printable pattern, not entropy, and exists only so every fixture seals and
+ * unseals the same well-known value. */
+const vaultSeed = (): number[] => new Array(64).fill(0).map((_, i) => (i * 7 + 3) & 0xff)
+
 interface CeremonyHarness {
   ceremony: CeremonyController
   mock: MockYubiKey
+  /** Enrollment meta the store view vends — no key material, v4 shape. */
+  meta: { slot: number; yubiSerial: string }
+  /** The seal the store view vends, wrapped to `mock`'s own slot key. */
+  seal: SealedBlob
+  /** The HD node the sealed seed reconstructs — what one tap must produce. */
+  expectedHd: HD
 }
 
 /**
  * Wire a CeremonyController to a fresh MockYubiKey that already holds a
- * generated slot key and an enrollment record bound to it — mirrors a vault
- * that has already been set up. Enrollment needs the key briefly present to
- * generate into the slot; it is removed again afterward so every test starts
- * from "no key seen yet" unless it calls mock.insertKey() itself, matching
- * the shape of the brief's own test snippets.
+ * generated slot key, plus an enrollment record (meta + seal) bound to it —
+ * mirrors a vault that has already been set up. Enrollment needs the key
+ * briefly present to generate into the slot; it is removed again afterward so
+ * every test starts from "no key seen yet" unless it calls mock.insertKey()
+ * itself, matching the shape of the brief's own test snippets.
  */
 async function makeCeremony(opts: { retentionMs?: number; sessionBased?: boolean } = {}): Promise<CeremonyHarness> {
   const mock = new MockYubiKey()
@@ -34,28 +47,27 @@ async function makeCeremony(opts: { retentionMs?: number; sessionBased?: boolean
   const { publicKey } = await mock.generateVaultKey(VAULT_SLOT)
   mock.removeKey()
 
-  const meta = { slot: VAULT_SLOT, yubiSerial: DEFAULT_SERIAL, r1PublicKey: compressP256(publicKey) }
+  const seal = sealVaultKey(vaultSeed(), publicKey, { slot: VAULT_SLOT, serial: DEFAULT_SERIAL })
+  const meta = { slot: VAULT_SLOT, yubiSerial: DEFAULT_SERIAL }
   const ceremony = new CeremonyController({
     getDriver: () => mock,
-    store: { getMeta: async () => meta },
+    store: { getMeta: async () => meta, getSeal: async () => seal },
     retentionMs: opts.retentionMs ?? RETENTION
   })
-  return { ceremony, mock }
+  return { ceremony, mock, meta, seal, expectedHd: HD.fromSeed(vaultSeed()) }
 }
 
 // microtask flush helper — drains microtasks by hopping the macrotask queue
 const flush = () => new Promise<void>(r => setTimeout(r, 0))
 
-const digest = (fill: number) => Uint8Array.from(new Array(32).fill(fill))
-
 describe('CeremonyController: arming', () => {
   test('driver unavailable rejects with driver-unavailable', async () => {
     const c = new CeremonyController({
       getDriver: () => null,
-      store: { getMeta: async () => null },
+      store: { getMeta: async () => null, getSeal: async () => null },
       retentionMs: RETENTION
     })
-    await expect(c.requestSigner('x')).rejects.toMatchObject({ code: 'driver-unavailable' })
+    await expect(c.requestKey('x')).rejects.toMatchObject({ code: 'driver-unavailable' })
   })
 
   test('no meta (not enrolled) rejects with not-enrolled', async () => {
@@ -63,26 +75,40 @@ describe('CeremonyController: arming', () => {
     mock.insertKey(DEFAULT_SERIAL)
     const c = new CeremonyController({
       getDriver: () => mock,
-      store: { getMeta: async () => null },
+      store: { getMeta: async () => null, getSeal: async () => null },
       retentionMs: RETENTION
     })
-    await expect(c.requestSigner('x')).rejects.toMatchObject({ code: 'not-enrolled' })
+    await expect(c.requestKey('x')).rejects.toMatchObject({ code: 'not-enrolled' })
   })
 
-  test('two concurrent requestSigner calls share one ceremony and resolve to the SAME signer', async () => {
+  test('meta without a seal rejects with not-enrolled BEFORE asking for a tap', async () => {
+    // Half-enrolled (meta written, seal missing) has nothing to unwrap, so
+    // there is no point raising a YubiKey prompt the user cannot satisfy.
+    const { mock, meta } = await makeCeremony()
+    const startSpy = jest.spyOn(mock, 'start')
+    const c = new CeremonyController({
+      getDriver: () => mock,
+      store: { getMeta: async () => meta, getSeal: async () => null },
+      retentionMs: RETENTION
+    })
+    await expect(c.requestKey('x')).rejects.toMatchObject({ code: 'not-enrolled' })
+    expect(startSpy).not.toHaveBeenCalled()
+  })
+
+  test('two concurrent requestKey calls share one ceremony and resolve to the SAME handle', async () => {
     const { ceremony: c, mock } = await makeCeremony()
-    const p1 = c.requestSigner('op A')
-    const p2 = c.requestSigner('op B')
+    const p1 = c.requestKey('op A')
+    const p2 = c.requestKey('op B')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const [s1, s2] = await Promise.all([p1, p2])
-    expect(s1).toBe(s2) // release() is idempotent by construction because of this
-    s1.release()
+    const [h1, h2] = await Promise.all([p1, p2])
+    expect(h1).toBe(h2) // release() is idempotent by construction because of this
+    h1.release()
   })
 
   test('wrong key serial (persistent reader) → serial-mismatch error', async () => {
     const { ceremony: c, mock } = await makeCeremony()
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     mock.insertKey('WRONG-SERIAL')
     const settled = expect(p).rejects.toMatchObject({ code: 'serial-mismatch' })
     await flush()
@@ -91,19 +117,28 @@ describe('CeremonyController: arming', () => {
     await settled
   })
 
-  test('wrong key serial (NFC tap) → serial-mismatch, and the finally still stops the session (no signer was armed)', async () => {
+  test('wrong key serial (NFC tap) → serial-mismatch, and the finally still stops the session (nothing was armed)', async () => {
     const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
     const stopSpy = jest.spyOn(nfc, 'stop')
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     nfc.insertKey('WRONG-SERIAL')
     c.submitPin('123456')
     await expect(p).rejects.toMatchObject({ code: 'serial-mismatch' })
     expect(stopSpy).toHaveBeenCalledTimes(1)
   })
 
-  test('wrong PIN (persistent reader) returns to pin-entry with retriesLeft, then succeeds', async () => {
+  test('a wrong serial is rejected before any ECDH — a foreign card never gets asked to unwrap', async () => {
     const { ceremony: c, mock } = await makeCeremony()
-    const p = c.requestSigner('x')
+    const ecdhSpy = jest.spyOn(mock, 'ecdh')
+    const p = c.requestKey('x')
+    mock.insertKey('WRONG-SERIAL')
+    await expect(p).rejects.toMatchObject({ code: 'serial-mismatch' })
+    expect(ecdhSpy).not.toHaveBeenCalled()
+  })
+
+  test('wrong PIN (persistent reader) returns to pin-entry with retriesLeft, then succeeds', async () => {
+    const { ceremony: c, mock, expectedHd } = await makeCeremony()
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     await flush()
     c.submitPin('000000')
@@ -112,9 +147,9 @@ describe('CeremonyController: arming', () => {
     expect(c.state.error?.code).toBe('pin-invalid')
     expect(c.state.error?.retriesLeft).toBe(2)
     c.submitPin('123456')
-    const signer = await p
-    expect(signer.publicKey.length).toBe(33)
-    signer.release()
+    const handle = await p
+    expect(handle.hd.toString()).toBe(expectedHd.toString())
+    handle.release()
   })
 
   test('NFC: a wrong PIN aborts the whole ceremony (no in-place retry) with retriesLeft intact, and stops the session', async () => {
@@ -124,19 +159,19 @@ describe('CeremonyController: arming', () => {
     // PIN again.
     const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
     const stopSpy = jest.spyOn(nfc, 'stop')
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     nfc.insertKey(DEFAULT_SERIAL)
     c.submitPin('000000') // wrong
     await expect(p).rejects.toMatchObject({ code: 'pin-invalid', retriesLeft: 2 })
     expect(c.state.phase).toBe('error')
     expect(c.state.error?.code).toBe('pin-invalid')
     expect(c.state.error?.retriesLeft).toBe(2)
-    expect(stopSpy).toHaveBeenCalledTimes(1) // no signer armed → the finally closed it
+    expect(stopSpy).toHaveBeenCalledTimes(1) // nothing armed → the finally closed it
   })
 
   test('detach while waiting for the PIN → key-removed-mid-op', async () => {
     const { ceremony: c, mock } = await makeCeremony()
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     await flush()
     expect(c.state.phase).toBe('pin-entry')
@@ -147,7 +182,7 @@ describe('CeremonyController: arming', () => {
 
   test('cancel rejects the pending request with user-cancelled', async () => {
     const { ceremony: c, mock } = await makeCeremony()
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     await flush()
     c.cancel()
@@ -155,190 +190,254 @@ describe('CeremonyController: arming', () => {
     expect(c.state.phase).toBe('idle')
   })
 
-  test('armed window expires back to idle, fires onRelock(timeout), and releases the signer', async () => {
+  test('armed window expires back to idle, fires onRelock(timeout), and drops the key', async () => {
     const { ceremony: c, mock } = await makeCeremony({ retentionMs: 1000 })
     const relocks: string[] = []
     c.onRelock = why => relocks.push(why)
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456') // queued; applied when the flow reaches pin-entry
-    const signer = await p
+    const handle = await p
     expect(c.state.phase).toBe('armed')
     await new Promise<void>(r => setTimeout(r, 1050))
     expect(c.state.phase).toBe('idle')
     expect(relocks).toEqual(['timeout'])
 
-    // The session is closed for good: sign() must not succeed after this.
-    await expect(signer.sign(digest(1))).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+    // The key is gone for good: the handle must not hand it out after this.
+    expect(() => handle.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
   })
 
-  test('notifyKeyDetached during the armed window relocks immediately and releases the signer', async () => {
+  test('notifyKeyDetached during the armed window relocks immediately and drops the key', async () => {
     const { ceremony: c, mock } = await makeCeremony()
     const relocks: string[] = []
     c.onRelock = why => relocks.push(why)
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456') // queued
-    const signer = await p
+    const handle = await p
     expect(c.state.phase).toBe('armed')
     c.notifyKeyDetached()
     expect(c.state.phase).toBe('idle')
     expect(relocks).toEqual(['detached'])
 
-    await expect(signer.sign(digest(1))).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+    expect(() => handle.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
   })
 
-  test('arming a session-based driver does NOT stop it — only release() does, so the session stays open for signing', async () => {
+  test('arming a session-based driver does NOT stop it — only release() does', async () => {
     const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
     const stopSpy = jest.spyOn(nfc, 'stop')
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     nfc.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
+    const handle = await p
     expect(c.state.phase).toBe('armed')
     expect(stopSpy).not.toHaveBeenCalled()
 
-    await signer.sign(digest(1))
-    expect(stopSpy).not.toHaveBeenCalled() // still open after a signature
-
-    signer.release()
+    handle.release()
     expect(stopSpy).toHaveBeenCalledTimes(1)
-    signer.release() // idempotent
+    handle.release() // idempotent
     expect(stopSpy).toHaveBeenCalledTimes(1)
   })
 
   test('arming a persistent reader never stops it, matching before', async () => {
     const { ceremony: c, mock } = await makeCeremony()
     const stopSpy = jest.spyOn(mock, 'stop')
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
+    const handle = await p
     expect(stopSpy).not.toHaveBeenCalled()
-    signer.release()
+    handle.release()
     expect(stopSpy).not.toHaveBeenCalled()
   })
 
-  test('a session-based driver keeps notifying the ceremony after arm — an unprompted detach while idle-armed still relocks', async () => {
+  test('a session-based driver keeps notifying the ceremony after arm — an unprompted detach while armed still relocks', async () => {
     // WalletContext's own persistent-reader listener explicitly skips
     // sessionBased drivers (it exists only for Android USB unplug), so the
     // ceremony's OWN run()-level subscription is the only thing that can ever
     // learn an NFC session detached. If that subscription were torn down the
-    // moment run() completes (as arming's own request/response cycle no
-    // longer needs it), a real driver-emitted 'detached' event — not a
+    // moment run() completes, a real driver-emitted 'detached' event — not a
     // manually-invoked one — would be silently dropped for the rest of the
-    // signer's life. This drives the event through the MOCK's own emit, not
-    // through calling ceremony.notifyKeyDetached() directly, so it actually
-    // exercises the subscription wiring rather than just the method body.
+    // handle's life, leaving the unwrapped key alive in memory after the card
+    // that authorized it is gone. This drives the event through the MOCK's own
+    // emit, not through calling ceremony.notifyKeyDetached() directly, so it
+    // actually exercises the subscription wiring rather than the method body.
     const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
     const relocks: string[] = []
     c.onRelock = why => relocks.push(why)
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     nfc.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
+    const handle = await p
     expect(c.state.phase).toBe('armed')
 
     nfc.removeKey() // a real driver-emitted detach, not a manual notify call
     expect(c.state.phase).toBe('idle')
     expect(relocks).toEqual(['detached'])
-    await expect(signer.sign(digest(1))).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+    expect(() => handle.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
   })
 })
 
-describe('ceremony signing session', () => {
-  test('signs several digests from one arm without re-collecting or re-verifying the PIN', async () => {
-    const { ceremony, mock } = await makeCeremony()
-    const verifyPinSpy = jest.spyOn(mock, 'verifyPin')
-    const p = ceremony.requestSigner('Withdraw from vault')
+describe('ceremony key handle', () => {
+  test('one tap yields an HD node that derives the enrolled vault keys', async () => {
+    const { ceremony, mock, expectedHd } = await makeCeremony()
+    const p = ceremony.requestKey('test withdrawal')
     mock.insertKey(DEFAULT_SERIAL)
     ceremony.submitPin('123456')
-    const signer = await p
-    expect(verifyPinSpy).toHaveBeenCalledTimes(1)
+    const handle = await p
 
-    const a = await signer.sign(digest(1))
-    const b = await signer.sign(digest(2))
-
-    expect(a.length).toBeGreaterThan(0)
-    expect(Utils.toHex(a)).not.toBe(Utils.toHex(b))
-    expect(signer.publicKey.length).toBe(33)
-    expect(verifyPinSpy).toHaveBeenCalledTimes(1) // still just the one, from arming
-    expect(ceremony.state.phase).toBe('armed') // back to armed between signatures
-    signer.release()
+    expect(handle.hd.toString()).toBe(expectedHd.toString())
+    // The whole point of the K1-only design: the node is real enough to derive
+    // spendable children, not just a matching string.
+    expect(handle.hd.deriveChild(0).privKey.toHex()).toBe(expectedHd.deriveChild(0).privKey.toHex())
+    handle.release()
   })
 
-  test('rejects a digest that is not 32 bytes without touching the driver', async () => {
+  test('release drops the key and relocks', async () => {
     const { ceremony, mock } = await makeCeremony()
-    const signEcdsaSpy = jest.spyOn(mock, 'signEcdsa')
-    const p = ceremony.requestSigner('Withdraw from vault')
+    const p = ceremony.requestKey('r')
     mock.insertKey(DEFAULT_SERIAL)
     ceremony.submitPin('123456')
-    const signer = await p
+    const handle = await p
+    expect(ceremony.state.phase).toBe('armed')
 
-    await expect(signer.sign(Uint8Array.from(new Array(31).fill(1)))).rejects.toMatchObject({
-      code: 'template-invalid'
+    handle.release()
+    expect(ceremony.state.phase).toBe('idle')
+    expect(() => handle.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
+  })
+
+  test('exactly ONE on-token ECDH per tap, and no signing at all', async () => {
+    const { ceremony, mock } = await makeCeremony()
+    const ecdhSpy = jest.spyOn(mock, 'ecdh')
+    const signSpy = jest.spyOn(mock, 'signEcdsa')
+    const verifyPinSpy = jest.spyOn(mock, 'verifyPin')
+
+    const p = ceremony.requestKey('Withdraw from vault')
+    mock.insertKey(DEFAULT_SERIAL)
+    ceremony.submitPin('123456')
+    const handle = await p
+
+    expect(ecdhSpy).toHaveBeenCalledTimes(1)
+    expect(ecdhSpy).toHaveBeenCalledWith(VAULT_SLOT, '123456', expect.any(String))
+    expect(signSpy).not.toHaveBeenCalled() // the card is an unwrap oracle now
+    expect(verifyPinSpy).toHaveBeenCalledTimes(1)
+
+    // Deriving many children costs nothing more — no second tap, no second ECDH.
+    for (let i = 0; i < 8; i++) handle.hd.deriveChild(i)
+    expect(ecdhSpy).toHaveBeenCalledTimes(1)
+    handle.release()
+  })
+
+  test('the unsealed seed is zeroized as soon as the HD node is built', async () => {
+    // The seed is the one artifact that CAN be wiped (the HD node itself
+    // cannot — see ceremony.ts's release() doc). If this regressed, a 64-byte
+    // copy of the vault seed would linger for the whole session.
+    const { ceremony, mock } = await makeCeremony()
+    const fillSpy = jest.spyOn(Array.prototype, 'fill')
+    const p = ceremony.requestKey('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    ceremony.submitPin('123456')
+    const handle = await p
+    const zeroedA64ByteArray = fillSpy.mock.calls.some(
+      ([value], i) => value === 0 && (fillSpy.mock.instances[i] as unknown[]).length === 64
+    )
+    fillSpy.mockRestore()
+    expect(zeroedA64ByteArray).toBe(true)
+    handle.release()
+  })
+
+  test('nothing key-shaped reaches the React-visible ceremony state', async () => {
+    const { ceremony, mock, expectedHd } = await makeCeremony()
+    const seen: string[] = []
+    const unsubscribe = ceremony.subscribe(s => seen.push(JSON.stringify(s)))
+    const p = ceremony.requestKey('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    ceremony.submitPin('123456')
+    const handle = await p
+    unsubscribe()
+
+    const xprv = expectedHd.toString()
+    const seedHex = Utils.toHex(vaultSeed())
+    for (const snapshot of seen) {
+      expect(snapshot).not.toContain(xprv)
+      expect(snapshot).not.toContain(seedHex)
+      expect(snapshot).not.toContain('123456') // the PIN never lands in state either
+    }
+    expect(Object.keys(ceremony.state).sort()).toEqual(['armedUntil', 'error', 'phase', 'reason'])
+    handle.release()
+  })
+
+  test('a tampered seal fails the ceremony with seal-corrupt and arms nothing', async () => {
+    const { mock, meta, seal } = await makeCeremony()
+    const tampered: SealedBlob = { ...seal, c: seal.c.slice(0, -2) + (seal.c.endsWith('00') ? '11' : '00') }
+    const c = new CeremonyController({
+      getDriver: () => mock,
+      store: { getMeta: async () => meta, getSeal: async () => tampered },
+      retentionMs: RETENTION
     })
-    expect(signEcdsaSpy).not.toHaveBeenCalled()
-    expect(ceremony.state.phase).toBe('armed') // rejected before ever touching the phase machinery
-    signer.release()
-  })
-
-  test('refuses to sign after release', async () => {
-    const { ceremony, mock } = await makeCeremony()
-    const p = ceremony.requestSigner('Withdraw from vault')
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
-    ceremony.submitPin('123456')
-    const signer = await p
-    signer.release()
-
-    await expect(signer.sign(digest(1))).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+    c.submitPin('123456')
+    await expect(p).rejects.toMatchObject({ code: 'seal-corrupt' })
+    expect(c.state.phase).toBe('error')
+    expect(c.state.error?.code).toBe('seal-corrupt')
+    // The message must not echo anything about the blob it failed to open.
+    expect(c.state.error).toEqual({ code: 'seal-corrupt', retriesLeft: undefined })
   })
 
-  test('persistent reader: a touch timeout mid-signature returns to error, and retry succeeds without re-entering the PIN', async () => {
-    const { ceremony, mock } = await makeCeremony()
+  test('a card whose slot key does not match the seal fails closed with seal-corrupt', async () => {
+    // Same serial, different slot key — e.g. the slot was regenerated behind
+    // the app's back. The ECDH succeeds; only the unseal can catch it.
+    const { meta, seal } = await makeCeremony()
+    const other = new MockYubiKey()
+    other.insertKey(DEFAULT_SERIAL)
+    await other.generateVaultKey(VAULT_SLOT)
+    const c = new CeremonyController({
+      getDriver: () => other,
+      store: { getMeta: async () => meta, getSeal: async () => seal },
+      retentionMs: RETENTION
+    })
+    const p = c.requestKey('x')
+    c.submitPin('123456')
+    await expect(p).rejects.toMatchObject({ code: 'seal-corrupt' })
+  })
+
+  test('persistent reader: a touch timeout during the unwrap returns to error, and retry succeeds without re-entering the PIN', async () => {
+    const { ceremony, mock, expectedHd } = await makeCeremony()
     const verifyPinSpy = jest.spyOn(mock, 'verifyPin')
-    const p = ceremony.requestSigner('Withdraw from vault')
+    mock.setTouchBehavior('timeout') // the touch is missed on the first try
+    const p = ceremony.requestKey('Withdraw from vault')
     mock.insertKey(DEFAULT_SERIAL)
     ceremony.submitPin('123456')
-    const signer = await p
-    expect(verifyPinSpy).toHaveBeenCalledTimes(1)
-
-    mock.setTouchBehavior('timeout')
-    const signing = signer.sign(digest(3))
     await flush()
     expect(ceremony.state.phase).toBe('error')
     expect(ceremony.state.error?.code).toBe('touch-timeout')
+    expect(verifyPinSpy).toHaveBeenCalledTimes(1)
 
     mock.setTouchBehavior('instant')
     ceremony.retry()
-    const sig = await signing
-    expect(sig.length).toBeGreaterThan(0)
+    const handle = await p
+    expect(handle.hd.toString()).toBe(expectedHd.toString())
     expect(verifyPinSpy).toHaveBeenCalledTimes(1) // no reopen on a persistent reader → no re-verify
-    signer.release()
+    expect(ceremony.state.phase).toBe('armed')
+    handle.release()
   })
 
-  test('NFC: a dropped tap mid-signature closes the dead session and reopens a fresh one — re-checking the serial and re-verifying the PIN — before retrying that signature', async () => {
+  test('NFC: a dropped tap during the unwrap closes the dead session and reopens a fresh one — re-checking the serial and re-verifying the PIN — before retrying the ECDH', async () => {
     // Regression for the sealed-key design's freeze: any tap hiccup used to
-    // kill the whole ceremony with a dead Retry button. Here the hiccup
-    // happens mid-WITHDRAWAL (after arming, during a signature), which is the
-    // scenario this whole task exists to support.
-    const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
+    // kill the whole ceremony with a dead Retry button. The unwrap is now the
+    // one touch-gated operation there is, so this is where a hiccup lands.
+    const { ceremony: c, mock: nfc, expectedHd } = await makeCeremony({ sessionBased: true })
     const startSpy = jest.spyOn(nfc, 'start')
     const stopSpy = jest.spyOn(nfc, 'stop')
     const verifyPinSpy = jest.spyOn(nfc, 'verifyPin')
     const getKeyInfoSpy = jest.spyOn(nfc, 'getKeyInfo')
+    const ecdhSpy = jest.spyOn(nfc, 'ecdh')
 
-    const p = c.requestSigner('Withdraw from vault')
+    nfc.setTouchBehavior('timeout') // the tap drops mid-ECDH
+    const p = c.requestKey('Withdraw from vault')
     nfc.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
-    expect(startSpy).toHaveBeenCalledTimes(1)
-    expect(verifyPinSpy).toHaveBeenCalledTimes(1)
-    expect(getKeyInfoSpy).toHaveBeenCalledTimes(1)
-    expect(stopSpy).not.toHaveBeenCalled() // session stays open across the arm
-
-    nfc.setTouchBehavior('timeout') // the tap drops mid-signature
-    const signing = signer.sign(digest(7))
     await flush()
     expect(c.state.phase).toBe('error')
     expect(c.state.error?.code).toBe('touch-timeout')
@@ -352,70 +451,80 @@ describe('ceremony signing session', () => {
     c.retry()
     await flush()
     expect(stopSpy).toHaveBeenCalledTimes(1) // retry closes the dead session before reopening
-    const sig = await signing
-    expect(sig.length).toBeGreaterThan(0)
+
+    const handle = await p
+    expect(handle.hd.toString()).toBe(expectedHd.toString())
     expect(startSpy).toHaveBeenCalledTimes(2) // retry reopened a fresh NFC session
     expect(verifyPinSpy).toHaveBeenCalledTimes(2) // PIN re-verified on the fresh session
-    expect(getKeyInfoSpy).toHaveBeenCalledTimes(2) // serial re-checked on the fresh session
+    expect(getKeyInfoSpy).toHaveBeenCalledTimes(2) // serial RE-CHECKED on the fresh session
+    expect(ecdhSpy).toHaveBeenCalledTimes(2) // one failed unwrap, one that landed
     expect(c.state.phase).toBe('armed')
 
-    signer.release()
+    handle.release()
     expect(stopSpy).toHaveBeenCalledTimes(2) // release() closes the reopened session
   })
 
-  test('a genuine detach while a mid-signature retry is pending releases the signer and fails that signature', async () => {
-    // Simulates WalletContext's own persistent-reader listener, which keeps
-    // forwarding detach events after the ceremony's OWN run()-level
-    // subscription has already unsubscribed post-arm (see run()'s finally).
-    // Without notifyKeyDetached reacting to an active (not just 'armed')
-    // signer, this event would be silently dropped and the retry wait would
-    // hang forever.
+  test('NFC: a card swap between the dropped tap and the retry is caught by the re-check', async () => {
+    // The serial check has to survive at BOTH sites: if the reopened session
+    // trusted the first tap's check, a second card presented on the retry
+    // would be asked to unwrap a seal that is not its own.
+    const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
+    const ecdhSpy = jest.spyOn(nfc, 'ecdh')
+    nfc.setTouchBehavior('timeout')
+    const p = c.requestKey('x')
+    nfc.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    await flush()
+    expect(c.state.error?.code).toBe('touch-timeout')
+    expect(ecdhSpy).toHaveBeenCalledTimes(1)
+
+    nfc.setTouchBehavior('instant')
+    nfc.insertKey('SOME-OTHER-KEY') // a different card lands on the retry tap
+    c.retry()
+    await expect(p).rejects.toMatchObject({ code: 'serial-mismatch' })
+    expect(ecdhSpy).toHaveBeenCalledTimes(1) // the foreign card was never asked to unwrap
+  })
+
+  test('a genuine detach while a retry is pending fails the request instead of hanging', async () => {
+    // Without notifyKeyDetached rejecting the pending retry waiter, this event
+    // would be silently dropped and the retry wait would hang forever behind a
+    // live "Retry?" prompt for a session that is already dead.
     const { ceremony: c, mock } = await makeCeremony()
     const relocks: string[] = []
     c.onRelock = why => relocks.push(why)
-    const p = c.requestSigner('Withdraw from vault')
+    mock.setTouchBehavior('timeout')
+    const p = c.requestKey('Withdraw from vault')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
-    expect(c.state.phase).toBe('armed')
-
-    mock.setTouchBehavior('timeout')
-    const signing = signer.sign(digest(4))
     await flush()
     expect(c.state.phase).toBe('error')
     expect(c.state.error?.code).toBe('touch-timeout')
 
     mock.removeKey()
-    c.notifyKeyDetached()
 
-    await expect(signing).rejects.toMatchObject({ code: 'key-removed-mid-op' })
-    expect(c.state.phase).toBe('idle')
-    expect(relocks).toEqual(['detached'])
-
-    // The session is closed for good — a later signature must not succeed.
-    await expect(signer.sign(digest(5))).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+    await expect(p).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+    expect(c.state.phase).toBe('error')
+    expect(c.state.error?.code).toBe('key-removed-mid-op')
+    // Nothing was ever armed — the drop happened before the key was unwrapped
+    // — so there is no session to relock, only a request to fail.
+    expect(relocks).toEqual([])
   })
 
-  test('cancelling during a mid-signature retry wait releases the signer and fails that signature', async () => {
+  test('cancelling during a retry wait rejects the request', async () => {
     const { ceremony: c, mock } = await makeCeremony()
     const relocks: string[] = []
     c.onRelock = why => relocks.push(why)
-    const p = c.requestSigner('Withdraw from vault')
+    mock.setTouchBehavior('timeout')
+    const p = c.requestKey('Withdraw from vault')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
-
-    mock.setTouchBehavior('timeout')
-    const signing = signer.sign(digest(6))
     await flush()
     expect(c.state.phase).toBe('error')
 
     c.cancel()
-    await expect(signing).rejects.toMatchObject({ code: 'user-cancelled' })
+    await expect(p).rejects.toMatchObject({ code: 'user-cancelled' })
     expect(c.state.phase).toBe('idle')
-    expect(relocks).toEqual(['manual'])
-
-    await expect(signer.sign(digest(7))).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+    expect(relocks).toEqual([])
   })
 })
 
@@ -423,53 +532,52 @@ describe('ceremony signing session', () => {
 // lifetime — every fixture above builds a fresh controller per test, which
 // cannot see anything that only becomes reachable on a SECOND ceremony
 // against the same controller. These tests deliberately reuse one `c` across
-// two (or more) full arm→sign→release cycles, the way production actually
-// runs.
+// two (or more) full arm→use→release cycles, the way production actually runs.
 describe('CeremonyController: one singleton, sequential ceremonies', () => {
-  test("a signer released normally clears activeSigner, so a SECOND ceremony's error path still stops the session", async () => {
+  test("a handle released normally clears activeHandle, so a SECOND ceremony's error path still stops the session", async () => {
     const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
 
     // Ceremony 1: arm normally and release, exactly as a caller finishing a
     // withdrawal would in its own finally.
-    const p1 = c.requestSigner('withdraw 1')
+    const p1 = c.requestKey('withdraw 1')
     nfc.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer1 = await p1
+    const handle1 = await p1
     expect(c.state.phase).toBe('armed')
-    signer1.release()
+    handle1.release()
     expect(c.state.phase).toBe('idle')
 
     // Ceremony 2: force a serial-mismatch by presenting a different key.
     const stopSpy = jest.spyOn(nfc, 'stop')
-    const p2 = c.requestSigner('withdraw 2')
+    const p2 = c.requestKey('withdraw 2')
     nfc.insertKey('WRONG-SERIAL')
     c.submitPin('123456')
     await expect(p2).rejects.toMatchObject({ code: 'serial-mismatch' })
 
-    // The bug this guards against: if release() never cleared activeSigner,
-    // run()'s finally guard `if (!this.activeSigner)` would see the STALE
-    // signer from ceremony 1 and skip closing ceremony 2's dead session
+    // The bug this guards against: if release() never cleared activeHandle,
+    // run()'s finally guard `if (!armed)` would be reasoning about a STALE
+    // handle from ceremony 1 and skip closing ceremony 2's dead session
     // entirely — leaving the system NFC sheet open on exactly the error path
     // that guard exists to handle.
     expect(stopSpy).toHaveBeenCalledTimes(1)
 
     // And the controller is left clean enough for a third ceremony to arm.
-    const p3 = c.requestSigner('withdraw 3')
+    const p3 = c.requestKey('withdraw 3')
     nfc.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer3 = await p3
+    const handle3 = await p3
     expect(c.state.phase).toBe('armed')
-    signer3.release()
+    handle3.release()
   })
 
-  test("a late release() from a stale signer must not steal a successor's PENDING attach-wait", async () => {
+  test("a late release() from a stale handle must not steal a successor's PENDING attach-wait", async () => {
     const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
 
     // Ceremony A arms normally.
-    const p1 = c.requestSigner('withdraw A')
+    const p1 = c.requestKey('withdraw A')
     nfc.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signerA = await p1
+    const handleA = await p1
     expect(c.state.phase).toBe('armed')
 
     // Ceremony B starts — a SECOND, independent ceremony — before A's caller
@@ -477,15 +585,11 @@ describe('CeremonyController: one singleton, sequential ceremonies', () => {
     // doc describes. The mock's start() would normally re-detect the
     // still-"present" key SYNCHRONOUSLY (see MockYubiKey.start), which
     // resolves B's own attach-wait before this test ever gets a chance to
-    // interleave anything — exactly why the PREVIOUS version of this test
-    // could never actually land A's release() while B was inside
-    // `await waiter.promise`, and so never exercised the real bug (it passed
-    // whether or not the per-attempt KeyEventSession box existed). Stubbing
-    // start() removes that synchronous shortcut and opens the genuine
-    // window: B is now parked awaiting a fresh attach event, same as a real
-    // NFC tap that has not landed yet.
+    // interleave anything. Stubbing start() removes that synchronous shortcut
+    // and opens the genuine window: B is now parked awaiting a fresh attach
+    // event, same as a real NFC tap that has not landed yet.
     const startSpy = jest.spyOn(nfc, 'start').mockImplementation(() => {})
-    const p2 = c.requestSigner('withdraw B')
+    const p2 = c.requestKey('withdraw B')
     c.submitPin('123456')
     await flush()
     expect(c.state.phase).toBe('waiting-for-key') // B is genuinely pending, not yet armed
@@ -495,18 +599,55 @@ describe('CeremonyController: one singleton, sequential ceremonies', () => {
     // per-attempt subscription, not one shared controller-wide field) exists
     // to protect: with a single shared field, A's release() unsubscribing it
     // would remove the listener B just registered for its own arm, and B's
-    // `await waiter.promise` below would then hang forever — the physical
-    // tap fired below would have no listener left to reach. ***
-    signerA.release()
+    // `await waiter.promise` below would then hang forever. ***
+    handleA.release()
 
     // The physical tap for B lands.
     startSpy.mockRestore()
     nfc.insertKey(DEFAULT_SERIAL)
-    const signerB = await p2
-    expect(signerB).not.toBe(signerA) // a genuinely new session, not shared
+    const handleB = await p2
+    expect(handleB).not.toBe(handleA) // a genuinely new session, not shared
     expect(c.state.phase).toBe('armed')
 
-    signerB.release()
+    handleB.release()
+  })
+})
+
+describe('CeremonyController: post-arm progress', () => {
+  test('progress from the spend path shows through, and never leaks the key', async () => {
+    const { ceremony: c, mock } = await makeCeremony()
+    const p = c.requestKey('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    c.submitPin('123456')
+    const handle = await p
+
+    c.noteProgress({ phase: 'preparing' })
+    expect(c.state.phase).toBe('preparing')
+    c.noteProgress({ phase: 'broadcasting' })
+    expect(c.state.phase).toBe('broadcasting')
+
+    handle.release()
+    expect(c.state.phase).toBe('idle')
+  })
+
+  test('progress with nothing armed is ignored — this is what keeps the ceremony-free sweep sheet-free', async () => {
+    const { ceremony: c } = await makeCeremony()
+    c.noteProgress({ phase: 'preparing' })
+    expect(c.state.phase).toBe('idle')
+    c.noteProgress({ phase: 'broadcasting' })
+    expect(c.state.phase).toBe('idle')
+  })
+
+  test('progress arriving mid-arm is ignored — the arming phases own the display', async () => {
+    const { ceremony: c, mock } = await makeCeremony()
+    const p = c.requestKey('x')
+    mock.insertKey(DEFAULT_SERIAL)
+    await flush()
+    expect(c.state.phase).toBe('pin-entry')
+    c.noteProgress({ phase: 'preparing' })
+    expect(c.state.phase).toBe('pin-entry')
+    c.submitPin('123456')
+    ;(await p).release()
   })
 })
 
@@ -515,120 +656,95 @@ describe('CeremonyController: retention timeout robustness', () => {
     jest.useRealTimers()
   })
 
-  test('the retention window elapsing during a mid-signature retry wait relocks rather than staying armed forever', async () => {
+  test('the retention window elapsing while the spend path is still working relocks rather than staying armed forever', async () => {
     jest.useFakeTimers()
     const { ceremony: c, mock } = await makeCeremony({ retentionMs: 1000 })
     const relocks: string[] = []
     c.onRelock = why => relocks.push(why)
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
+    const handle = await p
     expect(c.state.phase).toBe('armed')
 
-    mock.setTouchBehavior('timeout')
-    const signing = signer.sign(digest(1))
-    // The real assertion is the `await expect(signing).rejects...` below, but
-    // that rejection actually happens asynchronously inside the
-    // advanceTimersByTimeAsync call further down — attach a no-op handler
-    // now so Node never sees an unhandled rejection in the gap between then
-    // and when this test gets around to awaiting it.
-    signing.catch(() => {})
-    // Let the touch-timeout rejection land us in the retry wait — phase is
-    // 'error', not 'armed', for the whole rest of this test.
-    await jest.advanceTimersByTimeAsync(0)
-    expect(c.state.phase).toBe('error')
+    // A withdrawal that stalls in broadcast: phase is 'broadcasting', not
+    // 'armed', for the whole rest of this test.
+    c.noteProgress({ phase: 'broadcasting' })
+    expect(c.state.phase).toBe('broadcasting')
 
-    // Nobody ever calls retry() — simulating a user who wandered off
-    // mid-hiccup. Advance past the full retention window plus the grace
-    // recheck the busy-path fallback schedules.
+    // Advance past the full retention window plus the grace recheck the
+    // busy-path fallback schedules.
     await jest.advanceTimersByTimeAsync(1000 + 5_000 + 10)
 
     // The bug this guards against: the ORIGINAL one-shot timer's callback was
-    // guarded by `phase === 'armed'`, which is false here (phase is 'error');
-    // without a reschedule, the callback would return and NOTHING would ever
-    // check again — an armed session that never auto-relocks.
+    // guarded by `phase === 'armed'`, which is false here; without a
+    // reschedule, the callback would return and NOTHING would ever check
+    // again — an unwrapped vault key that never leaves memory.
     expect(c.state.phase).toBe('idle')
     expect(relocks).toEqual(['timeout'])
-    await expect(signing).rejects.toMatchObject({ code: 'key-removed-mid-op' })
-
-    // The session is closed for good.
-    await expect(signer.sign(digest(2))).rejects.toMatchObject({ code: 'key-removed-mid-op' })
+    expect(() => handle.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
   })
 
-  test('a successful signature refreshes the retention window instead of letting the original deadline expire underneath it', async () => {
+  test('reported progress refreshes the retention window instead of letting the original deadline expire underneath an active withdrawal', async () => {
     jest.useFakeTimers()
     const { ceremony: c, mock } = await makeCeremony({ retentionMs: 1000 })
     const relocks: string[] = []
     c.onRelock = why => relocks.push(why)
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
+    const handle = await p
+    const firstDeadline = c.state.armedUntil!
 
-    // Sign well before the window elapses...
+    // Report progress well before the window elapses...
     await jest.advanceTimersByTimeAsync(600)
-    await signer.sign(digest(1))
-    expect(c.state.phase).toBe('armed')
+    c.noteProgress({ phase: 'preparing' })
+    expect(c.state.armedUntil!).toBeGreaterThan(firstDeadline) // the deadline moved
 
-    // ...then advance PAST the original window's nominal deadline (600 + 500
-    // = 1100 > 1000) without ever going idle, proving the signature refreshed
-    // armedUntil and rescheduled the timer rather than leaving the original
-    // one-shot deadline to fire underneath the still-active session.
-    await jest.advanceTimersByTimeAsync(500)
-    expect(c.state.phase).toBe('armed')
+    // ...then advance past the ORIGINAL deadline (t=1000) AND the grace recheck
+    // that follows it (t=6000) — i.e. the exact instant an unrefreshed window
+    // would have relocked — without ever going idle. Proves the progress note
+    // rescheduled the timer rather than leaving the original one-shot deadline
+    // to fire underneath a live withdrawal.
+    await jest.advanceTimersByTimeAsync(5_500) // t = 6100
+    expect(c.state.phase).toBe('preparing')
     expect(relocks).toEqual([])
+    expect(handle.hd).toBeDefined()
 
-    signer.release()
+    handle.release()
   })
 })
 
-describe('CeremonyController: signing error handling', () => {
-  test('a non-retryable signEcdsa error surfaces phase: error with the code, instead of leaving awaiting-touch stuck', async () => {
+describe('CeremonyController: unwrap error handling', () => {
+  test('a non-retryable ecdh error surfaces phase: error with the code, instead of leaving awaiting-touch stuck', async () => {
     const { ceremony: c, mock } = await makeCeremony()
-    const p = c.requestSigner('x')
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
 
     // pin-locked is a real driver failure, not one of the RETRYABLE_TAP_ERRORS
     // (touch-timeout / nfc-lost / key-removed-mid-op) — it must not be
     // retried in place.
-    jest.spyOn(mock, 'signEcdsa').mockRejectedValueOnce(new VaultError('pin-locked', 'PIN is blocked'))
+    jest.spyOn(mock, 'ecdh').mockRejectedValueOnce(new VaultError('pin-locked', 'PIN is blocked'))
 
-    await expect(signer.sign(digest(1))).rejects.toMatchObject({ code: 'pin-locked' })
-    // The bug: relocating signing out of run() dropped the conversion run()'s
-    // own catch used to do (throw → phase: 'error' with the code). Without
-    // it, a hard failure left the sheet stuck showing "awaiting touch" with
-    // no error and no way forward.
+    await expect(p).rejects.toMatchObject({ code: 'pin-locked' })
     expect(c.state.phase).toBe('error')
     expect(c.state.error?.code).toBe('pin-locked')
-
-    signer.release()
   })
 
-  test('concurrent sign() calls on one signer reject instead of clobbering the shared retry state', async () => {
-    const { ceremony: c, mock } = await makeCeremony()
-    const p = c.requestSigner('x')
+  test('an unrecognized (non-VaultError) ecdh failure is treated as a retryable field drop', async () => {
+    const { ceremony: c, mock, expectedHd } = await makeCeremony()
+    const p = c.requestKey('x')
     mock.insertKey(DEFAULT_SERIAL)
     c.submitPin('123456')
-    const signer = await p
-
-    mock.setTouchBehavior('timeout')
-    const first = signer.sign(digest(1)) // parks in the retry wait
+    jest.spyOn(mock, 'ecdh').mockRejectedValueOnce(new Error('tag connection lost'))
     await flush()
     expect(c.state.phase).toBe('error')
+    expect(c.state.error?.code).toBe('nfc-lost')
 
-    // A second, overlapping sign() call must fail fast, not hang forever
-    // waiting on a retryWaiter the first call already owns (retryWaiter is a
-    // controller field, not per-call, so a second retryable error here would
-    // silently clobber the first call's deferred).
-    await expect(signer.sign(digest(2))).rejects.toMatchObject({ code: 'template-invalid' })
-
-    mock.setTouchBehavior('instant')
     c.retry()
-    const sig = await first
-    expect(sig.length).toBeGreaterThan(0)
-    signer.release()
+    const handle = await p
+    expect(handle.hd.toString()).toBe(expectedHd.toString())
+    handle.release()
   })
 })

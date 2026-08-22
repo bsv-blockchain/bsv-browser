@@ -22,7 +22,7 @@
  * key, now that the keyGetter itself no longer discriminates by enrollment
  * or caller. (It is not what keeps the YubiKey ceremony admin-only — that
  * follows separately, because nothing outside `services/vault` ever calls
- * `requestVaultSigner`/`ceremony.requestSigner` in the first place; a page
+ * `requestVaultKey`/`ceremony.requestKey` in the first place; a page
  * cannot reach the ceremony through this guarded surface even in principle,
  * privileged or not.)
  *
