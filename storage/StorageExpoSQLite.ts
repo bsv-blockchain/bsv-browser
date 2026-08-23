@@ -106,6 +106,10 @@ export class StorageExpoSQLite extends StorageProvider {
 
   async migrate(storageName: string, storageIdentityKey: string): Promise<string> {
     this.db = await SQLite.openDatabaseAsync(this.dbName)
+    // Wait out writer contention instead of failing immediately with
+    // "Error code 5: database is locked" (seen from finalizeAsync on device,
+    // where it turned into a native use-after-free — see patches/expo-sqlite).
+    await this.db.execAsync('PRAGMA busy_timeout = 5000')
     await createTables(this.db)
     await ensureOfflineActionsColumns(this.db)
 
