@@ -75,6 +75,30 @@ test('passes non-privileged-capable methods straight through, even privileged-lo
   expect(calls.map(c => c.method).sort()).toEqual(['createAction', 'listOutputs'])
 })
 
+test('preserves `this` for privileged-capable methods that read instance state', async () => {
+  // Regression test: the real wallet (SimpleWalletManager) implements
+  // getPublicKey as `async getPublicKey(args, originator) { this.ensureCanCall(...);
+  // return this.underlying.getPublicKey(...) }` -- it reads `this` internally.
+  // fakeWallet()'s methods above are closures that ignore `this` entirely, so
+  // they can't catch a guard that invokes the real method unbound. This wallet
+  // is deliberately shaped like the real one: a class instance method that
+  // throws if called without its `this` context, exactly as
+  // `this.ensureCanCall is not a function` did in production when
+  // guardVaultAccess called `value(args, originator)` instead of
+  // `value.call(target, args, originator)`.
+  class RealisticWallet {
+    marker = 'instance-state'
+    async getPublicKey(_args: any, _originator?: string) {
+      return { publicKey: this.marker }
+    }
+  }
+  const wallet = new RealisticWallet() as any
+  const guarded = guardVaultAccess(wallet, ADMIN)
+  await expect(guarded.getPublicKey({ protocolID: [1, 'x'], keyID: '1' } as any, 'evil.com')).resolves.toEqual({
+    publicKey: 'instance-state'
+  })
+})
+
 test('treats missing/false privileged flag as allowed', async () => {
   const { wallet, calls } = fakeWallet()
   const guarded = guardVaultAccess(wallet, ADMIN)

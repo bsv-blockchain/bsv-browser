@@ -82,7 +82,16 @@ export function guardVaultAccess<T extends WalletInterface>(wallet: T, adminOrig
         if (privileged && originator !== adminOriginator) {
           return Promise.reject(new VaultAccessDenied(String(prop), originator ?? ''))
         }
-        return (value as (a: unknown, o?: string) => unknown)(args, originator)
+        // .call(target, ...), not a bare invocation -- `value` is the real
+        // wallet's own method (e.g. SimpleWalletManager.prototype.getPublicKey),
+        // which reads `this.ensureCanCall`/`this.underlying` internally. A bare
+        // call left `this` unbound, so every PRIVILEGED_CAPABLE method (every
+        // ordinary, non-privileged getPublicKey call included, not just
+        // privileged ones) threw "undefined is not a function" the instant it
+        // touched `this` -- silently breaking wallet connections for any site
+        // opened in the in-app browser, since getPublicKey is the first call
+        // a BRC-100 connect makes.
+        return (value as (a: unknown, o?: string) => unknown).call(target, args, originator)
       }
     }
   })
