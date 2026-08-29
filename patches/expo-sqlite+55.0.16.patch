@@ -1,0 +1,44 @@
+diff --git a/node_modules/expo-sqlite/android/src/main/java/expo/modules/sqlite/SQLiteModule.kt b/node_modules/expo-sqlite/android/src/main/java/expo/modules/sqlite/SQLiteModule.kt
+index ac800ac..8c3a6e4 100644
+--- a/node_modules/expo-sqlite/android/src/main/java/expo/modules/sqlite/SQLiteModule.kt
++++ b/node_modules/expo-sqlite/android/src/main/java/expo/modules/sqlite/SQLiteModule.kt
+@@ -475,10 +475,15 @@ class SQLiteModule : Module() {
+   private fun finalize(statement: NativeStatement, database: NativeDatabase) {
+     maybeThrowForClosedDatabase(database)
+     maybeThrowForFinalizedStatement(statement)
+-    if (statement.ref.sqlite3_finalize() != NativeDatabaseBinding.SQLITE_OK) {
++    // sqlite3_finalize always frees the statement; a non-OK result only
++    // reports the error from the statement's most recent evaluation. Mark
++    // the statement finalized before throwing so the freed pointer can
++    // never be finalized again (use-after-free / heap corruption).
++    val ret = statement.ref.sqlite3_finalize()
++    statement.isFinalized = true
++    if (ret != NativeDatabaseBinding.SQLITE_OK) {
+       throw SQLiteErrorException(database.ref.convertSqlLiteErrorToString())
+     }
+-    statement.isFinalized = true
+   }
+ 
+   private fun addUpdateHook(database: NativeDatabase) {
+diff --git a/node_modules/expo-sqlite/ios/SQLiteModule.swift b/node_modules/expo-sqlite/ios/SQLiteModule.swift
+index 15c784f..9b44dbf 100644
+--- a/node_modules/expo-sqlite/ios/SQLiteModule.swift
++++ b/node_modules/expo-sqlite/ios/SQLiteModule.swift
+@@ -467,10 +467,15 @@ public final class SQLiteModule: Module {
+   private func finalize(statement: NativeStatement, database: NativeDatabase) throws {
+     try maybeThrowForClosedDatabase(database)
+     try maybeThrowForFinalizedStatement(statement)
+-    if exsqlite3_finalize(statement.pointer) != SQLITE_OK {
++    // sqlite3_finalize always frees the statement; a non-OK result only
++    // reports the error from the statement's most recent evaluation. Mark
++    // the statement finalized before throwing so the freed pointer can
++    // never be finalized again (use-after-free / heap corruption).
++    let ret = exsqlite3_finalize(statement.pointer)
++    statement.isFinalized = true
++    if ret != SQLITE_OK {
+       throw SQLiteErrorException(convertSqlLiteErrorToString(database))
+     }
+-    statement.isFinalized = true
+   }
+ 
+   private func convertSqlLiteErrorToString(_ db: OpaquePointer?) -> String {
