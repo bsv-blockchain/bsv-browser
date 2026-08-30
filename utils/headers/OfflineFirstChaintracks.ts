@@ -53,6 +53,16 @@ export class OfflineFirstChaintracks implements ChaintracksClientApi {
     if (local === root) return true
 
     if (!(await this.online())) {
+      // Logged, because this branch is otherwise indistinguishable from a bad
+      // proof: it returns false without consulting anything, and the caller
+      // (`Beef.verify` -> the toolbox's validateAtomicBeef) reports that as
+      // "The tx parameter must be valid AtomicBEEF". A device whose NetInfo
+      // says not-connected therefore rejects every incoming payment with an
+      // error blaming the sender's transaction, silently and forever.
+      console.warn(
+        `[OfflineFirstChaintracks] REFUSED height ${height}: offline (getOnline() false), no lookup attempted. ` +
+          'BEEF verification will fail and be reported as an invalid transaction.'
+      )
       this.lastMissHeight = height
       return false
     }
@@ -60,6 +70,10 @@ export class OfflineFirstChaintracks implements ChaintracksClientApi {
     try {
       const header = await this.remote.findHeaderForHeight(height)
       if (!header) {
+        console.warn(
+          `[OfflineFirstChaintracks] REFUSED height ${height}: the chaintracks service has no header ` +
+            'for it (behind the chain tip, or pruned).'
+        )
         this.lastMissHeight = height
         return false
       }
@@ -72,7 +86,18 @@ export class OfflineFirstChaintracks implements ChaintracksClientApi {
           `[OfflineFirstChaintracks] local root disagreed with network at height ${height} (local=${local} network=${remoteRoot}); healed`
         )
       }
-      return remoteRoot === root
+      const agrees = remoteRoot === root
+      if (!agrees) {
+        // The comparison is ===, so a root that is "correct" to the eye still
+        // fails on hex case or byte order. Print both to make which one it is
+        // obvious from a device log.
+        console.warn(
+          `[OfflineFirstChaintracks] REFUSED height ${height}: root mismatch\n` +
+            `  wanted (from the BEEF's merkle path): ${root}\n` +
+            `  got    (from chaintracks)           : ${remoteRoot}`
+        )
+      }
+      return agrees
     } catch (e: any) {
       // A verification path must never throw a network error at the caller:
       // `Beef.verify` treats false as "not proven", which is the truth here.
