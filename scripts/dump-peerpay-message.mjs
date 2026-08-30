@@ -27,8 +27,14 @@
  *   BOX          message box name (default payment_inbox)
  *   TXID         optional, only dump the message whose subject txid matches
  *   NETWORK      mainnet | testnet (default mainnet)
- *   CHECK_ROOTS  set to 1 to also validate merkle roots against a chain
- *                tracker (needs network access to WhatsOnChain)
+ *   CHECK_ROOTS  set to 1 to also validate merkle roots against the SDK's
+ *                default chain tracker (WhatsOnChain)
+ *   CHAINTRACKS_URL
+ *                set to the chaintracks service the APP uses to reproduce the
+ *                app's own verification — this is the half of the check that
+ *                the default chain tracker does NOT exercise. Defaults per
+ *                NETWORK to the same table as services/walletServiceConfig.ts
+ *                (chaintracksUrlFor). Set CHECK_APP_CHAINTRACKS=1 to run it.
  *   OUT          output directory (default ./peerpay-dump)
  */
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -43,6 +49,13 @@ const BOX = process.env.BOX ?? 'payment_inbox'
 const WANT_TXID = process.env.TXID?.toLowerCase()
 const NETWORK = process.env.NETWORK === 'testnet' ? 'testnet' : 'mainnet'
 const CHECK_ROOTS = process.env.CHECK_ROOTS === '1'
+const CHECK_APP_CT = process.env.CHECK_APP_CHAINTRACKS === '1'
+// Mirrors services/walletServiceConfig.ts chaintracksUrlFor().
+const CHAINTRACKS_URL =
+  process.env.CHAINTRACKS_URL ??
+  (NETWORK === 'testnet'
+    ? 'https://arcade-v2-testnet-us-1.bsvblockchain.tech/chaintracks/v1'
+    : 'https://arcade-v2-us-1.bsvblockchain.tech/chaintracks/v1')
 const OUT = process.env.OUT ?? 'peerpay-dump'
 
 if (!MNEMONIC) {
@@ -116,8 +129,11 @@ async function dissect(txBytes) {
   }
 
   // allowTxidOnly false is exactly what internalizeAction passes.
-  out.verifyValidStrict = beef.verifyValid(false).valid
+  const strict = beef.verifyValid(false)
+  out.verifyValidStrict = strict.valid
+  out.roots = strict.roots
   out.verifyValidLenient = beef.verifyValid(true).valid
+  out.beef = beef
 
   if (CHECK_ROOTS) {
     try {
@@ -127,6 +143,62 @@ async function dissect(txBytes) {
     }
   }
   return out
+}
+
+/**
+ * The app does NOT verify BEEF against WhatsOnChain. WalletContext installs
+ * OfflineFirstChaintracks over a ChaintracksServiceClient (see
+ * services/walletServiceConfig.ts installOfflineChainTracker), so
+ * `Beef.verify` asks THAT service for the merkle root at each bump height. A
+ * beef that WhatsOnChain confirms is still rejected if this service answers
+ * differently, is behind, or 404s the height — and the toolbox reports that
+ * as the very same 'valid AtomicBEEF' string.
+ *
+ * This replicates its network branch exactly: findHeaderForHeight →
+ * GET /findHeaderHexForHeight?height=N, then compare `.merkleRoot`.
+ */
+async function appChaintracksRootFor (height) {
+  const url = `${CHAINTRACKS_URL}/findHeaderHexForHeight?height=${height}`
+  const res = await fetch(url)
+  if (!res.ok) return { error: `HTTP ${res.status} ${res.statusText}` }
+  const v = await res.json()
+  if (v.status !== 'success') return { error: `status=${v.status} code=${v.code ?? ''} ${JSON.stringify(v).slice(0, 200)}` }
+  const header = v.value
+  if (header == null) return { error: 'service returned success with no header (height beyond its tip?)' }
+  const raw = header.merkleRoot
+  const root = typeof raw === 'string' ? raw : raw == null ? undefined : Utils.toHex(Array.from(raw))
+  return { root, height: header.height, hash: header.hash }
+}
+
+async function checkAppChaintracks (beef) {
+  const { roots } = beef.verifyValid(false)
+  const heights = Object.keys(roots)
+  if (heights.length === 0) {
+    console.log('  (no bumps — nothing for the chain tracker to answer)')
+    return
+  }
+  for (const h of heights) {
+    const expected = roots[h]
+    let got
+    try {
+      got = await appChaintracksRootFor(Number(h))
+    } catch (e) {
+      got = { error: e.message }
+    }
+    console.log(`  height ${h}`)
+    console.log(`    bump root      : ${expected}`)
+    if (got.error) {
+      console.log(`    chaintracks    : LOOKUP FAILED — ${got.error}`)
+      console.log('    => OfflineFirstChaintracks catches this and returns false,')
+      console.log('       which Beef.verify reports as "not proven". THIS is the failure.')
+    } else if (got.root === expected) {
+      console.log(`    chaintracks    : ${got.root}  ✓ agrees`)
+    } else {
+      console.log(`    chaintracks    : ${got.root ?? '(header had no merkleRoot field)'}  ✗ DISAGREES`)
+      console.log('    => Beef.verify returns false and the toolbox throws')
+      console.log('       "The tx parameter must be valid AtomicBEEF".')
+    }
+  }
 }
 
 let n = 0
@@ -165,7 +237,7 @@ for (const msg of messages) {
     continue
   }
   console.log(`atomicTxid   : ${d.atomicTxid ?? '(none — this is why it is rejected)'}`)
-  console.log(`bumps        : ${d.bumps}`)
+  console.log(`bumps        : ${d.bumps}${d.roots ? ` (heights ${Object.keys(d.roots).join(', ')})` : ''}`)
   console.log(`transactions : ${d.txs.length}`)
   for (const t of d.txs) {
     const flags = [t.hasProof ? 'PROOF' : null, t.txidOnly ? 'TXID-ONLY' : null].filter(Boolean).join(' ') || 'raw'
@@ -178,7 +250,12 @@ for (const msg of messages) {
   }
   console.log(`verifyValid(allowTxidOnly=false) : ${d.verifyValidStrict}   <- the check internalizeAction runs`)
   console.log(`verifyValid(allowTxidOnly=true)  : ${d.verifyValidLenient}`)
-  if ('verifyWithChainTracker' in d) console.log(`verify(chainTracker, false)      : ${d.verifyWithChainTracker}`)
+  if ('verifyWithChainTracker' in d) console.log(`verify(defaultChainTracker, false): ${d.verifyWithChainTracker}   <- WhatsOnChain, NOT what the app uses`)
+  if (CHECK_APP_CT) {
+    hr()
+    console.log(`app chain tracker (${CHAINTRACKS_URL}):`)
+    await checkAppChaintracks(d.beef)
+  }
   hr()
 
   // The verdict, spelled out.
@@ -195,15 +272,20 @@ for (const msg of messages) {
     console.log('         incomplete — see missingInputs / withMissingInputs / notValid above.')
     console.log('         Those transactions have neither a merkle proof nor a parent in the beef.')
   } else {
-    console.log('VERDICT: this beef is structurally valid. If internalizeAction still rejects')
-    console.log('         it, the failure is at the chain-tracker step — re-run with')
-    console.log('         CHECK_ROOTS=1 to validate the merkle roots against WhatsOnChain.')
+    console.log('VERDICT: this beef is structurally valid — the container is right and the')
+    console.log('         ancestry is complete. The bytes in the message box are NOT the')
+    console.log('         problem, so the rejection has to come from the other half of the')
+    console.log('         same if(): the chain-tracker call inside Beef.verify.')
+    if (!CHECK_APP_CT) {
+      console.log('         Re-run with CHECK_APP_CHAINTRACKS=1 to ask the chaintracks service')
+      console.log('         the app actually uses whether it agrees about these merkle roots.')
+    }
   }
 
   const stem = join(OUT, d.atomicTxid ?? msg.messageId)
   writeFileSync(`${stem}.atomicbeef.hex`, Utils.toHex(txBytes))
   writeFileSync(`${stem}.token.json`, JSON.stringify(token, null, 2))
-  writeFileSync(`${stem}.report.json`, JSON.stringify({ messageId: msg.messageId, sender: msg.sender, created_at: msg.created_at, ...d }, null, 2))
+  writeFileSync(`${stem}.report.json`, JSON.stringify({ messageId: msg.messageId, sender: msg.sender, created_at: msg.created_at, ...d, beef: undefined }, null, 2))
   console.log(`\nwrote ${stem}.{atomicbeef.hex,token.json,report.json}`)
 }
 
