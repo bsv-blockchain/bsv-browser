@@ -164,10 +164,43 @@ async function appChaintracksRootFor (height) {
   const v = await res.json()
   if (v.status !== 'success') return { error: `status=${v.status} code=${v.code ?? ''} ${JSON.stringify(v).slice(0, 200)}` }
   const header = v.value
-  if (header == null) return { error: 'service returned success with no header (height beyond its tip?)' }
-  const raw = header.merkleRoot
-  const root = typeof raw === 'string' ? raw : raw == null ? undefined : Utils.toHex(Array.from(raw))
-  return { root, height: header.height, hash: header.hash }
+  if (header == null) return { error: 'success with no value (height beyond the service tip?)' }
+  const raw = JSON.stringify(header).slice(0, 300)
+  // OfflineFirstChaintracks.rootHex accepts a string or a byte array. If the
+  // service answers with a bare 80-byte header hex instead of an object, there
+  // is no .merkleRoot at all and rootHex throws — which line 79 swallows into
+  // `return false`. Surface that rather than hiding it.
+  if (typeof header === 'string') return { error: `service returned a bare header string, not an object with .merkleRoot`, raw }
+  const mr = header.merkleRoot
+  if (mr == null) return { error: 'header object has no merkleRoot field', raw }
+  const root = typeof mr === 'string' ? mr : Utils.toHex(Array.from(mr))
+  return { root, height: header.height, hash: header.hash, raw }
+}
+
+/** The service's own tip. A root that is right today can have been unknown at
+ * the moment of the failed accept: if the service (or the device's header
+ * window) had not reached the bump height yet, findHeaderForHeight returned
+ * nothing and the verification failed then, even though it passes now. */
+async function appChaintracksTip () {
+  try {
+    const res = await fetch(`${CHAINTRACKS_URL}/getPresentHeight`)
+    const v = await res.json()
+    return v.status === 'success' ? v.value : `unexpected: ${JSON.stringify(v).slice(0, 120)}`
+  } catch (e) {
+    return `lookup failed: ${e.message}`
+  }
+}
+
+/** The three ways a "correct-looking" root still fails `remoteRoot === root`. */
+function explainNearMiss (expected, got) {
+  if (got.toLowerCase() === expected.toLowerCase()) {
+    return 'CASE ONLY — the bytes match but the hex case differs, and the comparison is ===. This fails.'
+  }
+  const reversed = (got.match(/../g) ?? []).reverse().join('')
+  if (reversed.toLowerCase() === expected.toLowerCase()) {
+    return 'BYTE ORDER — the service returns the opposite endianness to MerklePath.computeRoot(). This fails.'
+  }
+  return null
 }
 
 async function checkAppChaintracks (beef) {
@@ -176,6 +209,14 @@ async function checkAppChaintracks (beef) {
   if (heights.length === 0) {
     console.log('  (no bumps — nothing for the chain tracker to answer)')
     return
+  }
+  const tip = await appChaintracksTip()
+  console.log(`  service tip    : ${tip}`)
+  for (const h of heights) {
+    if (typeof tip === 'number' && tip < Number(h)) {
+      console.log(`  !! tip is BEHIND bump height ${h} by ${Number(h) - tip} blocks — findHeaderForHeight`)
+      console.log('     returns nothing for it, so verification fails right now.')
+    }
   }
   for (const h of heights) {
     const expected = roots[h]
@@ -189,12 +230,18 @@ async function checkAppChaintracks (beef) {
     console.log(`    bump root      : ${expected}`)
     if (got.error) {
       console.log(`    chaintracks    : LOOKUP FAILED — ${got.error}`)
+      if (got.raw) console.log(`    raw response   : ${got.raw}`)
       console.log('    => OfflineFirstChaintracks catches this and returns false,')
       console.log('       which Beef.verify reports as "not proven". THIS is the failure.')
     } else if (got.root === expected) {
-      console.log(`    chaintracks    : ${got.root}  ✓ agrees`)
+      console.log(`    chaintracks    : ${got.root}  ✓ agrees exactly`)
+      console.log(`    => the root is fine NOW. If the accept failed earlier, the service or the`)
+      console.log(`       device header window had not reached height ${h} at that moment.`)
     } else {
-      console.log(`    chaintracks    : ${got.root ?? '(header had no merkleRoot field)'}  ✗ DISAGREES`)
+      console.log(`    chaintracks    : ${got.root}  ✗ DISAGREES`)
+      const near = explainNearMiss(expected, got.root)
+      if (near) console.log(`    near miss      : ${near}`)
+      console.log(`    raw response   : ${got.raw}`)
       console.log('    => Beef.verify returns false and the toolbox throws')
       console.log('       "The tx parameter must be valid AtomicBEEF".')
     }
