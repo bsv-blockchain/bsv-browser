@@ -9,7 +9,7 @@
  * makes a crash recoverable.
  */
 import type { IncomingPayment, PeerPayClient } from '@bsv/message-box-client'
-import { P2PKH, PublicKey, Random, Transaction, Utils } from '@bsv/sdk'
+import { Beef, P2PKH, PublicKey, Random, Transaction, Utils } from '@bsv/sdk'
 import { BRC29_PROTOCOL_ID } from '@/utils/pay/rails/address'
 import {
   markOutboxSent,
@@ -53,40 +53,73 @@ export function peerPayLinkFor(identityKey: string, sats?: number): string {
   return Number.isFinite(amount) && amount > 0 ? `peerpay:${identityKey}?sats=${amount}` : `peerpay:${identityKey}`
 }
 
-/** Credit an incoming payment, then acknowledge it. Never acknowledge first. */
+/**
+ * Credit an incoming payment, then acknowledge it. Never acknowledge first.
+ *
+ * `repairBeef` is the second chance. The token's AtomicBEEF was minted at send
+ * time, and a reorg between then and now invalidates its merkle path without
+ * touching the transaction itself — the toolbox reports that as
+ * "The tx parameter must be valid AtomicBEEF", which reads like a malformed
+ * payment and is nothing of the kind. Given a repair function, one failure is
+ * retried with a proof re-fetched by txid. Omit it and behaviour is unchanged.
+ */
 export async function internalizeIncoming(
   wallet: InternalizingWallet,
   client: Pick<PeerPayClient, 'acknowledgeMessage'>,
   adminOriginator: string,
   payment: IncomingPayment,
-  description: string
+  description: string,
+  repairBeef?: (txid: string) => Promise<number[] | undefined>
 ): Promise<void> {
   // A note the sender attached to the token becomes the description the
   // recipient's wallet records — same field the sender's action carries.
   const note = (payment.token as { note?: unknown }).note
   const noted = typeof note === 'string' && note.trim().length > 0 ? note.trim().slice(0, 500) : undefined
-  await wallet.internalizeAction(
-    {
-      tx: payment.token.transaction,
-      outputs: [
-        {
-          paymentRemittance: {
-            derivationPrefix: payment.token.customInstructions.derivationPrefix,
-            derivationSuffix: payment.token.customInstructions.derivationSuffix,
-            senderIdentityKey: payment.sender
-          },
-          outputIndex: payment.token.outputIndex ?? 0,
-          protocol: 'wallet payment'
-        }
-      ],
-      labels: ['peerpay'],
-      // Same rule as the sender's side: the note verbatim, space-padded to the
-      // 5-byte validation floor when it is shorter.
-      description: noted ? noted.padEnd(5) : description
-    },
-    adminOriginator
-  )
+
+  const argsFor = (tx: number[] | typeof payment.token.transaction) => ({
+    tx,
+    outputs: [
+      {
+        paymentRemittance: {
+          derivationPrefix: payment.token.customInstructions.derivationPrefix,
+          derivationSuffix: payment.token.customInstructions.derivationSuffix,
+          senderIdentityKey: payment.sender
+        },
+        outputIndex: payment.token.outputIndex ?? 0,
+        protocol: 'wallet payment'
+      }
+    ],
+    labels: ['peerpay'],
+    // Same rule as the sender's side: the note verbatim, space-padded to the
+    // 5-byte validation floor when it is shorter.
+    description: noted ? noted.padEnd(5) : description
+  })
+
+  try {
+    await wallet.internalizeAction(argsFor(payment.token.transaction), adminOriginator)
+  } catch (e) {
+    // The subject txid comes from the token's own AtomicBEEF rather than from
+    // the sender as a separate field, so a repair can only ever ask about the
+    // transaction this payment is actually for.
+    const txid = repairBeef ? safeAtomicTxid(payment.token.transaction) : undefined
+    const repaired = txid ? await repairBeef!(txid) : undefined
+    // Rethrow the ORIGINAL error when no repair was available: it is the one
+    // that describes why the payment could not be credited, and the inbox shows
+    // it to the user. A "could not re-fetch" message would bury it.
+    if (!repaired) throw e
+    await wallet.internalizeAction(argsFor(repaired), adminOriginator)
+  }
+
   await client.acknowledgeMessage({ messageIds: [payment.messageId] })
+}
+
+/** The AtomicBEEF subject txid, or undefined if the bytes will not parse. */
+function safeAtomicTxid(tx: number[]): string | undefined {
+  try {
+    return Beef.fromBinary(Array.from(tx)).atomicTxid
+  } catch {
+    return undefined
+  }
 }
 
 /**
