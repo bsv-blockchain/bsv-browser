@@ -3,6 +3,10 @@
  * React Native WebView reports the source-frame URL on supported iOS and
  * Android WebMessageListener implementations. Never trust an originator sent
  * in page-controlled JSON.
+ *
+ * When the native frame URL is missing (`about:blank`, empty, `data:`), fall
+ * back to the tab URL. A verifiable embedded-frame URL still wins so an iframe
+ * keeps its own origin instead of inheriting the parent page.
  */
 export type WalletFrameIdentity = {
   originator: string
@@ -20,4 +24,8 @@ export function walletFrameIdentityFromUrl(frameUrl: unknown): WalletFrameIdenti
   } catch {
     return undefined
   }
+}
+
+export function resolveWalletFrameIdentity(frameUrl: unknown, fallbackUrl?: unknown): WalletFrameIdentity | undefined {
+  return walletFrameIdentityFromUrl(frameUrl) ?? walletFrameIdentityFromUrl(fallbackUrl)
 }

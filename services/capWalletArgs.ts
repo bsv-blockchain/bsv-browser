@@ -78,6 +78,7 @@ export function capWalletArgs<T extends WalletInterface>(wallet: T, limits?: Wal
       if (typeof value !== 'function' || !SIZED.has(prop as keyof WalletInterface)) {
         return typeof value === 'function' ? value.bind(target) : value
       }
+      const bound = (value as (a: unknown, o?: string) => unknown).bind(target)
       return (args: unknown, originator?: string) => {
         const refusal = checkWalletArgs(String(prop), args, active)
         if (refusal) {
@@ -91,7 +92,7 @@ export function capWalletArgs<T extends WalletInterface>(wallet: T, limits?: Wal
           )
           return Promise.reject(new WalletArgTooLarge(refusal.field, refusal.message))
         }
-        return (value as (a: unknown, o?: string) => unknown)(args, originator)
+        return bound(args, originator)
       }
     }
   })

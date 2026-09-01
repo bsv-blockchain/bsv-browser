@@ -3,6 +3,8 @@
  * material. The load-bearing defense against the privilege-escalation finding.
  */
 import { guardVaultAccess, VaultAccessDenied } from '../../services/vault/guard'
+import { capWalletArgs } from '../../services/capWalletArgs'
+import { limitsForTier } from '../../services/walletArgLimits'
 
 const ADMIN = 'admin.com'
 
@@ -39,7 +41,10 @@ test('blocks non-admin privileged getPublicKey (deposit-key enumeration)', async
   const { wallet } = fakeWallet()
   const guarded = guardVaultAccess(wallet, ADMIN)
   await expect(
-    guarded.getPublicKey({ privileged: true, protocolID: [2, 'vault'], keyID: 'vault/0', counterparty: 'self' } as any, 'evil.com')
+    guarded.getPublicKey(
+      { privileged: true, protocolID: [2, 'vault'], keyID: 'vault/0', counterparty: 'self' } as any,
+      'evil.com'
+    )
   ).rejects.toBeInstanceOf(VaultAccessDenied)
 })
 
@@ -47,7 +52,10 @@ test('blocks non-admin privileged createSignature (the spend signature)', async 
   const { wallet } = fakeWallet()
   const guarded = guardVaultAccess(wallet, ADMIN)
   await expect(
-    guarded.createSignature({ privileged: true, protocolID: [2, 'vault'], keyID: 'vault/0', hashToDirectlySign: [1] } as any, 'evil.com')
+    guarded.createSignature(
+      { privileged: true, protocolID: [2, 'vault'], keyID: 'vault/0', hashToDirectlySign: [1] } as any,
+      'evil.com'
+    )
   ).rejects.toBeInstanceOf(VaultAccessDenied)
 })
 
@@ -73,6 +81,52 @@ test('passes non-privileged-capable methods straight through, even privileged-lo
   await guarded.createAction({ privileged: true } as any, 'evil.com')
   await guarded.listOutputs({ basket: 'x' } as any, 'evil.com')
   expect(calls.map(c => c.method).sort()).toEqual(['createAction', 'listOutputs'])
+})
+
+test('preserves this for class methods so getPublicKey can call ensureCanCall', async () => {
+  // SimpleWalletManager.getPublicKey is a prototype method that does
+  // this.ensureCanCall(originator). The CWI bridge wraps that manager in
+  // guardVaultAccess; if the trap invokes the method unbound, identity-key
+  // retrieval fails with "this.ensureCanCall is not a function".
+  class WalletLike {
+    ensureCanCall(_originator?: string) {
+      /* the load-bearing this-call */
+    }
+    async getPublicKey(args: any, originator?: string) {
+      this.ensureCanCall(originator)
+      return { publicKey: '02ab', originator, args }
+    }
+    async getVersion(_args: any, originator?: string) {
+      this.ensureCanCall(originator)
+      return { version: '1.0.0' }
+    }
+  }
+  const guarded = guardVaultAccess(new WalletLike() as any, ADMIN)
+  await expect(guarded.getPublicKey({ identityKey: true }, 'swap.siftbitcoin.com')).resolves.toEqual({
+    publicKey: '02ab',
+    originator: 'swap.siftbitcoin.com',
+    args: { identityKey: true }
+  })
+  await expect(guarded.getVersion({}, 'swap.siftbitcoin.com')).resolves.toEqual({ version: '1.0.0' })
+})
+
+test('composed capWalletArgs(guardVaultAccess) still preserves this on getPublicKey', async () => {
+  class WalletLike {
+    ensureCanCall(_originator?: string) {}
+    async getPublicKey(args: any) {
+      this.ensureCanCall()
+      return { publicKey: '02cd', args }
+    }
+    async createAction() {
+      this.ensureCanCall()
+      return { txid: 'x' }
+    }
+  }
+  const wrapped = capWalletArgs(guardVaultAccess(new WalletLike() as any, ADMIN), limitsForTier('mid'))
+  await expect(wrapped.getPublicKey({ identityKey: true }, 'swap.siftbitcoin.com')).resolves.toEqual({
+    publicKey: '02cd',
+    args: { identityKey: true }
+  })
 })
 
 test('treats missing/false privileged flag as allowed', async () => {

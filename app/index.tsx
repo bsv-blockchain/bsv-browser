@@ -35,12 +35,7 @@ import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { useSheet, SheetProvider } from '@/context/SheetContext'
 import type { Tab } from '@/shared/types/browser'
-import {
-  DEFAULT_HOMEPAGE_URL,
-  kNEW_TAB_URL,
-  safeBottomInset,
-  ADDRESS_BAR_HEIGHT
-} from '@/shared/constants'
+import { DEFAULT_HOMEPAGE_URL, kNEW_TAB_URL, safeBottomInset, ADDRESS_BAR_HEIGHT } from '@/shared/constants'
 import { hostOf, isValidUrl, normalizeUrlForHistory } from '@/utils/generalHelpers'
 import tabStore from '../stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
@@ -59,11 +54,18 @@ import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downlo
 import { captureThumbnail, cleanupOrphanedThumbnails, thumbnailExists } from '@/utils/thumbnailService'
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildWalletDocumentStartScript } from '@/utils/webview/documentStartScript'
-import { walletFrameIdentityFromUrl } from '@/utils/webview/walletOrigin'
+import { resolveWalletFrameIdentity } from '@/utils/webview/walletOrigin'
 import { buildWalletResponseScript } from '@/utils/webview/walletResponseScript'
 import { normalizeWalletByteFields } from '@/utils/webview/walletByteJson'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
-import { getErrorPage, getNativeErrorInfo, paymentLoadingPage, navigationLoadingPage, escapeForTemplateLiteral, escapeForJsSingleQuote } from '@/utils/webview/errorPages'
+import {
+  getErrorPage,
+  getNativeErrorInfo,
+  paymentLoadingPage,
+  navigationLoadingPage,
+  escapeForTemplateLiteral,
+  escapeForJsSingleQuote
+} from '@/utils/webview/errorPages'
 
 import { AddressBar, AddressBarHandle } from '@/components/browser/AddressBar'
 import { TabsOverview } from '@/components/browser/TabsOverview'
@@ -106,10 +108,18 @@ const WALLET_MUTATING_CALLS = new Set([
 // no permission mutation). These are what dApps storm on page load.
 const CWI_NO_YIELD = new Set<string>([
   // L0 — free
-  'getVersion', 'getNetwork', 'isAuthenticated', 'waitForAuthentication',
+  'getVersion',
+  'getNetwork',
+  'isAuthenticated',
+  'waitForAuthentication',
   // L1 — crypto
-  'getPublicKey', 'createHmac', 'verifyHmac', 'createSignature', 'verifySignature',
-  'encrypt', 'decrypt'
+  'getPublicKey',
+  'createHmac',
+  'verifyHmac',
+  'createSignature',
+  'verifySignature',
+  'encrypt',
+  'decrypt'
 ])
 
 /* -------------------------------------------------------------------------- */
@@ -351,9 +361,9 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         enableApplePay={isWeb2Mode}
         injectedJavaScript={isWeb2Mode ? undefined : injectedJavaScript}
         injectedJavaScriptBeforeContentLoaded={isWeb2Mode ? undefined : injectedJSBefore}
-        // Install the wallet provider in child frames too. The native message
-        // event identifies the source-frame URL, so embedded apps retain their
-        // own BRC-100 origin instead of inheriting the top-level site's identity.
+        // Install the wallet provider in child frames too. A verifiable native
+        // frame URL is the BRC-100 originator; missing/about:blank falls back
+        // to the tab URL so main-frame getPublicKey still works.
         injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
         // Default ["phoneNumber"] makes WebKit scan + auto-link phone numbers on
         // every page parse — pure cost, no benefit for a general-purpose browser.
@@ -623,11 +633,7 @@ const SwitchLoadingOverlay = observer(function SwitchLoadingOverlay(props: {
  * re-render the entire Browser tree (and starve the JS thread when the menu
  * popover is opening). Renders nothing.
  */
-const ManifestWatcher = observer(function ManifestWatcher({
-  onRedirect
-}: {
-  onRedirect: (startUrl: string) => void
-}) {
+const ManifestWatcher = observer(function ManifestWatcher({ onRedirect }: { onRedirect: (startUrl: string) => void }) {
   const { fetchManifest, getStartUrl, shouldRedirectToStartUrl } = useWebAppManifest()
   const activeTab = tabStore.activeTab
   const tabId = activeTab?.id
@@ -1174,7 +1180,10 @@ const Browser = observer(function Browser() {
       // user returns to it.
       if (tabId !== activeTab.id) return
 
-      const frameIdentity = walletFrameIdentityFromUrl(eventUrl)
+      // Prefer the native source-frame URL (iframes keep their own origin).
+      // WKWebView often reports about:blank/empty for main-frame script
+      // messages; the tab URL is the fallback so getPublicKey still works.
+      const frameIdentity = resolveWalletFrameIdentity(eventUrl, activeTab.url)
 
       const sendResponseToWebView = (id: string, result: any) => {
         if (!activeTab?.webviewRef?.current) return
@@ -1479,10 +1488,13 @@ const Browser = observer(function Browser() {
   // The reactive isLoading/url subscription lives in <ManifestWatcher/> (rendered
   // below) so Browser doesn't re-render on every nav-state tick. This is just the
   // redirect sink it calls back into.
-  const handleManifestRedirect = useCallback((startUrl: string) => {
-    // updateActiveTab writes tab.url; AddressBar's url-sync reflects it.
-    updateActiveTab({ url: startUrl })
-  }, [updateActiveTab])
+  const handleManifestRedirect = useCallback(
+    (startUrl: string) => {
+      // updateActiveTab writes tab.url; AddressBar's url-sync reflects it.
+      updateActiveTab({ url: startUrl })
+    },
+    [updateActiveTab]
+  )
 
   /* -------------------------------------------------------------------------- */
   /*                              FULLSCREEN HANDLER                            */
@@ -1612,9 +1624,7 @@ const Browser = observer(function Browser() {
     // After backgroundWarmReady flips, render the full warm pool (and keep it
     // mounted) so subsequent tab switches stay instant.
     const activeId = activeTab?.id
-    const hostsToRender = backgroundWarmReady
-      ? warmWebTabs
-      : warmWebTabs.filter(tab => tab.id === activeId)
+    const hostsToRender = backgroundWarmReady ? warmWebTabs : warmWebTabs.filter(tab => tab.id === activeId)
 
     return (
       <>

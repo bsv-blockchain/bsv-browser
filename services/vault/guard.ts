@@ -77,12 +77,13 @@ export function guardVaultAccess<T extends WalletInterface>(wallet: T, adminOrig
       if (typeof value !== 'function' || !PRIVILEGED_CAPABLE.has(prop as keyof WalletInterface)) {
         return typeof value === 'function' ? value.bind(target) : value
       }
+      const bound = (value as (a: unknown, o?: string) => unknown).bind(target)
       return (args: unknown, originator?: string) => {
         const privileged = !!(args && typeof args === 'object' && (args as { privileged?: boolean }).privileged)
         if (privileged && originator !== adminOriginator) {
           return Promise.reject(new VaultAccessDenied(String(prop), originator ?? ''))
         }
-        return (value as (a: unknown, o?: string) => unknown)(args, originator)
+        return bound(args, originator)
       }
     }
   })

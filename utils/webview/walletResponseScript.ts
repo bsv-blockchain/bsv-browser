@@ -17,10 +17,11 @@ export function buildWalletResponseScript(message: unknown, responseOrigin?: str
       var responseOrigin = ${responseOriginString};
       if (!responseOrigin || window.location.origin === responseOrigin) {
         window.dispatchEvent(new MessageEvent('message', { data: data }));
-        return;
       }
-      for (var i = 0; i < window.frames.length; i++) {
-        try { window.frames[i].postMessage(data, responseOrigin); } catch (_) {}
+      if (responseOrigin) {
+        for (var i = 0; i < window.frames.length; i++) {
+          try { window.frames[i].postMessage(data, responseOrigin); } catch (_) {}
+        }
       }
     })();
   `
