@@ -1,6 +1,7 @@
 {
   "_meta.title": "BSV Browser - 支持与用户指南",
   "_meta.description": "了解如何使用 BSV Browser 浏览网页、付款并管理您的身份。包含分步指南、使用技巧及常见问题解答。",
+
   "_css.nav-sections": "'章节'",
   "_css.nav-close": "'关闭'",
 
@@ -86,7 +87,6 @@
   "wallet.overview.heading": "钱包概览",
   "wallet.overview.p1": "打开菜单并点击<strong>钱包</strong>查看您的钱包。主屏幕显示：",
   "wallet.overview.li1": "您当前以聪或法币显示的<strong>余额</strong>。点击它可刷新。",
-  "wallet.overview.li2": "前往<strong>交易记录</strong>、<strong>支付</strong>和<strong>旧版桥接</strong>的快捷链接。",
   "wallet.overview.li3": "带有复制按钮的<strong>身份密钥</strong>。",
   "wallet.overview.li4": "打开完整钱包配置屏幕的<strong>设置</strong>行。",
   "wallet.config.heading": "钱包配置",
@@ -108,22 +108,8 @@
   "wallet.p2p.heading": "点对点身份支付",
   "wallet.p2p.p1": "<strong>支付</strong>屏幕允许您使用对方的身份而非原始区块链地址直接向另一个人发送 BSV。通过 BSV 身份网络按姓名搜索收款人，输入金额并发送。",
   "wallet.p2p.p2": "收到的付款会显示在列表中。您可以逐一接受，或点击<strong>全部接受</strong>以批量接受所有待处理的付款。结果横幅会确认接受了多少笔。",
-  "wallet.legacy.heading": "旧版桥接",
-  "wallet.legacy.p1": "为了与传统 BSV 钱包和服务兼容，BSV Browser 通过<strong>旧版桥接</strong>屏幕支持标准的基于地址的交易。",
-  "wallet.legacy.li1": "<strong>接收：</strong>每天生成一个唯一地址和二维码。将它们分享给任何想向您发送 BSV 的人。传入资金将被自动检测并导入您的钱包 &mdash; 无需手动操作。",
-  "wallet.legacy.li2": "<strong>发送：</strong>输入 BSV 地址和金额，然后确认。您也可以点击<strong>全额发送</strong>以发送您的全部余额。",
-  "wallet.legacy.li3": "使用<strong>箭头按钮</strong>在每日地址之间导航，以查看之前某天的接收地址。",
-  "wallet.legacy_send.heading": "从旧版桥接发送",
-  "wallet.legacy_send.p1": "在接收部分下方，旧版桥接包含一个完整的发送表单。输入收款人的 BSV 地址和您要发送的金额。",
-  "wallet.legacy_send.li1": "点击<strong>发送 BSV</strong> 以广播交易。",
   "wallet.legacy_send.li2": "点击<strong>全额发送</strong>以发送您的全部可用余额。",
   "wallet.legacy_send.p2": "交易提交后会显示成功或错误横幅。",
-  "wallet.tx_history.heading": "交易历史",
-  "wallet.tx_history.p1": "<strong>交易记录</strong>屏幕列出您所有的交易，并带有颜色编码的状态标签：",
-  "wallet.tx_history.li1": "<strong>绿色</strong> &mdash; 已确认、已接受或正在广播。",
-  "wallet.tx_history.li2": "<strong>黄色</strong> &mdash; 待处理状态（未签名、非最终状态、尚未发送）。",
-  "wallet.tx_history.li3": "<strong>红色</strong> &mdash; 失败的交易。",
-  "wallet.tx_history.p2": "对于每笔交易，您可以在区块浏览器上查看它、复制原始交易数据，或中止仍处于待处理状态的交易。",
 
   "backup.heading": "备份与恢复",
   "backup.intro": "您持有密钥，因此您控制备份。BSV Browser 提供两种方法 &mdash; 12 个词的短语和可打印的恢复分片 &mdash; 让您选择最适合自己的方式。",

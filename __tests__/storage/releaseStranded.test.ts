@@ -12,7 +12,10 @@
  * non-vault transactions, and must not touch coins held by live reservations.
  */
 import { DatabaseSync } from 'node:sqlite'
-import { RELEASE_STRANDED_VAULT_STAGING_SQL } from '@/storage/methods/findSql'
+import {
+  RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL,
+  RELEASE_STRANDED_VAULT_STAGING_SQL
+} from '@/storage/methods/findSql'
 
 const TX1 = 'e1'.repeat(32)
 const TX2 = '27'.repeat(32)
@@ -103,5 +106,57 @@ describe('RELEASE_STRANDED_VAULT_STAGING_SQL', () => {
     const r = d.prepare(RELEASE_STRANDED_VAULT_STAGING_SQL).run()
     expect(Number(r.changes)).toBe(2)
     expect(spendables(d)[2]).toEqual({ outputId: 3, spendable: 0, spentBy: 4 })
+  })
+})
+
+describe('RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL', () => {
+  // The other arm of the same failure: the toolbox restored the coin to
+  // spendable=1 but updateOutput's spentBy: undefined was dropped by
+  // sqlUpdate, leaving spentBy pointing at the failed spender. createAction
+  // refuses such an input with WERR_REVIEW_ACTIONS (its reservation check
+  // never asks whether the spender is failed), so the coin is just as stuck
+  // as the spendable=0 arm until the reference is cleared.
+  it('clears the stale spentBy on already-spendable coins held by a failed invalid vault-deposit', () => {
+    const d = seeded()
+    seedFailedDeposit(d)
+    d.exec('UPDATE outputs SET spendable = 1 WHERE outputId = 1')
+    const r = d.prepare(RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL).run()
+    expect(Number(r.changes)).toBe(1)
+    expect(spendables(d)[0]).toEqual({ outputId: 1, spendable: 1, spentBy: null })
+    // The spendable=0 sibling is the OTHER statement's job, untouched here.
+    expect(spendables(d)[1]).toEqual({ outputId: 2, spendable: 0, spentBy: 3 })
+  })
+
+  it('does NOT clear a spendable coin held by a live (non-failed / non-invalid) spender', () => {
+    const d = seeded()
+    seedFailedDeposit(d, { txStatus: 'unproven', reqStatus: 'unmined' })
+    d.exec('UPDATE outputs SET spendable = 1')
+    const r = d.prepare(RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL).run()
+    expect(Number(r.changes)).toBe(0)
+    expect(spendables(d).every(o => o.spentBy === 3)).toBe(true)
+  })
+
+  it('does NOT clear references of failed transactions without the vault-deposit label', () => {
+    const d = seeded()
+    seedFailedDeposit(d, { label: 'some-other-flow' })
+    d.exec('UPDATE outputs SET spendable = 1')
+    const r = d.prepare(RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL).run()
+    expect(Number(r.changes)).toBe(0)
+  })
+
+  it('the two statements together heal BOTH arms of the production failure', () => {
+    const d = seeded()
+    seedFailedDeposit(d)
+    // One coin per arm: outputId 1 re-stranded (spendable=0), outputId 2
+    // restored spendable but with the stale reference.
+    d.exec('UPDATE outputs SET spendable = 1 WHERE outputId = 2')
+    const r1 = d.prepare(RELEASE_STRANDED_VAULT_STAGING_SQL).run()
+    const r2 = d.prepare(RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL).run()
+    expect(Number(r1.changes)).toBe(1)
+    expect(Number(r2.changes)).toBe(1)
+    expect(spendables(d)).toEqual([
+      { outputId: 1, spendable: 1, spentBy: null },
+      { outputId: 2, spendable: 1, spentBy: null }
+    ])
   })
 })

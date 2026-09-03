@@ -107,7 +107,11 @@ export function startMonitorIfCurrent(
   return true
 }
 
-export const MONITOR_DRAIN_TIMEOUT_MS = 10_000
+/**
+ * Bounded so a hung task cannot wedge logout/rebuild forever: one
+ * taskRunWaitMsecs tick (5 s) plus slack for a task pass to finish.
+ */
+export const MONITOR_DRAIN_TIMEOUT_MS = 7_000
 
 export type DrainOutcome = 'no-monitor' | 'never-started' | 'drained' | 'timeout'
 
@@ -117,10 +121,11 @@ export type DrainOutcome = 'no-monitor' | 'never-started' | 'drained' | 'timeout
  *
  * stopTasks only clears a flag; the loop notices at its next iteration, up to
  * taskRunWaitMsecs (5 s) later, plus however long a task pass is mid-run. A
- * storage.destroy() issued in that gap is exactly the destroy-under-a-live-
- * monitor race this exists to prevent, so the drain awaits the toolbox's own
- * completion signal, `_tasksRunningPromise` (assigned synchronously by
- * startTasks, resolved by the loop on exit).
+ * storage.destroy() issued in that gap closes the SQLite connection under a
+ * task still inside runOnce — the pass rejects, and the loop's own logEvent
+ * error write rejects again on the closed handle. So the drain awaits the
+ * toolbox's own completion signal, `_tasksRunningPromise` (assigned
+ * synchronously by startTasks, resolved by the loop on exit).
  *
  * The timeout is a backstop for a run loop that died on an unhandled error —
  * the toolbox never resolves `_tasksRunningPromise` in that case — so logout

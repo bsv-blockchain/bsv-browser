@@ -1,6 +1,7 @@
 {
   "_meta.title": "BSV Browser - Soporte y Guía del Usuario",
   "_meta.description": "Aprende a navegar, pagar y gestionar tu identidad con BSV Browser. Guías paso a paso, consejos y respuestas a preguntas frecuentes.",
+
   "_css.nav-sections": "'Secciones'",
   "_css.nav-close": "'Cerrar'",
 
@@ -86,7 +87,6 @@
   "wallet.overview.heading": "Resumen de la cartera",
   "wallet.overview.p1": "Abre el menú y toca <strong>Cartera</strong> para ver tu cartera. La pantalla principal muestra:",
   "wallet.overview.li1": "Tu <strong>saldo</strong> actual en satoshis o moneda fiat. Tócalo para actualizar.",
-  "wallet.overview.li2": "Accesos directos a <strong>Transacciones</strong>, <strong>Pagos</strong> y <strong>Puente heredado</strong>.",
   "wallet.overview.li3": "Tu <strong>Clave de identidad</strong> con un botón de copia.",
   "wallet.overview.li4": "Una fila de <strong>Configuración</strong> que abre la pantalla completa de configuración de la cartera.",
   "wallet.config.heading": "Configuración de la cartera",
@@ -108,22 +108,8 @@
   "wallet.p2p.heading": "Pagos de identidad entre pares",
   "wallet.p2p.p1": "La pantalla <strong>Pagos</strong> te permite enviar BSV directamente a otra persona usando su identidad en lugar de una dirección blockchain sin procesar. Busca al destinatario por nombre en la red de identidad BSV, introduce un importe y envía.",
   "wallet.p2p.p2": "Los pagos entrantes aparecen en una lista. Puedes aceptarlos individualmente, o tocar <strong>Aceptar todo</strong> para aceptar en lote todos los pagos pendientes a la vez. Un banner de resultado confirma cuántos fueron aceptados.",
-  "wallet.legacy.heading": "Puente heredado",
-  "wallet.legacy.p1": "Para compatibilidad con carteras y servicios BSV tradicionales, BSV Browser admite transacciones estándar basadas en direcciones a través de la pantalla del <strong>Puente heredado</strong>.",
-  "wallet.legacy.li1": "<strong>Recibir:</strong> Se genera una dirección única y un código QR para cada día. Compártelos con cualquiera que quiera enviarte BSV. Los fondos entrantes se detectan automáticamente y se importan a tu cartera &mdash; sin necesidad de acción manual.",
-  "wallet.legacy.li2": "<strong>Enviar:</strong> Introduce una dirección BSV y un importe, luego confirma. También puedes tocar <strong>Enviar máximo</strong> para enviar tu saldo completo.",
-  "wallet.legacy.li3": "Usa los <strong>botones de flecha</strong> para navegar entre las direcciones diarias si necesitas comprobar la dirección de recepción de un día anterior.",
-  "wallet.legacy_send.heading": "Enviar desde el Puente heredado",
-  "wallet.legacy_send.p1": "Debajo de la sección de recepción, el Puente heredado incluye un formulario de envío completo. Introduce la dirección BSV del destinatario y el importe que deseas enviar.",
-  "wallet.legacy_send.li1": "Toca <strong>Enviar BSV</strong> para difundir la transacción.",
   "wallet.legacy_send.li2": "Toca <strong>Enviar máximo</strong> para enviar tu saldo disponible completo.",
   "wallet.legacy_send.p2": "Aparece un banner de éxito o error después de enviar la transacción.",
-  "wallet.tx_history.heading": "Historial de transacciones",
-  "wallet.tx_history.p1": "La pantalla <strong>Transacciones</strong> lista todas tus transacciones con insignias de estado con código de colores:",
-  "wallet.tx_history.li1": "<strong>Verde</strong> &mdash; Confirmada, aceptada o en proceso de difusión.",
-  "wallet.tx_history.li2": "<strong>Amarillo</strong> &mdash; Estados pendientes (sin firmar, no final, aún no enviada).",
-  "wallet.tx_history.li3": "<strong>Rojo</strong> &mdash; Transacciones fallidas.",
-  "wallet.tx_history.p2": "Para cada transacción, puedes verla en el explorador de bloques, copiar los datos de transacción sin procesar, o abortar transacciones que aún estén pendientes.",
 
   "backup.heading": "Copia de seguridad y recuperación",
   "backup.intro": "Tú tienes las claves, tú controlas las copias de seguridad. BSV Browser te ofrece dos métodos — una frase de 12 palabras y participaciones de recuperación imprimibles — para que puedas elegir el enfoque que mejor se adapte a tu vida.",

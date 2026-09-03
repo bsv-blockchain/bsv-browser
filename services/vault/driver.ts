@@ -15,9 +15,13 @@ import { Platform } from 'react-native'
 import { vaultErrorFromNative } from './types'
 
 export interface KeyEvent {
-  type: 'attached' | 'detached'
+  type: 'attached' | 'detached' | 'session-failed'
   serial?: string
   transport: 'usb' | 'nfc' | 'mock'
+  /** session-failed only: why the session ended before any key connected.
+   * 'user-cancelled' = the user dismissed the system NFC sheet; 'no-key' =
+   * the session timed out or died without a key ever being presented. */
+  code?: 'user-cancelled' | 'no-key'
 }
 
 export interface VaultDriver {
@@ -78,13 +82,28 @@ export function setMockDriver(driver: VaultDriver | null): void {
  * explicit disconnect is a detach; anything unrecognized is treated as a
  * detach (fail-safe: a stray event relocks rather than silently keeping the
  * PKM armed). Getting this wrong makes insert read as detach and aborts the
- * in-flight ceremony as `key-removed-mid-op`. */
+ * in-flight ceremony as `key-removed-mid-op`.
+ *
+ * `failed:<code>` is the native didFailConnectingNFC path — the session died
+ * BEFORE any key connected, so neither attach nor detach fits (a detach would
+ * misreport it as key-removed-mid-op). `<code>` is the CoreNFC invalidation
+ * code: 200 = the user pressed cancel on the system sheet, anything else
+ * (201 timeout, 202/203 system faults) = no key ever presented. */
 export function mapNativeKeyEvent(eventType: string, serial: string, transport: string): KeyEvent {
+  const t = (transport as KeyEvent['transport']) || 'usb'
+  if (eventType === 'failed' || eventType.startsWith('failed:')) {
+    return {
+      type: 'session-failed',
+      code: eventType === 'failed:200' ? 'user-cancelled' : 'no-key',
+      serial: undefined,
+      transport: t
+    }
+  }
   const attached = eventType === 'attached' || eventType === 'connected'
   return {
     type: attached ? 'attached' : 'detached',
     serial: serial || undefined,
-    transport: (transport as KeyEvent['transport']) || 'usb'
+    transport: t
   }
 }
 
@@ -110,7 +129,14 @@ function adaptNative(native: NativeYubiKeyPiv): VaultDriver {
         const e = mapNativeKeyEvent(eventType, serial, transport)
         listeners.forEach(cb => cb(e))
       })
-      native.startDiscovery()
+      try {
+        native.startDiscovery()
+      } catch (e) {
+        // iOS throws VAULT_ERR:driver-unavailable when NFC reading is
+        // unavailable (NFC off, or a wedged nfcd needing a device restart)
+        // rather than silently not presenting the scan sheet.
+        throw vaultErrorFromNative(e)
+      }
     },
     stop: () => {
       native.stopDiscovery()

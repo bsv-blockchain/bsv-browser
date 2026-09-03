@@ -249,7 +249,7 @@ export async function sweepAddress(args: {
       }))
       const internalizeArgs: InternalizeActionArgs = {
         tx: tx!.toAtomicBEEF(),
-        description: 'Legacy Bridge Payment',
+        description: 'Payment to your address',
         outputs,
         labels: ['legacy', 'inbound', 'bsvbrowser', address, `ts:${nowSeconds}`]
       }

@@ -40,12 +40,12 @@ function fakeClient (blobs: number[][], entries?: LogEntry[]): any {
 
 describe('RemoteSyncReader', () => {
   it('returns chunks in sequence order', async () => {
-    const w = deriveBackupWallet(PRIMARY)
+    const w = deriveBackupWallet(PRIMARY, 'main')
     const blobs = [
-      await encodeChunk(w, chunkWithTx('aaa')),
-      await encodeChunk(w, chunkWithTx('bbb'))
+      await encodeChunk(w, chunkWithTx('aaa'), 'main'),
+      await encodeChunk(w, chunkWithTx('bbb'), 'main')
     ]
-    const reader = new RemoteSyncReader(fakeClient(blobs), w, DEVICE, 1, SETTINGS)
+    const reader = new RemoteSyncReader(fakeClient(blobs), w, 'main', DEVICE, 1, SETTINGS)
 
     expect((await reader.getSyncChunk(args)).provenTxs?.[0].txid).toBe('aaa')
     expect((await reader.getSyncChunk(args)).provenTxs?.[0].txid).toBe('bbb')
@@ -54,8 +54,8 @@ describe('RemoteSyncReader', () => {
   it('signals completion with an all-empty chunk', async () => {
     // The toolbox treats an empty chunk as the completion sentinel, and needs every one of
     // the twelve arrays present rather than undefined.
-    const w = deriveBackupWallet(PRIMARY)
-    const reader = new RemoteSyncReader(fakeClient([await encodeChunk(w, chunkWithTx('aaa'))]), w, DEVICE, 1, SETTINGS)
+    const w = deriveBackupWallet(PRIMARY, 'main')
+    const reader = new RemoteSyncReader(fakeClient([await encodeChunk(w, chunkWithTx('aaa'), 'main')]), w, 'main', DEVICE, 1, SETTINGS)
 
     await reader.getSyncChunk(args)
     const done = await reader.getSyncChunk(args)
@@ -68,48 +68,59 @@ describe('RemoteSyncReader', () => {
   it('rejects a log with a missing sequence', async () => {
     // A gap means the restore would be silently incomplete — the wallet would look healthy
     // while missing outputs it needs to spend. Failing loudly is the safer outcome.
-    const w = deriveBackupWallet(PRIMARY)
-    const blobs = [await encodeChunk(w, chunkWithTx('aaa'))]
+    const w = deriveBackupWallet(PRIMARY, 'main')
+    const blobs = [await encodeChunk(w, chunkWithTx('aaa'), 'main')]
     const broken: LogEntry[] = [
       { seq: 2, sha256: 'sha2', prevSha256: 'sha1', size: 1, createdAt: 'z' }
     ]
 
-    const reader = new RemoteSyncReader(fakeClient(blobs, broken), w, DEVICE, 1, SETTINGS)
+    const reader = new RemoteSyncReader(fakeClient(blobs, broken), w, 'main', DEVICE, 1, SETTINGS)
     await expect(reader.getSyncChunk(args)).rejects.toBeInstanceOf(BackupChainError)
   })
 
   it('rejects a forked chain', async () => {
-    const w = deriveBackupWallet(PRIMARY)
+    const w = deriveBackupWallet(PRIMARY, 'main')
     const blobs = [
-      await encodeChunk(w, chunkWithTx('aaa')),
-      await encodeChunk(w, chunkWithTx('bbb'))
+      await encodeChunk(w, chunkWithTx('aaa'), 'main'),
+      await encodeChunk(w, chunkWithTx('bbb'), 'main')
     ]
     const forked: LogEntry[] = [
       { seq: 1, sha256: 'sha1', prevSha256: undefined, size: 1, createdAt: 'z' },
       { seq: 2, sha256: 'sha2', prevSha256: 'NOT-sha1', size: 1, createdAt: 'z' }
     ]
 
-    const reader = new RemoteSyncReader(fakeClient(blobs, forked), w, DEVICE, 1, SETTINGS)
+    const reader = new RemoteSyncReader(fakeClient(blobs, forked), w, 'main', DEVICE, 1, SETTINGS)
     await expect(reader.getSyncChunk(args)).rejects.toThrow(/forked/)
   })
 
   it('cannot decrypt a log written by a different wallet', async () => {
-    const mine = deriveBackupWallet(PRIMARY)
-    const theirs = deriveBackupWallet(new PrivateKey(22).toArray('be', 32))
-    const blobs = [await encodeChunk(theirs, chunkWithTx('aaa'))]
+    const mine = deriveBackupWallet(PRIMARY, 'main')
+    const theirs = deriveBackupWallet(new PrivateKey(22).toArray('be', 32), 'main')
+    const blobs = [await encodeChunk(theirs, chunkWithTx('aaa'), 'main')]
 
-    const reader = new RemoteSyncReader(fakeClient(blobs), mine, DEVICE, 1, SETTINGS)
+    const reader = new RemoteSyncReader(fakeClient(blobs), mine, 'main', DEVICE, 1, SETTINGS)
+    await expect(reader.getSyncChunk(args)).rejects.toThrow()
+  })
+
+  it('cannot decrypt a log written by the same wallet on another network', async () => {
+    // The cross-network restore scenario this feature exists to prevent: same seed,
+    // blobs written on mainnet, reader operating on testnet. Must fail outright.
+    const main = deriveBackupWallet(PRIMARY, 'main')
+    const test = deriveBackupWallet(PRIMARY, 'test')
+    const blobs = [await encodeChunk(main, chunkWithTx('aaa'), 'main')]
+
+    const reader = new RemoteSyncReader(fakeClient(blobs), test, 'test', DEVICE, 1, SETTINGS)
     await expect(reader.getSyncChunk(args)).rejects.toThrow()
   })
 
   it('reads the index once, not per chunk', async () => {
-    const w = deriveBackupWallet(PRIMARY)
+    const w = deriveBackupWallet(PRIMARY, 'main')
     const blobs = [
-      await encodeChunk(w, chunkWithTx('aaa')),
-      await encodeChunk(w, chunkWithTx('bbb'))
+      await encodeChunk(w, chunkWithTx('aaa'), 'main'),
+      await encodeChunk(w, chunkWithTx('bbb'), 'main')
     ]
     const client = fakeClient(blobs)
-    const reader = new RemoteSyncReader(client, w, DEVICE, 1, SETTINGS)
+    const reader = new RemoteSyncReader(client, w, 'main', DEVICE, 1, SETTINGS)
 
     await reader.getSyncChunk(args)
     await reader.getSyncChunk(args)
@@ -121,7 +132,7 @@ describe('RemoteSyncReader', () => {
   it('round-trips a chunk through encode and restore byte-exactly', async () => {
     // The property the whole feature depends on: what a restore replays is exactly what
     // the push captured, including the binary fields that make outputs spendable.
-    const w = deriveBackupWallet(PRIMARY)
+    const w = deriveBackupWallet(PRIMARY, 'main')
     const original = emptyChunk('a', 'b', 'user') as unknown as Record<string, unknown[]>
     original.outputs = [{
       outputId: 1,
@@ -131,8 +142,8 @@ describe('RemoteSyncReader', () => {
       lockingScript: Array.from({ length: 64 }, (_, i) => i)
     }]
 
-    const blobs = [await encodeChunk(w, original as unknown as SyncChunk)]
-    const reader = new RemoteSyncReader(fakeClient(blobs), w, DEVICE, 1, SETTINGS)
+    const blobs = [await encodeChunk(w, original as unknown as SyncChunk, 'main')]
+    const reader = new RemoteSyncReader(fakeClient(blobs), w, 'main', DEVICE, 1, SETTINGS)
     const restored = await reader.getSyncChunk(args) as any
 
     // This metadata exists only in the database and is exactly why the seed alone cannot

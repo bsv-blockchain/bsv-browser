@@ -1,6 +1,7 @@
 {
   "_meta.title": "BSV Browser - Suporte e Guia do Usuário",
   "_meta.description": "Aprenda a navegar, pagar e gerenciar sua identidade com o BSV Browser. Guias passo a passo, dicas e respostas às perguntas mais comuns.",
+
   "_css.nav-sections": "'Seções'",
   "_css.nav-close": "'Fechar'",
 
@@ -86,7 +87,6 @@
   "wallet.overview.heading": "Visão geral da carteira",
   "wallet.overview.p1": "Abra o menu e toque em <strong>Carteira</strong> para ver sua carteira. A tela principal mostra:",
   "wallet.overview.li1": "Seu <strong>saldo</strong> atual em satoshis ou moeda fiduciária. Toque para atualizar.",
-  "wallet.overview.li2": "Atalhos para <strong>Transações</strong>, <strong>Pagamentos</strong> e <strong>Ponte Legada</strong>.",
   "wallet.overview.li3": "Sua <strong>Chave de Identidade</strong> com botão de cópia.",
   "wallet.overview.li4": "Uma linha de <strong>Configurações</strong> que abre a tela completa de configuração da carteira.",
   "wallet.config.heading": "Configuração da carteira",
@@ -108,22 +108,8 @@
   "wallet.p2p.heading": "Pagamentos peer-to-peer por identidade",
   "wallet.p2p.p1": "A tela de <strong>Pagamentos</strong> permite que você envie BSV diretamente para outra pessoa usando a identidade dela em vez de um endereço blockchain bruto. Pesquise o destinatário pelo nome na rede de identidade BSV, insira um valor e envie.",
   "wallet.p2p.p2": "Os pagamentos recebidos aparecem em uma lista. Você pode aceitá-los individualmente ou tocar em <strong>Aceitar Todos</strong> para aceitar todos os pagamentos pendentes de uma vez. Um banner de resultado confirma quantos foram aceitos.",
-  "wallet.legacy.heading": "Ponte Legada",
-  "wallet.legacy.p1": "Para compatibilidade com carteiras e serviços BSV tradicionais, o BSV Browser suporta transações baseadas em endereço padrão via tela de <strong>Ponte Legada</strong>.",
-  "wallet.legacy.li1": "<strong>Receber:</strong> Um endereço único e código QR são gerados para cada dia. Compartilhe-os com qualquer pessoa que queira enviar BSV para você. Os fundos recebidos são detectados automaticamente e importados para sua carteira &mdash; nenhuma ação manual é necessária.",
-  "wallet.legacy.li2": "<strong>Enviar:</strong> Insira um endereço BSV e o valor, depois confirme. Você também pode tocar em <strong>Enviar Máximo</strong> para enviar todo o seu saldo.",
-  "wallet.legacy.li3": "Use os <strong>botões de seta</strong> para navegar entre endereços diários caso precise verificar o endereço de recebimento de um dia anterior.",
-  "wallet.legacy_send.heading": "Enviando pela Ponte Legada",
-  "wallet.legacy_send.p1": "Abaixo da seção de recebimento, a Ponte Legada inclui um formulário completo de envio. Insira o endereço BSV do destinatário e o valor que deseja enviar.",
-  "wallet.legacy_send.li1": "Toque em <strong>Enviar BSV</strong> para transmitir a transação.",
   "wallet.legacy_send.li2": "Toque em <strong>Enviar Máximo</strong> para enviar todo o saldo disponível.",
   "wallet.legacy_send.p2": "Um banner de sucesso ou erro aparece após a transação ser enviada.",
-  "wallet.tx_history.heading": "Histórico de transações",
-  "wallet.tx_history.p1": "A tela de <strong>Transações</strong> lista todas as suas transações com badges de status codificados por cores:",
-  "wallet.tx_history.li1": "<strong>Verde</strong> &mdash; Confirmada, aceita ou sendo transmitida.",
-  "wallet.tx_history.li2": "<strong>Amarelo</strong> &mdash; Estados pendentes (não assinada, não final, ainda não enviada).",
-  "wallet.tx_history.li3": "<strong>Vermelho</strong> &mdash; Transações com falha.",
-  "wallet.tx_history.p2": "Para cada transação, você pode visualizá-la no explorador de blocos, copiar os dados brutos da transação ou cancelar transações que ainda estão pendentes.",
 
   "backup.heading": "Backup e Recuperação",
   "backup.intro": "Você tem as chaves, então você controla os backups. O BSV Browser oferece dois métodos — uma frase de 12 palavras e compartilhamentos de recuperação imprimíveis — para que você possa escolher a abordagem que se adapta à sua vida.",

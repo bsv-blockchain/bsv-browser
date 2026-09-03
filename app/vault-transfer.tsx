@@ -83,11 +83,7 @@ export default function VaultTransferScreen() {
       const w = pm as unknown as VaultWallet
       if (isDeposit) {
         await depositToVault(w, adminOriginator, sats, t('vault_deposit_reason', { amount: sats }), {
-          isOnline: getOnline,
-          // A failed tx2 leaves its staging coin spendable=0 even though it is
-          // live on chain (see VaultTransferOptions.releaseStrandedStaging);
-          // this lets the retry reuse that coin instead of splitting again.
-          releaseStrandedStaging: storage ? () => storage.releaseVaultStagingStrandedByInvalidTx() : undefined
+          isOnline: getOnline
         })
         // vaultOpen/haptic already fired by the ceremony's onArmed
         showToast(t('vault_deposit_done'), { type: 'success' })

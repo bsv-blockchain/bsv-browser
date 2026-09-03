@@ -21,10 +21,13 @@
  * No card, no ceremony. Always empties the vault (subject to the input cap)
  * and never re-vaults.
  *
- * Two rails built for the ~960 KB R1-K1 script survive it on their own merits
- * and are unchanged: the two-transaction deposit (tx1 stages exact funding,
- * tx2 spends only that — see depositToVault) and the deferred-broadcast
- * finish on withdrawal (see the PAST THE POINT OF NO ABORT comment).
+ * One rail built for the ~960 KB R1-K1 script survives it on its own merits:
+ * the deferred-broadcast finish on withdrawal (see the PAST THE POINT OF NO
+ * ABORT comment). The other — the two-transaction deposit that staged exact
+ * funding so no change output was ever a sibling of the giant script — is
+ * retired: a K1 deposit is ONE ordinary createAction (see depositToVault).
+ * What remains of the staging machinery exists only to recover money the old
+ * flow stranded on real wallets (see reclaimStagingOutputs).
  *
  * The `admin vault` basket name is admin-reserved: WalletPermissionsManager
  * blocks any non-admin originator (web pages) from listing, inserting into, or
@@ -43,10 +46,8 @@ import { VaultError } from './types'
 import { backupAttestation } from './backupAttestation'
 import { VaultKeyHandle } from './ceremony'
 import { noteVaultProgress, requestVaultKey } from './ceremonyHost'
-import { randomBytes } from './random'
 import { bip32KeyID, indexFromKeyID, depositPrivKey, depositPubKeyHash } from './vaultDerivation'
 import {
-  K1_LOCK_LEN,
   K1_UNLOCK_LEN,
   buildVaultLockingScript,
   decodeVaultInstructions,
@@ -57,53 +58,26 @@ import {
 export const VAULT_BASKET = 'admin vault'
 
 /**
- * The intermediate basket a deposit splits its funding into. See depositToVault:
- * tx1 carves out exactly (deposit + tx2 fee) here; tx2 spends it as its ONLY
- * input into the vault output, with no change. A stranded output in this basket
- * (tx1 landed, tx2 failed) is reused by the next deposit of the same amount.
+ * LEGACY — the intermediate basket the retired two-transaction deposit split
+ * its funding into (tx1 carved out deposit + tx2 fee here; tx2 spent it into
+ * the vault). No new outputs are ever created in it. It survives only so that
+ * reclaimStagingOutputs can find and recover coins the old flow stranded on
+ * real wallets (tx1 landed, tx2 failed).
  */
 export const VAULT_STAGING_BASKET = 'vault staging'
 
-/** BRC-42 protocol the staging output's P2PKH key is derived under. */
+/** LEGACY — BRC-42 protocol the staging output's P2PKH key was derived under.
+ * Reclaim-only: the key lives in the ordinary wallet key deriver (counterparty
+ * 'self'), so spending a staging coin needs no ceremony and no YubiKey. */
 const STAGING_PROTOCOL: [number, string] = [2, 'vault deposit staging']
 
 /** P2PKH unlock, worst case: push(73-byte DER+hashtype sig) + push(33-byte key). */
 const STAGING_UNLOCK_LEN = 108
 
-/**
- * Must equal the storage feeModel WalletContext configures
- * (`feeModel: { model: 'sat/kb', value: 100 }`). The split math relies on it:
- * tx1's staging output is sized to deposit + fee so that tx2's feeExcess is
- * exactly zero and generateChange adds no change output.
- */
-export const VAULT_SATS_PER_KB = 100
-
-/** Serialized tx size, byte-identical to wallet-toolbox's transactionSize. */
-function txSizeBytes(inputScriptLens: number[], outputScriptLens: number[]): number {
-  const varUint = (n: number) => (n <= 0xfc ? 1 : n <= 0xffff ? 3 : n <= 0xffffffff ? 5 : 9)
-  return (
-    4 +
-    varUint(inputScriptLens.length) +
-    inputScriptLens.reduce((a, e) => a + 40 + varUint(e) + e, 0) +
-    varUint(outputScriptLens.length) +
-    outputScriptLens.reduce((a, e) => a + 8 + varUint(e) + e, 0) +
-    4
-  )
-}
-
-/** The exact fee the vault-creating tx2 needs under the wallet's fee model. */
-export function vaultDepositTx2Fee(satsPerKb: number = VAULT_SATS_PER_KB): number {
-  return Math.ceil((txSizeBytes([STAGING_UNLOCK_LEN], [K1_LOCK_LEN]) / 1000) * satsPerKb)
-}
-
 interface StagingInstructions {
   v: 1
   type: 'staging'
   keyID: string
-}
-
-function encodeStagingInstructions(i: StagingInstructions): string {
-  return JSON.stringify(i)
 }
 
 function decodeStagingInstructions(s: string | undefined): StagingInstructions | null {
@@ -148,21 +122,6 @@ export interface VaultTransferOptions {
    * reaches the offline drain" a testable invariant.
    */
   isOnline?: () => Promise<boolean>
-  /**
-   * Storage-backed release of staging outputs stranded by a definitively
-   * invalid tx2. Returns how many outputs were made spendable again.
-   *
-   * When tx2 fails at broadcast, the toolbox first restores its inputs
-   * (releaseInputsAllocatedToFailedTransaction) but then re-strands them:
-   * markStaleInputsAsSpent asks the indexers whether the staging outpoint is
-   * a UTXO seconds after tx1 was broadcast, and indexer lag answers "no" —
-   * so a coin that IS on chain gets spendable=0 with a 'failed' spentBy that
-   * abortAction refuses to touch ('failed' is in its unAbortable list). The
-   * release runs before a deposit splits anew, so the stranded coin is reused
-   * instead of carving a third one. See releaseVaultStagingStrandedByInvalidTx
-   * in StorageExpoSQLite for the exact (deliberately narrow) predicate.
-   */
-  releaseStrandedStaging?: () => Promise<number>
 }
 
 export interface VaultSpendResult {
@@ -178,19 +137,19 @@ export interface VaultSpendResult {
 }
 
 /**
- * Minimum vault deposit — now a product floor, not an economic one.
+ * Dust-fold threshold for withdrawal remainders — not a deposit floor.
  *
  * The old 200,000 figure was R1 fee economics: a ~960 KB script paid for
  * twice, once to create the output and once to push the preimage that spent
  * it, made anything smaller not worth moving. A K1 vault output costs 25 bytes
  * to create and ~107 to spend, so at the wallet's fee rate moving one is a
  * couple of satoshis and the script no longer argues for any floor at all.
+ * Deposits are no longer capped by this constant.
  *
- * What remains is dust hygiene. A vault made of tiny outputs burns a deposit
- * index each, pushes every later withdrawal toward the input cap, and gives
- * the user a balance built from coins not worth selecting. Deposits below the
- * floor are refused outright, and a sub-floor withdrawal remainder is folded
- * into the withdrawal rather than re-vaulted, for the same reason.
+ * What remains is dust hygiene on the withdrawal side: a sub-floor remainder
+ * left over after a partial withdrawal is folded into the withdrawal (via the
+ * toolbox's own change) rather than re-vaulted, since an output this small
+ * isn't worth the index it would burn.
  */
 export const VAULT_DEPOSIT_MIN = 10_000
 
@@ -499,8 +458,8 @@ export async function getVaultBalance(w: VaultWallet, adminOriginator: string): 
  *
  * Costs exactly one tap, and every refusal is checked BEFORE it: a user must
  * never be asked to present a key for a transfer that was never going to
- * proceed, and — because the tap gates the funding split as well as the
- * derivation — cancelling it leaves no money staged behind.
+ * proceed, and — because the tap gates the derivation, and nothing is spent
+ * until the single createAction below it — cancelling it moves no money.
  *
  * `reason` is what the ceremony sheet shows while the key is armed.
  */
@@ -512,9 +471,6 @@ export async function depositToVault(
   opts?: VaultTransferOptions
 ): Promise<{ txid: string }> {
   await requireOnline(opts)
-  if (satoshis < VAULT_DEPOSIT_MIN) {
-    throw new VaultError('below-dust', `Vault deposits must be at least ${VAULT_DEPOSIT_MIN} satoshis`)
-  }
 
   // Depositing into a wallet with no recovery path would hide funds behind a
   // hardware key the user cannot get past. Advisory — the wizard is the real
@@ -536,142 +492,64 @@ export async function depositToVault(
   // A deposit address is a child of the vault node and there is no stored
   // xpub, so this is the only way to produce one. release() in the finally is
   // what drops the key and (on iOS) dismisses the NFC sheet — it must fire
-  // whether the deposit succeeds, fails to stage, or fails to sign.
+  // whether the deposit succeeds or fails to build.
   const handle = await requestVaultKey(reason)
   try {
-    return await stageAndLockDeposit(w, adminOriginator, satoshis, handle, opts)
+    return await lockDeposit(w, adminOriginator, satoshis, handle)
   } finally {
     handle.release()
   }
 }
 
 /**
- * The two-transaction deposit itself, run inside an armed ceremony.
+ * The deposit itself, run inside an armed ceremony: ONE ordinary createAction
+ * carrying the vault output, funded by the toolbox's own coin selection and
+ * change machinery.
  *
- * `handle` is operation-scoped: `hd` is read once, at the point of use, and
- * neither the handle nor the node is stored anywhere that outlives this call
- * (see VaultKeyHandle).
+ * This used to be two chained transactions (tx1 staged exact funding into
+ * VAULT_STAGING_BASKET, tx2 spent only that into the vault) so that the
+ * ~960 KB R1-K1 script never shared a transaction with a default-basket
+ * change output — change born next to it dragged the whole script into the
+ * inputBEEF of every later payment that spent that change. A K1 vault output
+ * is a 25-byte P2PKH lock, so that cost is gone and the deposit is one
+ * transaction like any other spend. The 'vault-deposit' label still matters:
+ * the patched toolbox (see patches/) suppresses UTXO-pool growth for it, so
+ * the deposit stays minimal — at most one change output — instead of
+ * splitting change toward numberOfDesiredUTXOs.
+ *
+ * `handle` is operation-scoped: `hd` is read once, at its only point of use,
+ * and neither the handle nor the node is stored anywhere that outlives this
+ * call (see VaultKeyHandle). A released or relocked handle refuses there.
+ *
+ * KNOWN TRADE: the deposit index is taken BEFORE createAction, so a funding
+ * failure (insufficient change for deposit + fee) burns an index the old
+ * two-tx flow would not have (its derivation ran only after tx1 landed).
+ * Accepted deliberately: index holes are harmless — withdraw and sweep read
+ * each output's STORED keyID, nothing ever walks the index space — and the
+ * alternative (deriving after createAction) would spend real money before
+ * knowing an address exists for it.
  */
-async function stageAndLockDeposit(
+async function lockDeposit(
   w: VaultWallet,
   adminOriginator: string,
   satoshis: number,
-  handle: VaultKeyHandle,
-  opts?: VaultTransferOptions
+  handle: VaultKeyHandle
 ): Promise<{ txid: string }> {
   // Announce work before starting it: the ceremony sheet is on screen for the
   // whole deposit, and this also refreshes the retention window so a slow
-  // staging broadcast cannot have the key relocked out from under it.
+  // createAction cannot have the key relocked out from under it.
   noteVaultProgress({ phase: 'preparing' })
-
-  // ── tx1: split ──────────────────────────────────────────────────────────
-  //
-  // Carve deposit + tx2's exact fee into a staging output, with the wallet's
-  // normal change machinery keeping the rest in the default basket. tx2 then
-  // spends ONLY that output into the vault script, so no deposit change output
-  // is ever a sibling of the vault output. Built for the ~960 KB R1-K1 script
-  // and kept for K1: it is what keeps a vault deposit's change out of the
-  // inputBEEF (and the coin selection) of every later ordinary payment.
-  const fee = vaultDepositTx2Fee()
-  const stagingTotal = satoshis + fee
-
-  // A stranded staging output (tx1 landed, tx2 failed) is money already carved
-  // out for exactly one deposit size. Reuse it rather than splitting again, so
-  // retrying the same deposit self-heals.
-  const listStaging = async () =>
-    (await w.listOutputs(
-      { basket: VAULT_STAGING_BASKET, include: 'entire transactions', includeCustomInstructions: true, limit: 100 },
-      adminOriginator
-    )) as ListOutputsResult
-  let staged = await listStaging()
-  let stagingOut = staged.outputs
-    .map(o => ({ ...o, si: decodeStagingInstructions(o.customInstructions) }))
-    .find((o): o is typeof o & { si: StagingInstructions } => o.si != null && o.satoshis === stagingTotal)
-
-  // A stranded staging output can be invisible here: a failed tx2 leaves it
-  // spendable=0 (see VaultTransferOptions.releaseStrandedStaging), and
-  // listOutputs only returns spendable coins. Release, then look again.
-  if (!stagingOut && opts?.releaseStrandedStaging) {
-    const released = await opts.releaseStrandedStaging().catch(e => {
-      console.log('[vault] stranded-staging release failed:', (e as Error)?.message)
-      return 0
-    })
-    if (released > 0) {
-      staged = await listStaging()
-      stagingOut = staged.outputs
-        .map(o => ({ ...o, si: decodeStagingInstructions(o.customInstructions) }))
-        .find((o): o is typeof o & { si: StagingInstructions } => o.si != null && o.satoshis === stagingTotal)
-    }
-  }
-
-  if (!stagingOut) {
-    const keyID = `staging ${Utils.toHex(randomBytes(8))}`
-    const { publicKey: stagingPub } = await w.getPublicKey(
-      { protocolID: STAGING_PROTOCOL, keyID, counterparty: 'self' },
-      adminOriginator
-    )
-    const stagingScript = new P2PKH().lock(PublicKey.fromString(stagingPub).toAddress()).toHex()
-    await w.createAction(
-      {
-        description: 'Prepare vault deposit',
-        outputs: [
-          {
-            satoshis: stagingTotal,
-            lockingScript: stagingScript,
-            outputDescription: 'Vault deposit funding',
-            basket: VAULT_STAGING_BASKET,
-            customInstructions: encodeStagingInstructions({ v: 1, type: 'staging', keyID }),
-            tags: ['vault']
-          }
-        ],
-        labels: ['vault', 'vault-deposit-split'],
-        options: { randomizeOutputs: false, acceptDelayedBroadcast: false }
-      },
-      adminOriginator
-    )
-    // Re-list rather than trusting the createAction result shape: this yields
-    // the outpoint AND the BEEF tx2 needs as inputBEEF in one call.
-    staged = await listStaging()
-    stagingOut = staged.outputs
-      .map(o => ({ ...o, si: decodeStagingInstructions(o.customInstructions) }))
-      .find((o): o is typeof o & { si: StagingInstructions } => o.si != null && o.satoshis === stagingTotal)
-    if (!stagingOut) throw new VaultError('no-transaction', 'Deposit split produced no staging output')
-  }
-
-  // ── tx2: vault ──────────────────────────────────────────────────────────
-  //
-  // Explicit single input, single vault output, no change. Two mechanisms keep
-  // it that shape, and BOTH are required:
-  //  - funding covers the outputs plus exactly the feeModel's target fee
-  //    (vaultDepositTx2Fee uses the same size formula), so feeExcess is 0 and
-  //    generateChange has no excess to return as change;
-  //  - the 'vault-deposit' label suppresses the toolbox's UTXO-pool growth
-  //    (targetNetCount — see the patch in patches/@bsv+wallet-toolbox-mobile),
-  //    which would otherwise pull in extra funding inputs and split change
-  //    into this transaction EVEN at feeExcess 0. That is what produced the
-  //    2026-08-21 production failure — and any change output here would put a
-  //    default-basket coin in the same transaction as the vault output,
-  //    defeating the whole two-transaction design.
-  //
-  // The signing below still tolerates extra toolbox-added inputs (it locates
-  // the staging input by outpoint and commits to the full input set), so a
-  // toolbox that ignores the label degrades to an ugly-but-valid deposit, not
-  // a broadcast rejection.
-  //
-  // `handle.hd` is read HERE, at its only point of use, rather than being
-  // hoisted into a local at the top of the deposit — a released or relocked
-  // handle must be able to refuse.
   const target = await nextDepositTarget(handle.hd)
+
+  // One call builds, signs AND broadcasts: with no caller-supplied inputs
+  // there is no signableTransaction step — every funding input is toolbox
+  // change the toolbox signs itself. Undelayed, so a failed broadcast surfaces
+  // here rather than leaving the deposit looking sent while it sits in the
+  // monitor's queue.
+  noteVaultProgress({ phase: 'broadcasting' })
   const created = await w.createAction(
     {
       description: 'Move to vault',
-      inputs: [
-        {
-          outpoint: stagingOut.outpoint,
-          unlockingScriptLength: STAGING_UNLOCK_LEN,
-          inputDescription: 'Vault deposit funding'
-        }
-      ],
       outputs: [
         {
           satoshis,
@@ -683,91 +561,209 @@ async function stageAndLockDeposit(
         }
       ],
       labels: ['vault', 'vault-deposit'],
-      inputBEEF: staged.BEEF?.length ? staged.BEEF : undefined,
-      options: { randomizeOutputs: false, acceptDelayedBroadcast: false, trustSelf: 'known' }
+      options: { randomizeOutputs: false, acceptDelayedBroadcast: false }
     },
     adminOriginator
   )
+  const txid = created.txid ?? (created.tx ? Transaction.fromAtomicBEEF(created.tx).id('hex') : undefined)
+  if (!txid) throw new VaultError('no-transaction', 'Deposit produced no transaction')
+  return { txid }
+}
+
+// ── legacy staging reclaim ────────────────────────────────────────────────
+
+export interface ReclaimResult {
+  /** Absent when there was nothing to reclaim. */
+  txid?: string
+  /** How many staging outputs the reclaim spent. */
+  reclaimed: number
+  /** Their total value (the fee comes out of it; the rest returns as change). */
+  satoshis: number
+}
+
+/**
+ * Recover money the retired two-transaction deposit stranded.
+ *
+ * The old flow could leave a funded staging output behind (tx1 landed, tx2
+ * failed — the 2026-08-22 device crash mid-deposit is exactly this shape),
+ * and that money is INVISIBLE: the main balance counts only the 'default'
+ * basket and the vault balance only 'admin vault', so a stranded coin shows
+ * up in neither. Now that deposits no longer consume staging outputs, this
+ * sweep is the only way that money comes back.
+ *
+ * Spends EVERY decodable staging output regardless of amount — unlike the old
+ * deposit-time reuse, which matched by exact satoshis — with no outputs of its
+ * own, so the toolbox returns the whole value (minus fee) as default-basket
+ * change. The staging key is an ordinary BRC-42 wallet key (counterparty
+ * 'self'), so no ceremony, no tap, no vault HD node is involved.
+ *
+ * Safe to call speculatively: returns {reclaimed: 0} without touching the
+ * wallet when the basket is empty.
+ */
+export async function reclaimStagingOutputs(
+  w: VaultWallet,
+  adminOriginator: string,
+  opts?: {
+    /**
+     * Storage-backed release of staging outputs stranded by a definitively
+     * invalid spender. Returns how many outputs were made spendable again.
+     *
+     * Runs FIRST because a stranded coin usually sits spendable=0: when the
+     * old tx2 failed, the toolbox restored its inputs but then re-stranded
+     * them — markStaleInputsAsSpent asked the indexers whether the staging
+     * outpoint was a UTXO seconds after tx1 broadcast, and indexer lag
+     * answered "no" — and listOutputs only returns spendable coins. See
+     * releaseVaultStagingStrandedByInvalidTx in StorageExpoSQLite for the
+     * deliberately narrow predicate.
+     */
+    releaseStrandedStaging?: () => Promise<number>
+    /** Storage-backed reservation heal for the retry below. See SpendingReferenceLookup. */
+    findSpendingReferences?: SpendingReferenceLookup
+  }
+): Promise<ReclaimResult> {
+  if (opts?.releaseStrandedStaging) {
+    await opts.releaseStrandedStaging().catch(e => {
+      console.log('[vault] stranded-staging release failed:', (e as Error)?.message)
+      return 0
+    })
+  }
+
+  const staged = (await w.listOutputs(
+    { basket: VAULT_STAGING_BASKET, include: 'entire transactions', includeCustomInstructions: true, limit: 100 },
+    adminOriginator
+  )) as ListOutputsResult
+  const coins = staged.outputs
+    .map(o => ({ ...o, si: decodeStagingInstructions(o.customInstructions) }))
+    .filter((o): o is typeof o & { si: StagingInstructions } => o.si != null)
+  if (coins.length === 0) return { reclaimed: 0, satoshis: 0 }
+
+  const totalSats = coins.reduce((s, c) => s + c.satoshis, 0)
+  const caArgs = {
+    description: 'Recover vault deposit funding',
+    inputs: coins.map(c => ({
+      outpoint: c.outpoint,
+      unlockingScriptLength: STAGING_UNLOCK_LEN,
+      inputDescription: 'Stranded vault deposit funding'
+    })),
+    outputs: [],
+    // 'vault-deposit' is load-bearing twice: the patched toolbox suppresses
+    // UTXO-pool growth for it (no extra funding inputs pulled in), and the
+    // stranded-release predicates (both arms — spendable=0 re-strands AND
+    // stale spentBy on spendable=1 coins, see findSql.ts) match on it — so if
+    // THIS transaction fails at broadcast and re-strands the coins, the same
+    // heal releases them for the next attempt. 'vault-reclaim' is for
+    // history and forensics only.
+    labels: ['vault', 'vault-deposit', 'vault-reclaim'],
+    // Mandatory, not an optimization: these inputs carry unlockingScriptLength
+    // and no unlockingScript, so isSignAction is true and the signer resolves
+    // each input's sourceTransaction ONLY from args.inputBEEF. trustSelf just
+    // skips storage re-walking proof ancestry for our own coins.
+    inputBEEF: staged.BEEF?.length ? staged.BEEF : undefined,
+    options: { randomizeOutputs: false, acceptDelayedBroadcast: false, trustSelf: 'known' }
+  }
+  let created: CreateActionResult
+  try {
+    created = await w.createAction(caArgs, adminOriginator)
+  } catch (e) {
+    // A prior failed attempt (or a concurrent reclaim from a quick screen
+    // remount) can leave a coin reserved by an orphaned transaction, and until
+    // that is aborted every later reclaim is refused outright — the same
+    // wedge the withdraw path heals. Abort it and retry ONCE; anything else
+    // frees nothing and rethrows untouched.
+    const freed = await freeReservedInputs(
+      w,
+      adminOriginator,
+      e,
+      coins.map(c => c.outpoint),
+      opts?.findSpendingReferences
+    )
+    if (freed === 0) throw e
+    created = await w.createAction(caArgs, adminOriginator)
+  }
 
   if (!created.signableTransaction) {
     const txid = created.txid ?? (created.tx ? Transaction.fromAtomicBEEF(created.tx).id('hex') : undefined)
-    if (!txid) throw new VaultError('no-transaction', 'Deposit produced no transaction')
-    return { txid }
+    if (!txid) throw new VaultError('no-transaction', 'Reclaim produced no transaction')
+    return { txid, reclaimed: coins.length, satoshis: totalSats }
   }
 
   const { tx: atomic, reference } = created.signableTransaction
-  let unlockingScript: string
-  let stagingInputIndex: number
+  const spends: Record<number, { unlockingScript: string }> = {}
   try {
     const tx = Transaction.fromAtomicBEEF(atomic)
-    // The toolbox is free to add funding inputs and change outputs of its own
-    // (generateChange grows the UTXO pool toward numberOfDesiredUTXOs), so the
-    // staging input is located by outpoint, never assumed to be input 0 — and
-    // the signature below must commit to EVERY input via otherInputs, or the
-    // nodes reject the spend with "false stack entry at end of script
-    // execution" (the 2026-08-21 production deposit failure).
-    const [stagingTxid, stagingVoutStr] = stagingOut.outpoint.split('.')
-    const stagingVout = Number(stagingVoutStr)
-    stagingInputIndex = tx.inputs.findIndex(
-      i =>
-        (i.sourceTXID ?? i.sourceTransaction?.id('hex'))?.toLowerCase() === stagingTxid.toLowerCase() &&
-        i.sourceOutputIndex === stagingVout
-    )
-    if (stagingInputIndex < 0) {
-      throw new VaultError('no-transaction', 'Staging input missing from the signable transaction')
+    for (const c of coins) {
+      // Preimage formatting is O(tx size) per input; yield between inputs so a
+      // large reclaim cannot hang the JS thread (same reasoning as the
+      // withdraw signing loop below).
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+      // The toolbox is free to add funding inputs of its own, so each staging
+      // input is located by outpoint, never assumed by position — and the
+      // signature commits to EVERY input via otherInputs, or the nodes reject
+      // the spend with "false stack entry at end of script execution" (the
+      // 2026-08-21 production deposit failure).
+      const [cTxid, cVoutStr] = c.outpoint.split('.')
+      const cVout = Number(cVoutStr)
+      const inputIndex = tx.inputs.findIndex(
+        i =>
+          (i.sourceTXID ?? i.sourceTransaction?.id('hex'))?.toLowerCase() === cTxid.toLowerCase() &&
+          i.sourceOutputIndex === cVout
+      )
+      if (inputIndex < 0) {
+        throw new VaultError('no-transaction', 'Staging input missing from the signable transaction')
+      }
+      const { publicKey: stagingPub } = await w.getPublicKey(
+        { protocolID: STAGING_PROTOCOL, keyID: c.si.keyID, counterparty: 'self' },
+        adminOriginator
+      )
+      const subscript = new P2PKH().lock(PublicKey.fromString(stagingPub).toAddress())
+      const input = tx.inputs[inputIndex]
+      const scope = TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID
+      const preimage = TransactionSignature.format({
+        sourceTXID: cTxid,
+        sourceOutputIndex: input.sourceOutputIndex,
+        sourceSatoshis: c.satoshis,
+        transactionVersion: tx.version,
+        otherInputs: tx.inputs.filter((_, i) => i !== inputIndex),
+        outputs: tx.outputs,
+        inputIndex,
+        inputSequence: input.sequence ?? 0xffffffff,
+        subscript,
+        lockTime: tx.lockTime,
+        scope
+      })
+      const { signature } = await w.createSignature(
+        {
+          protocolID: STAGING_PROTOCOL,
+          keyID: c.si.keyID,
+          counterparty: 'self',
+          hashToDirectlySign: Array.from(Hash.hash256(preimage))
+        },
+        adminOriginator
+      )
+      spends[inputIndex] = {
+        unlockingScript: new UnlockingScript([
+          { op: signature.length + 1, data: [...signature, scope] },
+          { op: 33, data: Utils.toArray(stagingPub, 'hex') }
+        ]).toHex()
+      }
     }
-    const { publicKey: stagingPub } = await w.getPublicKey(
-      { protocolID: STAGING_PROTOCOL, keyID: stagingOut.si.keyID, counterparty: 'self' },
-      adminOriginator
-    )
-    const subscript = new P2PKH().lock(PublicKey.fromString(stagingPub).toAddress())
-    const input = tx.inputs[stagingInputIndex]
-    const scope = TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID
-    const preimage = TransactionSignature.format({
-      sourceTXID: stagingTxid,
-      sourceOutputIndex: input.sourceOutputIndex,
-      sourceSatoshis: stagingOut.satoshis,
-      transactionVersion: tx.version,
-      otherInputs: tx.inputs.filter((_, i) => i !== stagingInputIndex),
-      outputs: tx.outputs,
-      inputIndex: stagingInputIndex,
-      inputSequence: input.sequence ?? 0xffffffff,
-      subscript,
-      lockTime: tx.lockTime,
-      scope
-    })
-    const { signature } = await w.createSignature(
-      {
-        protocolID: STAGING_PROTOCOL,
-        keyID: stagingOut.si.keyID,
-        counterparty: 'self',
-        hashToDirectlySign: Array.from(Hash.hash256(preimage))
-      },
-      adminOriginator
-    )
-    unlockingScript = new UnlockingScript([
-      { op: signature.length + 1, data: [...signature, scope] },
-      { op: 33, data: Utils.toArray(stagingPub, 'hex') }
-    ]).toHex()
   } catch (e) {
-    // Nothing was signed: release the reservation so the staging output stays
-    // spendable, and the next deposit of the same amount reuses it.
+    // Nothing was signed: release the reservation so the coins stay listed
+    // for the next reclaim attempt.
     await w.abortAction({ reference }, adminOriginator).catch(() => {})
     throw e
   }
 
-  // Unlike the withdrawal below, this broadcast is undelayed: the deposit is
-  // two chained transactions, and letting tx2 sit in the monitor's queue would
-  // leave the staged coin looking spent while nothing had actually landed.
-  noteVaultProgress({ phase: 'broadcasting' })
   const signed = await w.signAction(
-    { reference, spends: { [stagingInputIndex]: { unlockingScript } }, options: { acceptDelayedBroadcast: false } },
+    { reference, spends, options: { acceptDelayedBroadcast: false } },
     adminOriginator
   )
   const txid = signed.txid ?? (signed.tx ? Transaction.fromAtomicBEEF(signed.tx).id('hex') : undefined)
-  if (!txid) throw new VaultError('no-transaction', 'Deposit produced no transaction')
-  return { txid }
+  if (!txid) throw new VaultError('no-transaction', 'Reclaim produced no transaction')
+  return { txid, reclaimed: coins.length, satoshis: totalSats }
 }
+
 
 // ── withdraw / sweep (shared spend core) ─────────────────────────────────
 
@@ -891,12 +887,11 @@ async function spendVaultOutputs(
   // Omit it and createAction.js's makeSignableTransactionBeef throws
   // WERR_INTERNAL('Every signableTransaction input must have a
   // sourceTransaction') on the very first input, before signing ever starts.
-  // (depositToVault's tx2 is in the same boat, not exempt from it: its
-  // staging input also carries an unlockingScriptLength with no
+  // (reclaimStagingOutputs is in the same boat, not exempt from it: its
+  // staging inputs also carry an unlockingScriptLength with no
   // unlockingScript, so isSignAction is true there too. It needs no separate
   // note here because it already threads `staged.BEEF` through as inputBEEF
-  // for exactly this reason — see the createAction call below the staging
-  // input is built from.)
+  // for exactly this reason.)
   //
   // The second is the wrong-key check below: the BEEF is where each vault
   // output's REAL locking script comes from, which is what the derived child

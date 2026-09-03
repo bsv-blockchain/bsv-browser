@@ -1776,14 +1776,17 @@ export default function NearbyFlow({ role: initialRole, onExit }: NearbyFlowProp
             )}
             <View style={styles.gapXl} />
             {/* A completed payment ends on the balance it changed, on every
-                rail: exit the flow, then land on the wallet. */}
+                rail: exit the flow, then land on the wallet. `dismissTo` pops
+                the finished flow off rather than re-pushing the wallet above
+                it — see PaymentSuccessOverlay for why navigate leaves the
+                spent screens one swipe behind. */}
             <PrimaryButton
               styles={styles}
               colors={colors}
               label={t('done')}
               onPress={() => {
                 goBack()
-                router.navigate('/wallet')
+                router.dismissTo('/wallet')
               }}
             />
           </View>

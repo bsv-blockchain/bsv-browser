@@ -6,7 +6,14 @@
 import type { WalletProtocol } from '@bsv/sdk'
 
 /**
- * FROZEN. Do not change either value, ever.
+ * The networks a wallet can run on, as WalletContext names them. Each gets its own backup
+ * derivation and therefore its own server account — see backupKeyId.
+ */
+export type BackupChain = 'main' | 'test' | 'teratest'
+export const BACKUP_CHAINS: readonly BackupChain[] = ['main', 'test', 'teratest'] as const
+
+/**
+ * FROZEN. Do not change the protocol tuple or the keyID scheme, ever.
  *
  * Restore has nothing but the user's seed to work from, so these must not vary by install,
  * device, build, or randomness. Changing them orphans every backup ever written, with no
@@ -20,7 +27,18 @@ import type { WalletProtocol } from '@bsv/sdk'
  * and must not end in " protocol".
  */
 export const BACKUP_PROTOCOL: WalletProtocol = [2, 'wallet backup log']
-export const BACKUP_KEY_ID = '1'
+
+/**
+ * Per-network keyID.
+ *
+ * Folding the chain into the derivation is what makes cross-network restore impossible
+ * rather than merely filtered: one seed lands on three unrelated pseudonyms (three server
+ * accounts, so a testnet wallet's manifest never even lists mainnet blobs) and three
+ * unrelated encryption keys (so a mainnet blob would not decrypt on testnet regardless).
+ */
+export function backupKeyId (chain: BackupChain): string {
+  return `1 ${chain}`
+}
 
 /**
  * Delta chunk sizing.
@@ -64,5 +82,7 @@ export const MAX_BLOB_BYTES = 1 << 20
 
 /** AsyncStorage keys. */
 export const DEVICE_ID_KEY = 'backupDeviceId'
-export const cursorKey = (pseudonym: string, deviceId: string): string =>
-  `backupCursor-${pseudonym}-${deviceId}`
+// The chain is redundant with the pseudonym (which already differs per chain) but explicit:
+// a cursor must never be consulted for the wrong network's database.
+export const cursorKey = (chain: BackupChain, pseudonym: string, deviceId: string): string =>
+  `backupCursor-${chain}-${pseudonym}-${deviceId}`

@@ -14,7 +14,7 @@
  *    the greatest `updated_at` seen, and every offset resets to zero.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { cursorKey } from './constants'
+import { cursorKey, type BackupChain } from './constants'
 
 /** The twelve entity names used by `offsets`, singular and camelCase, as the toolbox emits them. */
 export const ENTITY_NAMES = [
@@ -91,8 +91,8 @@ export function offsetsToArgs (offsets: Record<EntityName, number>): Array<{ nam
   return ENTITY_NAMES.map(name => ({ name, offset: offsets[name] ?? 0 }))
 }
 
-export async function loadCursor (pseudonym: string, deviceId: string): Promise<PushCursor> {
-  const raw = await AsyncStorage.getItem(cursorKey(pseudonym, deviceId))
+export async function loadCursor (chain: BackupChain, pseudonym: string, deviceId: string): Promise<PushCursor> {
+  const raw = await AsyncStorage.getItem(cursorKey(chain, pseudonym, deviceId))
   if (raw == null) return freshCursor()
 
   try {
@@ -115,12 +115,12 @@ export async function loadCursor (pseudonym: string, deviceId: string): Promise<
   }
 }
 
-export async function saveCursor (pseudonym: string, deviceId: string, c: PushCursor): Promise<void> {
-  await AsyncStorage.setItem(cursorKey(pseudonym, deviceId), JSON.stringify(c))
+export async function saveCursor (chain: BackupChain, pseudonym: string, deviceId: string, c: PushCursor): Promise<void> {
+  await AsyncStorage.setItem(cursorKey(chain, pseudonym, deviceId), JSON.stringify(c))
 }
 
-export async function clearCursor (pseudonym: string, deviceId: string): Promise<void> {
-  await AsyncStorage.removeItem(cursorKey(pseudonym, deviceId))
+export async function clearCursor (chain: BackupChain, pseudonym: string, deviceId: string): Promise<void> {
+  await AsyncStorage.removeItem(cursorKey(chain, pseudonym, deviceId))
 }
 
 /**
@@ -131,8 +131,8 @@ export async function clearCursor (pseudonym: string, deviceId: string): Promise
  * server has never heard of instead of starting a fresh generation. Scoped by prefix so a
  * second wallet on the same device keeps its own bookkeeping.
  */
-export async function clearCursorsForPseudonym (pseudonym: string): Promise<void> {
-  const prefix = cursorKey(pseudonym, '')
+export async function clearCursorsForPseudonym (chain: BackupChain, pseudonym: string): Promise<void> {
+  const prefix = cursorKey(chain, pseudonym, '')
   const keys = (await AsyncStorage.getAllKeys()).filter(k => k.startsWith(prefix))
   if (keys.length > 0) await AsyncStorage.multiRemove(keys)
 }

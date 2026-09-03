@@ -40,7 +40,9 @@ interface CeremonyHarness {
  * every test starts from "no key seen yet" unless it calls mock.insertKey()
  * itself, matching the shape of the brief's own test snippets.
  */
-async function makeCeremony(opts: { retentionMs?: number; sessionBased?: boolean } = {}): Promise<CeremonyHarness> {
+async function makeCeremony(
+  opts: { retentionMs?: number; sessionBased?: boolean; attachTimeoutMs?: number } = {}
+): Promise<CeremonyHarness> {
   const mock = new MockYubiKey()
   if (opts.sessionBased) (mock as unknown as { sessionBased: boolean }).sessionBased = true
   mock.insertKey(DEFAULT_SERIAL)
@@ -52,7 +54,8 @@ async function makeCeremony(opts: { retentionMs?: number; sessionBased?: boolean
   const ceremony = new CeremonyController({
     getDriver: () => mock,
     store: { getMeta: async () => meta, getSeal: async () => seal },
-    retentionMs: opts.retentionMs ?? RETENTION
+    retentionMs: opts.retentionMs ?? RETENTION,
+    attachTimeoutMs: opts.attachTimeoutMs
   })
   return { ceremony, mock, meta, seal, expectedHd: HD.fromSeed(vaultSeed()) }
 }
@@ -275,6 +278,88 @@ describe('CeremonyController: arming', () => {
     expect(c.state.phase).toBe('idle')
     expect(relocks).toEqual(['detached'])
     expect(() => handle.hd).toThrow(expect.objectContaining({ code: 'key-removed-mid-op' }))
+  })
+})
+
+describe('CeremonyController: NFC session failure before a key connects', () => {
+  // The production hang: the system NFC sheet was cancelled or timed out
+  // BEFORE any key connected, YubiKit reported it via didFailConnectingNFC,
+  // and nothing forwarded it — so the ceremony parked in waiting-for-key
+  // forever. These drive the failure through the mock's own emit so the
+  // subscription wiring is exercised, not just the notify method body.
+
+  test('user cancelling the system NFC sheet rejects with user-cancelled, goes idle, and closes the session', async () => {
+    const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
+    const stopSpy = jest.spyOn(nfc, 'stop')
+    const p = c.requestKey('x')
+    c.submitPin('123456') // NFC collects the PIN before the tap
+    await flush() // reach waiting-for-key (driver.start() done, no key held)
+    expect(c.state.phase).toBe('waiting-for-key')
+
+    nfc.failSession('user-cancelled')
+    await expect(p).rejects.toMatchObject({ code: 'user-cancelled' })
+    expect(c.state.phase).toBe('idle')
+    expect(stopSpy).toHaveBeenCalledTimes(1) // nothing armed → the finally closed it
+  })
+
+  test('the session dying without a key (timeout / failed to present) rejects with no-key and surfaces an error', async () => {
+    const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true })
+    const stopSpy = jest.spyOn(nfc, 'stop')
+    const p = c.requestKey('x')
+    c.submitPin('123456')
+    await flush()
+    expect(c.state.phase).toBe('waiting-for-key')
+
+    nfc.failSession('no-key')
+    await expect(p).rejects.toMatchObject({ code: 'no-key' })
+    expect(c.state.phase).toBe('error')
+    expect(c.state.error?.code).toBe('no-key')
+    expect(stopSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('watchdog: no attach within attachTimeoutMs rejects with no-key even when the driver stays silent', async () => {
+    // Covers the paths YubiKit swallows internally (readingAvailable false,
+    // session invalidated before didBecomeActive) where NO event ever reaches
+    // JS — the only layer that can catch those is a deadline of our own.
+    const { ceremony: c } = await makeCeremony({ sessionBased: true, attachTimeoutMs: 40 })
+    const p = c.requestKey('x')
+    c.submitPin('123456')
+    await flush()
+    expect(c.state.phase).toBe('waiting-for-key')
+
+    await expect(p).rejects.toMatchObject({ code: 'no-key' })
+    expect(c.state.phase).toBe('error')
+    expect(c.state.error?.code).toBe('no-key')
+  })
+
+  test('watchdog is disarmed by a successful attach — an armed session is not killed when the deadline passes', async () => {
+    const { ceremony: c, mock: nfc } = await makeCeremony({ sessionBased: true, attachTimeoutMs: 40 })
+    const p = c.requestKey('x')
+    nfc.insertKey(DEFAULT_SERIAL) // key already held: start() emits attached immediately
+    c.submitPin('123456')
+    const handle = await p
+    expect(c.state.phase).toBe('armed')
+
+    await new Promise<void>(r => setTimeout(r, 80)) // sail past the deadline
+    expect(c.state.phase).toBe('armed') // no spurious relock or error
+    expect(() => handle.hd).not.toThrow()
+    handle.release()
+  })
+
+  test('watchdog does not apply to a persistent reader — waiting for a USB insert has no deadline', async () => {
+    const { ceremony: c, mock, expectedHd } = await makeCeremony({ attachTimeoutMs: 40 })
+    const p = c.requestKey('x')
+    await flush()
+    expect(c.state.phase).toBe('waiting-for-key')
+
+    await new Promise<void>(r => setTimeout(r, 80)) // well past the (inapplicable) deadline
+    expect(c.state.phase).toBe('waiting-for-key')
+
+    mock.insertKey(DEFAULT_SERIAL) // user finally plugs the key in
+    c.submitPin('123456')
+    const handle = await p
+    expect(handle.hd.toString()).toBe(expectedHd.toString())
+    handle.release()
   })
 })
 

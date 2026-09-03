@@ -1,6 +1,7 @@
 {
   "_meta.title": "BSV Browser - サポート＆ユーザーガイド",
   "_meta.description": "BSV Browserでのブラウジング、支払い、ID管理の方法を学びましょう。ステップバイステップのガイド、ヒント、よくある質問への回答を掲載しています。",
+
   "_css.nav-sections": "'セクション'",
   "_css.nav-close": "'閉じる'",
 
@@ -86,7 +87,6 @@
   "wallet.overview.heading": "ウォレット概要",
   "wallet.overview.p1": "メニューを開いて<strong>ウォレット</strong>をタップすると、ウォレットが表示されます。メイン画面には以下が表示されます：",
   "wallet.overview.li1": "現在の<strong>残高</strong>（サトシまたは法定通貨）。タップすると更新されます。",
-  "wallet.overview.li2": "<strong>トランザクション</strong>、<strong>支払い</strong>、<strong>レガシーブリッジ</strong>へのクイックリンク。",
   "wallet.overview.li3": "コピーボタン付きの<strong>IDキー</strong>。",
   "wallet.overview.li4": "ウォレット設定の全画面を開く<strong>設定</strong>行。",
   "wallet.config.heading": "ウォレットの設定",
@@ -108,22 +108,8 @@
   "wallet.p2p.heading": "ピアツーピアのID決済",
   "wallet.p2p.p1": "<strong>支払い</strong>画面では、生のブロックチェーンアドレスではなく、相手のIDを使ってBSVを直接送信できます。BSV IDネットワーク全体で名前から受取人を検索し、金額を入力して送信します。",
   "wallet.p2p.p2": "受信した支払いはリストに表示されます。個別に受け入れるか、<strong>すべて受け入れ</strong>をタップして保留中のすべての支払いを一括で受け入れることができます。結果バナーに受け入れた件数が表示されます。",
-  "wallet.legacy.heading": "レガシーブリッジ",
-  "wallet.legacy.p1": "従来のBSVウォレットやサービスとの互換性のため、BSV Browserは<strong>レガシーブリッジ</strong>画面を通じて、標準的なアドレスベースのトランザクションをサポートしています。",
-  "wallet.legacy.li1": "<strong>受取：</strong> 毎日固有のアドレスとQRコードが生成されます。BSVを送りたい人にそれらを共有してください。入金は自動的に検出され、ウォレットにインポートされます。手動操作は不要です。",
-  "wallet.legacy.li2": "<strong>送金：</strong> BSVアドレスと金額を入力し、確認します。<strong>最大額を送金</strong>をタップして残高全額を送ることもできます。",
-  "wallet.legacy.li3": "<strong>矢印ボタン</strong>を使って日ごとのアドレスを移動し、前日の受取アドレスを確認できます。",
-  "wallet.legacy_send.heading": "レガシーブリッジからの送金",
-  "wallet.legacy_send.p1": "受取セクションの下に、レガシーブリッジの送金フォームがあります。受取人のBSVアドレスと送金額を入力します。",
-  "wallet.legacy_send.li1": "<strong>BSVを送金</strong>をタップしてトランザクションをブロードキャストします。",
   "wallet.legacy_send.li2": "<strong>最大額を送金</strong>をタップして利用可能な全残高を送ります。",
   "wallet.legacy_send.p2": "トランザクション送信後に、成功またはエラーのバナーが表示されます。",
-  "wallet.tx_history.heading": "トランザクション履歴",
-  "wallet.tx_history.p1": "<strong>トランザクション</strong>画面には、色分けされたステータスバッジ付きで全トランザクションが一覧表示されます：",
-  "wallet.tx_history.li1": "<strong>緑</strong> &mdash; 確認済み、受理済み、またはブロードキャスト中。",
-  "wallet.tx_history.li2": "<strong>黄</strong> &mdash; 保留状態（未署名、未確定、未送信）。",
-  "wallet.tx_history.li3": "<strong>赤</strong> &mdash; 失敗したトランザクション。",
-  "wallet.tx_history.p2": "各トランザクションについて、ブロックエクスプローラーで確認したり、生のトランザクションデータをコピーしたり、まだ保留中のトランザクションを中止したりできます。",
 
   "backup.heading": "バックアップとリカバリー",
   "backup.intro": "鍵を持っているのはあなたなので、バックアップもあなたが管理します。BSV Browserには12単語のフレーズと印刷可能なリカバリーシェアの2つの方法があり、あなたのライフスタイルに合ったアプローチを選択できます。",

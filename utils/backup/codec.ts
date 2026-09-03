@@ -21,7 +21,7 @@ import {
   parseJsonRpc,
   stringifyJsonRpc
 } from '@bsv/wallet-toolbox-mobile/out/src/storage/remoting/BinaryJson'
-import { BACKUP_KEY_ID, BACKUP_PROTOCOL } from './constants'
+import { BACKUP_PROTOCOL, backupKeyId, type BackupChain } from './constants'
 
 /**
  * Minimum length before a numeric array is worth packing as bytes.
@@ -129,33 +129,49 @@ function unpackBytes (value: unknown, key?: string): unknown {
  * key comes from the wallet's own key material and nobody else can derive it; naming the
  * server as counterparty instead would let the server decrypt via ECDH. One enum value
  * decides it.
+ *
+ * The chain enters twice, deliberately. The keyID folds it into the encryption key, so a
+ * blob written on one network cannot decrypt on another at all. The plaintext also carries
+ * a `chain` label, which decodeChunk asserts — belt and braces so that even a future
+ * derivation mistake that collapsed the keys back together could not cross-restore.
  */
 export async function encodeChunk (
   wallet: CompletedProtoWallet,
-  chunk: SyncChunk
+  chunk: SyncChunk,
+  chain: BackupChain
 ): Promise<number[]> {
-  const json = stringifyJsonRpc(packBytes(chunk), true)
+  const json = stringifyJsonRpc({ chain, chunk: packBytes(chunk) }, true)
   const { ciphertext } = await wallet.encrypt({
     plaintext: Utils.toArray(json, 'utf8'),
     protocolID: BACKUP_PROTOCOL,
-    keyID: BACKUP_KEY_ID,
+    keyID: backupKeyId(chain),
     counterparty: 'self'
   })
   return ciphertext
 }
 
-/** Decrypt and parse a sync chunk. Throws if the ciphertext was not written by this key. */
+/**
+ * Decrypt and parse a sync chunk. Throws if the ciphertext was not written by this key,
+ * or if the decrypted payload's chain label disagrees with the chain being restored.
+ */
 export async function decodeChunk (
   wallet: CompletedProtoWallet,
-  ciphertext: number[]
+  ciphertext: number[],
+  chain: BackupChain
 ): Promise<SyncChunk> {
   const { plaintext } = await wallet.decrypt({
     ciphertext,
     protocolID: BACKUP_PROTOCOL,
-    keyID: BACKUP_KEY_ID,
+    keyID: backupKeyId(chain),
     counterparty: 'self'
   })
-  return unpackBytes(parseJsonRpc(Utils.toUTF8(plaintext), true)) as SyncChunk
+  const envelope = parseJsonRpc(Utils.toUTF8(plaintext), true) as { chain?: unknown, chunk?: unknown }
+  if (envelope?.chain !== chain) {
+    throw new Error(
+      `backup blob is labeled for chain '${String(envelope?.chain)}' but '${chain}' was expected — refusing to restore across networks`
+    )
+  }
+  return unpackBytes(envelope.chunk) as SyncChunk
 }
 
 /** The twelve entity arrays a SyncChunk carries, in the protocol's dependency order. */

@@ -168,7 +168,6 @@ export interface WalletContextValue {
   selectedStorageUrl: string
   selectedMethod: string
   selectedNetwork: AppChain
-  setWalletBuilt: (current: boolean) => void
   buildWalletFromMnemonic: (mnemonic?: string, opts?: WalletBuildOptions) => Promise<void>
   buildWalletFromRecoveredKey: (wif: string, opts?: WalletBuildOptions) => Promise<void>
   /** Progress of the encrypted-log restore that runs during a wallet import. */
@@ -233,7 +232,6 @@ export const WalletContext = createContext<WalletContextValue>({
   selectedStorageUrl: '',
   selectedMethod: '',
   selectedNetwork: 'main',
-  setWalletBuilt: (current: boolean) => {},
   buildWalletFromMnemonic: async () => {},
   buildWalletFromRecoveredKey: async () => {},
   backupRestore: { phase: 'idle', chunks: 0, total: 0 },
@@ -420,11 +418,16 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const adminOriginator = ADMIN_ORIGINATOR
   const [walletBuilt, setWalletBuiltState] = useState<boolean>(false)
   /**
-   * Mirror of walletBuilt for the build guards (utils/walletLifecycle). The
-   * builders and the auto-build effect run inside async closures whose
-   * captured walletBuilt snapshot can be stale — reading it let a second
-   * build (and a second monitor on the same SQLite file) through in the
-   * 2026-08-22 logout-then-reimport crash. The guards read this ref instead.
+   * Ref twin of walletBuilt, kept in sync at every transition by the
+   * setWalletBuilt wrapper below. The build guards (utils/walletLifecycle)
+   * MUST read this, not the state: buildWalletFromMnemonic /
+   * buildWalletFromRecoveredKey are useCallbacks whose closures freeze
+   * walletBuilt at creation time, and stale holders (the auto-build effect,
+   * screens memoizing a handler) can call an old identity after a build
+   * succeeded — the frozen `walletBuilt=false` waves the duplicate through,
+   * which is how a second wallet+monitor stack gets built over a live one.
+   * walletBuildingRef doesn't cover this: it only serializes CONCURRENT
+   * builds, both builders clear it on completion.
    */
   const walletBuiltRef = useRef<boolean>(false)
   /** Writes both the render value and the ref the build guards read synchronously. */
@@ -774,6 +777,9 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         const chain = selectedNetwork
         // Toolbox chain id ('teratest' -> 'ttn'). App keeps 'teratest' for AsyncStorage keys / env / UI.
         const walletChain = toWalletChain(selectedNetwork)
+        // The backup log's network name. Distinct from walletChain ('ttn' for teratest):
+        // the backup derivation is frozen on the app-level names.
+        const backupChain = chain === 'main' ? 'main' as const : chain === 'test' ? 'test' as const : 'teratest' as const
         const keyDeriver = new KeyDeriver(new PrivateKey(primaryKey))
         const storageManager = new WalletStorageManager(keyDeriver.identityKey)
         const signer = new WalletSigner(walletChain, keyDeriver, storageManager)
@@ -918,7 +924,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
           const identityKey = keyDeriver.identityKey
           const keySuffix = identityKey.slice(-8)
-          const chainStr = chain === 'main' ? 'main' : chain === 'test' ? 'test' : 'teratest'
+          const chainStr = backupChain
 
           // ── Select the best database file from the registry ──
           let knownDbs = await getRegisteredDbs(keySuffix, chainStr)
@@ -973,6 +979,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
               const restored = await restoreOnImport({
                 storage: phoneStorage,
                 primaryKey,
+                chain: chainStr,
                 identityKey,
                 baseUrl: DEFAULT_BACKUP_URL,
                 onProgress: (chunks, total) => setBackupRestore({ phase: 'restoring', chunks, total })
@@ -1060,17 +1067,20 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
 
         // Start background monitor for transaction status updates (sending → unproven → completed)
         try {
-          // Belt-and-braces against the 2026-08-22 crash: if an earlier
-          // build's monitor is somehow still installed (a teardown path was
-          // skipped or raced), stop and clear it before constructing its
-          // replacement. Two monitors on one SQLite file deadlock
-          // ("database is locked") and have corrupted the expo-sqlite heap.
+          // A previous build's monitor may still be running: overwriting the
+          // ref without stopping it orphans an unstoppable duplicate — two
+          // monitors on one SQLite file was the contention behind the
+          // 2026-08-22 deposit crash (duplicate Clock rows in monitor_events
+          // are its fingerprint). Belt to logout's braces: this also covers
+          // any future teardown path that resets walletBuilt without stopping
+          // the monitor the way rebuildWallet/switchNetwork/logout now do.
           const hadLeftover = await stopLeftoverMonitor(monitorRef, e =>
             console.warn('[WalletContext] Failed to stop leftover monitor:', e)
           )
           if (hadLeftover) {
-            logWithTimestamp(F, 'Stopped leftover monitor from a previous build before constructing a new one')
+            console.warn('[WalletContext] Stopped a leftover monitor from a previous wallet build')
           }
+
 
           const monitorOptions = Monitor.createDefaultWalletMonitorOptions(walletChain, storageManager, services)
           monitorOptions.callbackToken = callbackToken
@@ -1146,6 +1156,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
                   return await pushOnce({
                     storage: phoneStorage!,
                     primaryKey,
+                    chain: backupChain,
                     identityKey: keyDeriver.identityKey,
                     baseUrl: DEFAULT_BACKUP_URL
                   })
@@ -1288,12 +1299,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           // contention that contributes to watchdog/OOM kills on real devices.
           monitorRef.current = monitor
           InteractionManager.runAfterInteractions(() => {
-            // startTasks runs in background — don't await (it never resolves until
-            // stopTasks). A rebuild/switchNetwork/logout can land inside this
-            // deferred window, and stopTasks() is only a flag write, so starting
-            // an already-superseded monitor here would resurrect it as an orphan
-            // next to the new build's monitor — the identity re-check inside
-            // startMonitorIfCurrent is what prevents that.
+            // startMonitorIfCurrent re-checks identity: stopTasks() before
+            // startTasks() is a no-op (it only clears a flag the loop hasn't
+            // set yet), so a rebuild/switchNetwork/logout/unmount landing
+            // inside this deferral window would otherwise "stop" a
+            // not-yet-started monitor and this callback would then start an
+            // unstoppable zombie nothing references. startTasks runs in
+            // background — not awaited (it never resolves until stopTasks).
             const started = startMonitorIfCurrent(monitorRef, monitor, e =>
               console.error('[WalletContext] Monitor error:', e)
             )
@@ -1462,6 +1474,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         console.error('[WalletContext] Error building mnemonic wallet:', error)
       }
     },
+    // walletBuilt deliberately absent: the repeat-build guard reads
+    // walletBuiltRef, so the callback identity no longer needs to churn on it.
     [configStatus, getMnemonic, buildWallet, setWalletBuilt]
   )
 
@@ -1511,6 +1525,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
         console.error('[WalletContext] Error building wallet from recovered key:', error)
       }
     },
+    // Same as buildWalletFromMnemonic: the guard reads walletBuiltRef.
     [configStatus, buildWallet, setWalletBuilt]
   )
 
@@ -1519,16 +1534,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const rebuildWallet = useCallback(async () => {
     logWithTimestamp(F, 'Rebuilding wallet')
 
-    // Stop any running monitor
-    try {
-      const monitor = monitorRef.current
-      if (monitor) {
-        await monitor.stopTasks()
-        monitorRef.current = null
-      }
-    } catch (e) {
-      console.warn('[WalletContext] Failed to stop monitor during rebuild:', e)
-    }
+    // Stop any running monitor and let its current pass drain before the
+    // storage teardown below closes the connection under it.
+    await stopMonitorAndDrain(monitorRef, {
+      warn: (message, error) => console.warn(`[WalletContext] ${message}`, error)
+    })
     // Same convention as monitorRef above: clear so a stale deferred header
     // init or reconnect handler from the old build can't pair a leftover
     // store/tracker across the rebuild.
@@ -1561,16 +1571,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       if (network === selectedNetwork) return
       logWithTimestamp(F, `Switching network from ${selectedNetwork} to ${network}`)
 
-      // Stop any running monitor
-      try {
-        const monitor = monitorRef.current
-        if (monitor) {
-          await monitor.stopTasks()
-          monitorRef.current = null
-        }
-      } catch (e) {
-        console.warn('[WalletContext] Failed to stop monitor during network switch:', e)
-      }
+      // Stop any running monitor and let its current pass drain before the
+      // storage teardown below closes the connection under it.
+      await stopMonitorAndDrain(monitorRef, {
+        warn: (message, error) => console.warn(`[WalletContext] ${message}`, error)
+      })
       // Same convention as monitorRef above: clear so the old chain's
       // tracker/store can't linger and get paired against the new chain.
       offlineChaintracksRef.current = undefined
@@ -1617,9 +1622,11 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     ;(async () => {
       // Mnemonic first, recovered key only as a fallback when the mnemonic
       // pass genuinely built nothing. The sequence reads walletBuiltRef —
-      // this closure's walletBuilt snapshot is stale by the time the mnemonic
-      // build finishes, and falling through on it built a SECOND wallet (and
-      // second monitor) whenever a leftover recovered key existed
+      // this closure's walletBuilt is frozen at false, and the old
+      // `!walletBuildingRef.current` check was wrong twice over: it reads
+      // false after a SUCCESSFUL build too (both builders clear it on
+      // completion), so a wallet holding both a mnemonic and a leftover
+      // recoveredKey would build TWICE — two wallet stacks, two monitors
       // (utils/walletLifecycle.runAutoBuildSequence, the 2026-08-22 crash).
       await runAutoBuildSequence({
         built: walletBuiltRef,
@@ -1851,8 +1858,12 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
     const off = driver.onKeyEvent(e => {
       if (e.type === 'detached') {
         vaultCeremony.notifyKeyDetached()
-      } else {
+      } else if (e.type === 'attached') {
         vaultCeremony.notifyKeyAttached()
+      } else {
+        // session-failed: the session died before any key connected. Never
+        // emitted by a persistent reader today, but must not read as attach.
+        vaultCeremony.notifySessionFailed(e.code)
       }
     })
     return () => {
@@ -1882,25 +1893,25 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
   const logout = useCallback(() => {
     logWithTimestamp(F, 'Logout')
     ;(async () => {
-      // Stop the monitor and wait for its run loop to actually exit BEFORE
-      // destroying the storage under it. Skipping this is what caused the
-      // 2026-08-22 crash: logout left the monitor running, re-import built a
-      // second one, and two monitors on one SQLite file deadlocked
-      // ("database is locked") and corrupted the expo-sqlite heap.
+      // Tear the wallet down the same way rebuildWallet does. Logout used to
+      // skip this, which orphaned a running monitor AND left the SQLite
+      // connection open: a re-import of the same phrase then opened a second
+      // connection to the SAME file with a second monitor on top — the
+      // "database is locked" contention that corrupted expo-sqlite state and
+      // crashed the 2026-08-22 vault deposit. stopMonitorAndDrain waits for
+      // the run loop to actually exit before storage.destroy() closes the
+      // connection under a task still mid-pass.
       await stopMonitorAndDrain(monitorRef, {
         warn: (message, error) => console.warn(`[WalletContext] ${message}`, error)
       })
-      // Same convention as rebuildWallet/switchNetwork: never leave the old
-      // build's tracker/store to pair against the next wallet's.
       offlineChaintracksRef.current = undefined
       headerStoreRef.current = undefined
-      // Close the storage connection so a re-import opens a fresh one instead
-      // of sharing a file handle with this dead wallet's.
       if (storage?.db) {
         try {
           await storage.destroy()
         } catch {}
       }
+      setStorage(null)
 
       setManagers({})
       setConfigStatus('initial')
@@ -2257,7 +2268,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedStorageUrl,
       selectedMethod,
       selectedNetwork,
-      setWalletBuilt,
       buildWalletFromMnemonic,
       buildWalletFromRecoveredKey,
       backupRestore,
@@ -2299,7 +2309,6 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
       selectedStorageUrl,
       selectedMethod,
       selectedNetwork,
-      setWalletBuilt,
       buildWalletFromMnemonic,
       buildWalletFromRecoveredKey,
       backupRestore,

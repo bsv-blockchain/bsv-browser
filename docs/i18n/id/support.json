@@ -1,6 +1,7 @@
 {
   "_meta.title": "BSV Browser - Dukungan & Panduan Pengguna",
   "_meta.description": "Pelajari cara menjelajah, membayar, dan mengelola identitas Anda dengan BSV Browser. Panduan langkah demi langkah, tips, dan jawaban atas pertanyaan umum.",
+
   "_css.nav-sections": "'Bagian'",
   "_css.nav-close": "'Tutup'",
 
@@ -86,7 +87,6 @@
   "wallet.overview.heading": "Ikhtisar dompet",
   "wallet.overview.p1": "Buka menu dan ketuk <strong>Dompet</strong> untuk melihat dompet Anda. Layar utama menampilkan:",
   "wallet.overview.li1": "<strong>Saldo</strong> Anda saat ini dalam satoshi atau mata uang fiat. Ketuk untuk menyegarkan.",
-  "wallet.overview.li2": "Tautan cepat ke <strong>Transaksi</strong>, <strong>Pembayaran</strong>, dan <strong>Jembatan Lama</strong>.",
   "wallet.overview.li3": "<strong>Kunci Identitas</strong> Anda dengan tombol salin.",
   "wallet.overview.li4": "Baris <strong>Pengaturan</strong> yang membuka layar konfigurasi dompet lengkap.",
   "wallet.config.heading": "Konfigurasi dompet",
@@ -108,22 +108,8 @@
   "wallet.p2p.heading": "Pembayaran identitas peer-to-peer",
   "wallet.p2p.p1": "Layar <strong>Pembayaran</strong> memungkinkan Anda mengirim BSV langsung ke orang lain menggunakan identitas mereka alih-alih alamat blockchain mentah. Cari penerima berdasarkan nama di jaringan identitas BSV, masukkan jumlah, dan kirim.",
   "wallet.p2p.p2": "Pembayaran masuk muncul dalam daftar. Anda dapat menerimanya satu per satu, atau ketuk <strong>Terima Semua</strong> untuk menerima setiap pembayaran yang tertunda sekaligus. Spanduk hasil mengkonfirmasi berapa yang diterima.",
-  "wallet.legacy.heading": "Jembatan Lama",
-  "wallet.legacy.p1": "Untuk kompatibilitas dengan dompet dan layanan BSV tradisional, BSV Browser mendukung transaksi berbasis alamat standar melalui layar <strong>Jembatan Lama</strong>.",
-  "wallet.legacy.li1": "<strong>Terima:</strong> Alamat unik dan kode QR dibuat untuk setiap hari. Bagikan kepada siapa saja yang ingin mengirim BSV kepada Anda. Dana masuk secara otomatis terdeteksi dan diimpor ke dompet Anda &mdash; tidak diperlukan tindakan manual.",
-  "wallet.legacy.li2": "<strong>Kirim:</strong> Masukkan alamat BSV dan jumlah, lalu konfirmasi. Anda juga dapat mengetuk <strong>Kirim Maks</strong> untuk mengirim seluruh saldo Anda.",
-  "wallet.legacy.li3": "Gunakan <strong>tombol panah</strong> untuk menavigasi antar alamat harian jika Anda perlu memeriksa alamat penerimaan hari sebelumnya.",
-  "wallet.legacy_send.heading": "Mengirim dari Jembatan Lama",
-  "wallet.legacy_send.p1": "Di bawah bagian penerimaan, Jembatan Lama menyertakan formulir pengiriman lengkap. Masukkan alamat BSV penerima dan jumlah yang ingin Anda kirim.",
-  "wallet.legacy_send.li1": "Ketuk <strong>Kirim BSV</strong> untuk menyiarkan transaksi.",
   "wallet.legacy_send.li2": "Ketuk <strong>Kirim Maks</strong> untuk mengirim seluruh saldo yang tersedia.",
   "wallet.legacy_send.p2": "Spanduk sukses atau kesalahan muncul setelah transaksi dikirimkan.",
-  "wallet.tx_history.heading": "Riwayat transaksi",
-  "wallet.tx_history.p1": "Layar <strong>Transaksi</strong> mencantumkan semua transaksi Anda dengan lencana status berkode warna:",
-  "wallet.tx_history.li1": "<strong>Hijau</strong> &mdash; Dikonfirmasi, diterima, atau sedang disiarkan.",
-  "wallet.tx_history.li2": "<strong>Kuning</strong> &mdash; Status tertunda (tidak ditandatangani, tidak final, belum dikirim).",
-  "wallet.tx_history.li3": "<strong>Merah</strong> &mdash; Transaksi gagal.",
-  "wallet.tx_history.p2": "Untuk setiap transaksi, Anda dapat melihatnya di penjelajah blok, menyalin data transaksi mentah, atau membatalkan transaksi yang masih tertunda.",
 
   "backup.heading": "Cadangan & Pemulihan",
   "backup.intro": "Anda menyimpan kuncinya, jadi Anda mengendalikan cadangan. BSV Browser memberi Anda dua metode — frasa 12 kata dan bagian pemulihan yang dapat dicetak — sehingga Anda dapat memilih pendekatan yang sesuai dengan kehidupan Anda.",

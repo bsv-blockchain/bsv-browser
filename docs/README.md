@@ -39,7 +39,7 @@ BSV Browser is a mobile browser with a self-custodial BSV wallet that provides:
 - Web2/Web3 dual browsing mode
 - BRC-100 compliant wallet interface (CWI) for web apps
 - Peer-to-peer payments via MessageBox
-- Legacy Bridge for traditional P2PKH address interoperability
+- Paying to, and getting paid at, traditional P2PKH addresses
 - Decentralized identity and trust management
 - Shamir's Secret Sharing for printable key backup
 - Database import/export for full wallet backup

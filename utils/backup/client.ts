@@ -30,6 +30,7 @@ import {
   type Limits,
   type LogEntry
 } from '@bsv/backup-cache-client'
+import type { BackupChain } from './constants'
 import { deriveBackupWallet } from './derive'
 
 export { BackupHttpError, ERR_BLOB_TOO_LARGE, ERR_SEQ_CONFLICT }
@@ -50,12 +51,14 @@ export class BackupClient extends BackupCacheClient {
    *   prefix — the request URI is signed into every proof, so a prefix the
    *   server does not see identically would fail all of them.
    * @param primaryKey the wallet's m/0'/0' key, from which the pseudonym is derived.
+   * @param chain the network this client serves. Each chain derives a different
+   *   pseudonym, so each network's log lives in its own server account.
    * @param fetchImpl injectable transport for tests; defaults to global fetch.
    */
-  constructor (baseUrl: string, primaryKey: number[], fetchImpl?: typeof fetch) {
+  constructor (baseUrl: string, primaryKey: number[], chain: BackupChain, fetchImpl?: typeof fetch) {
     super({
       baseUrl,
-      wallet: deriveBackupWallet(primaryKey),
+      wallet: deriveBackupWallet(primaryKey, chain),
       fetch: withTimeout(fetchImpl ?? ((input, init) => fetch(input, init)))
     })
   }

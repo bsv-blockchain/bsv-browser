@@ -230,6 +230,13 @@
         direction: ltr;
       }
 
+      /* Text-only subsection: one column, held to the same measure as the
+         section intro so the paragraphs do not run the full page width. */
+      .guide-row.single {
+        grid-template-columns: 1fr;
+        max-width: 800px;
+      }
+
       .guide-text h3 {
         font-size: 1.4rem;
         font-weight: 500;
@@ -601,6 +608,7 @@
             <a href="#getting-started" data-i18n="nav.getting_started">Getting Started</a>
             <a href="#browsing" data-i18n="nav.browsing">Browsing the Web</a>
             <a href="#wallet" data-i18n="nav.wallet">Wallet &amp; Payments</a>
+            <a href="#vault" data-i18n="nav.vault">Vault</a>
             <a href="#backup" data-i18n="nav.backup">Backup &amp; Recovery</a>
             <a href="#export-import" data-i18n="nav.export_import">Export &amp; Import</a>
             <a href="#identity" data-i18n="nav.identity">Identity &amp; Trust</a>
@@ -905,8 +913,8 @@
             <ul>
               <li data-i18n-html="wallet.overview.li1">Your current <strong>balance</strong> in satoshis or fiat. Tap it to refresh.</li>
               <li data-i18n-html="wallet.overview.li2">
-                Quick links to <strong>Transactions</strong>, <strong>Payments</strong>, and
-                <strong>Legacy Bridge</strong>.
+                Buttons for <strong>Pay</strong>, <strong>Get paid</strong>, and the <strong>Vault</strong>, with your
+                recent <strong>Activity</strong> listed below them.
               </li>
               <li data-i18n-html="wallet.overview.li3">Your <strong>Identity Key</strong> with a copy button.</li>
               <li data-i18n-html="wallet.overview.li4">A <strong>Settings</strong> row that opens the full wallet configuration screen.</li>
@@ -1013,31 +1021,30 @@
 
         <div class="guide-row">
           <div class="guide-text">
-            <h3 data-i18n="wallet.legacy.heading">Legacy Bridge</h3>
+            <h3 data-i18n="wallet.legacy.heading">Get paid to an address</h3>
             <p data-i18n-html="wallet.legacy.p1">
-              For compatibility with traditional BSV wallets and services, BSV Browser supports standard address-based
-              transactions via the <strong>Legacy Bridge</strong> screen.
+              For compatibility with traditional BSV wallets and services, BSV Browser can receive standard
+              address-based payments. Open <strong>Wallet &gt; Pay</strong>, choose <strong>Get paid</strong>, then
+              tap <strong>To an address</strong>.
             </p>
             <ul>
               <li data-i18n-html="wallet.legacy.li1">
-                <strong>Receive:</strong> A unique address and QR code are generated for each day. Share them with
-                anyone who wants to send you BSV. Incoming funds are automatically detected and imported into your
-                wallet &mdash; no manual action needed.
+                A unique address and QR code are generated for each day. Share them with anyone who wants to send you
+                BSV. Incoming funds are automatically detected and imported into your wallet &mdash; no manual action
+                needed.
               </li>
               <li data-i18n-html="wallet.legacy.li2">
-                <strong>Send:</strong> Enter a BSV address and amount, then confirm. You can also tap
-                <strong>Send Max</strong> to send your entire balance.
+                Tap <strong>Copy</strong> to put the address on your clipboard, or let the sender scan the QR code.
               </li>
               <li data-i18n-html="wallet.legacy.li3">
-                Use the <strong>arrow buttons</strong> to navigate between daily addresses if you need to check a
-                previous day's receive address.
+                Tap <strong>Reach an earlier day</strong> if you need to check a previous day's receive address.
               </li>
             </ul>
           </div>
           <div class="guide-image">
             <img
               src="legacy_bridge_receive_funds.png"
-              alt="Legacy Bridge screen receiving funds with auto-import"
+              alt="The To an address receive screen, showing a QR code, the address, and a Copy button"
               class="guide-screenshot"
             />
           </div>
@@ -1045,21 +1052,26 @@
 
         <div class="guide-row reverse">
           <div class="guide-text">
-            <h3 data-i18n="wallet.legacy_send.heading">Sending from Legacy Bridge</h3>
-            <p data-i18n="wallet.legacy_send.p1">
-              Below the receive section, the Legacy Bridge includes a full send form. Enter the recipient's BSV address
-              and the amount you want to send.
+            <h3 data-i18n="wallet.legacy_send.heading">Paying to an address</h3>
+            <p data-i18n-html="wallet.legacy_send.p1">
+              To send in the other direction, open <strong>Wallet &gt; Pay</strong>, stay on <strong>Pay</strong>, and
+              tap <strong>To an address</strong>. Enter the recipient's BSV address &mdash; typing it, pasting it, or
+              tapping the QR icon to scan it &mdash; and the amount you want to send.
             </p>
             <ul>
-              <li data-i18n-html="wallet.legacy_send.li1">Tap <strong>Send BSV</strong> to broadcast the transaction.</li>
+              <li data-i18n-html="wallet.legacy_send.li1">Tap <strong>Pay</strong> to broadcast the transaction.</li>
               <li data-i18n-html="wallet.legacy_send.li2">Tap <strong>Send Max</strong> to send your full available balance.</li>
+              <li data-i18n-html="wallet.legacy_send.li3">
+                The screen reminds you that a payment sent this way is <strong>not</strong> announced to the recipient
+                &mdash; they will simply see the funds arrive.
+              </li>
             </ul>
             <p data-i18n="wallet.legacy_send.p2">A success or error banner appears after the transaction is submitted.</p>
           </div>
           <div class="guide-image">
             <img
               src="legacy_bridge_send.png"
-              alt="Legacy Bridge send form with address and amount fields"
+              alt="The To an address send form, with recipient address, amount, Send Max and a Pay button"
               class="guide-screenshot"
             />
           </div>
@@ -1067,24 +1079,242 @@
 
         <div class="guide-row">
           <div class="guide-text">
-            <h3 data-i18n="wallet.tx_history.heading">Transaction history</h3>
-            <p data-i18n-html="wallet.tx_history.p1">The <strong>Transactions</strong> screen lists all your transactions with colour-coded status badges:</p>
+            <h3 data-i18n="wallet.tx_history.heading">Activity</h3>
+            <p data-i18n-html="wallet.tx_history.p1">
+              Your transaction history is on the wallet screen itself, under <strong>Activity</strong>, below the
+              balance and the three buttons &mdash; so checking whether a payment went through costs no extra
+              navigation. Entries are grouped by day, and each row reads left to right: an arrow showing the
+              direction, what the payment was, then its status and the amount. Money coming in is shown in green.
+            </p>
+            <p data-i18n="wallet.tx_history.p2">Each row carries a short status:</p>
             <ul>
-              <li data-i18n-html="wallet.tx_history.li1"><strong>Green</strong> &mdash; Confirmed, accepted, or broadcasting.</li>
-              <li data-i18n-html="wallet.tx_history.li2"><strong>Yellow</strong> &mdash; Pending states (unsigned, non-final, not yet sent).</li>
-              <li data-i18n-html="wallet.tx_history.li3"><strong>Red</strong> &mdash; Failed transactions.</li>
+              <li data-i18n-html="wallet.tx_history.li1">
+                <strong>Confirmed</strong> or <strong>Seen</strong> &mdash; settled, and shown quietly, because
+                nothing is needed from you.
+              </li>
+              <li data-i18n-html="wallet.tx_history.li2">
+                <strong>Broadcasting</strong>, or <strong>Offline &middot; queued</strong> when you have no
+                connection &mdash; still on its way.
+              </li>
+              <li data-i18n-html="wallet.tx_history.li3">
+                <strong>Not Sent</strong>, <strong>Unsigned</strong> or <strong>Non-final</strong> &mdash; highlighted,
+                because they may want your attention.
+              </li>
+              <li data-i18n-html="wallet.tx_history.li4"><strong>Failed</strong> &mdash; the transaction did not go through.</li>
             </ul>
-            <p data-i18n="wallet.tx_history.p2">
-              For each transaction, you can view it on the block explorer, copy the raw transaction data, or abort
-              transactions that are still pending.
+            <p data-i18n-html="wallet.tx_history.p3">
+              Tap a row to expand it. You can <strong>View on block explorer</strong>, <strong>Copy transaction
+              ID</strong>, <strong>Copy BEEF as hex</strong>, <strong>Refresh status</strong>, and
+              <strong>Cancel transaction</strong> for one that has not gone out yet. <strong>Export CSV</strong>, at
+              the top of the list, saves the whole history.
             </p>
           </div>
           <div class="guide-image">
             <img
-              src="transaction_history.png"
-              alt="Transaction history with colour-coded status badges"
+              src="wallet_activity.png"
+              alt="The wallet screen with the Activity list below the balance, showing payments grouped by day"
               class="guide-screenshot"
             />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: Vault -->
+    <section id="vault" class="guide-section">
+      <div class="container">
+        <h2 data-i18n="vault.heading">The Vault</h2>
+        <p class="section-intro" data-i18n="vault.intro">
+          The vault is a safe inside your wallet. Funds you move into it can only be moved out again with a hardware
+          security key in your hand — so someone who picks up your unlocked phone can spend your everyday balance, but
+          cannot touch what is in the vault. Both putting funds in and taking them out require the key, its PIN, and a
+          physical touch.
+        </p>
+
+        <div class="guide-row">
+          <div class="guide-text">
+            <h3 data-i18n="vault.what.heading">What you need, and where to find it</h3>
+            <p data-i18n-html="vault.what.p1">
+              Open the browser menu and tap <strong>Wallet</strong>, then tap <strong>Vault</strong>. Your vault balance
+              is shown separately from your everyday balance &mdash; the two never overlap, so money in the vault is
+              money that cannot be spent by tapping Pay.
+            </p>
+            <p data-i18n-html="vault.what.p2">
+              The vault needs a <strong>YubiKey 5C</strong>-class security key. On iPhone the key is read over
+              <strong>NFC</strong>: hold it against the top of the phone. On Android you normally plug it in over
+              <strong>USB-C</strong>; on Android phones with NFC a tap works too, though you must keep the key held
+              against the phone until the unlock finishes, and the prompts will still say "insert" and "touch the gold
+              contact". If the app cannot use a security key on your device, the Vault screen tells you so instead of
+              offering setup.
+            </p>
+            <div class="tip-box">
+              <p data-i18n-html="vault.what.tip">
+                <strong>Tip:</strong> The vault is optional. If you never set one up, nothing about the rest of the
+                wallet changes.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img
+              src="wallet_overview.png"
+              alt="Wallet screen showing the Pay, Get paid and Vault buttons beneath the balance"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row reverse">
+          <div class="guide-text">
+            <h3 data-i18n="vault.setup.heading">Setting up the vault</h3>
+            <p data-i18n-html="vault.setup.p1">
+              Tap <strong>Set up vault</strong> on the Vault screen. The wizard asks for three things, in this order:
+            </p>
+            <ul>
+              <li data-i18n-html="vault.setup.li1">
+                <strong>A backup first.</strong> The vault protects your funds from someone who has your phone; it
+                cannot protect them from losing it. So before anything can be locked away, you must either write down
+                your recovery phrase and confirm you have done so, or print your recovery shares. Either one is enough.
+              </li>
+              <li data-i18n-html="vault.setup.li2">
+                <strong>A vault passphrase.</strong> Five or more unrelated random words. The wizard can generate six
+                for you, and shows a strength meter if you type your own. This is your second way back into the vault,
+                so store it alongside your recovery phrase &mdash; not with your security key.
+              </li>
+              <li data-i18n-html="vault.setup.li3">
+                <strong>Your security key.</strong> Enter the key's PIN, then hold it to your phone (or plug it in) and
+                touch its gold contact. The vault key is written to the security key, and setup is complete.
+              </li>
+            </ul>
+            <p data-i18n-html="vault.setup.p2">
+              There are exactly <strong>two ways</strong> to open the vault afterwards: your security key plus its PIN,
+              or your wallet recovery phrase plus your vault passphrase. Both routes have to survive. If you lose the
+              key and cannot produce the phrase and the passphrase together, there is no third route, no backup key, and
+              no reset &mdash; not by us, not by anyone &mdash; and the funds stay where they are permanently.
+            </p>
+            <div class="warning-box">
+              <p data-i18n-html="vault.setup.warning">
+                <strong>Important:</strong> The vault passphrase cannot be reset or recovered. If you lose both your
+                security key and your passphrase, the funds in the vault cannot be moved by anybody, ever. A mistyped
+                passphrase during setup silently creates a different, empty vault &mdash; which is why the wizard makes
+                you type it twice.
+              </p>
+            </div>
+          </div>
+          <div class="guide-image">
+            <img
+              src="wallet_config_screen.png"
+              alt="Wallet settings showing Recovery Key and Print Recovery Shares, which satisfy the vault's backup requirement"
+              class="guide-screenshot"
+            />
+          </div>
+        </div>
+
+        <div class="guide-row single">
+          <div class="guide-text">
+            <h3 data-i18n="vault.deposit.heading">Putting funds into the vault</h3>
+            <p data-i18n-html="vault.deposit.p1">
+              From the Vault screen, tap <strong>Deposit</strong>. Type the amount you want to move out of your everyday
+              balance &mdash; in satoshis, or in your chosen display currency if you have set one &mdash; and tap
+              <strong>Deposit</strong> again.
+            </p>
+            <p data-i18n="vault.deposit.p2">The app then walks you through a single unlock:</p>
+            <ul>
+              <li data-i18n-html="vault.deposit.li1">
+                On iPhone you are asked for your <strong>PIN</strong> first, then to <strong>hold your YubiKey to the
+                top of your phone</strong> and keep it there. On Android you insert the key first, then enter the PIN,
+                then <strong>touch the gold contact</strong>.
+              </li>
+              <li data-i18n-html="vault.deposit.li2">
+                The screen shows <strong>Unlocking your funds</strong>, then <strong>Sending to the network</strong>.
+                Keep the app open while it does.
+              </li>
+              <li data-i18n-html="vault.deposit.li3">
+                When it finishes you see <strong>Moved to vault</strong>, the vault balance updates, and the key locks
+                itself again.
+              </li>
+            </ul>
+            <p data-i18n-html="vault.deposit.p3">
+              A deposit takes <strong>one touch</strong>, no matter the amount, and there is
+              <strong>no minimum deposit</strong> &mdash; you can move as little as a single satoshi. You do need enough
+              in your everyday balance to cover the amount plus the network fee, and you need to be online: the app will
+              not accept a vault transfer while you are offline and hold it to send later.
+            </p>
+            <div class="tip-box">
+              <p data-i18n-html="vault.deposit.tip">
+                <strong>Tip:</strong> Cancelling at any point before the key unlocks moves no money at all. If you
+                change your mind while the app is waiting for your key, just tap <strong>Cancel</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-row single">
+          <div class="guide-text">
+            <h3 data-i18n="vault.withdraw.heading">Taking funds out of the vault</h3>
+            <p data-i18n-html="vault.withdraw.p1">
+              From the Vault screen, tap <strong>Withdraw</strong>. Either type an amount, or tap
+              <strong>Send Max</strong> to move <strong>Entire vault balance</strong>. Tap <strong>Withdraw</strong> and
+              unlock with your key exactly as you did for the deposit &mdash; PIN, then hold or touch. The funds arrive
+              back in your everyday balance, and you see <strong>Withdrawn from vault</strong>. Once a withdrawal is
+              unlocked it is signed and sent in the background, so the app finishes the job even if your connection
+              wobbles at that last moment.
+            </p>
+            <p data-i18n-html="vault.withdraw.p2">
+              Each deposit you have made is stored as a separate piece of the vault, and one withdrawal can move up to
+              <strong>32</strong> of them. If your vault is made up of more pieces than that, the withdrawal takes what
+              it can and tells you: <em>Moved part of your vault. N more deposits remain &mdash; withdraw again to move
+              them.</em> Simply withdraw again to move the rest.
+            </p>
+            <ul>
+              <li data-i18n-html="vault.withdraw.li1">
+                If you ask for a specific amount that cannot be assembled from 32 pieces, the app says
+                <em>Withdraw a smaller amount first</em> rather than failing part-way. Each withdrawal also tidies the
+                vault up, so the next one can move more.
+              </li>
+              <li data-i18n-html="vault.withdraw.li2">
+                Withdrawing part of your vault returns the rest to the vault automatically, in the same step and with no
+                second touch. If what would be left behind is a tiny amount &mdash; under 10,000 satoshis &mdash; it
+                goes to your everyday balance along with your withdrawal instead of back into the vault, so a little
+                extra can arrive with it. Either way the network fee comes out of what arrives, so the final figure is
+                never exactly the number you typed.
+              </li>
+            </ul>
+            <p data-i18n-html="vault.withdraw.p3">
+              You cannot switch the vault off while it still holds funds. <strong>Disable vault</strong> asks you to
+              withdraw everything first, because a disabled vault has nothing left to sign with.
+            </p>
+          </div>
+        </div>
+
+        <div class="guide-row single">
+          <div class="guide-text">
+            <h3 data-i18n="vault.recover.heading">If you lose your security key</h3>
+            <p data-i18n-html="vault.recover.p1">
+              This is what the vault passphrase is for. On the Vault screen, under <strong>Manage</strong>, tap
+              <strong>Recover with phrase</strong>. Your wallet recovery phrase is already on the device, so you only
+              need to supply the <strong>vault passphrase</strong> you chose during setup. Tap
+              <strong>Recover funds</strong>.
+            </p>
+            <p data-i18n="vault.recover.p2">
+              Everything in the vault is moved to your everyday balance and the vault is cleared &mdash; no security key
+              is involved at any point. If the vault holds more pieces than one transaction can carry, recovery keeps
+              going until it is empty. Afterwards the vault is switched off; set it up again with a new key whenever you
+              are ready.
+            </p>
+            <p data-i18n-html="vault.recover.p3">
+              A wrong passphrase is rejected before anything moves: <em>That passphrase does not match this vault.
+              Nothing has been moved.</em> The same route also gets you back in if you lock your security key's PIN by
+              entering it incorrectly too many times.
+            </p>
+            <div class="warning-box">
+              <p data-i18n-html="vault.recover.warning">
+                <strong>Important:</strong> Recovery shares printed by this app split your recovery phrase itself, so a
+                wallet restored from them gets its phrase back &mdash; it can set up a vault, and a vault set up earlier
+                on that same phrase can still be recovered with the vault passphrase. Older share sheets, which split a
+                key rather than the phrase, behave differently: a wallet restored from those has no recovery phrase, and
+                because the vault key comes from that phrase, it can neither set up a vault nor recover one.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -1095,8 +1325,10 @@
       <div class="container">
         <h2 data-i18n="backup.heading">Backup &amp; Recovery</h2>
         <p class="section-intro" data-i18n="backup.intro">
-          You hold the keys, so you control the backups. BSV Browser gives you two methods — a 12-word phrase and
-          printable recovery shares — so you can pick the approach that fits your life.
+          You hold the keys, so you control the backups. BSV Browser gives you two ways to save the key itself — a
+          12-word phrase and printable recovery shares — so you can pick the approach that fits your life. Alongside
+          them, an encrypted copy of your wallet's records is kept on our server by default, so that a replacement
+          device can rebuild what your phrase alone cannot.
         </p>
 
         <div class="guide-row">
@@ -1192,6 +1424,55 @@
             />
           </div>
         </div>
+
+        <div class="guide-row single">
+          <div class="guide-text">
+            <h3 data-i18n="backup.private.heading">Private backup to our server</h3>
+            <p data-i18n-html="backup.private.p1">
+              Your recovery phrase saves your key, but it cannot rebuild your wallet on its own. Records such as change
+              outputs and received payments carry information that exists only in your wallet's own database, so a
+              phrase restored onto a new phone can leave funds it cannot spend. To close that gap, BSV Browser keeps an
+              <strong>encrypted copy of your wallet database</strong> on a BSV Association server. This is
+              <strong>on by default</strong>.
+            </p>
+            <p data-i18n-html="backup.private.p2">
+              The copy is encrypted on your device before it is sent, with a key that only your own wallet can derive
+              &mdash; the key your recovery phrase, or your printed shares, restores. We store ciphertext and have no way
+              to decrypt it, so we cannot read your transactions, your balances, or anything else in the backup &mdash;
+              and we cannot restore it for you either. It is also stored under a key derived purely for backup, which
+              cannot be linked to your wallet identity by anyone who does not already hold your wallet's private key.
+            </p>
+            <p data-i18n-html="backup.private.p3">
+              You are in control of it from <strong>Wallet &gt; Settings &gt; Private backup</strong>:
+            </p>
+            <ul>
+              <li data-i18n-html="backup.private.li1">
+                <strong>Back up to server</strong> &mdash; turn uploading off at any time. Nothing further is read from
+                your wallet or sent. What has already been uploaded is left alone.
+              </li>
+              <li data-i18n-html="backup.private.li2">
+                <strong>Delete backup from server</strong> &mdash; permanently removes everything this wallet has
+                uploaded, on every network and including what other devices uploaded, and switches backing up off on
+                <em>this</em> device. If the deletion fails you are told rather than wrongly reassured. Your coins, keys,
+                and recovery phrase are untouched. Note that any other device still set up with this wallet keeps
+                backing up until you switch it off there too, and will upload a fresh copy.
+              </li>
+            </ul>
+            <p data-i18n-html="backup.private.p4">
+              Your browsing history and bookmarks are never included, and your recovery phrase, private keys, and vault
+              passphrase are never sent in any form. Full detail is in the
+              <a href="privacy.html#wallet-backup">Privacy Policy</a>.
+            </p>
+            <div class="warning-box">
+              <p data-i18n-html="backup.private.warning">
+                <strong>Important:</strong> The private backup is not a substitute for your recovery phrase &mdash; it is
+                unreadable without the wallet key that your phrase, or your printed shares, restores. Keep one of them
+                regardless. Equally, if you turn the backup off, be aware that your phrase alone may not be able to
+                recover all of your funds on a new device.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1282,19 +1563,24 @@
         <div class="guide-row">
           <div class="guide-text">
             <h3 data-i18n="export.vs_phrase.heading">Export vs. recovery phrase: what to use when</h3>
-            <p data-i18n="export.vs_phrase.intro">The two backup methods serve different purposes. Use both for the most complete protection.</p>
+            <p data-i18n="export.vs_phrase.intro">These backup methods serve different purposes. Use more than one for the most complete protection.</p>
             <ul>
               <li data-i18n-html="export.vs_phrase.li1">
-                <strong>Recovery phrase / backup shares</strong> &mdash; restores your root key only. Without a database
-                export, your transaction history, UTXOs, and certificates cannot be recovered. There is no
-                chain-scanning or derivation-path recovery process. Use this as your offline safeguard against losing
-                access to your keys entirely.
+                <strong>Recovery phrase / backup shares</strong> &mdash; restores your root key only. On its own it
+                cannot rebuild your transaction history, UTXOs, or certificates, because there is no chain-scanning or
+                derivation-path recovery process. Use this as your offline safeguard against losing access to your keys
+                entirely. Everything else depends on it.
               </li>
               <li data-i18n-html="export.vs_phrase.li2">
                 <strong>Exported database</strong> &mdash; a complete snapshot of your wallet at a point in time,
-                including transaction history, UTXOs, and certificate data. This is the only way to recover your wallet
-                state after data loss. Best suited for moving to a new device or recovering from accidental app data
-                deletion.
+                including transaction history, UTXOs, and certificate data. A file you hold yourself and can restore
+                offline. Best suited for moving to a new device or recovering from accidental app data deletion.
+              </li>
+              <li data-i18n-html="export.vs_phrase.li3">
+                <strong>Private backup to our server</strong> &mdash; the same wallet records, encrypted on your device
+                and kept current automatically, so there is nothing for you to remember to do. On by default, and
+                unreadable without the wallet key that your recovery phrase or printed shares restores. See
+                <a href="#backup">Private backup to our server</a>.
               </li>
             </ul>
             <div class="tip-box">
@@ -1593,9 +1879,10 @@
               They protect different things. Your <strong>recovery phrase</strong> (or backup shares) restores your root
               key only &mdash; there is no chain-scanning or gap-limit derivation process that can reconstruct your
               transaction history or UTXOs from the blockchain. An <strong>exported wallet database</strong> is a full
-              snapshot including all transaction history, UTXOs, and certificates, and is the only way to recover that
-              data after loss. For the strongest protection, keep both: a recovery phrase stored safely offline and a
-              regularly-updated database export in cloud storage.
+              snapshot including all transaction history, UTXOs, and certificates. The app's
+              <a href="#backup">private backup</a> keeps an encrypted copy of those same records on our server
+              automatically, which is what restores them on a new device by default. For the strongest protection, keep
+              a recovery phrase stored safely offline as well as a database export you hold yourself.
             </p>
           </div>
 
@@ -1620,9 +1907,13 @@
           <div class="faq-item">
             <h3 data-i18n="faq.q6.h3">Does BSV Association have access to my keys or browsing data?</h3>
             <p data-i18n-html="faq.q6.p">
-              No. BSV Browser does not collect or transmit your browsing history, wallet keys, or personal data to BSV
-              Association or any other party. Everything stays on your device. See the
-              <a href="privacy.html">Privacy Policy</a> for details.
+              No. Your keys never leave your device, and your browsing history is never collected or transmitted to
+              anyone. There is one thing that does leave: by default the app uploads an
+              <strong>encrypted</strong> copy of your wallet database to a BSV Association server so a new device can
+              be restored. It is encrypted with a key only your own wallet can derive, which we never receive, so we
+              cannot read it &mdash; and you can switch it off or delete it from
+              <strong>Wallet &gt; Settings &gt; Private backup</strong>. See
+              <a href="#backup">Backup &amp; Recovery</a> and the <a href="privacy.html">Privacy Policy</a> for details.
             </p>
           </div>
 
@@ -1649,6 +1940,39 @@
             <p data-i18n-html="faq.q9.p">
               Yes. A desktop version is available at
               <a href="https://desktop.bsvb.tech" target="_blank" rel="noopener">desktop.bsvb.tech</a>.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3 data-i18n="faq.q10.h3">Do I need a hardware key to use the vault, and is there a minimum amount?</h3>
+            <p data-i18n-html="faq.q10.p">
+              A YubiKey 5C-class security key is required &mdash; that is the whole point of the vault, since neither a
+              deposit nor a withdrawal can be made without it. There is <strong>no minimum deposit</strong>; you can
+              move any amount into the vault, down to a single satoshi. The vault is entirely optional, and if you never
+              set one up nothing else about the wallet changes. See <a href="#vault">The Vault</a>.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3 data-i18n="faq.q11.h3">What happens to my vault if I lose my YubiKey?</h3>
+            <p data-i18n-html="faq.q11.p">
+              You use the vault passphrase you chose when you set the vault up. On the Vault screen, tap
+              <strong>Manage &gt; Recover with phrase</strong>, enter the passphrase, and everything in the vault is
+              moved back to your everyday balance without any security key. If you lose
+              <em>both</em> your security key and your vault passphrase, the funds cannot be moved by anyone &mdash;
+              not even by us. Store the passphrase with your recovery phrase, and never with the key itself.
+            </p>
+          </div>
+
+          <div class="faq-item">
+            <h3 data-i18n="faq.q12.h3">Can BSV Association read my private backup?</h3>
+            <p data-i18n-html="faq.q12.p">
+              No. The backup is encrypted on your device with a key only your own wallet can derive, which we never
+              receive, so what we hold is ciphertext we have no means of decrypting. It is also stored under a key
+              derived solely for backup that cannot be linked to your wallet identity. The consequence cuts both ways:
+              we cannot read your backup, and we cannot restore it for you either &mdash; only the wallet key your
+              recovery phrase or printed shares restores can unlock it. You can switch it off or delete it entirely from
+              <strong>Wallet &gt; Settings &gt; Private backup</strong>.
             </p>
           </div>
         </div>

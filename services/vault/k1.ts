@@ -18,7 +18,8 @@ export const K1_LOCK_LEN = 25
 
 /** Conservative estimate, not exact: a real P2PKH unlock measures ~107 bytes
  * (push(≤72-byte DER sig) + push(33-byte compressed pubkey)), matching the
- * proven staging-unlock shape used elsewhere in the vault. DER signatures
+ * staging-unlock shape the legacy reclaim still builds (see transfers.ts's
+ * reclaimStagingOutputs). DER signatures
  * vary between 70 and 72 bytes, so this pins the ceiling rather than the
  * exact length. */
 export const K1_UNLOCK_LEN = 108

@@ -64,7 +64,15 @@ jest.mock('@/hooks/useOnline', () => ({ useOnline: () => mockOnline }))
 
 const mockParams: Record<string, string> = {}
 jest.mock('expo-router', () => ({
-  router: { back: jest.fn(), replace: jest.fn(), navigate: jest.fn(), canGoBack: () => true },
+  // dismissTo is what leaving this screen uses — a bare navigate would re-push
+  // the wallet above the cells being left behind rather than popping them off.
+  router: {
+    back: jest.fn(),
+    replace: jest.fn(),
+    navigate: jest.fn(),
+    dismissTo: jest.fn(),
+    canGoBack: () => true
+  },
   useLocalSearchParams: () => mockParams,
   useFocusEffect: () => {}
 }))

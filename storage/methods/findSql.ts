@@ -253,6 +253,31 @@ export const RELEASE_STRANDED_VAULT_STAGING_SQL = `
   )
 `.trim()
 
+/**
+ * Companion to RELEASE_STRANDED_VAULT_STAGING_SQL: clear a STALE spentBy on
+ * coins that are already spendable again.
+ *
+ * The other arm of the same failure. When the invalid spender's inputs are
+ * restored, updateOutput({spendable: true, spentBy: undefined}) re-lists the
+ * coin — but sqlUpdate drops undefined values, so spentBy keeps pointing at
+ * the failed transaction (which HAS a txid). createAction's reservation check
+ * (markKnownInputsSpent) refuses any input whose spentBy names a tx with a
+ * txid — WITHOUT checking whether that tx is 'failed' — so every later spend
+ * of the coin throws WERR_REVIEW_ACTIONS forever. Same deliberately narrow
+ * predicate: only a 'failed' spender whose req the network rejected outright
+ * ('invalid') and that carries the vault-deposit label.
+ */
+export const RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL = `
+  UPDATE outputs SET spentBy = NULL
+  WHERE spendable = 1 AND spentBy IN (
+    SELECT t.transactionId FROM transactions t
+    JOIN proven_tx_reqs r ON r.txid = t.txid AND r.status = 'invalid'
+    JOIN tx_labels_map m ON m.transactionId = t.transactionId AND m.isDeleted = 0
+    JOIN tx_labels l ON l.txLabelId = m.txLabelId AND l.label = 'vault-deposit'
+    WHERE t.status = 'failed'
+  )
+`.trim()
+
 /** Split a `txid.vout` or `txid:vout` outpoint into its parts, or null. */
 export function splitOutpoint(outpoint: string): { txid: string; vout: number } | null {
   const m = /^([0-9a-fA-F]{64})[.:](\d+)$/.exec(outpoint.trim())

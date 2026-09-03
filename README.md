@@ -10,7 +10,7 @@ A mobile browser that brings identity, micropayments, and BSV-powered websites t
 - Permission-gated access for web apps requesting wallet operations
 - Peer-to-peer payments via MessageBox with identity resolution
 - Local Payments -- BLE (Bluetooth Low Energy) peer-to-peer transfers between nearby phones
-- Legacy Bridge for sending/receiving via traditional P2PKH addresses
+- Paying to, and getting paid at, traditional P2PKH addresses
 - Trust and identity management (BRC-68 certifiers)
 - Shamir's Secret Sharing backup -- split your key into printable QR shares
 - Database import/export for full wallet backup and migration
@@ -110,10 +110,12 @@ bsv-browser/
 │   ├── _layout.tsx         #   Root layout -- context providers + Stack navigator
 │   ├── index.tsx           #   Home / browser screen
 │   ├── auth/               #   Mnemonic & recovery-share auth flows
-│   ├── payments.tsx        #   Peer-to-peer payments (send/receive via MessageBox)
-│   ├── local-payments.tsx  #   Local Payments (BLE P2P transfer between nearby phones)
-│   ├── legacy-payments.tsx #   Legacy Bridge (P2PKH receive addresses + send to address)
-│   ├── transactions.tsx    #   Transaction history
+│   ├── pay.tsx             #   Pay / Get paid -- one screen over three rails
+│   ├── wallet.tsx          #   Balance, the three destinations, and Activity
+│   ├── payments.tsx        #   Retired -> redirects into /pay (MessageBox handles)
+│   ├── local-payments.tsx  #   Retired -> redirects into /pay (nearby, BLE)
+│   ├── legacy-payments.tsx #   Retired -> redirects into /pay (to an address)
+│   ├── transactions.tsx    #   Retired -> redirects to /wallet, where Activity now lives
 │   ├── settings.tsx        #   Settings screen
 │   ├── trust.tsx           #   Trust management
 │   └── wallet-config.tsx   #   Network / wallet config picker
@@ -254,7 +256,7 @@ refactor tab store to use async initialization
 | CWI provider             | `utils/webview/cwiProvider.ts`                                                                      |
 | WebView bridge           | `utils/webview/messageRouter.ts`, `utils/webview/injectedPolyfills.ts`                              |
 | Permissions              | `utils/permissionsManager.ts`, `hooks/usePermissions.ts`                                            |
-| Payments                 | `app/payments.tsx` (P2P), `app/local-payments.tsx` (BLE), `app/legacy-payments.tsx` (Legacy Bridge) |
+| Payments                 | `app/pay.tsx` over `utils/pay/rails/` -- `handle.ts` (P2P), `nearby.ts` (BLE), `address.ts` (P2PKH)  |
 | Backup / recovery        | `utils/backupShares.ts`, `app/auth/scan-shares.tsx`                                                 |
 | DB import/export         | `utils/importDatabases.ts`, `utils/exportDatabases.ts`                                              |
 | Translations             | `context/i18n/translations.tsx` -- add your language code to the table                              |

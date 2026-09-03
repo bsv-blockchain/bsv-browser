@@ -6,6 +6,7 @@ import {
   buildFindSql,
   columnsExcluding,
   rangeReadSql,
+  RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL,
   RELEASE_STRANDED_VAULT_STAGING_SQL,
   spendingReferencesSql,
   splitOutpoint
@@ -1426,8 +1427,13 @@ export class StorageExpoSQLite extends StorageProvider {
   async releaseVaultStagingStrandedByInvalidTx(): Promise<number> {
     if (!this.isAvailable()) await this.makeAvailable()
     const r = await this.getDB().runAsync(RELEASE_STRANDED_VAULT_STAGING_SQL, [])
-    const released = r?.changes ?? 0
-    if (released > 0) console.log('[vault] released %d output(s) stranded by invalid deposit tx2', released)
+    // The other arm: coins already spendable=1 but with a stale spentBy still
+    // naming the failed spender (updateOutput's spentBy: undefined is dropped
+    // by sqlUpdate). createAction refuses those with WERR_REVIEW_ACTIONS, so
+    // they are just as stuck as the spendable=0 arm until cleared.
+    const r2 = await this.getDB().runAsync(RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL, [])
+    const released = (r?.changes ?? 0) + (r2?.changes ?? 0)
+    if (released > 0) console.log('[vault] released %d output(s) stranded by invalid deposit tx', released)
     return released
   }
 

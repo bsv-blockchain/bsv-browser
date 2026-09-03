@@ -6,6 +6,7 @@
  */
 import type { StorageExpoSQLite } from '@/storage'
 import { BackupClient, type DeviceSummary } from './client'
+import type { BackupChain } from './constants'
 import { deriveBackupWallet } from './derive'
 import { RemoteSyncReader } from './RemoteSyncReader'
 
@@ -14,6 +15,8 @@ export interface RestoreDeps {
   storage: StorageExpoSQLite
   /** The wallet's m/0'/0' key, from the mnemonic or from recovery shares. */
   primaryKey: number[]
+  /** The network being restored. Selects the per-network pseudonym and decryption key. */
+  chain: BackupChain
   /** The wallet's real identity key, for the local user record. */
   identityKey: string
   /** Supply exactly one. */
@@ -40,6 +43,7 @@ export interface RestoreResult {
 /** What the user can choose between when more than one device has a backup. */
 export async function listBackups (deps: {
   primaryKey: number[]
+  chain: BackupChain
   baseUrl?: string
   client?: BackupClient
 }): Promise<DeviceSummary[]> {
@@ -54,7 +58,7 @@ export async function listBackups (deps: {
  */
 export async function restoreFromBackup (deps: RestoreDeps): Promise<RestoreResult> {
   const client = resolveClient(deps)
-  const wallet = deriveBackupWallet(deps.primaryKey)
+  const wallet = deriveBackupWallet(deps.primaryKey, deps.chain)
 
   const devices = await client.manifest()
   if (devices.length === 0) {
@@ -79,7 +83,7 @@ export async function restoreFromBackup (deps: RestoreDeps): Promise<RestoreResu
     'backup-restore'
   )
 
-  const reader = new RemoteSyncReader(client, wallet, chosen.deviceId, chosen.generation, settings)
+  const reader = new RemoteSyncReader(client, wallet, deps.chain, chosen.deviceId, chosen.generation, settings)
 
   let chunks = 0
   for (;;) {
@@ -139,10 +143,10 @@ function pickTarget (
   return { deviceId: newestGeneration.deviceId, generation: newestGeneration.generation }
 }
 
-function resolveClient (deps: { primaryKey: number[], baseUrl?: string, client?: BackupClient }): BackupClient {
+function resolveClient (deps: { primaryKey: number[], chain: BackupChain, baseUrl?: string, client?: BackupClient }): BackupClient {
   if (deps.client != null) return deps.client
   if (deps.baseUrl == null || deps.baseUrl === '') {
     throw new Error('restore requires either a client or a baseUrl')
   }
-  return new BackupClient(deps.baseUrl, deps.primaryKey)
+  return new BackupClient(deps.baseUrl, deps.primaryKey, deps.chain)
 }

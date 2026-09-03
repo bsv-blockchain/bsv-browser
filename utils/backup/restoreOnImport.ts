@@ -26,6 +26,7 @@
  */
 import type { StorageExpoSQLite } from '@/storage'
 import { BackupClient, type DeviceSummary } from './client'
+import type { BackupChain } from './constants'
 import { listBackups, restoreFromBackup } from './restore'
 
 export interface RestoreOnImportDeps {
@@ -33,6 +34,8 @@ export interface RestoreOnImportDeps {
   storage: StorageExpoSQLite
   /** The wallet's m/0'/0' key — derives both the backup identity and the decryption key. */
   primaryKey: number[]
+  /** The network being imported. Selects which per-network backup account to consult. */
+  chain: BackupChain
   /** The wallet's real identity key, for the local user record. Never sent. */
   identityKey: string
   /** Backup server origin. Empty or absent means the feature is off for this build. */
@@ -53,12 +56,12 @@ export interface RestoreOnImportResult {
 }
 
 export async function restoreOnImport (deps: RestoreOnImportDeps): Promise<RestoreOnImportResult> {
-  const client = deps.client ?? (hasUrl(deps.baseUrl) ? new BackupClient(deps.baseUrl!, deps.primaryKey) : null)
+  const client = deps.client ?? (hasUrl(deps.baseUrl) ? new BackupClient(deps.baseUrl!, deps.primaryKey, deps.chain) : null)
   if (client == null) {
     return { restored: false, chunks: 0, reason: 'not-configured' }
   }
 
-  const devices = await listBackups({ primaryKey: deps.primaryKey, client })
+  const devices = await listBackups({ primaryKey: deps.primaryKey, chain: deps.chain, client })
   const target = newestTarget(devices)
   if (target == null) {
     // Nothing was ever pushed under this seed. An ordinary outcome — a phrase from a
@@ -70,6 +73,7 @@ export async function restoreOnImport (deps: RestoreOnImportDeps): Promise<Resto
   const result = await restoreFromBackup({
     storage: deps.storage,
     primaryKey: deps.primaryKey,
+    chain: deps.chain,
     identityKey: deps.identityKey,
     client,
     deviceId: target.deviceId,

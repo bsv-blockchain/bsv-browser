@@ -19,7 +19,7 @@ import type { StorageExpoSQLite } from '@/storage'
 import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
 import { BackupClient, BackupHttpError, ERR_SEQ_CONFLICT } from './client'
 import { encodeChunk, estimateEncodedBytes, isEmptyChunk } from './codec'
-import { GENERATION_CHUNK_THRESHOLD, MAX_ITEMS, MAX_ROUGH_SIZE } from './constants'
+import { GENERATION_CHUNK_THRESHOLD, MAX_ITEMS, MAX_ROUGH_SIZE, type BackupChain } from './constants'
 import {
   ENTITY_NAMES,
   ENTITY_TO_CHUNK_ARRAY,
@@ -38,6 +38,12 @@ export interface PushDeps {
   storage: StorageExpoSQLite
   /** The wallet's m/0'/0' key. The backup identity and encryption key derive from it. */
   primaryKey: number[]
+  /**
+   * The network the wallet database belongs to. Folded into the derivation, so each
+   * network pushes to its own server account under its own encryption key — a chunk from
+   * a testnet database can never land in, or restore into, the mainnet log.
+   */
+  chain: BackupChain
   /** The wallet's real identity key — used only for the LOCAL user lookup, never sent. */
   identityKey: string
   /** Supply exactly one of these. */
@@ -78,10 +84,10 @@ export async function pushOnce (deps: PushDeps): Promise<PushResult> {
   }
 
   const client = resolveClient(deps)
-  const pseudonym = backupPseudonym(deps.primaryKey)
+  const pseudonym = backupPseudonym(deps.primaryKey, deps.chain)
   const deviceId = deps.deviceId ?? (await getDeviceId())
 
-  let cursor = await loadCursor(pseudonym, deviceId)
+  let cursor = await loadCursor(deps.chain, pseudonym, deviceId)
 
   const chunk = await deps.storage.getSyncChunk({
     identityKey: deps.identityKey,
@@ -94,18 +100,19 @@ export async function pushOnce (deps: PushDeps): Promise<PushResult> {
   })
 
   if (isEmptyChunk(chunk)) {
-    // Window exhausted. Advance `since` past everything seen and reset the offsets, exactly
-    // as EntitySyncState does when its merge reports done.
+    // Window exhausted. Advance `since` past everything seen and reset the offsets, as
+    // EntitySyncState does when its merge reports done — except that we advance PAST the
+    // high-water mark rather than onto it. See nextInstant.
     const advanced: PushCursor = {
       ...cursor,
-      since: cursor.maxUpdatedAt ?? cursor.since,
+      since: nextInstant(cursor.maxUpdatedAt) ?? cursor.since,
       maxUpdatedAt: undefined,
       offsets: zeroOffsets()
     }
 
     const rotated = shouldRotate(advanced)
     const next = rotated ? rotate(advanced) : advanced
-    await saveCursor(pseudonym, deviceId, next)
+    await saveCursor(deps.chain, pseudonym, deviceId, next)
     return { pushed: 0, bytes: 0, windowClosed: true, rotated }
   }
 
@@ -136,8 +143,8 @@ export async function pushOnce (deps: PushDeps): Promise<PushResult> {
     return { pushed: 0, bytes: 0, windowClosed: false, rotated: false, oversized: true }
   }
 
-  const wallet = deriveBackupWallet(deps.primaryKey)
-  const ciphertext = await encodeChunk(wallet, chunk)
+  const wallet = deriveBackupWallet(deps.primaryKey, deps.chain)
+  const ciphertext = await encodeChunk(wallet, chunk, deps.chain)
 
   const seq = cursor.seq + 1
   let sha: string
@@ -150,7 +157,7 @@ export async function pushOnce (deps: PushDeps): Promise<PushResult> {
       // view rather than retrying into the same wall — this happens after a reinstall that
       // kept the log but lost the cursor, or if two devices shared a device id.
       cursor = await resyncFromServer(client, pseudonym, deviceId, cursor)
-      await saveCursor(pseudonym, deviceId, cursor)
+      await saveCursor(deps.chain, pseudonym, deviceId, cursor)
       return { pushed: 0, bytes: 0, windowClosed: false, rotated: false }
     }
     // Anything else: leave the cursor untouched so the same chunk is retried next pass.
@@ -158,7 +165,7 @@ export async function pushOnce (deps: PushDeps): Promise<PushResult> {
   }
 
   // Only advance after the append succeeded, so a failure never skips records.
-  await saveCursor(pseudonym, deviceId, {
+  await saveCursor(deps.chain, pseudonym, deviceId, {
     ...cursor,
     offsets: advanceOffsets(cursor, chunk),
     maxUpdatedAt: maxUpdatedAt(cursor.maxUpdatedAt, chunk),
@@ -183,11 +190,46 @@ function resolveClient (deps: PushDeps): BackupClient {
   if (deps.baseUrl == null || deps.baseUrl === '') {
     throw new Error('pushOnce requires either a client or a baseUrl')
   }
-  const key = `${deps.baseUrl} ${backupPseudonym(deps.primaryKey)}`
+  const key = `${deps.baseUrl} ${backupPseudonym(deps.primaryKey, deps.chain)}`
   if (cachedClient?.key !== key) {
-    cachedClient = { key, client: new BackupClient(deps.baseUrl, deps.primaryKey) }
+    cachedClient = { key, client: new BackupClient(deps.baseUrl, deps.primaryKey, deps.chain) }
   }
   return cachedClient.client
+}
+
+/**
+ * The instant after a closed window's high-water mark — where the next window starts.
+ *
+ * This is the one place our cursor deliberately DIVERGES from `EntitySyncState`, which
+ * sets `when = maxUpdated_at` exactly. The column comparison is `updated_at >= ?`
+ * (storage/methods/findSql.ts), so starting the next window ON the high-water mark
+ * re-reads every record sharing that timestamp. For the toolbox that is harmless: it
+ * syncs into a storage that merges, so a re-read record is merged again and nothing
+ * accumulates. Our writer is an append-only blob log, where the same re-read becomes a
+ * brand-new encrypted blob — so the boundary record was uploaded again on the very next
+ * window, forever, roughly one duplicate every two passes on a wallet that had gone
+ * quiet. Each duplicate also counted toward GENERATION_CHUNK_THRESHOLD, so an idle
+ * wallet re-uploaded its entire database about every 200 passes.
+ *
+ * Advancing by one millisecond is exact rather than approximate: SQLite stores these
+ * columns as `toISOString()` text, whose resolution IS one millisecond, so this is the
+ * next representable instant and no timestamp can hide in the gap.
+ *
+ * It cannot skip a record either. A window only closes when a chunk comes back empty,
+ * which means nothing at or after `since` remained beyond the offsets — so everything up
+ * to and including the high-water mark had already been read and appended. Anything
+ * written later necessarily carries a greater `updated_at`, because the closing pass runs
+ * at least MIN_PUSH_INTERVAL_MS after the pass that set the mark. (A device clock jumping
+ * backwards could still orphan a record, but that was equally true of `>=` and is not
+ * something a timestamp cursor can defend against.)
+ */
+function nextInstant (iso: string | undefined): string | undefined {
+  if (iso == null) return undefined
+  const t = Date.parse(iso)
+  // An unparseable timestamp must not silently reset the window to the epoch; leaving it
+  // alone means the caller falls back to the existing `since` and re-reads at worst.
+  if (Number.isNaN(t)) return undefined
+  return new Date(t + 1).toISOString()
 }
 
 /** Per-entity consumed counts grow by what this chunk carried. */

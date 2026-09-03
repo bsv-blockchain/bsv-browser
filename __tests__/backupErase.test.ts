@@ -27,7 +27,7 @@ import { isBackupPushEnabled, setBackupPushEnabled } from '@/utils/backup/prefer
 
 const PRIMARY = new PrivateKey(31).toArray('be', 32)
 const OTHER = new PrivateKey(32).toArray('be', 32)
-const PSEUDONYM = backupPseudonym(PRIMARY)
+const PSEUDONYM = backupPseudonym(PRIMARY, 'main')
 const DEVICE = 'e'.repeat(32)
 
 function fakeClient (over: { deleteAccount?: jest.Mock } = {}): any {
@@ -43,6 +43,7 @@ function fakeClient (over: { deleteAccount?: jest.Mock } = {}): any {
 
 const deps = (over: Record<string, unknown> = {}): any => ({
   primaryKey: PRIMARY,
+  chain: 'main',
   client: fakeClient(),
   ...over
 })
@@ -81,34 +82,45 @@ describe('eraseRemoteBackup', () => {
   it('clears the push cursors for this wallet so a re-enable starts a fresh log', async () => {
     // A cursor pointing at seq 9 of generation 3 describes a log the server no longer has.
     // Keeping it would make the next append conflict instead of starting over.
-    await saveCursor(PSEUDONYM, DEVICE, { ...freshCursor(), seq: 9, generation: 3 })
+    await saveCursor('main', PSEUDONYM, DEVICE, { ...freshCursor(), seq: 9, generation: 3 })
 
     await eraseRemoteBackup(deps())
 
-    expect(await AsyncStorage.getItem(cursorKey(PSEUDONYM, DEVICE))).toBeNull()
-    expect(await loadCursor(PSEUDONYM, DEVICE)).toEqual(freshCursor())
+    expect(await AsyncStorage.getItem(cursorKey('main', PSEUDONYM, DEVICE))).toBeNull()
+    expect(await loadCursor('main', PSEUDONYM, DEVICE)).toEqual(freshCursor())
   })
 
   it('leaves another wallet’s cursors alone', async () => {
-    const otherPseudonym = backupPseudonym(OTHER)
-    await saveCursor(otherPseudonym, DEVICE, { ...freshCursor(), seq: 4 })
+    const otherPseudonym = backupPseudonym(OTHER, 'main')
+    await saveCursor('main', otherPseudonym, DEVICE, { ...freshCursor(), seq: 4 })
 
     await eraseRemoteBackup(deps())
 
-    expect(await AsyncStorage.getItem(cursorKey(otherPseudonym, DEVICE))).not.toBeNull()
+    expect(await AsyncStorage.getItem(cursorKey('main', otherPseudonym, DEVICE))).not.toBeNull()
+  })
+
+  it('leaves the same wallet’s other-network cursors alone', async () => {
+    // Erasure is per network account: wiping the mainnet log must not disturb the
+    // testnet log's bookkeeping for the same seed.
+    const testPseudonym = backupPseudonym(PRIMARY, 'test')
+    await saveCursor('test', testPseudonym, DEVICE, { ...freshCursor(), seq: 6 })
+
+    await eraseRemoteBackup(deps())
+
+    expect((await loadCursor('test', testPseudonym, DEVICE)).seq).toBe(6)
   })
 
   it('keeps the cursor when the server rejects the erasure', async () => {
     // Nothing was deleted, so the local bookkeeping must still describe the server's real
     // state — clearing it here would strand the existing log and silently orphan it.
-    await saveCursor(PSEUDONYM, DEVICE, { ...freshCursor(), seq: 5 })
+    await saveCursor('main', PSEUDONYM, DEVICE, { ...freshCursor(), seq: 5 })
     const client = fakeClient({
       deleteAccount: jest.fn().mockRejectedValue(new BackupHttpError(500, 'ERR_INTERNAL', 'nope'))
     })
 
     await expect(eraseRemoteBackup(deps({ client }))).rejects.toBeInstanceOf(BackupHttpError)
 
-    expect((await loadCursor(PSEUDONYM, DEVICE)).seq).toBe(5)
+    expect((await loadCursor('main', PSEUDONYM, DEVICE)).seq).toBe(5)
     // The opt-out stands, though: it was a deliberate act, and re-arming pushing after a
     // failed erasure would upload again while the user still wants their data gone.
     expect(await isBackupPushEnabled()).toBe(false)

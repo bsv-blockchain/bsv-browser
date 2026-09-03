@@ -1,6 +1,7 @@
 {
   "_meta.title": "BSV Browser - Assistance et guide d'utilisation",
   "_meta.description": "Apprenez à naviguer, payer et gérer votre identité avec BSV Browser. Guides pas à pas, conseils et réponses aux questions courantes.",
+
   "_css.nav-sections": "'Sections'",
   "_css.nav-close": "'Fermer'",
 
@@ -86,7 +87,6 @@
   "wallet.overview.heading": "Aperçu du portefeuille",
   "wallet.overview.p1": "Ouvrez le menu et appuyez sur <strong>Portefeuille</strong> pour voir votre portefeuille. L'écran principal affiche :",
   "wallet.overview.li1": "Votre <strong>solde</strong> actuel en satoshis ou en monnaie fiat. Appuyez dessus pour actualiser.",
-  "wallet.overview.li2": "Liens rapides vers <strong>Transactions</strong>, <strong>Paiements</strong> et <strong>Passerelle héritée</strong>.",
   "wallet.overview.li3": "Votre <strong>Clé d'identité</strong> avec un bouton de copie.",
   "wallet.overview.li4": "Une ligne <strong>Paramètres</strong> qui ouvre l'écran complet de configuration du portefeuille.",
   "wallet.config.heading": "Configuration du portefeuille",
@@ -108,22 +108,8 @@
   "wallet.p2p.heading": "Paiements d'identité entre pairs",
   "wallet.p2p.p1": "L'écran <strong>Paiements</strong> vous permet d'envoyer des BSV directement à une autre personne en utilisant son identité plutôt qu'une adresse blockchain brute. Recherchez le destinataire par nom sur le réseau d'identité BSV, saisissez un montant et envoyez.",
   "wallet.p2p.p2": "Les paiements entrants apparaissent dans une liste. Vous pouvez les accepter individuellement, ou appuyer sur <strong>Tout accepter</strong> pour accepter en lot tous les paiements en attente en une seule fois. Une bannière de résultat confirme combien ont été acceptés.",
-  "wallet.legacy.heading": "Passerelle héritée",
-  "wallet.legacy.p1": "Pour la compatibilité avec les portefeuilles et services BSV traditionnels, BSV Browser prend en charge les transactions standard basées sur les adresses via l'écran <strong>Passerelle héritée</strong>.",
-  "wallet.legacy.li1": "<strong>Recevoir :</strong> Une adresse unique et un code QR sont générés chaque jour. Partagez-les avec quiconque souhaite vous envoyer des BSV. Les fonds entrants sont automatiquement détectés et importés dans votre portefeuille &mdash; aucune action manuelle requise.",
-  "wallet.legacy.li2": "<strong>Envoyer :</strong> Saisissez une adresse BSV et un montant, puis confirmez. Vous pouvez également appuyer sur <strong>Envoyer le maximum</strong> pour envoyer l'intégralité de votre solde.",
-  "wallet.legacy.li3": "Utilisez les <strong>boutons fléchés</strong> pour naviguer entre les adresses quotidiennes si vous devez vérifier l'adresse de réception d'un jour précédent.",
-  "wallet.legacy_send.heading": "Envoi depuis la Passerelle héritée",
-  "wallet.legacy_send.p1": "Sous la section de réception, la Passerelle héritée comprend un formulaire d'envoi complet. Saisissez l'adresse BSV du destinataire et le montant que vous souhaitez envoyer.",
-  "wallet.legacy_send.li1": "Appuyez sur <strong>Envoyer des BSV</strong> pour diffuser la transaction.",
   "wallet.legacy_send.li2": "Appuyez sur <strong>Envoyer le maximum</strong> pour envoyer l'intégralité de votre solde disponible.",
   "wallet.legacy_send.p2": "Une bannière de succès ou d'erreur apparaît après l'envoi de la transaction.",
-  "wallet.tx_history.heading": "Historique des transactions",
-  "wallet.tx_history.p1": "L'écran <strong>Transactions</strong> liste toutes vos transactions avec des badges de statut codés par couleur :",
-  "wallet.tx_history.li1": "<strong>Vert</strong> &mdash; Confirmée, acceptée ou en cours de diffusion.",
-  "wallet.tx_history.li2": "<strong>Jaune</strong> &mdash; États en attente (non signée, non finale, pas encore envoyée).",
-  "wallet.tx_history.li3": "<strong>Rouge</strong> &mdash; Transactions échouées.",
-  "wallet.tx_history.p2": "Pour chaque transaction, vous pouvez la consulter sur l'explorateur de blocs, copier les données de transaction brutes, ou annuler les transactions encore en attente.",
 
   "backup.heading": "Sauvegarde et récupération",
   "backup.intro": "Vous détenez les clés, donc vous contrôlez les sauvegardes. BSV Browser vous offre deux méthodes — une phrase de 12 mots et des partages de récupération imprimables — pour que vous puissiez choisir l'approche qui convient le mieux à votre mode de vie.",

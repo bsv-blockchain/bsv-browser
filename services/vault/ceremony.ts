@@ -227,11 +227,22 @@ export class CeremonyController {
    * rather than by caller good behaviour. */
   private static readonly ARM_MAX_MULTIPLE = 3
 
+  /** Deadline for a session-based transport's waiting-for-key. CoreNFC caps a
+   * tag-reader session at 60 s; if nothing (attach OR failure) has arrived in
+   * 65 s the session is dead and its ending was swallowed somewhere below us —
+   * YubiKit drops several such paths internally (readingAvailable false at
+   * start, a session invalidated before it ever became active), so no delegate
+   * fix can make this watchdog redundant. Persistent readers (Android USB)
+   * are exempt: waiting for an insert legitimately has no deadline. */
+  private static readonly DEFAULT_ATTACH_TIMEOUT_MS = 65_000
+
   constructor(
     private deps: {
       getDriver: () => VaultDriver | null
       store: CeremonyStoreView
       retentionMs: number
+      /** Test seam for the waiting-for-key watchdog (session-based only). */
+      attachTimeoutMs?: number
     }
   ) {}
 
@@ -343,6 +354,16 @@ export class CeremonyController {
     this.attachWaiter = undefined
   }
 
+  /** The NFC session died before any key connected (system sheet cancelled,
+   * 60 s CoreNFC timeout, or a session that failed to present at all). Only
+   * meaningful while something is parked on waiting-for-key: neither attach
+   * nor detach fits — a detach here would misreport it as key-removed-mid-op
+   * on a key that was never there. */
+  notifySessionFailed(code: 'user-cancelled' | 'no-key' = 'no-key'): void {
+    this.attachWaiter?.reject(new VaultError(code))
+    this.attachWaiter = undefined
+  }
+
   /**
    * Why this outlives `run()` for a session-based transport: WalletContext's
    * own persistent-reader listener explicitly skips `sessionBased` drivers
@@ -356,6 +377,7 @@ export class CeremonyController {
     session.off?.()
     session.off = driver.onKeyEvent(e => {
       if (e.type === 'attached') this.notifyKeyAttached()
+      else if (e.type === 'session-failed') this.notifySessionFailed(e.code)
       else this.notifyKeyDetached()
     })
   }
@@ -570,7 +592,22 @@ export class CeremonyController {
     this.set({ phase: 'waiting-for-key' })
     const waiter = (this.attachWaiter = defer<void>())
     driver.start()
-    await waiter.promise
+    // Watchdog: a session-based transport that reports NOTHING by the deadline
+    // is dead, and its death was swallowed below us (see
+    // DEFAULT_ATTACH_TIMEOUT_MS). Identity-checked against attachWaiter so a
+    // late firing can never touch a successor ceremony's waiter.
+    const attachDeadline = setTimeout(() => {
+      if (this.attachWaiter === waiter) {
+        this.attachWaiter = undefined
+        waiter.reject(new VaultError('no-key', 'No key connected before the NFC session deadline'))
+      }
+    }, this.deps.attachTimeoutMs ?? CeremonyController.DEFAULT_ATTACH_TIMEOUT_MS)
+    ;(attachDeadline as { unref?: () => void }).unref?.()
+    try {
+      await waiter.promise
+    } finally {
+      clearTimeout(attachDeadline)
+    }
     this.throwIfStale(gen)
     this.set({ phase: 'connecting' })
     const info = await driver.getKeyInfo()

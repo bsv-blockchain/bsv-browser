@@ -32,6 +32,7 @@ import { PrivateKey } from '@bsv/sdk'
 import { printRecoveryShares } from '@/utils/printRecoveryShares'
 import { recordBackupAttestation } from '@/services/vault/backupAttestation'
 import { isBackupPushEnabled, setBackupPushEnabled } from '@/utils/backup/preference'
+import { BACKUP_CHAINS } from '@/utils/backup/constants'
 import { eraseRemoteBackup } from '@/utils/backup/erase'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { TaskBackupPush } from '@/utils/monitor/TaskBackupPush'
@@ -157,7 +158,13 @@ export default function WalletConfigScreen() {
         return
       }
 
-      const { deleted } = await eraseRemoteBackup({ primaryKey, baseUrl: DEFAULT_BACKUP_URL })
+      // Every network's account: each chain derives its own pseudonym, so one seed holds
+      // up to three separate server accounts. Erasure means all of them. A failure on any
+      // chain propagates — a partial erasure must never be reported as done.
+      let deleted = 0
+      for (const chain of BACKUP_CHAINS) {
+        deleted += (await eraseRemoteBackup({ primaryKey, chain, baseUrl: DEFAULT_BACKUP_URL })).deleted
+      }
       setBackupPushOn(false)
       showToast(t('backup_erase_done', { count: deleted }), { type: 'success' })
     } catch (e) {

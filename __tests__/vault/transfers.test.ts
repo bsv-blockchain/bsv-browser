@@ -52,8 +52,8 @@ import {
   VAULT_BASKET,
   VAULT_STAGING_BASKET,
   VAULT_DEPOSIT_MIN,
-  vaultDepositTx2Fee,
   depositToVault,
+  reclaimStagingOutputs,
   withdrawFromVault,
   sweepVaultWithHD,
   getVaultBalance,
@@ -166,8 +166,9 @@ let wallet: VaultWallet & {
   listActions: jest.Mock
 }
 
-/** Staging outputs the fake wallet "holds": created by a deposit's split tx1,
- * consumed when a vault tx2 lists one as its input. */
+/** Staging outputs the fake wallet "holds" — legacy strands from the retired
+ * two-transaction deposit, served to reclaimStagingOutputs' listOutputs call.
+ * Nothing mints these any more; reclaim tests seed them directly. */
 let fakeStagingUtxos: { outpoint: string; satoshis: number; customInstructions?: string }[]
 
 let keyRelease: jest.Mock
@@ -212,24 +213,11 @@ beforeEach(async () => {
   lastSignable = undefined
   lastHandle = undefined
   fakeStagingUtxos = []
-  let stagingSeq = 0
   wallet = {
-    // Default behavior mirrors the two-transaction deposit: a split action
-    // (basket VAULT_STAGING_BASKET output) mints a fake staging UTXO; a vault
-    // action that names one as an explicit input consumes it.
-    createAction: jest.fn(async (args: any) => {
-      const out = args?.outputs?.[0]
-      if (out?.basket === VAULT_STAGING_BASKET) {
-        fakeStagingUtxos.push({
-          outpoint: `${String(stagingSeq++).padStart(2, '0')}${'ab'.repeat(31)}.0`,
-          satoshis: out.satoshis,
-          customInstructions: out.customInstructions
-        })
-      } else if (Array.isArray(args?.inputs) && args.inputs.length > 0) {
-        fakeStagingUtxos = fakeStagingUtxos.filter(u => !args.inputs.some((i: any) => i.outpoint === u.outpoint))
-      }
-      return { txid: 'deadbeef'.repeat(8) }
-    }),
+    // Default: one call builds, signs and broadcasts — the single-transaction
+    // deposit shape (no signableTransaction comes back when the caller
+    // supplies no inputs of its own).
+    createAction: jest.fn(async () => ({ txid: 'deadbeef'.repeat(8) })),
     signAction: jest.fn(async () => ({ txid: 'feedface'.repeat(8) })),
     listOutputs: jest.fn(async (args: any) =>
       args?.basket === VAULT_STAGING_BASKET ? { outputs: [...fakeStagingUtxos] } : { outputs: [] }
@@ -259,41 +247,36 @@ beforeEach(async () => {
 // ── deposit ───────────────────────────────────────────────────────────────
 
 describe('depositToVault', () => {
-  it('rejects below the 10,000 sat floor, without asking for a key', async () => {
-    await expect(depositToVault(wallet, ADMIN, VAULT_DEPOSIT_MIN - 1, REASON)).rejects.toMatchObject({
-      code: 'below-dust'
-    })
-    expect(wallet.createAction).not.toHaveBeenCalled()
-    expect(requestVaultKey).not.toHaveBeenCalled()
-  })
-
-  /** The createAction calls that carry the vault output (deposit tx2). */
+  /** The createAction calls that carry the vault output. */
   const vaultCalls = () =>
     wallet.createAction.mock.calls.map(([a]: [any]) => a).filter((a: any) => a.labels?.includes('vault-deposit'))
-  /** The split calls that carve out staging funding (deposit tx1). */
-  const splitCalls = () =>
-    wallet.createAction.mock.calls.map(([a]: [any]) => a).filter((a: any) => a.labels?.includes('vault-deposit-split'))
 
-  it('splits first: tx1 stages deposit + tx2 fee, tx2 spends only that input with no change', async () => {
+  it('moves the deposit in ONE ordinary transaction: no inputs of ours, no signAction', async () => {
     await seedMeta()
-    await depositToVault(wallet, ADMIN, 250_000, REASON)
+    const { txid } = await depositToVault(wallet, ADMIN, 250_000, REASON)
+    expect(txid).toBe('deadbeef'.repeat(8))
 
-    const [split] = splitCalls()
-    const [vault] = vaultCalls()
-    expect(split).toBeDefined()
-    expect(vault).toBeDefined()
+    // Exactly one createAction — the two-transaction staging deposit is gone.
+    expect(wallet.createAction).toHaveBeenCalledTimes(1)
+    const [args] = wallet.createAction.mock.calls[0]
 
-    // tx1 stages exactly deposit + tx2's fee into the staging basket.
-    expect(split.outputs).toHaveLength(1)
-    expect(split.outputs[0].basket).toBe(VAULT_STAGING_BASKET)
-    expect(split.outputs[0].satoshis).toBe(250_000 + vaultDepositTx2Fee())
+    // Funding is the toolbox's own coin selection: we supply no inputs, so no
+    // signableTransaction step exists and no inputBEEF is needed.
+    expect(args.inputs).toBeUndefined()
+    expect(args.inputBEEF).toBeUndefined()
+    expect(args.outputs).toHaveLength(1)
+    expect(args.outputs[0].basket).toBe(VAULT_BASKET)
+    expect(args.outputs[0].satoshis).toBe(250_000)
+    // The label is load-bearing: the patched toolbox suppresses UTXO-pool
+    // growth for 'vault-deposit', keeping the deposit shape minimal.
+    expect(args.labels).toEqual(expect.arrayContaining(['vault', 'vault-deposit']))
+    expect(args.options).toMatchObject({ randomizeOutputs: false, acceptDelayedBroadcast: false })
 
-    // tx2 names the staging output as its ONLY input and the vault output as
-    // its ONLY output — the exact funding means no change output can appear.
-    expect(vault.inputs).toHaveLength(1)
-    expect(vault.inputs[0].outpoint).toMatch(/\.0$/)
-    expect(vault.outputs).toHaveLength(1)
-    expect(vault.outputs[0].basket).toBe(VAULT_BASKET)
+    // Nothing to sign on our side: the vault output is an output, not a spend.
+    expect(wallet.signAction).not.toHaveBeenCalled()
+    expect(wallet.createSignature).not.toHaveBeenCalled()
+    // And nothing was staged anywhere.
+    expect(wallet.listOutputs).not.toHaveBeenCalled()
   })
 
   it('taps once and releases the key when the deposit is done', async () => {
@@ -312,7 +295,8 @@ describe('depositToVault', () => {
     await expect(depositToVault(wallet, ADMIN, 250_000, REASON)).rejects.toMatchObject({ code: 'user-cancelled' })
     // takeNextIndex never ran: no vault address exists without an unwrap.
     expect((await vaultStore.getMeta())!.nextKeyIndex).toBe(0)
-    // And no money moved: the tap gates the split as well as the derivation.
+    // And no money moved: the tap gates the derivation, and the createAction
+    // only comes after it.
     expect(wallet.createAction).not.toHaveBeenCalled()
   })
 
@@ -321,210 +305,6 @@ describe('depositToVault', () => {
     wallet.createAction.mockRejectedValueOnce(new Error('boom'))
     await expect(depositToVault(wallet, ADMIN, 250_000, REASON)).rejects.toThrow('boom')
     expect(keyRelease).toHaveBeenCalled()
-  })
-
-  it('reuses a stranded staging output of the same amount instead of splitting again', async () => {
-    await seedMeta()
-    await depositToVault(wallet, ADMIN, 250_000, REASON)
-    // Simulate tx2 having failed: put the consumed staging output back.
-    const [split] = splitCalls()
-    fakeStagingUtxos.push({
-      outpoint: `${'cd'.repeat(32)}.0`,
-      satoshis: split.outputs[0].satoshis,
-      customInstructions: split.outputs[0].customInstructions
-    })
-    wallet.createAction.mockClear()
-    await depositToVault(wallet, ADMIN, 250_000, REASON)
-    expect(splitCalls()).toHaveLength(0)
-    expect(vaultCalls()).toHaveLength(1)
-  })
-
-  it('signs tx2 with a wallet-derived staging key when a signable transaction comes back', async () => {
-    await seedMeta()
-    const G = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
-    const stagingTotal = 250_000 + vaultDepositTx2Fee()
-    const stagingScript = new P2PKH().lock(PublicKey.fromString(G).toAddress())
-    const src = new Transaction()
-    src.addOutput({ satoshis: stagingTotal, lockingScript: stagingScript })
-    const stagingOut = {
-      outpoint: `${src.id('hex')}.0`,
-      satoshis: stagingTotal,
-      customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: 'staging cafebabe' })
-    }
-    wallet.listOutputs.mockImplementation(async (args: any) =>
-      args?.basket === VAULT_STAGING_BASKET ? { outputs: [stagingOut], BEEF: stitchBeef([{ src }]) } : { outputs: [] }
-    )
-    wallet.createAction.mockImplementation(async (args: any) => {
-      const tx = new Transaction()
-      tx.addInput({
-        sourceTransaction: src,
-        sourceOutputIndex: 0,
-        sequence: 0xffffffff,
-        unlockingScript: new UnlockingScript([])
-      })
-      tx.addOutput({
-        satoshis: args.outputs[0].satoshis,
-        lockingScript: new P2PKH().lock(Utils.toArray('11'.repeat(20), 'hex'))
-      })
-      return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-dep' } }
-    })
-
-    const { txid } = await depositToVault(wallet, ADMIN, 250_000, REASON)
-    expect(txid).toBe('feedface'.repeat(8))
-
-    // The digest handed to the wallet is a real 32-byte sighash under the
-    // staging key's own derivation.
-    const [sigArgs] = wallet.createSignature.mock.calls[0]
-    expect(sigArgs.keyID).toBe('staging cafebabe')
-    expect(sigArgs.counterparty).toBe('self')
-    expect(sigArgs.hashToDirectlySign).toHaveLength(32)
-
-    // signAction gets a P2PKH-shaped unlock: <sig+hashtype> <staging pubkey>.
-    const [signArgs] = wallet.signAction.mock.calls[0]
-    expect(signArgs.reference).toBe('ref-dep')
-    const unlock = signArgs.spends[0].unlockingScript as string
-    expect(unlock.endsWith(`21${G}`)).toBe(true)
-    // sig push = 70 mock bytes + 0x41 hashtype
-    expect(unlock.startsWith('47')).toBe(true)
-    expect(unlock.slice(2 + 70 * 2, 2 + 71 * 2)).toBe('41')
-  })
-
-  /**
-   * The production 2026-08-21 failure: generateChange's UTXO-pool growth
-   * (targetNetCount) added a funding input and change outputs to tx2, and the
-   * staging signature — built with `otherInputs: []` — committed to a
-   * one-input transaction. Every broadcaster rejected the result with
-   * "false stack entry at end of script execution". The staging unlock must
-   * verify against the REAL interpreter for whatever transaction shape the
-   * toolbox hands back.
-   */
-  const realStagingWallet = (opts: { stagingFirst: boolean }) => {
-    const stagingPriv = PrivateKey.fromRandom()
-    const stagingPub = stagingPriv.toPublicKey().toString()
-    const stagingTotal = 250_000 + vaultDepositTx2Fee()
-    const stagingLock = new P2PKH().lock(stagingPriv.toPublicKey().toAddress())
-    const stagingSrc = new Transaction()
-    stagingSrc.addOutput({ satoshis: stagingTotal, lockingScript: stagingLock })
-    const fundPriv = PrivateKey.fromRandom()
-    const fundSrc = new Transaction()
-    fundSrc.addOutput({ satoshis: 12_730, lockingScript: new P2PKH().lock(fundPriv.toPublicKey().toAddress()) })
-
-    const stagingOut = {
-      outpoint: `${stagingSrc.id('hex')}.0`,
-      satoshis: stagingTotal,
-      customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: 'staging cafebabe' })
-    }
-    wallet.listOutputs.mockImplementation(async (args: any) =>
-      args?.basket === VAULT_STAGING_BASKET
-        ? { outputs: [stagingOut], BEEF: stitchBeef([{ src: stagingSrc }]) }
-        : { outputs: [] }
-    )
-    wallet.getPublicKey.mockImplementation(async (args: any) => ({
-      publicKey: args?.identityKey ? IDENTITY_KEY : stagingPub
-    }))
-    // Sign the digest for real: the wallet signs hashToDirectlySign raw, and
-    // the interpreter's OP_CHECKSIG later re-derives that digest itself.
-    wallet.createSignature.mockImplementation(async (args: any) => {
-      const sig = ECDSA.sign(new BigNumber(args.hashToDirectlySign), stagingPriv, true)
-      return { signature: sig.toDER() as number[] }
-    })
-
-    let signable: Transaction | undefined
-    wallet.createAction.mockImplementation(async (args: any) => {
-      const tx = new Transaction()
-      const addStaging = () =>
-        tx.addInput({ sourceTransaction: stagingSrc, sourceOutputIndex: 0, sequence: 0xffffffff, unlockingScript: new UnlockingScript([]) })
-      const addFunding = () =>
-        tx.addInput({ sourceTransaction: fundSrc, sourceOutputIndex: 0, sequence: 0xffffffff, unlockingScript: new UnlockingScript([]) })
-      if (opts.stagingFirst) {
-        addStaging()
-        addFunding()
-      } else {
-        addFunding()
-        addStaging()
-      }
-      tx.addOutput({
-        satoshis: args.outputs[0].satoshis,
-        lockingScript: new P2PKH().lock(Utils.toArray('11'.repeat(20), 'hex'))
-      })
-      // The change outputs the toolbox splits in (production had eight).
-      tx.addOutput({ satoshis: 5000, lockingScript: new P2PKH().lock(Utils.toArray('22'.repeat(20), 'hex')) })
-      tx.addOutput({ satoshis: 7000, lockingScript: new P2PKH().lock(Utils.toArray('33'.repeat(20), 'hex')) })
-      signable = tx
-      return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-dep' } }
-    })
-    return {
-      stagingSrc,
-      stagingTotal,
-      stagingLock,
-      tx: () => signable!
-    }
-  }
-
-  const validateStagingSpend = (f: ReturnType<typeof realStagingWallet>, expectedIndex: number) => {
-    const [signArgs] = wallet.signAction.mock.calls[0]
-    const keys = Object.keys(signArgs.spends)
-    expect(keys).toEqual([String(expectedIndex)])
-    const tx = f.tx()
-    const ok = new Spend({
-      sourceTXID: f.stagingSrc.id('hex'),
-      sourceOutputIndex: 0,
-      sourceSatoshis: f.stagingTotal,
-      lockingScript: f.stagingLock,
-      transactionVersion: tx.version,
-      otherInputs: tx.inputs.filter((_, i) => i !== expectedIndex),
-      inputIndex: expectedIndex,
-      unlockingScript: UnlockingScript.fromHex(signArgs.spends[expectedIndex].unlockingScript),
-      outputs: tx.outputs,
-      inputSequence: 0xffffffff,
-      lockTime: tx.lockTime
-    }).validate()
-    expect(ok).toBe(true)
-  }
-
-  it('signs a VALID tx2 when the toolbox adds a funding input and change outputs', async () => {
-    await seedMeta()
-    const f = realStagingWallet({ stagingFirst: true })
-    const { txid } = await depositToVault(wallet, ADMIN, 250_000, REASON)
-    expect(txid).toBe('feedface'.repeat(8))
-    validateStagingSpend(f, 0)
-  })
-
-  it('finds the staging input by outpoint even when it is not input 0', async () => {
-    await seedMeta()
-    const f = realStagingWallet({ stagingFirst: false })
-    await depositToVault(wallet, ADMIN, 250_000, REASON)
-    validateStagingSpend(f, 1)
-  })
-
-  it('tries the injected stranded-staging release before splitting again', async () => {
-    await seedMeta()
-    const stagingTotal = 250_000 + vaultDepositTx2Fee()
-    const stranded = {
-      outpoint: `${'cd'.repeat(32)}.0`,
-      satoshis: stagingTotal,
-      customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: 'staging cafebabe' })
-    }
-    // The heal makes the stranded output visible again (spendable=1), which
-    // the fake models by inserting it into the listable set.
-    const releaseStrandedStaging = jest.fn(async () => {
-      fakeStagingUtxos.push(stranded)
-      return 1
-    })
-    await depositToVault(wallet, ADMIN, 250_000, REASON, { releaseStrandedStaging })
-    expect(releaseStrandedStaging).toHaveBeenCalledTimes(1)
-    expect(splitCalls()).toHaveLength(0)
-    expect(vaultCalls()).toHaveLength(1)
-    expect(vaultCalls()[0].inputs[0].outpoint).toBe(stranded.outpoint)
-  })
-
-  it('splits anew when the stranded-staging release frees nothing', async () => {
-    await seedMeta()
-    const releaseStrandedStaging = jest.fn(async () => 0)
-    await depositToVault(wallet, ADMIN, 250_000, REASON, { releaseStrandedStaging })
-    expect(releaseStrandedStaging).toHaveBeenCalledTimes(1)
-    expect(splitCalls()).toHaveLength(1)
-    expect(vaultCalls()).toHaveLength(1)
   })
 
   it('locks the deposit to a child of the tapped key, with v3 customInstructions', async () => {
@@ -594,16 +374,262 @@ describe('depositToVault', () => {
   })
 
   it('reports preparing then broadcasting so the armed sheet shows activity', async () => {
-    // Each note also refreshes the retention window, so a slow staging
-    // broadcast cannot have the armed key relocked out from under the deposit
-    // before it reaches nextDepositTarget.
+    // Each note also refreshes the retention window, so a slow createAction
+    // cannot have the armed key relocked out from under the deposit.
     await seedMeta()
-    realStagingWallet({ stagingFirst: true })
     await depositToVault(wallet, ADMIN, 250_000, REASON)
 
     const phases = (noteVaultProgress as jest.Mock).mock.calls.map(([p]) => p.phase)
     expect(phases[0]).toBe('preparing')
     expect(phases).toContain('broadcasting')
+  })
+})
+
+// ── legacy staging reclaim ────────────────────────────────────────────────
+
+describe('reclaimStagingOutputs', () => {
+  it('returns zero and touches nothing when the staging basket is empty', async () => {
+    const r = await reclaimStagingOutputs(wallet, ADMIN)
+    expect(r).toEqual({ reclaimed: 0, satoshis: 0 })
+    expect(wallet.createAction).not.toHaveBeenCalled()
+    expect(wallet.signAction).not.toHaveBeenCalled()
+    // No ceremony either — staging keys are ordinary wallet keys.
+    expect(requestVaultKey).not.toHaveBeenCalled()
+  })
+
+  it('runs the storage heal BEFORE listing, so spendable=0 strands become visible', async () => {
+    const stranded = {
+      outpoint: `${'cd'.repeat(32)}.0`,
+      satoshis: 250_017,
+      customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: 'staging cafebabe' })
+    }
+    // The heal makes the stranded output visible again (spendable=1), which
+    // the fake models by inserting it into the listable set.
+    const releaseStrandedStaging = jest.fn(async () => {
+      fakeStagingUtxos.push(stranded)
+      return 1
+    })
+    const r = await reclaimStagingOutputs(wallet, ADMIN, { releaseStrandedStaging })
+    expect(releaseStrandedStaging).toHaveBeenCalledTimes(1)
+    expect(releaseStrandedStaging.mock.invocationCallOrder[0]).toBeLessThan(
+      wallet.listOutputs.mock.invocationCallOrder[0]
+    )
+    expect(r.reclaimed).toBe(1)
+    expect(r.satoshis).toBe(250_017)
+    // Direct-txid branch (no signableTransaction came back): the txid is
+    // plumbed through and nothing needed our signature.
+    expect(r.txid).toBe('deadbeef'.repeat(8))
+    expect(wallet.signAction).not.toHaveBeenCalled()
+    const [args] = wallet.createAction.mock.calls[0]
+    expect(args.inputs).toHaveLength(1)
+    expect(args.inputs[0].outpoint).toBe(stranded.outpoint)
+  })
+
+  it('sweeps every decodable staging output regardless of amount, skipping undecodable ones', async () => {
+    fakeStagingUtxos.push(
+      { outpoint: `${'ab'.repeat(32)}.0`, satoshis: 250_017, customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: 'staging aaaa' }) },
+      { outpoint: `${'cd'.repeat(32)}.1`, satoshis: 99_999, customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: 'staging bbbb' }) },
+      { outpoint: `${'ef'.repeat(32)}.0`, satoshis: 12_345, customInstructions: 'not json at all' }
+    )
+    const r = await reclaimStagingOutputs(wallet, ADMIN)
+    expect(r.reclaimed).toBe(2)
+    expect(r.satoshis).toBe(250_017 + 99_999)
+    const [args] = wallet.createAction.mock.calls[0]
+    expect(args.inputs.map((i: any) => i.outpoint)).toEqual([`${'ab'.repeat(32)}.0`, `${'cd'.repeat(32)}.1`])
+    // The reclaim keeps nothing: no outputs of its own, so the whole value
+    // (minus fee) returns as toolbox change to the default basket.
+    expect(args.outputs).toEqual([])
+    // 'vault-deposit' is load-bearing: RELEASE_STRANDED_VAULT_STAGING_SQL's
+    // predicate matches it, so a reclaim that itself fails at broadcast is
+    // healed by the same release next time.
+    expect(args.labels).toEqual(expect.arrayContaining(['vault', 'vault-deposit', 'vault-reclaim']))
+  })
+
+  /**
+   * The production 2026-08-21 failure, migrated from the retired two-tx
+   * deposit: generateChange's UTXO-pool growth added a funding input and
+   * change outputs, and a staging signature built with `otherInputs: []`
+   * committed to a one-input transaction. Every broadcaster rejected the
+   * result with "false stack entry at end of script execution". Each staging
+   * unlock must verify against the REAL interpreter for whatever transaction
+   * shape the toolbox hands back.
+   */
+  const realReclaimWallet = (opts: { stagingFirst: boolean; coins?: number }) => {
+    const coins = Array.from({ length: opts.coins ?? 1 }, (_, k) => {
+      const priv = PrivateKey.fromRandom()
+      const sats = 250_017 + k * 12_345
+      const lock = new P2PKH().lock(priv.toPublicKey().toAddress())
+      const src = new Transaction()
+      src.addOutput({ satoshis: sats, lockingScript: lock })
+      return {
+        priv,
+        pub: priv.toPublicKey().toString(),
+        sats,
+        lock,
+        src,
+        keyID: `staging c0ffee0${k}`,
+        out: {
+          outpoint: `${src.id('hex')}.0`,
+          satoshis: sats,
+          customInstructions: JSON.stringify({ v: 1, type: 'staging', keyID: `staging c0ffee0${k}` })
+        }
+      }
+    })
+    const fundPriv = PrivateKey.fromRandom()
+    const fundSrc = new Transaction()
+    fundSrc.addOutput({ satoshis: 12_730, lockingScript: new P2PKH().lock(fundPriv.toPublicKey().toAddress()) })
+
+    wallet.listOutputs.mockImplementation(async (args: any) =>
+      args?.basket === VAULT_STAGING_BASKET
+        ? { outputs: coins.map(c => c.out), BEEF: stitchBeef(coins) }
+        : { outputs: [] }
+    )
+    wallet.getPublicKey.mockImplementation(async (args: any) =>
+      args?.identityKey
+        ? { publicKey: IDENTITY_KEY }
+        : { publicKey: coins.find(c => c.keyID === args.keyID)!.pub }
+    )
+    // Sign the digest for real: the wallet signs hashToDirectlySign raw, and
+    // the interpreter's OP_CHECKSIG later re-derives that digest itself.
+    wallet.createSignature.mockImplementation(async (args: any) => {
+      const c = coins.find(cc => cc.keyID === args.keyID)!
+      const sig = ECDSA.sign(new BigNumber(args.hashToDirectlySign), c.priv, true)
+      return { signature: sig.toDER() as number[] }
+    })
+
+    let signable: Transaction | undefined
+    wallet.createAction.mockImplementation(async () => {
+      const tx = new Transaction()
+      // Non-default sequence and lockTime, deliberately: the preimage must
+      // read BOTH from the transaction (transfers.ts formats with
+      // input.sequence ?? 0xffffffff and tx.lockTime). A regression that
+      // hardcodes the defaults would sign the wrong digest — the exact
+      // "false stack entry" production failure class — and all-default
+      // fixtures would never catch it.
+      const addStaging = () => {
+        for (const c of coins) {
+          tx.addInput({ sourceTransaction: c.src, sourceOutputIndex: 0, sequence: 0xfffffffe, unlockingScript: new UnlockingScript([]) })
+        }
+      }
+      const addFunding = () =>
+        tx.addInput({ sourceTransaction: fundSrc, sourceOutputIndex: 0, sequence: 0xffffffff, unlockingScript: new UnlockingScript([]) })
+      if (opts.stagingFirst) {
+        addStaging()
+        addFunding()
+      } else {
+        addFunding()
+        addStaging()
+      }
+      // The change outputs the toolbox generates (a reclaim has none of its own).
+      tx.addOutput({ satoshis: 5000, lockingScript: new P2PKH().lock(Utils.toArray('22'.repeat(20), 'hex')) })
+      tx.addOutput({ satoshis: 7000, lockingScript: new P2PKH().lock(Utils.toArray('33'.repeat(20), 'hex')) })
+      tx.lockTime = 700_000
+      signable = tx
+      return { signableTransaction: { tx: tx.toAtomicBEEF(), reference: 'ref-rec' } }
+    })
+    return { coins, tx: () => signable! }
+  }
+
+  const validateReclaimSpends = (f: ReturnType<typeof realReclaimWallet>) => {
+    const [signArgs] = wallet.signAction.mock.calls[0]
+    expect(signArgs.reference).toBe('ref-rec')
+    // Undelayed, pinned: a reclaim must not report success while its
+    // transaction sits in the monitor queue with the broadcast still pending.
+    expect(signArgs.options).toMatchObject({ acceptDelayedBroadcast: false })
+    const tx = f.tx()
+    for (const c of f.coins) {
+      const idx = tx.inputs.findIndex(i => i.sourceTransaction?.id('hex') === c.src.id('hex'))
+      expect(idx).toBeGreaterThanOrEqual(0)
+      expect(signArgs.spends[idx]).toBeDefined()
+      const ok = new Spend({
+        sourceTXID: c.src.id('hex'),
+        sourceOutputIndex: 0,
+        sourceSatoshis: c.sats,
+        lockingScript: c.lock,
+        transactionVersion: tx.version,
+        otherInputs: tx.inputs.filter((_, i) => i !== idx),
+        inputIndex: idx,
+        unlockingScript: UnlockingScript.fromHex(signArgs.spends[idx].unlockingScript),
+        outputs: tx.outputs,
+        inputSequence: tx.inputs[idx].sequence ?? 0xffffffff,
+        lockTime: tx.lockTime
+      }).validate()
+      expect(ok).toBe(true)
+    }
+    expect(Object.keys(signArgs.spends)).toHaveLength(f.coins.length)
+  }
+
+  it('signs a VALID reclaim when the toolbox adds a funding input and change outputs', async () => {
+    const f = realReclaimWallet({ stagingFirst: true })
+    const r = await reclaimStagingOutputs(wallet, ADMIN)
+    expect(r.txid).toBe('feedface'.repeat(8))
+    expect(r.reclaimed).toBe(1)
+    validateReclaimSpends(f)
+  })
+
+  it('finds each staging input by outpoint even when none of them is input 0', async () => {
+    const f = realReclaimWallet({ stagingFirst: false, coins: 2 })
+    const r = await reclaimStagingOutputs(wallet, ADMIN)
+    expect(r.reclaimed).toBe(2)
+    validateReclaimSpends(f)
+  })
+
+  it('signs every staging coin with its OWN key, all valid under the real interpreter', async () => {
+    const f = realReclaimWallet({ stagingFirst: true, coins: 3 })
+    const r = await reclaimStagingOutputs(wallet, ADMIN)
+    expect(r.reclaimed).toBe(3)
+    expect(r.satoshis).toBe(f.coins.reduce((s, c) => s + c.sats, 0))
+    validateReclaimSpends(f)
+  })
+
+  it('aborts the reservation when signing fails, so the coins stay reclaimable', async () => {
+    realReclaimWallet({ stagingFirst: true })
+    wallet.createSignature.mockRejectedValueOnce(new Error('deriver down'))
+    await expect(reclaimStagingOutputs(wallet, ADMIN)).rejects.toThrow('deriver down')
+    expect(wallet.abortAction).toHaveBeenCalledWith({ reference: 'ref-rec' }, ADMIN)
+    expect(wallet.signAction).not.toHaveBeenCalled()
+  })
+
+  it('forwards the listed BEEF as inputBEEF — the signer resolves sources only from it', async () => {
+    realReclaimWallet({ stagingFirst: true })
+    await reclaimStagingOutputs(wallet, ADMIN)
+    // The listOutputs args are load-bearing: without includeCustomInstructions
+    // every coin decodes as null and the reclaim silently recovers NOTHING;
+    // without 'entire transactions' there is no BEEF and the signer throws.
+    const [listArgs] = wallet.listOutputs.mock.calls[0]
+    expect(listArgs.basket).toBe(VAULT_STAGING_BASKET)
+    expect(listArgs.include).toBe('entire transactions')
+    expect(listArgs.includeCustomInstructions).toBe(true)
+    const [args] = wallet.createAction.mock.calls[0]
+    expect(Array.isArray(args.inputBEEF)).toBe(true)
+    expect(args.inputBEEF.length).toBeGreaterThan(0)
+    expect(args.options).toMatchObject({ acceptDelayedBroadcast: false, trustSelf: 'known' })
+  })
+
+  it('heals a stuck reservation (review-actions refusal) by aborting the orphan and retrying once', async () => {
+    // A prior crashed reclaim/deposit left the coin's spentBy pointing at an
+    // orphaned transaction; createAction refuses with WERR_REVIEW_ACTIONS.
+    // The reclaim must free the orphan (same machinery as the withdraw path)
+    // and retry once, not surface the refusal to a fire-and-forget caller.
+    const f = realReclaimWallet({ stagingFirst: true })
+    const orphanTxid = '9a'.repeat(32)
+    const reviewErr = Object.assign(new Error('actions require review'), {
+      reviewActionResults: [{ competingTxs: [orphanTxid] }]
+    })
+    const inner = wallet.createAction.getMockImplementation()!
+    wallet.createAction.mockImplementationOnce(async () => {
+      throw reviewErr
+    })
+    wallet.createAction.mockImplementation(inner)
+    wallet.listActions.mockResolvedValue({
+      actions: [{ txid: orphanTxid, status: 'unsigned', reference: 'ref-orphan' }]
+    })
+
+    const r = await reclaimStagingOutputs(wallet, ADMIN)
+    expect(r.reclaimed).toBe(1)
+    expect(wallet.abortAction).toHaveBeenCalledWith({ reference: 'ref-orphan' }, ADMIN)
+    expect(wallet.createAction).toHaveBeenCalledTimes(2)
+    validateReclaimSpends(f)
   })
 })
 

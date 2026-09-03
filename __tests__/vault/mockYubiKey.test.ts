@@ -70,6 +70,26 @@ describe('mapNativeKeyEvent', () => {
   test('unknown event fails safe to detached', () => {
     expect(mapNativeKeyEvent('garbage', '', '').type).toBe('detached')
   })
+  test("native 'failed:200' (user cancelled the system NFC sheet) maps to session-failed/user-cancelled", () => {
+    expect(mapNativeKeyEvent('failed:200', '', 'nfc')).toEqual({
+      type: 'session-failed',
+      code: 'user-cancelled',
+      serial: undefined,
+      transport: 'nfc'
+    })
+  })
+  test("native 'failed:201' (NFC session timed out) maps to session-failed/no-key", () => {
+    expect(mapNativeKeyEvent('failed:201', '', 'nfc')).toEqual({
+      type: 'session-failed',
+      code: 'no-key',
+      serial: undefined,
+      transport: 'nfc'
+    })
+  })
+  test("any other 'failed:<code>' maps to session-failed/no-key, not detached", () => {
+    expect(mapNativeKeyEvent('failed:202', '', 'nfc')).toMatchObject({ type: 'session-failed', code: 'no-key' })
+    expect(mapNativeKeyEvent('failed:0', '', 'nfc')).toMatchObject({ type: 'session-failed', code: 'no-key' })
+  })
 })
 
 // ── signEcdsa (task 4) ──

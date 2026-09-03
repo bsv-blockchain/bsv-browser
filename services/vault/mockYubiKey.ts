@@ -57,6 +57,14 @@ export class MockYubiKey implements VaultDriver {
     this.pin = pin
   }
 
+  /** Simulate the NFC session dying before any key connected — the system
+   * scan sheet being cancelled (user-cancelled) or timing out / failing to
+   * present (no-key). Mirrors the real adapter's `failed:<code>` events from
+   * the native didFailConnectingNFC handler. */
+  failSession(code: 'user-cancelled' | 'no-key'): void {
+    this.emit({ type: 'session-failed', code, transport: 'mock' })
+  }
+
   /** Simulate a slot that already holds a key (e.g. an age-plugin-yubikey
    * identity in retired slot 82), so readVaultPublicKey reports it occupied
    * before any generate. */

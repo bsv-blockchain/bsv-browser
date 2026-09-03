@@ -44,15 +44,21 @@ export function useDeepLinking() {
         }
       }
 
-      // Navigate to browser if not already there. navigate() NOT push():
-      // +native-intent already routes http launches to '/', so push() here would
-      // mount a SECOND Browser on top (a duplicate that re-renders forever on
-      // every WalletContext/SSE tick = the storm). navigate() alone is not
-      // enough either — a bare NAVIGATE appends a route it cannot see as "the
-      // same one", so /index is declared `dangerouslySingular` in app/_layout to
-      // make this reuse the Browser that is already mounted.
+      // Go to the browser if not already there. NOT push(): +native-intent
+      // already routes http launches to '/', so push() would mount a SECOND
+      // Browser on top (a duplicate that re-renders forever on every
+      // WalletContext/SSE tick = the storm). /index is declared
+      // `dangerouslySingular` in app/_layout so the existing Browser is the one
+      // matched rather than a new one appended.
+      //
+      // dismissTo() NOT navigate(): a bare NAVIGATE onto a route already in the
+      // stack re-pushes it on top instead of walking back to it, so opening a
+      // link from, say, a half-finished payment left `[wallet, pay, index]` —
+      // the browser on screen with the abandoned flow one edge-swipe behind it.
+      // POP_TO truncates at the target, which makes the browser the root it is
+      // supposed to be: there is nothing to go back to from a link tap.
       if (pathnameRef.current !== '/') {
-        router.navigate('/')
+        router.dismissTo('/')
       }
 
       // Create new tab or update active tab with the URL
@@ -76,7 +82,9 @@ export function useDeepLinking() {
       }
     } catch (error) {
       console.error('[Deep Link] Error handling URL:', error)
-      router.navigate('/')
+      // Same reasoning as above: land on the browser as the root, not on top of
+      // whatever the failed link interrupted.
+      router.dismissTo('/')
     }
   }, [])
 

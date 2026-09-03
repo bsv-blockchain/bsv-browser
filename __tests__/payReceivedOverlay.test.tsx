@@ -55,9 +55,19 @@ jest.mock('@/hooks/useConfirmationSound', () => ({
 
 // Done returns the user to the wallet so the updated balance is the next thing
 // they see. Navigation is the overlay's job — call sites only clean up state.
+//
+// It must POP to the wallet, not navigate to it. A bare NAVIGATE on a route
+// that is already in the stack does not walk back to it: StackRouter filters
+// the existing route out and re-pushes it on top, so every screen the payment
+// was made from stays underneath. The user lands on the wallet and can swipe
+// back into the flow they just finished.
 const mockNavigate = jest.fn()
+const mockDismissTo = jest.fn()
 jest.mock('expo-router', () => ({
-  router: { navigate: (href: string) => mockNavigate(href) }
+  router: {
+    navigate: (href: string) => mockNavigate(href),
+    dismissTo: (href: string) => mockDismissTo(href)
+  }
 }))
 
 import React from 'react'
@@ -84,6 +94,7 @@ beforeEach(() => {
   mockMarkDone = undefined
   mockConfirmation.mockClear()
   mockNavigate.mockClear()
+  mockDismissTo.mockClear()
 })
 
 describe('ReceivedOverlay', () => {
@@ -152,9 +163,11 @@ describe('ReceivedOverlay', () => {
     act(() => {
       mockMarkDone?.()
     })
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(mockDismissTo).not.toHaveBeenCalled()
     fireEvent.press(screen.getByLabelText('done'))
-    expect(mockNavigate).toHaveBeenCalledWith('/wallet')
+    expect(mockDismissTo).toHaveBeenCalledWith('/wallet')
+    // Not navigate: that would leave the finished flow on the stack beneath.
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 
   it('sounds the confirmation tone', () => {
@@ -208,6 +221,7 @@ describe('PaymentSuccessOverlay (sent)', () => {
       mockMarkDone?.()
     })
     fireEvent.press(screen.getByLabelText('done'))
-    expect(mockNavigate).toHaveBeenCalledWith('/wallet')
+    expect(mockDismissTo).toHaveBeenCalledWith('/wallet')
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 })

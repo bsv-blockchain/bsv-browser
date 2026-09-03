@@ -197,12 +197,14 @@ class HybridYubiKeyPiv : HybridYubiKeyPivSpec() {
       // PIV CHANGE REFERENCE DATA needs only the old PIN — NOT management-key
       // auth. Gating it on the management key would wrongly reject a key that
       // has a custom management key but a still-default PIN.
-      try {
-        piv.changePin(oldPin.toCharArray(), newPin.toCharArray())
-        "{\"ok\":true}"
-      } catch (e: InvalidPinException) {
-        throw VaultException("pin-invalid", "retries=${e.attemptsRemaining}")
-      }
+      //
+      // A wrong/locked old PIN throws InvalidPinException, which withPiv's
+      // mapError classifies (pin-invalid:retries=N, or pin-locked when no
+      // attempts remain) — same reporting as every other PIN-consuming op on
+      // both platforms. No local catch: one used to force pin-invalid here
+      // even at 0 retries, diverging from mapError and from iOS.
+      piv.changePin(oldPin.toCharArray(), newPin.toCharArray())
+      "{\"ok\":true}"
     }
     return promise
   }

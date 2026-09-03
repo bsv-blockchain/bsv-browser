@@ -1,6 +1,7 @@
-import { PrivateKey } from '@bsv/sdk'
+import { PrivateKey, Utils } from '@bsv/sdk'
 import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
 import { CHUNK_ENTITIES, decodeChunk, emptyChunk, encodeChunk, isEmptyChunk } from '@/utils/backup/codec'
+import { BACKUP_PROTOCOL, backupKeyId } from '@/utils/backup/constants'
 import { deriveBackupWallet } from '@/utils/backup/derive'
 
 const KEY = new PrivateKey(7).toArray('be', 32)
@@ -24,8 +25,8 @@ function chunkWithBinary (): SyncChunk {
 
 describe('backup chunk codec', () => {
   it('round-trips binary fields byte-exactly', async () => {
-    const w = deriveBackupWallet(KEY)
-    const decoded = await decodeChunk(w, await encodeChunk(w, chunkWithBinary()))
+    const w = deriveBackupWallet(KEY, 'main')
+    const decoded = await decodeChunk(w, await encodeChunk(w, chunkWithBinary(), 'main'), 'main')
 
     expect(decoded.provenTxs?.[0].rawTx).toEqual(ALL_BYTES)
     expect(decoded.provenTxs?.[0].merklePath).toEqual(ALL_BYTES)
@@ -34,8 +35,8 @@ describe('backup chunk codec', () => {
   it('returns binary fields as number[], not Uint8Array', async () => {
     // The toolbox's processSyncChunk expects number[]; handing it a typed array would
     // fail deep inside storage rather than here.
-    const w = deriveBackupWallet(KEY)
-    const decoded = await decodeChunk(w, await encodeChunk(w, chunkWithBinary()))
+    const w = deriveBackupWallet(KEY, 'main')
+    const decoded = await decodeChunk(w, await encodeChunk(w, chunkWithBinary(), 'main'), 'main')
 
     expect(Array.isArray(decoded.provenTxs?.[0].rawTx)).toBe(true)
     expect(decoded.provenTxs?.[0].rawTx).not.toBeInstanceOf(Uint8Array)
@@ -46,7 +47,7 @@ describe('backup chunk codec', () => {
     // entities call .getTime() on these columns (EntityProvenTxReq.mergeExisting
     // crashed the real on-device restore on a string), so decode must revive
     // them. Other string fields must stay strings.
-    const w = deriveBackupWallet(KEY)
+    const w = deriveBackupWallet(KEY, 'main')
     const base = emptyChunk('from', 'to', 'user') as unknown as Record<string, unknown>
     base.provenTxReqs = [{
       provenTxReqId: 1,
@@ -60,7 +61,7 @@ describe('backup chunk codec', () => {
       notify: '{}',
       rawTx: ALL_BYTES
     }]
-    const decoded = await decodeChunk(w, await encodeChunk(w, base as unknown as SyncChunk))
+    const decoded = await decodeChunk(w, await encodeChunk(w, base as unknown as SyncChunk, 'main'), 'main')
     const req = decoded.provenTxReqs?.[0] as any
     expect(req.created_at).toBeInstanceOf(Date)
     expect(req.updated_at).toBeInstanceOf(Date)
@@ -75,12 +76,12 @@ describe('backup chunk codec', () => {
     // against ~1.37 as base64. On a realistically sized transaction the payload should
     // therefore land near half the naive size; 0.7 leaves room for the JSON envelope and
     // the 48-byte AES-GCM overhead without making the test meaningless.
-    const w = deriveBackupWallet(KEY)
+    const w = deriveBackupWallet(KEY, 'main')
     const chunk = emptyChunk('a', 'b', 'c') as unknown as Record<string, unknown>
     const rawTx = Array.from({ length: 2048 }, (_, i) => i % 256)
     chunk.provenTxs = [{ provenTxId: 1, txid: 'ab', height: 1, index: 0, rawTx, merklePath: rawTx }]
 
-    const packed = (await encodeChunk(w, chunk as unknown as SyncChunk)).length
+    const packed = (await encodeChunk(w, chunk as unknown as SyncChunk, 'main')).length
     const naive = JSON.stringify(chunk).length
 
     expect(packed).toBeLessThan(naive * 0.7)
@@ -89,8 +90,8 @@ describe('backup chunk codec', () => {
   it('preserves all twelve entity arrays', async () => {
     // The toolbox's consumer loops forever on an undefined entity array rather than
     // treating it as empty, so every one must survive the round trip.
-    const w = deriveBackupWallet(KEY)
-    const decoded = await decodeChunk(w, await encodeChunk(w, chunkWithBinary())) as unknown as Record<string, unknown>
+    const w = deriveBackupWallet(KEY, 'main')
+    const decoded = await decodeChunk(w, await encodeChunk(w, chunkWithBinary(), 'main'), 'main') as unknown as Record<string, unknown>
 
     for (const name of CHUNK_ENTITIES) {
       expect(Array.isArray(decoded[name])).toBe(true)
@@ -98,46 +99,76 @@ describe('backup chunk codec', () => {
   })
 
   it('leaves short numeric arrays untouched in value', async () => {
-    const w = deriveBackupWallet(KEY)
+    const w = deriveBackupWallet(KEY, 'main')
     const chunk = emptyChunk('a', 'b', 'c') as unknown as Record<string, unknown>
     chunk.outputs = [{ outputId: 1, tags: [1, 2, 3], vout: 0 }]
 
-    const decoded = await decodeChunk(w, await encodeChunk(w, chunk as unknown as SyncChunk)) as unknown as Record<string, any>
+    const decoded = await decodeChunk(w, await encodeChunk(w, chunk as unknown as SyncChunk, 'main'), 'main') as unknown as Record<string, any>
     expect(decoded.outputs[0].tags).toEqual([1, 2, 3])
   })
 
   it('round-trips a long non-byte numeric array unchanged', async () => {
     // Values above 255 must not be mistaken for bytes.
-    const w = deriveBackupWallet(KEY)
+    const w = deriveBackupWallet(KEY, 'main')
     const big = Array.from({ length: 64 }, (_, i) => 1000 + i)
     const chunk = emptyChunk('a', 'b', 'c') as unknown as Record<string, unknown>
     chunk.outputs = [{ heights: big }]
 
-    const decoded = await decodeChunk(w, await encodeChunk(w, chunk as unknown as SyncChunk)) as unknown as Record<string, any>
+    const decoded = await decodeChunk(w, await encodeChunk(w, chunk as unknown as SyncChunk, 'main'), 'main') as unknown as Record<string, any>
     expect(decoded.outputs[0].heights).toEqual(big)
   })
 
   it('round-trips a byte-like id array losslessly', async () => {
     // A long array of small integers is packed as bytes; it must come back identical.
-    const w = deriveBackupWallet(KEY)
+    const w = deriveBackupWallet(KEY, 'main')
     const ids = Array.from({ length: 100 }, (_, i) => i % 200)
     const chunk = emptyChunk('a', 'b', 'c') as unknown as Record<string, unknown>
     chunk.outputs = [{ ids }]
 
-    const decoded = await decodeChunk(w, await encodeChunk(w, chunk as unknown as SyncChunk)) as unknown as Record<string, any>
+    const decoded = await decodeChunk(w, await encodeChunk(w, chunk as unknown as SyncChunk, 'main'), 'main') as unknown as Record<string, any>
     expect(decoded.outputs[0].ids).toEqual(ids)
   })
 
   it('produces ciphertext another wallet cannot read', async () => {
-    const mine = deriveBackupWallet(KEY)
-    const theirs = deriveBackupWallet(new PrivateKey(8).toArray('be', 32))
+    const mine = deriveBackupWallet(KEY, 'main')
+    const theirs = deriveBackupWallet(new PrivateKey(8).toArray('be', 32), 'main')
 
-    await expect(decodeChunk(theirs, await encodeChunk(mine, chunkWithBinary()))).rejects.toThrow()
+    await expect(decodeChunk(theirs, await encodeChunk(mine, chunkWithBinary(), 'main'), 'main')).rejects.toThrow()
+  })
+
+  it('produces ciphertext the other network cannot read', async () => {
+    // The network-separation property at the codec level: a blob written on mainnet must
+    // not decrypt for the same seed operating on testnet. The keyID folds the chain into
+    // the derivation, so this fails at decryption, before any label is even consulted.
+    const main = deriveBackupWallet(KEY, 'main')
+    const test = deriveBackupWallet(KEY, 'test')
+
+    await expect(decodeChunk(test, await encodeChunk(main, chunkWithBinary(), 'main'), 'test')).rejects.toThrow()
+  })
+
+  it('rejects a decrypted payload whose chain label disagrees', async () => {
+    // Belt and braces behind the per-chain key: if a future refactor ever collapsed the
+    // derivations back onto one key, the label inside the plaintext still stops a
+    // cross-network restore. Forge that exact scenario: a payload labeled 'test',
+    // encrypted under the MAIN keyID, presented to a 'main' decode.
+    const w = deriveBackupWallet(KEY, 'main')
+    const forged = {
+      chain: 'test',
+      chunk: emptyChunk('a', 'b', 'c')
+    }
+    const { ciphertext } = await w.encrypt({
+      plaintext: Utils.toArray(JSON.stringify(forged), 'utf8'),
+      protocolID: BACKUP_PROTOCOL,
+      keyID: backupKeyId('main'),
+      counterparty: 'self'
+    })
+
+    await expect(decodeChunk(w, ciphertext, 'main')).rejects.toThrow(/chain/)
   })
 
   it('does not leak plaintext into the ciphertext', async () => {
-    const w = deriveBackupWallet(KEY)
-    const ct = await encodeChunk(w, chunkWithBinary())
+    const w = deriveBackupWallet(KEY, 'main')
+    const ct = await encodeChunk(w, chunkWithBinary(), 'main')
 
     expect(Buffer.from(ct).toString('utf8')).not.toContain('deadbeefcafe')
     expect(Buffer.from(ct).toString('utf8')).not.toContain('provenTxs')

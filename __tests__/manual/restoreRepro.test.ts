@@ -117,6 +117,7 @@ const BASE_URL = process.env.RESTORE_BASE_URL ?? 'https://backup.bsvblockchain.t
       const result = await restoreOnImport({
         storage,
         primaryKey,
+        chain: 'main',
         identityKey,
         baseUrl: BASE_URL,
         onProgress: (chunks, total) => {

@@ -1,39 +1,56 @@
 import { PrivateKey } from '@bsv/sdk'
-import { BACKUP_KEY_ID, BACKUP_PROTOCOL } from '@/utils/backup/constants'
+import { BACKUP_PROTOCOL, backupKeyId } from '@/utils/backup/constants'
 import { backupPseudonym, deriveBackupKey, deriveBackupWallet } from '@/utils/backup/derive'
 
 // A deliberately trivial, well-known test key. Never funded, never used on mainnet.
 const TEST_PRIMARY = new PrivateKey(1).toArray('be', 32)
 
 describe('backup key derivation', () => {
-  it('is deterministic for a given primaryKey', () => {
-    expect(backupPseudonym(TEST_PRIMARY)).toBe(backupPseudonym(TEST_PRIMARY))
+  it('is deterministic for a given primaryKey and chain', () => {
+    expect(backupPseudonym(TEST_PRIMARY, 'main')).toBe(backupPseudonym(TEST_PRIMARY, 'main'))
   })
 
   it('produces a compressed public key in hex', () => {
-    expect(backupPseudonym(TEST_PRIMARY)).toMatch(/^0[23][0-9a-f]{64}$/)
+    expect(backupPseudonym(TEST_PRIMARY, 'main')).toMatch(/^0[23][0-9a-f]{64}$/)
   })
 
   it('differs from the wallet identity key', () => {
     // The privacy property in one assertion: the server authenticates the pseudonym and
     // therefore never learns the identity key the rest of the app uses.
     const identity = new PrivateKey(TEST_PRIMARY).toPublicKey().toString()
-    expect(backupPseudonym(TEST_PRIMARY)).not.toBe(identity)
+    expect(backupPseudonym(TEST_PRIMARY, 'main')).not.toBe(identity)
   })
 
   it('differs for a different primaryKey', () => {
-    expect(backupPseudonym(TEST_PRIMARY)).not.toBe(backupPseudonym(new PrivateKey(2).toArray('be', 32)))
+    expect(backupPseudonym(TEST_PRIMARY, 'main'))
+      .not.toBe(backupPseudonym(new PrivateKey(2).toArray('be', 32), 'main'))
   })
 
-  it('MATCHES THE FROZEN VECTOR', () => {
-    // Precomputed and verified identical on @bsv/sdk 2.1.9 and 2.4.0.
+  it('differs for every pair of chains', () => {
+    // The network-separation property. One seed must land on THREE distinct server
+    // accounts, so a testnet wallet can never see — let alone restore — mainnet blobs.
+    const main = backupPseudonym(TEST_PRIMARY, 'main')
+    const test = backupPseudonym(TEST_PRIMARY, 'test')
+    const teratest = backupPseudonym(TEST_PRIMARY, 'teratest')
+
+    expect(main).not.toBe(test)
+    expect(main).not.toBe(teratest)
+    expect(test).not.toBe(teratest)
+  })
+
+  it('MATCHES THE FROZEN VECTORS', () => {
+    // Precomputed straight from @bsv/sdk's KeyDeriver with protocol [2, 'wallet backup log']
+    // and keyID `1 ${chain}`, counterparty 'self'.
     //
-    // If this fails, DO NOT update the expected value. The constant is correct; a mismatch
-    // means derive.ts disagrees with the spec — most likely the protocol tuple, the keyID,
-    // or the counterparty. Changing it here would orphan every backup already written by a
-    // shipped build, silently.
-    expect(backupPseudonym(TEST_PRIMARY))
-      .toBe('03d7a8c57df91ccdc3704f2cc546b0c19b2dcfab5d3e0a438d2a8ae6cd3d3618b5')
+    // If this fails, DO NOT update the expected values. A mismatch means derive.ts disagrees
+    // with the spec — most likely the protocol tuple, the keyID, or the counterparty.
+    // Changing a vector here would orphan every backup already written under it, silently.
+    expect(backupPseudonym(TEST_PRIMARY, 'main'))
+      .toBe('03078c66c5f14fdaab3ab1ec6ce0cd4efd736ad35afeed09826dff11e7ce1b1bdb')
+    expect(backupPseudonym(TEST_PRIMARY, 'test'))
+      .toBe('029a0df2fabef7479dfe7086db3f750fbc526bdac1243f75b9eb8628544a1398cd')
+    expect(backupPseudonym(TEST_PRIMARY, 'teratest'))
+      .toBe('0313989e4302d8b64975fbe2a2d16c344188a94934df028cd57f058f409bf97c5a')
   })
 
   it('recovers the same pseudonym from a share-restored primary key', () => {
@@ -48,25 +65,25 @@ describe('backup key derivation', () => {
     // encoding difference is immaterial — and asserting on it would be asserting on the
     // wrong thing.
     expect(new PrivateKey(recovered).toHex()).toBe(new PrivateKey(TEST_PRIMARY).toHex())
-    expect(backupPseudonym(recovered)).toBe(backupPseudonym(TEST_PRIMARY))
+    expect(backupPseudonym(recovered, 'main')).toBe(backupPseudonym(TEST_PRIMARY, 'main'))
   })
 
   it('derives identically from padded and minimal key encodings', () => {
     // WalletContext's share-restore path calls recoveredKey.toArray() with no padding, so
     // the same key can reach us in either encoding. Both must land on one pseudonym.
     const minimal = new PrivateKey(TEST_PRIMARY).toArray()
-    expect(backupPseudonym(minimal)).toBe(backupPseudonym(TEST_PRIMARY))
+    expect(backupPseudonym(minimal, 'main')).toBe(backupPseudonym(TEST_PRIMARY, 'main'))
   })
 
   it('round-trips encryption with counterparty self', async () => {
-    const w = deriveBackupWallet(TEST_PRIMARY)
+    const w = deriveBackupWallet(TEST_PRIMARY, 'main')
     const plaintext = [1, 2, 3, 4, 5]
 
     const { ciphertext } = await w.encrypt({
-      plaintext, protocolID: BACKUP_PROTOCOL, keyID: BACKUP_KEY_ID, counterparty: 'self',
+      plaintext, protocolID: BACKUP_PROTOCOL, keyID: backupKeyId('main'), counterparty: 'self',
     })
     const { plaintext: out } = await w.decrypt({
-      ciphertext, protocolID: BACKUP_PROTOCOL, keyID: BACKUP_KEY_ID, counterparty: 'self',
+      ciphertext, protocolID: BACKUP_PROTOCOL, keyID: backupKeyId('main'), counterparty: 'self',
     })
 
     expect(out).toEqual(plaintext)
@@ -76,19 +93,35 @@ describe('backup key derivation', () => {
   it('produces ciphertext another wallet cannot read', async () => {
     // What makes the store zero-knowledge: nobody without this seed can derive the key,
     // including the server holding the ciphertext.
-    const mine = deriveBackupWallet(TEST_PRIMARY)
-    const theirs = deriveBackupWallet(new PrivateKey(9).toArray('be', 32))
+    const mine = deriveBackupWallet(TEST_PRIMARY, 'main')
+    const theirs = deriveBackupWallet(new PrivateKey(9).toArray('be', 32), 'main')
 
     const { ciphertext } = await mine.encrypt({
-      plaintext: [9, 9, 9], protocolID: BACKUP_PROTOCOL, keyID: BACKUP_KEY_ID, counterparty: 'self',
+      plaintext: [9, 9, 9], protocolID: BACKUP_PROTOCOL, keyID: backupKeyId('main'), counterparty: 'self',
     })
 
     await expect(theirs.decrypt({
-      ciphertext, protocolID: BACKUP_PROTOCOL, keyID: BACKUP_KEY_ID, counterparty: 'self',
+      ciphertext, protocolID: BACKUP_PROTOCOL, keyID: backupKeyId('main'), counterparty: 'self',
+    })).rejects.toThrow()
+  })
+
+  it('produces ciphertext the SAME wallet on another chain cannot read', async () => {
+    // Cross-network restore must be cryptographically impossible, not merely filtered:
+    // the testnet-derived key must fail to decrypt a mainnet blob outright.
+    const main = deriveBackupWallet(TEST_PRIMARY, 'main')
+    const test = deriveBackupWallet(TEST_PRIMARY, 'test')
+
+    const { ciphertext } = await main.encrypt({
+      plaintext: [1, 2, 3], protocolID: BACKUP_PROTOCOL, keyID: backupKeyId('main'), counterparty: 'self',
+    })
+
+    await expect(test.decrypt({
+      ciphertext, protocolID: BACKUP_PROTOCOL, keyID: backupKeyId('test'), counterparty: 'self',
     })).rejects.toThrow()
   })
 
   it('exposes the private key behind the pseudonym', () => {
-    expect(deriveBackupKey(TEST_PRIMARY).toPublicKey().toString()).toBe(backupPseudonym(TEST_PRIMARY))
+    expect(deriveBackupKey(TEST_PRIMARY, 'main').toPublicKey().toString())
+      .toBe(backupPseudonym(TEST_PRIMARY, 'main'))
   })
 })

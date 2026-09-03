@@ -21,6 +21,8 @@ import PressableScale from '@/components/ui/PressableScale'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { EnrollWizard } from '@/components/vault/EnrollWizard'
 import { useVaultBalance } from '@/hooks/useVaultBalance'
+import { useWallet } from '@/context/WalletContext'
+import { reclaimStagingOutputs, type VaultWallet } from '@/services/vault/transfers'
 import { vaultStore, VaultMeta } from '@/services/vault/vaultStore'
 import { getVaultDriver } from '@/services/vault/driver'
 import { disableVault } from '@/services/vault/VaultKeyService'
@@ -35,6 +37,7 @@ export default function VaultScreen() {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   const { balance, loading, refresh } = useVaultBalance()
+  const { managers, adminOriginator, storage } = useWallet()
   const [enrolled, setEnrolled] = useState<boolean | null>(null)
   const [meta, setMeta] = useState<VaultMeta | null>(null)
   const [enrolling, setEnrolling] = useState(false)
@@ -50,6 +53,31 @@ export default function VaultScreen() {
   useEffect(() => {
     reload()
   }, [reload])
+
+  // Recover money the retired two-transaction deposit stranded (tx1 landed,
+  // tx2 failed). Stranded coins are invisible to BOTH balances — the main
+  // balance counts only the default basket, the vault balance only the vault
+  // basket — so this cannot wait for the user to notice anything. One attempt
+  // per screen visit; a wallet with nothing stranded returns without touching
+  // anything. No ceremony: staging keys are ordinary wallet-derived keys.
+  const pm = managers?.permissionsManager
+  useEffect(() => {
+    if (!enrolled || !pm) return
+    let stale = false
+    reclaimStagingOutputs(pm as unknown as VaultWallet, adminOriginator, {
+      releaseStrandedStaging: storage ? () => storage.releaseVaultStagingStrandedByInvalidTx() : undefined,
+      findSpendingReferences: storage ? outpoints => storage.findSpendingReferences(outpoints) : undefined
+    })
+      .then(r => {
+        if (stale || r.reclaimed === 0) return
+        console.log(`[vault] reclaimed ${r.reclaimed} staging output(s), ${r.satoshis} sats · txid=${r.txid}`)
+        showToast(t('vault_reclaim_done'), { type: 'success' })
+      })
+      .catch(e => console.log('[vault] staging reclaim failed:', (e as Error)?.message))
+    return () => {
+      stale = true
+    }
+  }, [enrolled, pm, adminOriginator, storage])
 
   const onEnrolled = useCallback(async () => {
     setEnrolling(false)

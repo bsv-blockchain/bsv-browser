@@ -34,7 +34,7 @@ function clientWith (
   respond: (call: Call) => Response
 ): { client: BackupClient, calls: Call[] } {
   const calls: Call[] = []
-  const client = new BackupClient(BASE, KEY, (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const client = new BackupClient(BASE, KEY, 'main', (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith('/v1/limits')) return limitsRes()
     const call = { url, init }
@@ -55,7 +55,23 @@ describe('BackupClient identity', () => {
     const { client, calls } = clientWith(() => jsonRes({ seq: 1, sha256: 'ab', size: 3 }, 201))
     await client.append(DEVICE, 1, 1, undefined, [1, 2, 3])
 
-    expect(proofOf(calls[0]).identityKey).toBe(backupPseudonym(KEY))
+    expect(proofOf(calls[0]).identityKey).toBe(backupPseudonym(KEY, 'main'))
+  })
+
+  it('authenticates as a DIFFERENT pseudonym per network', async () => {
+    // Chain-separate server accounts: the testnet client must never present the mainnet
+    // pseudonym, or the two networks' logs would land in one account.
+    const calls: Call[] = []
+    const client = new BackupClient(BASE, KEY, 'test', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/v1/limits')) return limitsRes()
+      calls.push({ url, init })
+      return jsonRes({ seq: 1, sha256: 'ab', size: 3 }, 201)
+    }) as typeof fetch)
+    await client.append(DEVICE, 1, 1, undefined, [1, 2, 3])
+
+    expect(proofOf(calls[0]).identityKey).toBe(backupPseudonym(KEY, 'test'))
+    expect(proofOf(calls[0]).identityKey).not.toBe(backupPseudonym(KEY, 'main'))
   })
 
   it('signs the request URI and the body digest into the action', async () => {
@@ -139,7 +155,7 @@ describe('BackupClient request timeout', () => {
     jest.useFakeTimers()
     try {
       const never = new Promise<Response>(() => {})
-      const client = new BackupClient(BASE, KEY, (async (input: RequestInfo | URL) => {
+      const client = new BackupClient(BASE, KEY, 'main', (async (input: RequestInfo | URL) => {
         if (String(input).endsWith('/v1/limits')) return limitsRes()
         return await never
       }) as typeof fetch)

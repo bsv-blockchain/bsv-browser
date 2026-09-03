@@ -184,7 +184,7 @@ describe('sweepAddress', () => {
     expect(result.importedSatoshis).toBe(1000)
     const [args, originator] = wallet.internalizeAction.mock.calls[0]
     expect(originator).toBe('admin.com')
-    expect(args.description).toBe('Legacy Bridge Payment')
+    expect(args.description).toBe('Payment to your address')
     expect(args.labels).toEqual(['legacy', 'inbound', 'bsvbrowser', ADDRESS, 'ts:1700000000'])
     expect(args.outputs[0]).toMatchObject({
       outputIndex: 0,

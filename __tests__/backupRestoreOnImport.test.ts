@@ -84,6 +84,7 @@ function fakeStorage (expected: number): any {
 
 const deps = (over: Record<string, unknown>): any => ({
   primaryKey: PRIMARY,
+  chain: 'main',
   identityKey: '02' + 'ab'.repeat(32),
   ...over
 })
@@ -110,10 +111,10 @@ describe('restoreOnImport', () => {
   })
 
   it('replays the newest generation of the most recently written device', async () => {
-    const w = deriveBackupWallet(PRIMARY)
+    const w = deriveBackupWallet(PRIMARY, 'main')
     const logs = {
-      [`${OLD_DEVICE}/1`]: [await encodeChunk(w, chunkWithTx('old'))],
-      [`${NEW_DEVICE}/2`]: [await encodeChunk(w, chunkWithTx('new1')), await encodeChunk(w, chunkWithTx('new2'))]
+      [`${OLD_DEVICE}/1`]: [await encodeChunk(w, chunkWithTx('old'), 'main')],
+      [`${NEW_DEVICE}/2`]: [await encodeChunk(w, chunkWithTx('new1'), 'main'), await encodeChunk(w, chunkWithTx('new2'), 'main')]
     }
     const client = fakeClient(
       [
@@ -139,9 +140,9 @@ describe('restoreOnImport', () => {
   })
 
   it('seeds the user row and the source device\'s syncState before the first chunk', async () => {
-    const w = deriveBackupWallet(PRIMARY)
+    const w = deriveBackupWallet(PRIMARY, 'main')
     const client = fakeClient([summary({ deviceId: NEW_DEVICE, generation: 1 })], {
-      [`${NEW_DEVICE}/1`]: [await encodeChunk(w, chunkWithTx('only'))]
+      [`${NEW_DEVICE}/1`]: [await encodeChunk(w, chunkWithTx('only'), 'main')]
     })
     const storage = fakeStorage(1)
     const identityKey = '02' + 'ab'.repeat(32)
@@ -160,12 +161,12 @@ describe('restoreOnImport', () => {
   })
 
   it('reports progress as chunks land', async () => {
-    const w = deriveBackupWallet(PRIMARY)
+    const w = deriveBackupWallet(PRIMARY, 'main')
     const client = fakeClient([summary({})], {
       [`${OLD_DEVICE}/1`]: [
-        await encodeChunk(w, chunkWithTx('a')),
-        await encodeChunk(w, chunkWithTx('b')),
-        await encodeChunk(w, chunkWithTx('c'))
+        await encodeChunk(w, chunkWithTx('a'), 'main'),
+        await encodeChunk(w, chunkWithTx('b'), 'main'),
+        await encodeChunk(w, chunkWithTx('c'), 'main')
       ]
     })
     const seen: Array<[number, number]> = []
@@ -184,10 +185,10 @@ describe('restoreOnImport', () => {
   it('fails the import when the log has a gap', async () => {
     // Half a history is worse than none: the wallet would look healthy while missing the
     // outputs it needs to spend, so this must reach the user as a failure.
-    const w = deriveBackupWallet(PRIMARY)
+    const w = deriveBackupWallet(PRIMARY, 'main')
     const client = fakeClient(
       [summary({})],
-      { [`${OLD_DEVICE}/1`]: [await encodeChunk(w, chunkWithTx('a'))] },
+      { [`${OLD_DEVICE}/1`]: [await encodeChunk(w, chunkWithTx('a'), 'main')] },
       { [`${OLD_DEVICE}/1`]: [{ seq: 2, sha256: 'sha2', prevSha256: 'sha1', size: 1, createdAt: 'z' }] }
     )
 

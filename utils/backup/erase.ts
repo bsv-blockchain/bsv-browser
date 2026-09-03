@@ -23,6 +23,7 @@
  * device can no longer be fully restored, which is why the caller confirms first.
  */
 import { BackupClient } from './client'
+import type { BackupChain } from './constants'
 import { clearCursorsForPseudonym } from './cursor'
 import { backupPseudonym } from './derive'
 import { setBackupPushEnabled } from './preference'
@@ -30,6 +31,8 @@ import { setBackupPushEnabled } from './preference'
 export interface EraseDeps {
   /** The wallet's m/0'/0' key. Derives the pseudonym whose data is erased. */
   primaryKey: number[]
+  /** The network whose backup account is erased. Each network is a separate account. */
+  chain: BackupChain
   /** Supply exactly one of these. */
   baseUrl?: string
   client?: BackupClient
@@ -50,7 +53,7 @@ export async function eraseRemoteBackup (deps: EraseDeps): Promise<EraseResult> 
   const { deleted } = await client.deleteAccount()
 
   // Step 3 — only now that the server really has nothing.
-  await clearCursorsForPseudonym(backupPseudonym(deps.primaryKey))
+  await clearCursorsForPseudonym(deps.chain, backupPseudonym(deps.primaryKey, deps.chain))
 
   return { deleted }
 }
@@ -60,5 +63,5 @@ function resolveClient (deps: EraseDeps): BackupClient {
   if (deps.baseUrl == null || deps.baseUrl === '') {
     throw new Error('eraseRemoteBackup requires either a client or a baseUrl')
   }
-  return new BackupClient(deps.baseUrl, deps.primaryKey)
+  return new BackupClient(deps.baseUrl, deps.primaryKey, deps.chain)
 }

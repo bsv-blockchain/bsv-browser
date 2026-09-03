@@ -11,7 +11,7 @@ const RUN = process.env.RESTORE_REPRO === '1'
     const secret = recoverSecretFromShares(shares)
     if (secret.kind !== 'entropy') throw new Error('legacy')
     const w = recoverMnemonicWallet(Mnemonic.fromEntropy(secret.entropy).toString())
-    const client = new BackupClient('https://backup.bsvblockchain.tech', w.primaryKey)
+    const client = new BackupClient('https://backup.bsvblockchain.tech', w.primaryKey, 'main')
     const devices = await client.manifest()
     console.log('DEVICES:', JSON.stringify(devices))
   })

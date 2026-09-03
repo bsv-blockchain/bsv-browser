@@ -215,11 +215,15 @@ export default function PayScreen() {
    * Back from anywhere on this screen means "back to the wallet" — never to
    * the chooser grid. The grid is a decision the user already made on the way
    * in; stepping back through it makes leaving a two- or three-tap affair.
-   * `navigate` walks back to the wallet when it is in the stack (the normal
-   * case) and pushes it when /pay was deep-linked into directly.
+   *
+   * `dismissTo` pops to the wallet when it is in the stack (the normal case)
+   * and replaces this screen with it when /pay was deep-linked into directly.
+   * Not `navigate`: that re-pushes the wallet above the very cells this is
+   * trying to leave behind, which puts them one edge-swipe away instead of
+   * discarding them.
    */
   const goBack = useCallback(() => {
-    router.navigate('/wallet')
+    router.dismissTo('/wallet')
   }, [])
 
   const grid = () => (

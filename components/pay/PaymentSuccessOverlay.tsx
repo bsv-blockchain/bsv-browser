@@ -97,14 +97,21 @@ export default function PaymentSuccessOverlay({
 
   /**
    * Done means "back to the wallet", uniformly: a completed payment in either
-   * direction ends on the balance it changed. `navigate` walks back to the
-   * wallet screen when it is already in the stack (the common case — Pay/Get
-   * paid are reached from it) rather than stacking a fresh copy, and the wallet
-   * refetches balance and activity on focus.
+   * direction ends on the balance it changed, and the wallet refetches balance
+   * and activity on focus.
+   *
+   * `dismissTo`, NOT `navigate`. Both land on the wallet, but only one of them
+   * clears the flow behind it. A bare NAVIGATE onto a route already in the
+   * stack does not walk back to it — StackRouter filters that route out and
+   * re-pushes it on top, so `[wallet, pay, address-send]` becomes
+   * `[pay, address-send, wallet]` and the finished payment is still sitting
+   * under the user's thumb: one edge-swipe back into a flow they completed.
+   * POP_TO (`dismissTo`) truncates at the target instead, leaving
+   * `[index, wallet]`, so back from here is the browser and nothing else.
    */
   const acknowledge = useCallback(() => {
     onDismiss()
-    router.navigate('/wallet')
+    router.dismissTo('/wallet')
   }, [onDismiss])
 
   const settleIn = reducedMotion

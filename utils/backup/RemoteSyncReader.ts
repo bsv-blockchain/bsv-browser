@@ -14,6 +14,7 @@ import type {
 import type { TableSettings } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/tables'
 import type { BackupClient, LogEntry } from './client'
 import { decodeChunk, emptyChunk } from './codec'
+import type { BackupChain } from './constants'
 
 export class BackupChainError extends Error {
   constructor (message: string) {
@@ -29,6 +30,7 @@ export class RemoteSyncReader {
   constructor (
     private readonly client: BackupClient,
     private readonly wallet: CompletedProtoWallet,
+    private readonly chain: BackupChain,
     private readonly deviceId: string,
     private readonly generation: number,
     private readonly settings: TableSettings
@@ -60,7 +62,7 @@ export class RemoteSyncReader {
 
     const entry = this.entries[this.next++]
     const ciphertext = await this.client.blob(this.deviceId, this.generation, entry.seq)
-    return await decodeChunk(this.wallet, Array.from(ciphertext))
+    return await decodeChunk(this.wallet, Array.from(ciphertext), this.chain)
   }
 
   /** Number of chunks in this generation, once the index has been read. */
