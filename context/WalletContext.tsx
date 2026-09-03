@@ -52,7 +52,6 @@ import {
   refuseRepeatBuild,
   runAutoBuildSequence,
   startMonitorIfCurrent,
-  stopLeftoverMonitor,
   stopMonitorAndDrain
 } from '@/utils/walletLifecycle'
 import {
@@ -1074,10 +1073,13 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({ children =
           // are its fingerprint). Belt to logout's braces: this also covers
           // any future teardown path that resets walletBuilt without stopping
           // the monitor the way rebuildWallet/switchNetwork/logout now do.
-          const hadLeftover = await stopLeftoverMonitor(monitorRef, e =>
-            console.warn('[WalletContext] Failed to stop leftover monitor:', e)
-          )
-          if (hadLeftover) {
+          // Drained, not just stopped: a leftover mid-pass could otherwise
+          // still be touching this same wallet's SQLite file while the new
+          // build's monitor comes up.
+          const leftover = await stopMonitorAndDrain(monitorRef, {
+            warn: (message, error) => console.warn(`[WalletContext] ${message}`, error)
+          })
+          if (leftover !== 'no-monitor') {
             console.warn('[WalletContext] Stopped a leftover monitor from a previous wallet build')
           }
 

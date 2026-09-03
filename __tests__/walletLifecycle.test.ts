@@ -1,5 +1,5 @@
 /**
- * The four double-monitor guards from context/WalletContext.tsx, extracted to
+ * The double-monitor guards from context/WalletContext.tsx, extracted to
  * utils/walletLifecycle.ts after the 2026-08-22 production crash:
  * logout-then-reimport orphaned a running monitor, two monitors landed on one
  * SQLite file, and the resulting "database is locked" contention corrupted the
@@ -15,7 +15,6 @@ import {
   refuseRepeatBuild,
   runAutoBuildSequence,
   startMonitorIfCurrent,
-  stopLeftoverMonitor,
   stopMonitorAndDrain,
   type MonitorLifecycle,
   type Ref
@@ -113,7 +112,7 @@ describe('upstream Monitor contract (what makes the guards necessary)', () => {
   })
 })
 
-describe('logout-then-reimport (guards 1 + 3)', () => {
+describe('logout-then-reimport (drained teardown)', () => {
   it('stops and drains the old monitor before the new one starts', async () => {
     const events: string[] = []
     const oldMonitor = new FakeMonitor('old', events)
@@ -131,8 +130,9 @@ describe('logout-then-reimport (guards 1 + 3)', () => {
     await expect(drain).resolves.toBe('drained')
     expect(monitorRef.current).toBeNull()
 
-    // Re-import: buildWallet finds no leftover and installs the new monitor.
-    await expect(stopLeftoverMonitor(monitorRef)).resolves.toBe(false)
+    // Re-import: buildWallet's leftover check finds nothing and installs the
+    // new monitor.
+    await expect(stopMonitorAndDrain(monitorRef)).resolves.toBe('no-monitor')
     monitorRef.current = newMonitor
     expect(startMonitorIfCurrent(monitorRef, newMonitor)).toBe(true)
 
@@ -143,7 +143,7 @@ describe('logout-then-reimport (guards 1 + 3)', () => {
     expect(newMonitor._tasksRunning).toBe(true)
   })
 
-  it('buildWallet stops a leftover monitor a skipped teardown left behind (the pre-fix logout)', async () => {
+  it('buildWallet stops AND drains a leftover monitor a skipped teardown left behind (the pre-fix logout)', async () => {
     const events: string[] = []
     const orphan = new FakeMonitor('orphan', events)
     const newMonitor = new FakeMonitor('new', events)
@@ -151,18 +151,22 @@ describe('logout-then-reimport (guards 1 + 3)', () => {
     expect(startMonitorIfCurrent(monitorRef, orphan)).toBe(true)
 
     // logout forgets the monitor (the 2026-08-22 bug) — the ref still holds
-    // it when re-import reaches buildWallet, where guard 1 catches it.
-    await expect(stopLeftoverMonitor(monitorRef)).resolves.toBe(true)
+    // it when re-import reaches buildWallet, where the leftover check catches
+    // it. Drained, not just stopped: a mid-pass leftover could otherwise
+    // still be touching the same SQLite file the new build opens.
+    const drain = stopMonitorAndDrain(monitorRef, { timeoutMs: 1_000 })
+    orphan.completeRunLoop()
+    await expect(drain).resolves.toBe('drained')
     expect(monitorRef.current).toBeNull()
     monitorRef.current = newMonitor
     expect(startMonitorIfCurrent(monitorRef, newMonitor)).toBe(true)
 
-    expect(events).toEqual(['start:orphan', 'stop:orphan', 'start:new'])
+    expect(events).toEqual(['start:orphan', 'stop:orphan', 'loop-exit:orphan', 'start:new'])
     expect(orphan._tasksRunning).toBe(false)
     expect(newMonitor._tasksRunning).toBe(true)
   })
 
-  it('stopLeftoverMonitor nulls the ref even when stopTasks throws', async () => {
+  it('stopMonitorAndDrain nulls the ref even when stopTasks throws', async () => {
     const error = new Error('already torn down')
     const warn = jest.fn()
     const monitorRef: Ref<MonitorLifecycle | null> = {
@@ -173,13 +177,15 @@ describe('logout-then-reimport (guards 1 + 3)', () => {
         }
       }
     }
-    await expect(stopLeftoverMonitor(monitorRef, warn)).resolves.toBe(true)
+    // The monitor never started, so there is no run loop to drain past the
+    // failed stop.
+    await expect(stopMonitorAndDrain(monitorRef, { warn })).resolves.toBe('never-started')
     expect(monitorRef.current).toBeNull()
-    expect(warn).toHaveBeenCalledWith(error)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('stopTasks failed'), error)
   })
 })
 
-describe('rebuild inside the deferred-startTasks window (guard 2)', () => {
+describe('rebuild inside the deferred-startTasks window (startMonitorIfCurrent)', () => {
   it('never starts the stopped monitor: the stale deferred callback is refused', async () => {
     const monitor = realMonitor()
     const monitorRef: Ref<MonitorLifecycle | null> = { current: monitor }
@@ -221,7 +227,7 @@ describe('rebuild inside the deferred-startTasks window (guard 2)', () => {
   })
 })
 
-describe('stopMonitorAndDrain (guard 3)', () => {
+describe('stopMonitorAndDrain', () => {
   it('returns no-monitor when nothing is installed', async () => {
     await expect(stopMonitorAndDrain({ current: null })).resolves.toBe('no-monitor')
   })
@@ -271,7 +277,7 @@ describe('stopMonitorAndDrain (guard 3)', () => {
   })
 })
 
-describe('repeat-build guard (guard 4a)', () => {
+describe('repeat-build guard (refuseRepeatBuild)', () => {
   it('refuses build-while-built via walletBuiltRef even from a stale closure', () => {
     const built: Ref<boolean> = { current: false }
     const building: Ref<boolean> = { current: false }
@@ -297,7 +303,7 @@ describe('repeat-build guard (guard 4a)', () => {
   })
 })
 
-describe('auto-build sequence (guard 4b)', () => {
+describe('auto-build sequence (runAutoBuildSequence)', () => {
   /**
    * Builders that transition the shared refs exactly like the real ones in
    * WalletContext, including their own refuseRepeatBuild guard — so these
@@ -395,7 +401,7 @@ describe('auto-build sequence (guard 4b)', () => {
     expect(built.current).toBe(true)
 
     // Simulate the pre-fix fall-through calling the builder directly from a
-    // stale closure: guard 4a inside the builder still refuses it.
+    // stale closure: refuseRepeatBuild inside the builder still refuses it.
     await deps.buildFromRecoveredKey('KLeftoverWif')
     expect(calls).toEqual(['mnemonic:built', 'recovered:refused'])
   })

@@ -1,5 +1,5 @@
 /**
- * Wallet lifecycle guards — the four "double-monitor" defenses used by
+ * Wallet lifecycle guards — the "double-monitor" defenses used by
  * context/WalletContext.tsx, extracted so they can be unit-tested
  * (__tests__/walletLifecycle.test.ts).
  *
@@ -9,15 +9,16 @@
  * ("database is locked") and corrupted its heap. Each guard below closes one
  * path to a second live monitor:
  *
- *  1. stopLeftoverMonitor    — buildWallet stops+nulls any leftover monitor
- *                              before constructing its replacement.
+ *  1. stopMonitorAndDrain    — every teardown path (logout, rebuildWallet,
+ *                              switchNetwork, and buildWallet's leftover check
+ *                              before constructing a replacement) stops the
+ *                              monitor and waits for its run loop to actually
+ *                              exit before storage is destroyed or replaced.
  *  2. startMonitorIfCurrent  — the InteractionManager-deferred startTasks
  *                              callback re-checks identity, because
  *                              Monitor.stopTasks() is only a flag write and
  *                              cannot cancel a start that has not run yet.
- *  3. stopMonitorAndDrain    — logout stops the monitor and waits for its run
- *                              loop to actually exit before storage.destroy().
- *  4. refuseRepeatBuild /    — the builders' repeat-build guard and the
+ *  3. refuseRepeatBuild /    — the builders' repeat-build guard and the
  *     runAutoBuildSequence     auto-build effect's recovered-key fallback read
  *                              walletBuiltRef, never a stale closure's state.
  *
@@ -50,34 +51,7 @@ export interface MonitorLifecycle {
 }
 
 /**
- * Guard 1 — buildWallet's belt-and-braces: if an earlier build's monitor is
- * somehow still installed when a new one is about to be constructed (a
- * teardown path was skipped or raced), stop it and clear the ref.
- *
- * The ref is nulled BEFORE stopTasks so that from the first line no other code
- * path (deferred start, foreground resume, diagnostics) can adopt the dying
- * monitor, even if stopTasks throws.
- *
- * @returns true when a leftover monitor existed (worth logging — with the
- * other guards in place this should never fire).
- */
-export async function stopLeftoverMonitor(
-  monitorRef: Ref<MonitorLifecycle | null>,
-  warn?: (error: unknown) => void
-): Promise<boolean> {
-  const leftover = monitorRef.current
-  if (!leftover) return false
-  monitorRef.current = null
-  try {
-    await leftover.stopTasks()
-  } catch (error) {
-    warn?.(error)
-  }
-  return true
-}
-
-/**
- * Guard 2 — start a monitor's task loop only if it is still the installed one.
+ * Guard — start a monitor's task loop only if it is still the installed one.
  *
  * buildWallet installs the monitor synchronously but defers startTasks past
  * the current interactions (cold-start contention). A rebuild, network switch,
@@ -116,8 +90,10 @@ export const MONITOR_DRAIN_TIMEOUT_MS = 7_000
 export type DrainOutcome = 'no-monitor' | 'never-started' | 'drained' | 'timeout'
 
 /**
- * Guard 3 — logout's teardown: stop the installed monitor and wait for its run
- * loop to actually exit before the caller destroys the storage under it.
+ * Guard — the one teardown for every path that destroys or replaces wallet
+ * storage (logout, rebuildWallet, switchNetwork, and buildWallet's leftover
+ * check): stop the installed monitor and wait for its run loop to actually
+ * exit before the caller proceeds.
  *
  * stopTasks only clears a flag; the loop notices at its next iteration, up to
  * taskRunWaitMsecs (5 s) later, plus however long a task pass is mid-run. A
@@ -171,7 +147,7 @@ export async function stopMonitorAndDrain(
 }
 
 /**
- * Guard 4a — the builders' repeat-build guard.
+ * Guard — the builders' repeat-build guard.
  *
  * Reads the refs at CALL time, so a builder invoked from a stale closure (the
  * auto-build effect's async body, an import screen's captured callback) still
@@ -201,7 +177,7 @@ export interface AutoBuildDeps {
 }
 
 /**
- * Guard 4b — the auto-build effect's decision sequence: mnemonic first,
+ * Guard — the auto-build effect's decision sequence: mnemonic first,
  * recovered key only as a fallback when the mnemonic pass genuinely built
  * nothing.
  *
