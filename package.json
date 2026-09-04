@@ -38,6 +38,7 @@
     "@bsv/backup-cache-client": "^0.1.0",
     "@bsv/btms": "^1.1.0",
     "@bsv/btms-permission-module": "^1.1.0",
+    "@bsv/expo-wallet-toolbox": "0.1.0",
     "@bsv/message-box-client": "^2.2.1",
     "@bsv/sdk": "^2.4.1",
     "@bsv/templates": "^1.10.0",
@@ -180,7 +181,7 @@
       "^expo-sqlite$": "<rootDir>/__tests__/__mocks__/expo-sqlite.js"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/auth)/)",
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/expo-wallet-toolbox|@bsv/auth)/)",
       "/node_modules/react-native-reanimated/plugin/"
     ]
   }
