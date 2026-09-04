@@ -9,6 +9,10 @@
     "LocalPayTransport": {
       "ios": { "language": "swift", "implementationClassName": "HybridLocalPayTransport" },
       "android": { "language": "kotlin", "implementationClassName": "HybridLocalPayTransport" }
+    },
+    "LocalPayBleTransport": {
+      "ios": { "language": "swift", "implementationClassName": "HybridLocalPayBleTransport" },
+      "android": { "language": "kotlin", "implementationClassName": "HybridLocalPayBleTransport" }
     }
   }
 }

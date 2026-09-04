@@ -13,4 +13,8 @@
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
   <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
   <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
+  <!-- BLE is one rung of several; a phone without it still pays by QR
+       (spec 2026-09-02 §8). required="false" keeps the Play listing open
+       to BLE-less devices. -->
+  <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 </manifest>

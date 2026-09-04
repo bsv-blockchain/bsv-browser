@@ -8,10 +8,13 @@
 #pragma once
 
 // Forward declarations of C++ defined types
+// Forward declaration of `HybridLocalPayBleTransportSpec` to properly resolve imports.
+namespace margelo::nitro::localpaytransport { class HybridLocalPayBleTransportSpec; }
 // Forward declaration of `HybridLocalPayTransportSpec` to properly resolve imports.
 namespace margelo::nitro::localpaytransport { class HybridLocalPayTransportSpec; }
 
 // Include C++ defined types
+#include "HybridLocalPayBleTransportSpec.hpp"
 #include "HybridLocalPayTransportSpec.hpp"
 #include <NitroModules/Promise.hpp>
 #include <NitroModules/Result.hpp>
@@ -30,6 +33,8 @@ namespace margelo::nitro::localpaytransport { class HybridLocalPayTransportSpec;
 #include <NitroModules/DateToChronoDate.hpp>
 
 // Forward declarations of Swift defined types
+// Forward declaration of `HybridLocalPayBleTransportSpec_cxx` to properly resolve imports.
+namespace LocalPayTransport { class HybridLocalPayBleTransportSpec_cxx; }
 // Forward declaration of `HybridLocalPayTransportSpec_cxx` to properly resolve imports.
 namespace LocalPayTransport { class HybridLocalPayTransportSpec_cxx; }
 

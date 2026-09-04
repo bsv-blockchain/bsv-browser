@@ -87,6 +87,10 @@
 	<string>This app needs camera access to scan QR codes.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>This app uses Face ID/Touch ID to securely authenticate you and protect your wallet.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>BSV Browser uses Bluetooth to send and receive payments directly between nearby devices.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>BSV Browser uses Bluetooth to send and receive payments directly between nearby devices.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>BSV Browser uses the local network to send and receive payments directly between nearby devices.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

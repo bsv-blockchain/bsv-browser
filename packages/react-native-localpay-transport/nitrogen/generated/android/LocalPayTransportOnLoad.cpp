@@ -15,8 +15,9 @@
 #include <fbjni/fbjni.h>
 #include <NitroModules/HybridObjectRegistry.hpp>
 
-#include "JHybridLocalPayTransportSpec.hpp"
+#include "JHybridLocalPayBleTransportSpec.hpp"
 #include "JFunc_void_std__string.hpp"
+#include "JHybridLocalPayTransportSpec.hpp"
 #include <NitroModules/DefaultConstructableObject.hpp>
 
 namespace margelo::nitro::localpaytransport {
@@ -35,20 +36,35 @@ struct JHybridLocalPayTransportSpecImpl: public jni::JavaClass<JHybridLocalPayTr
     return javaPart->getJHybridLocalPayTransportSpec();
   }
 };
+struct JHybridLocalPayBleTransportSpecImpl: public jni::JavaClass<JHybridLocalPayBleTransportSpecImpl, JHybridLocalPayBleTransportSpec::JavaPart> {
+  static constexpr auto kJavaDescriptor = "Lcom/margelo/nitro/localpaytransport/HybridLocalPayBleTransport;";
+  static std::shared_ptr<JHybridLocalPayBleTransportSpec> create() {
+    static const auto constructorFn = javaClassStatic()->getConstructor<JHybridLocalPayBleTransportSpecImpl::javaobject()>();
+    jni::local_ref<JHybridLocalPayBleTransportSpec::JavaPart> javaPart = javaClassStatic()->newObject(constructorFn);
+    return javaPart->getJHybridLocalPayBleTransportSpec();
+  }
+};
 
 void registerAllNatives() {
   using namespace margelo::nitro;
   using namespace margelo::nitro::localpaytransport;
 
   // Register native JNI methods
-  margelo::nitro::localpaytransport::JHybridLocalPayTransportSpec::CxxPart::registerNatives();
+  margelo::nitro::localpaytransport::JHybridLocalPayBleTransportSpec::CxxPart::registerNatives();
   margelo::nitro::localpaytransport::JFunc_void_std__string_cxx::registerNatives();
+  margelo::nitro::localpaytransport::JHybridLocalPayTransportSpec::CxxPart::registerNatives();
 
   // Register Nitro Hybrid Objects
   HybridObjectRegistry::registerHybridObjectConstructor(
     "LocalPayTransport",
     []() -> std::shared_ptr<HybridObject> {
       return JHybridLocalPayTransportSpecImpl::create();
+    }
+  );
+  HybridObjectRegistry::registerHybridObjectConstructor(
+    "LocalPayBleTransport",
+    []() -> std::shared_ptr<HybridObject> {
+      return JHybridLocalPayBleTransportSpecImpl::create();
     }
   );
 }

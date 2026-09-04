@@ -8,17 +8,18 @@
 #include "LocalPayTransport-Swift-Cxx-Bridge.hpp"
 
 // Include C++ implementation defined types
+#include "HybridLocalPayBleTransportSpecSwift.hpp"
 #include "HybridLocalPayTransportSpecSwift.hpp"
 #include "LocalPayTransport-Swift-Cxx-Umbrella.hpp"
 #include <NitroModules/NitroDefines.hpp>
 
 namespace margelo::nitro::localpaytransport::bridge::swift {
 
-  // pragma MARK: std::function<void()>
-  Func_void create_Func_void(void* NON_NULL swiftClosureWrapper) noexcept {
-    auto swiftClosure = LocalPayTransport::Func_void::fromUnsafe(swiftClosureWrapper);
-    return [swiftClosure = std::move(swiftClosure)]() mutable -> void {
-      swiftClosure.call();
+  // pragma MARK: std::function<void(const std::string& /* result */)>
+  Func_void_std__string create_Func_void_std__string(void* NON_NULL swiftClosureWrapper) noexcept {
+    auto swiftClosure = LocalPayTransport::Func_void_std__string::fromUnsafe(swiftClosureWrapper);
+    return [swiftClosure = std::move(swiftClosure)](const std::string& result) mutable -> void {
+      swiftClosure.call(result);
     };
   }
   
@@ -30,12 +31,28 @@ namespace margelo::nitro::localpaytransport::bridge::swift {
     };
   }
   
-  // pragma MARK: std::function<void(const std::string& /* frameBase64 */)>
-  Func_void_std__string create_Func_void_std__string(void* NON_NULL swiftClosureWrapper) noexcept {
-    auto swiftClosure = LocalPayTransport::Func_void_std__string::fromUnsafe(swiftClosureWrapper);
-    return [swiftClosure = std::move(swiftClosure)](const std::string& frameBase64) mutable -> void {
-      swiftClosure.call(frameBase64);
+  // pragma MARK: std::function<void()>
+  Func_void create_Func_void(void* NON_NULL swiftClosureWrapper) noexcept {
+    auto swiftClosure = LocalPayTransport::Func_void::fromUnsafe(swiftClosureWrapper);
+    return [swiftClosure = std::move(swiftClosure)]() mutable -> void {
+      swiftClosure.call();
     };
+  }
+  
+  // pragma MARK: std::shared_ptr<HybridLocalPayBleTransportSpec>
+  std::shared_ptr<HybridLocalPayBleTransportSpec> create_std__shared_ptr_HybridLocalPayBleTransportSpec_(void* NON_NULL swiftUnsafePointer) noexcept {
+    LocalPayTransport::HybridLocalPayBleTransportSpec_cxx swiftPart = LocalPayTransport::HybridLocalPayBleTransportSpec_cxx::fromUnsafe(swiftUnsafePointer);
+    return std::make_shared<margelo::nitro::localpaytransport::HybridLocalPayBleTransportSpecSwift>(swiftPart);
+  }
+  void* NON_NULL get_std__shared_ptr_HybridLocalPayBleTransportSpec_(std__shared_ptr_HybridLocalPayBleTransportSpec_ cppType) {
+    std::shared_ptr<margelo::nitro::localpaytransport::HybridLocalPayBleTransportSpecSwift> swiftWrapper = std::dynamic_pointer_cast<margelo::nitro::localpaytransport::HybridLocalPayBleTransportSpecSwift>(cppType);
+    #ifdef NITRO_DEBUG
+    if (swiftWrapper == nullptr) [[unlikely]] {
+      throw std::runtime_error("Class \"HybridLocalPayBleTransportSpec\" is not implemented in Swift!");
+    }
+    #endif
+    LocalPayTransport::HybridLocalPayBleTransportSpec_cxx& swiftPart = swiftWrapper->getSwiftPart();
+    return swiftPart.toUnsafe();
   }
   
   // pragma MARK: std::shared_ptr<HybridLocalPayTransportSpec>

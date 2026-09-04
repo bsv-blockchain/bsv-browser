@@ -27,7 +27,6 @@ import { VaultProvider } from '@/context/VaultContext'
 import { VaultCeremonySheet } from '@/components/vault/VaultCeremonySheet'
 import { ToastHost, showToast } from '@/components/ui/Toast'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
-import DefaultBrowserPrompt from '@/components/onboarding/DefaultBrowserPrompt'
 import { LanguageProvider } from '@/context/i18n/translations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/onboarding/Web3BenefitsModalHandler'
@@ -135,7 +134,6 @@ export default function RootLayout() {
                           <DeepLinkHandler />
                           <Web3BenefitsModalHandler />
                           {/* <TranslationTester /> */}
-                          <DefaultBrowserPrompt />
                           <PermissionSheet />
                           <VaultCeremonySheet />
                           <LocalPayNotificationBridge />

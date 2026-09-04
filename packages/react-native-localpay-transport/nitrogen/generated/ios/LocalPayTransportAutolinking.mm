@@ -11,6 +11,7 @@
 #import <type_traits>
 
 #include "HybridLocalPayTransportSpecSwift.hpp"
+#include "HybridLocalPayBleTransportSpecSwift.hpp"
 
 @interface LocalPayTransportAutolinking : NSObject
 @end
@@ -25,6 +26,13 @@
     "LocalPayTransport",
     []() -> std::shared_ptr<HybridObject> {
       std::shared_ptr<HybridLocalPayTransportSpec> hybridObject = LocalPayTransport::LocalPayTransportAutolinking::createLocalPayTransport();
+      return hybridObject;
+    }
+  );
+  HybridObjectRegistry::registerHybridObjectConstructor(
+    "LocalPayBleTransport",
+    []() -> std::shared_ptr<HybridObject> {
+      std::shared_ptr<HybridLocalPayBleTransportSpec> hybridObject = LocalPayTransport::LocalPayTransportAutolinking::createLocalPayBleTransport();
       return hybridObject;
     }
   );

@@ -6,13 +6,15 @@
     and dev-physical archive with -configuration Debug). Release keeps
     BSVBrowser.entitlements.
 
-    Identical to Release except that com.apple.developer.web-browser is absent.
-    That entitlement is approved for the App ID and the hand-managed App Store
-    profile carries it, but the dev profiles use remote credentials and Expo
-    mints an AdHoc profile without the capability, so Xcode refuses to archive:
-
-      Provisioning Profile "*[expo] org.bsvassociation.browser AdHoc ..." does
-      not support the Default Web Browser capability.
+    Now byte-identical to Release: the split existed only because
+    com.apple.developer.web-browser could not appear in Debug (Expo mints an
+    AdHoc profile without the Default Web Browser capability, and Xcode refuses
+    to archive). That entitlement was dropped from the app entirely in favour of
+    the BLE local-payment rung, which cannot coexist with it — linking
+    CoreBluetooth makes ITMS-90683 demand NSBluetoothAlwaysUsageDescription, and
+    that purpose string is one of the seven that get a browser-entitled app
+    rejected. Kept as a separate file because the Xcode project references it
+    per-configuration; collapse it only alongside a pbxproj change.
 
     NFC reader-session formats MUST stay — that is the YubiKey transport on iOS,
     so dropping it here would break the vault ceremony this build exists to test.

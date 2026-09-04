@@ -23,4 +23,16 @@ public final class LocalPayTransportAutolinking {
   public static func isLocalPayTransportRecyclable() -> Bool {
     return HybridLocalPayTransport.self is any RecyclableView.Type
   }
+  
+  public static func createLocalPayBleTransport() -> bridge.std__shared_ptr_HybridLocalPayBleTransportSpec_ {
+    let hybridObject = HybridLocalPayBleTransport()
+    return { () -> bridge.std__shared_ptr_HybridLocalPayBleTransportSpec_ in
+      let __cxxWrapped = hybridObject.getCxxWrapper()
+      return __cxxWrapped.getCxxPart()
+    }()
+  }
+  
+  public static func isLocalPayBleTransportRecyclable() -> Bool {
+    return HybridLocalPayBleTransport.self is any RecyclableView.Type
+  }
 }

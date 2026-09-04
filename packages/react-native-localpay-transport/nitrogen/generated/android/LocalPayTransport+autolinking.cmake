@@ -33,8 +33,10 @@ target_sources(
   # Autolinking Setup
   ../nitrogen/generated/android/LocalPayTransportOnLoad.cpp
   # Shared Nitrogen C++ sources
+  ../nitrogen/generated/shared/c++/HybridLocalPayBleTransportSpec.cpp
   ../nitrogen/generated/shared/c++/HybridLocalPayTransportSpec.cpp
   # Android-specific Nitrogen C++ sources
+  ../nitrogen/generated/android/c++/JHybridLocalPayBleTransportSpec.cpp
   ../nitrogen/generated/android/c++/JHybridLocalPayTransportSpec.cpp
 )
 

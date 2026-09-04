@@ -54,6 +54,8 @@ android {
 
 dependencies {
   implementation 'com.google.android.gms:play-services-nearby:19.3.0'
+  // Plain-JVM unit tests for BleGattProfile (no android.* imports there on purpose).
+  testImplementation 'junit:junit:4.13.2'
   implementation project(':react-native-nitro-modules')
   // For < 0.71, this will be from the local maven repo; for > 0.71 this is
   // replaced by `com.facebook.react:react-android:$version` by the react
