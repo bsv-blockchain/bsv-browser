@@ -251,7 +251,7 @@ refactor tab store to use async initialization
 | ------------------------ | --------------------------------------------------------------------------------------------------- |
 | Adding a new screen      | `app/` -- add a new `.tsx` file; Expo Router picks it up automatically                              |
 | Modifying browser chrome | `components/browser/`                                                                               |
-| Wallet logic             | `context/WalletContext.tsx`, `utils/simpleWalletBuilder.ts`, `storage/`                             |
+| Wallet logic             | `context/WalletContext.tsx`, `storage/`                                                             |
 | Auth / mnemonic          | `app/auth/mnemonic.tsx`, `utils/mnemonicWallet.ts`                                                  |
 | CWI provider             | `utils/webview/cwiProvider.ts`                                                                      |
 | WebView bridge           | `utils/webview/messageRouter.ts`, `utils/webview/injectedPolyfills.ts`                              |
