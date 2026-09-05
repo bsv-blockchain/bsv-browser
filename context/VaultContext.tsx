@@ -16,7 +16,7 @@ import { CeremonyState } from '@/services/vault/ceremony'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
 import { showToast } from '@/components/ui/Toast'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 
 interface VaultContextValue {
   state: CeremonyState

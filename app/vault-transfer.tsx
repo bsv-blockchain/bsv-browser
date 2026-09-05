@@ -36,7 +36,7 @@ import { VaultError } from '@/services/vault/types'
 import { haptics } from '@/hooks/useHaptics'
 import { showToast } from '@/components/ui/Toast'
 import { showAlert } from '@/components/ui/AlertCard'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 

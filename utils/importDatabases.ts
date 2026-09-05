@@ -10,7 +10,7 @@ import {
   selectLatestDb,
   parseTimestampFromFilename
 } from './walletDbRegistry'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 import { showAlert } from '@/components/ui/AlertCard'
 import { showToast } from '@/components/ui/Toast'
 

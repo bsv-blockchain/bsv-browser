@@ -29,7 +29,7 @@ import { useLocalStorage } from '@/context/LocalStorageProvider'
 import { disableVault, recoverVaultHD } from '@/services/vault/VaultKeyService'
 import { sweepVaultWithHD, type VaultWallet } from '@/services/vault/transfers'
 import { VaultError } from '@/services/vault/types'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 

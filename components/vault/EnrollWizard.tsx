@@ -31,7 +31,7 @@ import { printRecoveryShares } from '@/utils/printRecoveryShares'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
 import { showToast } from '@/components/ui/Toast'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 import { PhraseBackupSheet } from './PhraseBackupSheet'
 import {
   readBackupAttestation,

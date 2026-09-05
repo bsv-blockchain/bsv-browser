@@ -10,7 +10,7 @@ jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }))
 // initialised as a side effect of importing translations.tsx — has to be
 // running. That module also detects a device locale; in this Jest environment
 // no locale is found, so it falls back to 'en', which is what these tests need.
-import '@/context/i18n/translations'
+import '@/context/i18n/browserTranslations'
 
 import React from 'react'
 import { fireEvent, render } from '@testing-library/react-native'
