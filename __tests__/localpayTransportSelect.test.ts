@@ -6,7 +6,7 @@ import { requestNearbyPermissions } from '@/utils/localpay/transport/nearbyPermi
 
 let mockIsSupported = true
 
-jest.mock('react-native-localpay-transport', () => ({
+jest.mock('@bsv/react-native-localpay-transport', () => ({
   getLocalPayTransport: () => ({ isSupported: () => mockIsSupported })
 }))
 

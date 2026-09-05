@@ -1,5 +1,5 @@
 import { Platform } from 'react-native'
-import { getLocalPayTransport } from 'react-native-localpay-transport'
+import { getLocalPayTransport } from '@bsv/react-native-localpay-transport'
 import { CAP_AWDL, CAP_NEARBY, type Session } from '../session'
 
 export type TransportKind = 'awdl' | 'nearby' | 'qr'
