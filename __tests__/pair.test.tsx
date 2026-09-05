@@ -25,7 +25,7 @@ import { WalletClient } from '@bsv/sdk'
 import PairScreen from '@/app/pair'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
 import { VaultAccessDenied } from '@/services/vault/guard'
-import type { ConnectParams } from '@/context/WalletConnectionContext'
+import type { ConnectParams } from '@bsv/expo-wallet-toolbox/core/context/WalletConnectionContext'
 
 // The wallet the screen is handed — a stand-in for the real
 // WalletPermissionsManager. Only `getPublicKey` needs to exist: guardVaultAccess's
@@ -40,7 +40,7 @@ jest.mock('@/context/WalletContext', () => ({
 }))
 
 const mockConnect = jest.fn(async (_params: ConnectParams, _wallet: WalletClient) => {})
-jest.mock('@/context/WalletConnectionContext', () => ({
+jest.mock('@bsv/expo-wallet-toolbox/core/context/WalletConnectionContext', () => ({
   useWalletConnection: () => ({
     status: 'idle',
     sessionMeta: undefined,

@@ -19,7 +19,7 @@ import {
 } from '@/shared/constants'
 
 import { formatAmount, parseDisplayToSatoshis, getUnitLabel } from '@/utils/amountFormatHelpers'
-import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import { ExchangeRateContext } from '@bsv/expo-wallet-toolbox/core/context/ExchangeRateContext'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
 import { showAlert } from '@/components/ui/AlertCard'

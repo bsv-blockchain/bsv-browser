@@ -15,7 +15,7 @@ let mockVaultPhase: string
 jest.mock('@/context/WalletContext', () => ({
   useWallet: () => mockWalletCtx
 }))
-jest.mock('@/context/VaultContext', () => ({
+jest.mock('@bsv/expo-wallet-toolbox/core/context/VaultContext', () => ({
   useVault: () => ({ state: { phase: mockVaultPhase }, submitPin: () => {}, cancel: () => {}, retry: () => {} })
 }))
 jest.mock('@/services/vault/transfers', () => ({

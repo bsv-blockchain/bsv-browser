@@ -9,7 +9,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { WalletContext } from '@/context/WalletContext'
 import { UserContext } from '@/context/UserContext'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
-import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import { ExchangeRateContext } from '@bsv/expo-wallet-toolbox/core/context/ExchangeRateContext'
 import { formatAmountParts } from '@/utils/amountFormatHelpers'
 import { haptics } from '@/hooks/useHaptics'
 

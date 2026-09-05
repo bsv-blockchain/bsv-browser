@@ -38,7 +38,7 @@ import { sdk } from '@bsv/wallet-toolbox-mobile'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWallet } from '@/context/WalletContext'
-import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import { ExchangeRateContext } from '@bsv/expo-wallet-toolbox/core/context/ExchangeRateContext'
 import {
   formatAmountParts,
   formatAmount,

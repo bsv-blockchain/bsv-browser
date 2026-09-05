@@ -1,6 +1,6 @@
 import React, { ReactNode, useState, useEffect, useContext } from 'react'
 import { formatAmount } from '@/utils/amountFormatHelpers'
-import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import { ExchangeRateContext } from '@bsv/expo-wallet-toolbox/core/context/ExchangeRateContext'
 import { useWallet } from '@/context/WalletContext'
 
 type Props = {

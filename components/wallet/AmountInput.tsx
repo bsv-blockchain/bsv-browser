@@ -7,7 +7,7 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
 import { durations } from '@/context/theme/motion'
 import { useWallet } from '@/context/WalletContext'
-import { ExchangeRateContext } from '@/context/ExchangeRateContext'
+import { ExchangeRateContext } from '@bsv/expo-wallet-toolbox/core/context/ExchangeRateContext'
 import { parseDisplayToSatoshis, formatAmount } from '@/utils/amountFormatHelpers'
 
 export const SEND_MAX_VALUE = '2099999999999999'
