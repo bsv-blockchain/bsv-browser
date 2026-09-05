@@ -9,7 +9,7 @@ import {
 } from 'react-native'
 import { useLocalSearchParams, router } from 'expo-router'
 import { WalletClient } from '@bsv/sdk'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { useWalletConnection } from '@bsv/expo-wallet-toolbox/core/context/WalletConnectionContext'

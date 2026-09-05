@@ -12,7 +12,7 @@
  * swallowed.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { useVault } from '@bsv/expo-wallet-toolbox/core/context/VaultContext'
 import { getVaultBalance, VaultWallet } from '@/services/vault/transfers'
 

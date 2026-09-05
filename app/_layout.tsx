@@ -14,13 +14,13 @@ import React, { useEffect } from 'react'
 import { View, useColorScheme } from 'react-native'
 import { Stack } from 'expo-router'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
-import { UserContextProvider, NativeHandlers } from '../context/UserContext'
+import { UserContextProvider, NativeHandlers } from '@bsv/expo-wallet-toolbox/core/context/UserContext'
 import packageJson from '../package.json'
-import { WalletContextProvider, useWallet } from '@/context/WalletContext'
+import { WalletContextProvider, useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { ExchangeRateContextProvider } from '@bsv/expo-wallet-toolbox/core/context/ExchangeRateContext'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
 // TODO: Re-add RecoveryKeySaver when WAB support returns
-import LocalStorageProvider from '@/context/LocalStorageProvider'
+import LocalStorageProvider from '@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider'
 import PermissionSheet from '@/components/ui/PermissionSheet'
 import { AlertHost } from '@/components/ui/AlertCard'
 import { VaultProvider } from '@bsv/expo-wallet-toolbox/core/context/VaultContext'
@@ -123,7 +123,7 @@ export default function RootLayout() {
           <LocalStorageProvider>
             <UserContextProvider nativeHandlers={nativeHandlers} appVersion={packageJson.version} appName="BSV Browser">
               <ExchangeRateContextProvider>
-                <WalletContextProvider>
+                <WalletContextProvider onToast={showToast}>
                   <BrowserModeProvider>
                     <ThemeProvider>
                       <WalletConnectionProvider walletName="BSV Browser">

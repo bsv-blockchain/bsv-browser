@@ -35,7 +35,7 @@ const mockPermissionsManager = {
   getPublicKey: jest.fn(async () => ({ publicKey: '02' + '11'.repeat(32) }))
 }
 
-jest.mock('@/context/WalletContext', () => ({
+jest.mock('@bsv/expo-wallet-toolbox/core/context/WalletContext', () => ({
   useWallet: () => ({ managers: { permissionsManager: mockPermissionsManager } })
 }))
 

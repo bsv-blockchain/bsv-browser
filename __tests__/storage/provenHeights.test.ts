@@ -7,7 +7,7 @@
  * columns.
  */
 import { DatabaseSync } from 'node:sqlite'
-import { PROVEN_HEIGHTS_SQL } from '@/storage/methods/findSql'
+import { PROVEN_HEIGHTS_SQL } from '@bsv/expo-wallet-toolbox/core/storage/methods/findSql'
 
 function seeded(): DatabaseSync {
   const d = new DatabaseSync(':memory:')

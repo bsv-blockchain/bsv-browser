@@ -21,7 +21,7 @@ import AmountDisplay from '@/components/wallet/AmountDisplay'
 import ReceivedOverlay from '@/components/pay/PaymentSuccessOverlay'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { showToast } from '@/components/ui/Toast'
 import {
   MAX_RECOVERY_DAYS,

@@ -38,7 +38,10 @@ function sourceFiles(): string[] {
       else if (/\.tsx?$/.test(e.name)) out.push(p)
     }
   }
-  for (const d of SEARCH_DIRS) walk(path.join(ROOT, d))
+  for (const d of SEARCH_DIRS) {
+    const dir = path.join(ROOT, d)
+    if (fs.existsSync(dir)) walk(dir)
+  }
   return out
 }
 

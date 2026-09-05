@@ -12,7 +12,7 @@
 let mockWalletCtx: { managers: unknown; adminOriginator: string; txStatusVersion: number }
 let mockVaultPhase: string
 
-jest.mock('@/context/WalletContext', () => ({
+jest.mock('@bsv/expo-wallet-toolbox/core/context/WalletContext', () => ({
   useWallet: () => mockWalletCtx
 }))
 jest.mock('@bsv/expo-wallet-toolbox/core/context/VaultContext', () => ({

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect } from 'react'
 import { View, Text, StyleSheet } from 'react-native'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { sdk } from '@bsv/wallet-toolbox-mobile'
 import AmountDisplay from './AmountDisplay'
 import AppLogo from '../ui/AppLogo'

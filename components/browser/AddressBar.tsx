@@ -25,7 +25,7 @@ import { useFocusEffect, router } from 'expo-router'
 
 import { haptics } from '@/hooks/useHaptics'
 import { useTheme } from '@/context/theme/ThemeContext'
-import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { useLocalStorage } from '@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider'
 import { useSheet } from '@/context/SheetContext'
 import type { SheetRoute } from '@/context/SheetContext'
 import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'

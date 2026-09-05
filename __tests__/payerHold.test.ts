@@ -1,12 +1,12 @@
 import { holdSentPaymentOffline } from '@/utils/offline/payerHold'
-import { insertOfflineAction } from '@/storage/methods/offlineActions'
+import { insertOfflineAction } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
-import type { StorageExpoSQLite } from '@/storage/StorageExpoSQLite'
+import type { StorageExpoSQLite } from '@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite'
 
 // The DB mapper is its own tested unit (`storage/methods/offlineActions.ts`);
 // here it's mocked so these tests pin exactly what `holdSentPaymentOffline`
 // hands it, without duplicating its own SQL coverage.
-jest.mock('@/storage/methods/offlineActions', () => ({
+jest.mock('@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions', () => ({
   insertOfflineAction: jest.fn().mockResolvedValue(undefined)
 }))
 

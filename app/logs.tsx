@@ -15,7 +15,7 @@ import Clipboard from '@react-native-clipboard/clipboard'
 import { showToast } from '@/components/ui/Toast'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 
 interface LogEntry {
   id: string

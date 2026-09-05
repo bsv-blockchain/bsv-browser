@@ -46,7 +46,7 @@ jest.mock('react-i18next', () => ({
 // only the ones that explicitly set mockStorage exercise it.
 let mockStorage: { sqliteDb: unknown } | undefined
 const mockRunMonitorTask = jest.fn().mockResolvedValue('')
-jest.mock('@/context/WalletContext', () => ({
+jest.mock('@bsv/expo-wallet-toolbox/core/context/WalletContext', () => ({
   useWallet: () => ({
     walletBuilding: false,
     walletBuilt: true,
@@ -88,7 +88,7 @@ import { render } from '@testing-library/react-native'
 import PayScreen from '@/app/pay'
 import { ThemeProvider } from '@/context/theme/ThemeContext'
 import { resetProofNudgeForTests } from '@/utils/pay/proofNudge'
-import type { OfflineActionRow } from '@/storage/methods/offlineActions'
+import type { OfflineActionRow } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 
 // Lowercase hex: validatePeerPayURI's compressed-key regex is case-sensitive,
 // so an uppercase key is rejected as malformed.
