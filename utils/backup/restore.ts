@@ -4,7 +4,7 @@
  * Given nothing but a recovered seed (or the primary key from printed shares), rebuild the
  * wallet database from the encrypted log.
  */
-import type { StorageExpoSQLite } from '@/storage'
+import type { StorageExpoSQLite } from '@bsv/expo-wallet-toolbox/core/storage'
 import { BackupClient, type DeviceSummary } from './client'
 import type { BackupChain } from './constants'
 import { deriveBackupWallet } from './derive'

@@ -10,7 +10,7 @@ jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }))
 // initialised as a side effect of importing translations.tsx — has to be
 // running. That module also detects a device locale; in this Jest environment
 // no locale is found, so it falls back to 'en', which is what these tests need.
-import '@/context/i18n/translations'
+import '@/context/i18n/browserTranslations'
 
 import React from 'react'
 import { fireEvent, render } from '@testing-library/react-native'
@@ -70,9 +70,12 @@ describe('OfflineNotice', () => {
 
   it('never says a queued payment has settled, online or off', () => {
     const { getByText } = render(<OfflineNotice online queued={1} rejected={[]} />)
-    // The negation is the load-bearing part of the copy: "not reached the
-    // network yet", never "received" or "settled".
-    expect(getByText(/not reached the network yet/i)).toBeTruthy()
+    // The negation is the load-bearing part, not any particular phrasing: the
+    // copy lives in the library's catalogue now and its wording moves (0.1.3
+    // reworded "not reached the network yet" to "not been processed yet").
+    // Assert the meaning that must never regress — the payment is described as
+    // not done, and settlement is explicitly withheld.
+    expect(getByText(/have not been [a-z ]+ yet/i)).toBeTruthy()
     expect(getByText(/nothing is settled until/i)).toBeTruthy()
   })
 
@@ -80,7 +83,7 @@ describe('OfflineNotice', () => {
     // Offline, the offline card already carries the count; a second card saying
     // the same thing is noise.
     const { queryByText } = render(<OfflineNotice online={false} queued={2} rejected={[]} />)
-    expect(queryByText(/not reached the network yet/i)).toBeNull()
+    expect(queryByText(/have not been [a-z ]+ yet/i)).toBeNull()
   })
 
   it('shows a rejection with its sender even when back online', () => {

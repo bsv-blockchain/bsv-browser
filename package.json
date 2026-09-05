@@ -38,6 +38,8 @@
     "@bsv/backup-cache-client": "^0.1.0",
     "@bsv/btms": "^1.1.0",
     "@bsv/btms-permission-module": "^1.1.0",
+    "@bsv/expo-wallet-toolbox": "0.1.3",
+    "@bsv/react-native-localpay-transport": "0.1.1",
     "@bsv/message-box-client": "^2.2.1",
     "@bsv/sdk": "^2.4.1",
     "@bsv/templates": "^1.10.0",
@@ -107,7 +109,6 @@
     "react-native-engine-native": "file:./packages/react-native-engine-native",
     "react-native-gesture-handler": "~2.30.0",
     "react-native-localize": "^3.4.1",
-    "react-native-localpay-transport": "file:./packages/react-native-localpay-transport",
     "react-native-modal": "^14.0.0-rc.1",
     "react-native-nitro-modules": "^0.35.2",
     "react-native-otp-inputs": "^7.4.0",
@@ -180,7 +181,7 @@
       "^expo-sqlite$": "<rootDir>/__tests__/__mocks__/expo-sqlite.js"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/auth)/)",
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/expo-wallet-toolbox|@bsv/react-native-localpay-transport|@bsv/auth)/)",
       "/node_modules/react-native-reanimated/plugin/"
     ]
   }

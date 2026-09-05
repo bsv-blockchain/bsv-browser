@@ -11,7 +11,7 @@ import {
   type PostedResult
 } from '@/utils/offline/plan'
 import type { OrderableTx } from '@/utils/offline/order'
-import type { OfflineActionRow } from '@/storage/methods/offlineActions'
+import type { OfflineActionRow } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 
 const tx = (txid: string, inputTxids: string[] = [], extra: Partial<OrderableTx> = {}): OrderableTx => ({
   txid,

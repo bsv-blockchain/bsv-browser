@@ -24,12 +24,12 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import PressableScale from '@/components/ui/PressableScale'
 import { showToast } from '@/components/ui/Toast'
 import { haptics } from '@/hooks/useHaptics'
-import { useWallet } from '@/context/WalletContext'
-import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
+import { useLocalStorage } from '@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider'
 import { disableVault, recoverVaultHD } from '@/services/vault/VaultKeyService'
 import { sweepVaultWithHD, type VaultWallet } from '@/services/vault/transfers'
 import { VaultError } from '@/services/vault/types'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 

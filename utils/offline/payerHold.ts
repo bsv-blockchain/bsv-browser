@@ -52,9 +52,9 @@
  * shares nothing. What genuinely is shared — the `offline_actions` insert — is
  * reused directly via `insertOfflineAction`.
  */
-import { insertOfflineAction } from '@/storage/methods/offlineActions'
+import { insertOfflineAction } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
-import type { StorageExpoSQLite } from '@/storage/StorageExpoSQLite'
+import type { StorageExpoSQLite } from '@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite'
 
 export async function holdSentPaymentOffline(args: {
   storage: StorageExpoSQLite

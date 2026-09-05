@@ -14,7 +14,7 @@
  * reads and hands the rows in, so the rules that decide whether money may be
  * parked — and under whose name — are unit-testable rather than device-only.
  */
-import type { OfflineActionRole } from '@/storage/methods/offlineActions'
+import type { OfflineActionRole } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 
 export interface HeldReq {
   txid: string

@@ -1,4 +1,4 @@
-import { StorageError, storageErrorFromSqlite } from '@/storage/errors'
+import { StorageError, storageErrorFromSqlite } from '@bsv/expo-wallet-toolbox/core/storage/errors'
 
 /** Every expo-sqlite failure carries this same code, whatever went wrong. */
 const sqliteError = (message: string) => Object.assign(new Error(message), { code: 'ERR_INTERNAL_SQLITE_ERROR' })

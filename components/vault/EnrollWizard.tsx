@@ -26,19 +26,19 @@ import { spacing, radii, typography } from '@/context/theme/tokens'
 import { enrollVault, finalizeEnrollment } from '@/services/vault/VaultKeyService'
 import { VaultError } from '@/services/vault/types'
 import { PassphraseField } from './PassphraseField'
-import { useLocalStorage } from '@/context/LocalStorageProvider'
+import { useLocalStorage } from '@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider'
 import { printRecoveryShares } from '@/utils/printRecoveryShares'
 import { sounds } from '@/hooks/useConfirmationSound'
 import { haptics } from '@/hooks/useHaptics'
 import { showToast } from '@/components/ui/Toast'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 import { PhraseBackupSheet } from './PhraseBackupSheet'
 import {
   readBackupAttestation,
   recordBackupAttestation,
   type BackupMedium
 } from '@/services/vault/backupAttestation'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 

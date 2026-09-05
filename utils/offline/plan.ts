@@ -8,7 +8,7 @@
  * 'sent' for a transaction nobody has.
  */
 import { dependencyOrder, descendantsOf, releaseOrder, type OrderableTx } from './order'
-import type { OfflineActionRow } from '@/storage/methods/offlineActions'
+import type { OfflineActionRow } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 import type { ProvenTxReqStatus } from '@bsv/wallet-toolbox-mobile/out/src/sdk/types'
 
 export type PostOutcome = 'success' | 'serviceError' | 'invalidTx' | 'doubleSpend'

@@ -21,7 +21,7 @@
  */
 import { WalletMonitorTask } from '@bsv/wallet-toolbox-mobile/out/src/monitor/tasks/WalletMonitorTask'
 import type { Monitor } from '@bsv/wallet-toolbox-mobile'
-import type { ProcessOfflineActionsResult } from '@/storage/methods/processOfflineActions'
+import type { ProcessOfflineActionsResult } from '@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions'
 
 export class TaskSendOffline extends WalletMonitorTask {
   static taskName = 'SendOffline'

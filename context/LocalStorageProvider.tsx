@@ -8,7 +8,7 @@ import React, {
   useState
 } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 import {
   autoUnlockKek,
   deleteAllSecrets,

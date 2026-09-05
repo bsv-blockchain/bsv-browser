@@ -13,8 +13,7 @@
       },
       "env": {
         "RCT_USE_PREBUILT_RNCORE": "0",
-        "EXPO_PUBLIC_BACKUP_URL": "https://backup.bsvblockchain.tech",
-        "EXPO_NO_WEB_BROWSER_ENTITLEMENT": "1"
+        "EXPO_PUBLIC_BACKUP_URL": "https://backup.bsvblockchain.tech"
       }
     },
     "dev-physical": {
@@ -22,8 +21,7 @@
       "distribution": "internal",
       "env": {
         "RCT_USE_PREBUILT_RNCORE": "0",
-        "EXPO_PUBLIC_BACKUP_URL": "https://backup.bsvblockchain.tech",
-        "EXPO_NO_WEB_BROWSER_ENTITLEMENT": "1"
+        "EXPO_PUBLIC_BACKUP_URL": "https://backup.bsvblockchain.tech"
       }
     },
     "preview-apk": {

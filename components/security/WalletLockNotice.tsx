@@ -23,8 +23,8 @@ import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import PressableScale from '@/components/ui/PressableScale'
 import { showAlert } from '@/components/ui/AlertCard'
-import { useLocalStorage } from '@/context/LocalStorageProvider'
-import i18n from '@/context/i18n/translations'
+import { useLocalStorage } from '@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider'
+import i18n from '@/context/i18n/browserTranslations'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 

@@ -17,7 +17,7 @@ import {
   rangeReadSql,
   spendingReferencesSql,
   splitOutpoint
-} from '@/storage/methods/findSql'
+} from '@bsv/expo-wallet-toolbox/core/storage/methods/findSql'
 
 describe('columnsExcluding', () => {
   it('returns undefined when nothing is excluded, meaning SELECT *', () => {
@@ -134,7 +134,7 @@ describe('column lists match the schema', () => {
   // Parses createTables.ts rather than trusting the hardcoded lists. A column
   // added to the schema but not here would be silently dropped from every
   // projected read — invisible in any test that does not compare the two.
-  const ddl = readFileSync(join(__dirname, '../../storage/schema/createTables.ts'), 'utf8')
+  const ddl = readFileSync(join(__dirname, '../../node_modules/@bsv/expo-wallet-toolbox/core/storage/schema/createTables.ts'), 'utf8')
 
   const columnsFromDdl = (table: string): string[] => {
     const create = new RegExp(`CREATE TABLE IF NOT EXISTS ${table} \\(([\\s\\S]*?)\\n {4}\\);`).exec(ddl)

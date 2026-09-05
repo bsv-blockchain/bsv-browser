@@ -21,7 +21,7 @@ import PressableScale from '@/components/ui/PressableScale'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { EnrollWizard } from '@/components/vault/EnrollWizard'
 import { useVaultBalance } from '@/hooks/useVaultBalance'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { reclaimStagingOutputs, type VaultWallet } from '@/services/vault/transfers'
 import { vaultStore, VaultMeta } from '@/services/vault/vaultStore'
 import { getVaultDriver } from '@/services/vault/driver'
@@ -29,7 +29,7 @@ import { disableVault } from '@/services/vault/VaultKeyService'
 import { showAlert } from '@/components/ui/AlertCard'
 import { showToast } from '@/components/ui/Toast'
 import { haptics } from '@/hooks/useHaptics'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 

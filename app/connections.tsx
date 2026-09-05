@@ -13,14 +13,14 @@ import { useTranslation } from 'react-i18next'
 import { spacing, radii, typography } from '@/context/theme/tokens'
 import { GroupedSection } from '@/components/ui/GroupedList'
 import { ListRow } from '@/components/ui/ListRow'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { guardVaultAccess } from '@/services/vault/guard'
 import { capWalletArgs } from '@/services/capWalletArgs'
 import { ADMIN_ORIGINATOR } from '@/context/config'
 import { showToast } from '@/components/ui/Toast'
-import connectionStore, { type Connection } from '@/stores/ConnectionStore'
+import connectionStore, { type Connection } from '@bsv/expo-wallet-toolbox/core/stores/ConnectionStore'
 import QRScanner from '@/components/QRScanner'
-import { useWalletConnection, lastSeqKey } from '@/context/WalletConnectionContext'
+import { useWalletConnection, lastSeqKey } from '@bsv/expo-wallet-toolbox/core/context/WalletConnectionContext'
 
 interface PairingParams {
   [key: string]: string // required by Expo Router's UnknownInputParams

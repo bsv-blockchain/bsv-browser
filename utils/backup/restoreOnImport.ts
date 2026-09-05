@@ -24,7 +24,7 @@
  * healthy while missing the outputs it needs to spend is worse than one that plainly
  * failed to restore.
  */
-import type { StorageExpoSQLite } from '@/storage'
+import type { StorageExpoSQLite } from '@bsv/expo-wallet-toolbox/core/storage'
 import { BackupClient, type DeviceSummary } from './client'
 import type { BackupChain } from './constants'
 import { listBackups, restoreFromBackup } from './restore'

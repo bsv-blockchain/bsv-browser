@@ -10,7 +10,7 @@
  * off-by-one produces plausible bytes of the right length.
  */
 import { DatabaseSync } from 'node:sqlite'
-import { rangeReadSql } from '@/storage/methods/findSql'
+import { rangeReadSql } from '@bsv/expo-wallet-toolbox/core/storage/methods/findSql'
 
 /** 300 bytes with a recognisable pattern, so a shifted read is visible. */
 const RAW = Array.from({ length: 300 }, (_, i) => (i * 7) % 256)

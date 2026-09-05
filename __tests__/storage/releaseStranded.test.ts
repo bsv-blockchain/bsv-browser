@@ -15,7 +15,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   RELEASE_STALE_VAULT_STAGING_SPENTBY_SQL,
   RELEASE_STRANDED_VAULT_STAGING_SQL
-} from '@/storage/methods/findSql'
+} from '@bsv/expo-wallet-toolbox/core/storage/methods/findSql'
 
 const TX1 = 'e1'.repeat(32)
 const TX2 = '27'.repeat(32)

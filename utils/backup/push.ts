@@ -15,7 +15,7 @@
  * are `since`-based and replay is idempotent, so a torn read corrects itself on the next
  * pass.
  */
-import type { StorageExpoSQLite } from '@/storage'
+import type { StorageExpoSQLite } from '@bsv/expo-wallet-toolbox/core/storage'
 import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
 import { BackupClient, BackupHttpError, ERR_SEQ_CONFLICT } from './client'
 import { encodeChunk, estimateEncodedBytes, isEmptyChunk } from './codec'

@@ -13,7 +13,7 @@ import {
   RECLAIM_EXCLUDED_SQL,
   RECLAIM_INPUT_BEEF_SQL,
   RECLAIM_SIZES_SQL
-} from '@/storage/methods/reclaim'
+} from '@bsv/expo-wallet-toolbox/core/storage/methods/reclaim'
 
 const TIP = 1000
 const CUTOFF = '2027-01-01'

@@ -27,7 +27,7 @@ import PressableScale from '@/components/ui/PressableScale'
 import { AmountInput, SEND_MAX_VALUE } from '@/components/wallet/AmountInput'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, radii, typography } from '@/context/theme/tokens'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { useVaultBalance } from '@/hooks/useVaultBalance'
 import AmountDisplay from '@/components/wallet/AmountDisplay'
 import { depositToVault, withdrawFromVault, type VaultWallet } from '@/services/vault/transfers'
@@ -36,7 +36,7 @@ import { VaultError } from '@/services/vault/types'
 import { haptics } from '@/hooks/useHaptics'
 import { showToast } from '@/components/ui/Toast'
 import { showAlert } from '@/components/ui/AlertCard'
-import i18n from '@/context/i18n/translations'
+import i18n from '@/context/i18n/browserTranslations'
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
 

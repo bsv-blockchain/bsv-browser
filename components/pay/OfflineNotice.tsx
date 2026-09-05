@@ -34,7 +34,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
-import type { OfflineActionRow } from '@/storage/methods/offlineActions'
+import type { OfflineActionRow } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 
 export interface OfflineNoticeProps {
   online: boolean

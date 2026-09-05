@@ -1,5 +1,5 @@
 import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
-import type { ProcessOfflineActionsResult } from '@/storage/methods/processOfflineActions'
+import type { ProcessOfflineActionsResult } from '@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions'
 
 // The base class constructor only stores the monitor and name, so a bare
 // object is enough — same trick the previous version of this suite used.

@@ -14,7 +14,7 @@
  * transaction by transaction into `this` — so a row whose stored `inputBEEF` is
  * unreadable is exactly how that happens.
  */
-jest.mock('@/utils/net/online', () => ({ getOnline: jest.fn(async () => true) }))
+jest.mock('@bsv/expo-wallet-toolbox/core/net/online', () => ({ getOnline: jest.fn(async () => true) }))
 
 // `mock`-prefixed so jest's out-of-scope guard allows the factory to close over it.
 const mockPostReqs = jest.fn()
@@ -24,9 +24,9 @@ jest.mock('@bsv/wallet-toolbox-mobile/out/src/storage/methods/attemptToPostReqsT
 
 import { Beef, LockingScript, Transaction, UnlockingScript } from '@bsv/sdk'
 import type { TableProvenTxReq } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/tables'
-import { processOfflineActions } from '@/storage/methods/processOfflineActions'
-import type { BindValue, OfflineActionRow } from '@/storage/methods/offlineActions'
-import { ensureOfflineActionsColumns } from '@/storage/schema/createTables'
+import { processOfflineActions } from '@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions'
+import type { BindValue, OfflineActionRow } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
+import { ensureOfflineActionsColumns } from '@bsv/expo-wallet-toolbox/core/storage/schema/createTables'
 
 /** A spendable-looking transaction. Never signed: nothing here evaluates script. */
 function txSpending(sourceTXID: string): Transaction {

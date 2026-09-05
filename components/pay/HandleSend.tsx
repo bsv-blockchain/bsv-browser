@@ -24,7 +24,7 @@ import { ConfigPanel, MessageBoxBar, useMessageBoxConfig } from '@/components/pa
 import { useIdentitySearch } from '@/components/pay/useIdentitySearch'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { spacing, typography, radii } from '@/context/theme/tokens'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { CONSEQUENCE_KEYS } from '@/utils/pay/rails'
 import {
   NO_MESSAGE_BOX,

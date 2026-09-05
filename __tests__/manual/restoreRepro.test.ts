@@ -78,7 +78,7 @@ import { Mnemonic } from '@bsv/sdk'
 import { recoverSecretFromShares } from '@/utils/backupShares'
 import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
 import { restoreOnImport } from '@/utils/backup/restoreOnImport'
-import { StorageExpoSQLite } from '@/storage/StorageExpoSQLite'
+import { StorageExpoSQLite } from '@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 
 const RUN = process.env.RESTORE_REPRO === '1'

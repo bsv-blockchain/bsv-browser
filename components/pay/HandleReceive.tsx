@@ -40,7 +40,7 @@ import { ConfigPanel, MessageBoxBar, useMessageBoxConfig } from '@/components/pa
 import { showToast } from '@/components/ui/Toast'
 import { useTheme } from '@/context/theme/ThemeContext'
 import { radii, spacing, typography } from '@/context/theme/tokens'
-import { useWallet } from '@/context/WalletContext'
+import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { makeIdentityClient, resolveIdentity } from '@/utils/identity/resolveIdentity'
 import {
   NO_MESSAGE_BOX,

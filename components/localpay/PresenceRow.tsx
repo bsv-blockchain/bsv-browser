@@ -10,7 +10,7 @@
  * ── Why there is no separate "device found" ──
  *
  * The AWDL transport surfaces exactly two things to JS: a decoded frame, or an
- * error (see packages/react-native-localpay-transport — `startListening`,
+ * error (see @bsv/react-native-localpay-transport — `startListening`,
  * `sendFrame`). There is no connection callback, so neither side can observe
  * discovery separately from the TLS-PSK handshake. By the time anything reaches
  * JS, the peer has been found AND the encrypted channel has carried real bytes.
