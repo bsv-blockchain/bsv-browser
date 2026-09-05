@@ -82,7 +82,6 @@ User taps "Scan Backup Shares"
 | `app/auth/mnemonic.tsx`        | Wallet create/import screen (mnemonic or hex key)             |
 | `app/auth/scan-shares.tsx`     | QR camera scanner for backup share recovery                   |
 | `utils/mnemonicWallet.ts`      | BIP-39/32 mnemonic generation, recovery, validation           |
-| `utils/simpleWalletBuilder.ts` | Wallet construction from primary key                          |
 | `utils/backupShares.ts`        | Shamir's Secret Sharing -- split key into printable QR shares |
 | `context/WalletContext.tsx`    | Wallet lifecycle, permissions, SSE monitor                    |
 | `context/config.tsx`           | Default configuration (`DEFAULT_WAB_URL = 'noWAB'`)           |
