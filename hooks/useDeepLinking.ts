@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { Linking } from 'react-native'
+import { pairingSchemeOf } from '@/utils/deepLinkSchemes'
 import { router, usePathname } from 'expo-router'
 import tabStore from '@/stores/TabStore'
 import {
@@ -11,7 +12,7 @@ import {
 
 /**
  * Simplified deep linking: when app receives http/https URL, navigate browser directly to it.
- * Also handles bsv-browser://pair?... URIs for wallet pairing QR codes scanned via the camera app.
+ * Also handles bsv-browser://pair?... and bsv-wallet://pair?... URIs for wallet pairing QR codes scanned via the camera app.
  */
 export function useDeepLinking() {
   const browserLinkQueue = useRef<Promise<void>>(Promise.resolve())
@@ -107,7 +108,7 @@ export function useDeepLinking() {
   }, [])
 
   /**
-   * Handle bsv-browser://pair?topic=...&backendIdentityKey=...&protocolID=...&origin=...&expiry=...&sig=...
+   * Handle bsv-browser://pair?topic= (and the bsv-wallet:// equivalent)...&backendIdentityKey=...&protocolID=...&origin=...&expiry=...&sig=...
    *
    * Used by external QR codes (e.g. scanned via the iOS/Android camera app). Parses pairing
    * parameters from the URI and navigates directly to /pair, bypassing the connections screen.
@@ -115,8 +116,10 @@ export function useDeepLinking() {
    */
   const handlePairingLink = useCallback((url: string) => {
     try {
-      // bsv-browser://pair?topic=... — URL constructor needs a valid base
-      const parsed = new URL(url.replace('bsv-browser://', 'bsv-browser://host/'))
+      // <scheme>://pair?topic=... — URL constructor needs a valid base
+      const scheme = pairingSchemeOf(url)
+      if (!scheme) return
+      const parsed = new URL(url.replace(new RegExp(`^${scheme}`, 'i'), `${scheme}host/`))
       const get = (key: string) => parsed.searchParams.get(key) ?? undefined
 
       const topic = get('topic')
@@ -148,7 +151,7 @@ export function useDeepLinking() {
       if (isExternalBrowserUrl(url)) {
         console.log('[Deep Link] Opening URL directly:', url)
         enqueueBrowserLink(url)
-      } else if (url.startsWith('bsv-browser://pair')) {
+      } else if (pairingSchemeOf(url)) {
         console.log('[Deep Link] Opening pairing screen:', url)
         handlePairingLink(url)
       } else if (url.toLowerCase().startsWith('peerpay:')) {

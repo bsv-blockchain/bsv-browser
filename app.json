@@ -2,7 +2,10 @@
   "expo": {
     "name": "BSV Browser",
     "slug": "bsv-browser",
-    "scheme": "bsv-browser",
+    "scheme": [
+      "bsv-browser",
+      "bsv-wallet"
+    ],
     "version": "1.6.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
@@ -110,6 +113,30 @@
             "BROWSABLE",
             "DEFAULT"
           ]
+        },
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "bsv-browser"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "bsv-wallet"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -139,7 +166,8 @@
           {
             "CFBundleURLName": "org.bsvassociation.browser.pair",
             "CFBundleURLSchemes": [
-              "bsv-browser"
+              "bsv-browser",
+              "bsv-wallet"
             ]
           }
         ],

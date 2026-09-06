@@ -47,6 +47,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>bsv-browser</string>
+				<string>bsv-wallet</string>
 			</array>
 		</dict>
 		<dict>
