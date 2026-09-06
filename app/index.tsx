@@ -47,7 +47,6 @@ import { useWebAppManifest } from '@/hooks/useWebAppManifest'
 import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
 import PermissionModal from '@/components/browser/PermissionModal'
 import { getPermissionState } from '@/utils/permissionsManager'
-import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
@@ -382,6 +381,13 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
                 const resources: string[] = event.nativeEvent?.resources ?? []
                 ;(async () => {
                   try {
+                    // Required lazily: importing react-native-permissions runs
+                    // TurboModuleRegistry.getEnforcing at module scope, and this file
+                    // is evaluated while expo-router builds its route manifest —
+                    // before that registry exists.
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    const { check, request, PERMISSIONS, RESULTS } =
+                      require('react-native-permissions') as typeof import('react-native-permissions')
                     const toGrant: string[] = []
                     for (const resource of resources) {
                       if (resource.includes('VIDEO_CAPTURE')) {

@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions'
 import { Platform } from 'react-native'
 
 /**
@@ -45,8 +44,33 @@ export type PermissionType =
   | 'WRITE_EXTERNAL_STORAGE'
   | 'NOTIFICATIONS'
 
-// Platform-specific permission mapping
-const platformPermissionMap: Partial<Record<PermissionType, any>> =
+/**
+ * react-native-permissions is required lazily, not imported at module scope.
+ * Its spec module runs `TurboModuleRegistry.getEnforcing('RNPermissions')` as a
+ * side effect of being imported, and this file is reached from app/index.tsx,
+ * which expo-router evaluates while building its route manifest -- before the
+ * TurboModule registry exists. A static import therefore throws
+ * "'RNPermissions' could not be found" at bundle evaluation, which surfaces as
+ * the Browser route having no default export. Same lazy-require pattern the
+ * wallet library uses for expo-router and AsyncStorage.
+ */
+type PermissionsApi = typeof import('react-native-permissions')
+let permissionsApi: PermissionsApi | undefined
+function loadPermissions(): PermissionsApi {
+  if (!permissionsApi) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    permissionsApi = require('react-native-permissions') as PermissionsApi
+  }
+  return permissionsApi
+}
+
+// Platform-specific permission mapping. Built on first use, not at module
+// scope, so PERMISSIONS is only dereferenced once the native module is up.
+let cachedPermissionMap: Partial<Record<PermissionType, any>> | undefined
+function platformPermissions(): Partial<Record<PermissionType, any>> {
+  if (cachedPermissionMap) return cachedPermissionMap
+  const { PERMISSIONS } = loadPermissions()
+  cachedPermissionMap =
   Platform.select({
     android: {
       CAMERA: PERMISSIONS.ANDROID.CAMERA,
@@ -93,6 +117,8 @@ const platformPermissionMap: Partial<Record<PermissionType, any>> =
       ACCESS_COARSE_LOCATION: PERMISSIONS.IOS.LOCATION_WHEN_IN_USE
     }
   }) || {}
+  return cachedPermissionMap
+}
 
 /**
  * Represents the state of a given permission: granted, denied, or requires a prompt.
@@ -222,12 +248,13 @@ export async function checkPermissionForDomain(domain: string, permission: Permi
     return false
   }
 
-  const osPermission = platformPermissionMap[permission]
+  const osPermission = platformPermissions()[permission]
   if (!osPermission) {
     console.warn(`No OS permission mapping found for ${permission}`)
     return false
   }
 
+  const { check, request, RESULTS } = loadPermissions()
   const result = await check(osPermission as any)
   if (result === RESULTS.GRANTED) return true
 
