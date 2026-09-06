@@ -67,6 +67,12 @@ function fakeStorage (expected: number): any {
     makeAvailable: jest.fn().mockResolvedValue({ storageIdentityKey: 'fresh-local' }),
     findOrInsertUser: jest.fn(async () => ({ user: { userId: 7 }, isNew: true })),
     findOrInsertSyncStateAuth: jest.fn(async () => ({ syncState: {}, isNew: true })),
+    // 0.2.0 added reconcileRestoredProofs, which pages over stored proof
+    // requests after the log lands so a replayed unsent request cannot
+    // rebroadcast an already-completed transaction. An empty first page ends
+    // the loop (it breaks on requests.length < limit).
+    findProvenTxReqs: jest.fn(async () => []),
+    findProvenTxs: jest.fn(async () => []),
     processSyncChunk: jest.fn(async () => {
       // The real processSyncChunk verifyTruthy/verifyOne's these rows — a chunk
       // arriving before both seeds is exactly the "A truthy value is required"
