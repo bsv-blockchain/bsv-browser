@@ -10,6 +10,12 @@ import { WalletHomeScreen } from '@bsv/expo-wallet-toolbox/ui'
  * this is the one thing the library cannot supply: a way back out to it.
  * WalletHomeScreen leaves that slot empty by default, because most host apps
  * (BSV Wallet included) have nothing to return to.
+ *
+ * dismissTo, not replace: the Browser is already below this screen (AddressBar
+ * pushes /wallet), so popping back to it plays the pop animation — the Browser
+ * comes in from the left, which is what leaving reads as. `replace` swaps the
+ * top of the stack instead and animates forward, so going back looked like
+ * going deeper. Same POP_TO reasoning as the deep-link handler (51d224e).
  */
 export default function Wallet() {
   const { colors } = useTheme()
@@ -19,7 +25,7 @@ export default function Wallet() {
     <WalletHomeScreen
       topLeft={
         <TouchableOpacity
-          onPress={() => router.replace('/')}
+          onPress={() => router.dismissTo('/')}
           style={[styles.back, { backgroundColor: colors.surfaceRaised, borderColor: colors.surfaceRaisedBorder }]}
           accessibilityRole="button"
           accessibilityLabel={t('back_to_browser')}
