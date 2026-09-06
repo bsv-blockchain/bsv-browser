@@ -38,7 +38,7 @@
     "@bsv/backup-cache-client": "^0.1.0",
     "@bsv/btms": "^1.1.0",
     "@bsv/btms-permission-module": "^1.1.0",
-    "@bsv/expo-wallet-toolbox": "0.2.0",
+    "@bsv/expo-wallet-toolbox": "0.2.1",
     "@bsv/react-native-localpay-transport": "0.1.1",
     "@bsv/message-box-client": "^2.2.1",
     "@bsv/sdk": "^2.4.1",
