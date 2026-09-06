@@ -121,6 +121,9 @@ const CWI_NO_YIELD = new Set<string>([
   'decrypt'
 ])
 
+/** Longest the interaction yield may delay a wallet call before it proceeds anyway. */
+const CWI_YIELD_TIMEOUT_MS = 250
+
 /* -------------------------------------------------------------------------- */
 /*                               USER AGENTS                                  */
 /* -------------------------------------------------------------------------- */
@@ -1349,8 +1352,24 @@ const Browser = observer(function Browser() {
       // runAfterInteractions adds latency for no benefit — they touch no storage
       // and don't contend with chrome the way an L3 createAction does. Only
       // L2 (reads) and L3 (mutations) keep the yield.
+      // Bounded, because runAfterInteractions does not fire while ANY interaction
+      // handle is open, and a handle that is never released waits forever. A
+      // looping Animated.timing holds one for as long as it runs unless its
+      // config passes `isInteraction: false` — AppLogo's rotate loop is exactly
+      // that shape. Unbounded, a spinner somewhere on screen silently wedges
+      // every L2/L3 wallet call a dApp makes, while L0/L1 keep answering because
+      // they skip this yield: the page connects, then listOutputs never returns.
+      // The yield is a scheduling nicety; it must never be able to outrank a
+      // wallet call, so cap it and proceed.
       if (!CWI_NO_YIELD.has(msg.call)) {
-        await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()))
+        await new Promise<void>(resolve => {
+          const done = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+          const timer = setTimeout(done, CWI_YIELD_TIMEOUT_MS)
+          InteractionManager.runAfterInteractions(done)
+        })
       }
 
       const perfEnd = mark(`cwi.${msg.call}`)

@@ -1,0 +1,16 @@
+diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/ui/AppLogo.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/components/ui/AppLogo.tsx
+--- a/node_modules/@bsv/expo-wallet-toolbox/ui/components/ui/AppLogo.tsx
++++ b/node_modules/@bsv/expo-wallet-toolbox/ui/components/ui/AppLogo.tsx
+@@ -23,7 +23,11 @@
+           toValue: 1,
+           duration: 10000,
+           easing: Easing.linear,
+-          useNativeDriver: true
++          useNativeDriver: true,
++          // A loop never ends, so without this it holds an InteractionManager
++          // handle for the lifetime of the component and runAfterInteractions
++          // never fires for anyone else.
++          isInteraction: false
+         })
+       ).start()
+     }
