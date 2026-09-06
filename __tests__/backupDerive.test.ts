@@ -1,6 +1,6 @@
 import { PrivateKey } from '@bsv/sdk'
-import { BACKUP_PROTOCOL, backupKeyId } from '@/utils/backup/constants'
-import { backupPseudonym, deriveBackupKey, deriveBackupWallet } from '@/utils/backup/derive'
+import { BACKUP_PROTOCOL, backupKeyId } from '@bsv/expo-wallet-toolbox/core/backup/constants'
+import { backupPseudonym, deriveBackupKey, deriveBackupWallet } from '@bsv/expo-wallet-toolbox/core/backup/derive'
 
 // A deliberately trivial, well-known test key. Never funded, never used on mainnet.
 const TEST_PRIMARY = new PrivateKey(1).toArray('be', 32)

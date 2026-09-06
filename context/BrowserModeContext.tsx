@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState, useEffect } from 'react'
 import { Platform } from 'react-native'
 import { useLocalSearchParams } from 'expo-router'
-import { useLocalStorage } from './LocalStorageProvider'
+import { useLocalStorage } from '@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider'
 import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 
 interface BrowserModeContextType {

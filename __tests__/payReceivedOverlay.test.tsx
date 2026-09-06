@@ -20,6 +20,9 @@ jest.mock('expo-haptics', () => ({
 }))
 
 jest.mock('react-i18next', () => ({
+  // The library's translations module calls i18n.use(initReactI18next)
+  // at import time, so the mock has to supply it or i18next throws.
+  initReactI18next: { type: '3rdParty', init: () => {} },
   useTranslation: () => ({
     t: (key: string, opts?: { count?: number }) => (opts?.count ? `${key}:${opts.count}` : key),
     i18n: { language: 'en' }
@@ -28,7 +31,7 @@ jest.mock('react-i18next', () => ({
 
 // The amount is rendered by AmountDisplay, which reaches for wallet settings and
 // an exchange rate. Neither is what this file is about, so it becomes plain text.
-jest.mock('@/components/wallet/AmountDisplay', () => {
+jest.mock('@bsv/expo-wallet-toolbox/ui/components/wallet/AmountDisplay', () => {
   const { Text } = require('react-native')
   return {
     __esModule: true,
@@ -37,7 +40,7 @@ jest.mock('@/components/wallet/AmountDisplay', () => {
 })
 
 let mockMarkDone: (() => void) | undefined
-jest.mock('@/components/ui/Celebration', () => {
+jest.mock('@bsv/expo-wallet-toolbox/ui/components/ui/Celebration', () => {
   const { View } = require('react-native')
   return {
     __esModule: true,
@@ -49,8 +52,17 @@ jest.mock('@/components/ui/Celebration', () => {
 })
 
 const mockConfirmation = jest.fn()
-jest.mock('@/hooks/useConfirmationSound', () => ({
-  sounds: { confirmation: () => mockConfirmation(), release: jest.fn() }
+// Upstream replaced the single `confirmation` cue with per-direction ones, so
+// the overlay now calls paymentSend() or paymentReceive() depending on which
+// way the money went.
+jest.mock('@bsv/expo-wallet-toolbox/core/hooks/useConfirmationSound', () => ({
+  sounds: {
+    paymentReceive: () => mockConfirmation(),
+    paymentSend: () => mockConfirmation(),
+    vaultOpen: jest.fn(),
+    vaultClose: jest.fn(),
+    release: jest.fn()
+  }
 }))
 
 // Done returns the user to the wallet so the updated balance is the next thing
@@ -72,8 +84,8 @@ jest.mock('expo-router', () => ({
 
 import React from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react-native'
-import { ThemeProvider } from '@/context/theme/ThemeContext'
-import ReceivedOverlay from '@/components/pay/PaymentSuccessOverlay'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import ReceivedOverlay from '@bsv/expo-wallet-toolbox/ui/components/pay/PaymentSuccessOverlay'
 
 function draw(props: {
   amount: number
@@ -85,7 +97,9 @@ function draw(props: {
 }) {
   return render(
     <ThemeProvider>
-      <ReceivedOverlay {...props} />
+      {/* The app wires dismissTo="/wallet" (PayScreen -> overlay): the library
+          defaults to '/', which is the Browser here, not the wallet. */}
+      <ReceivedOverlay dismissTo="/wallet" {...props} />
     </ThemeProvider>
   )
 }

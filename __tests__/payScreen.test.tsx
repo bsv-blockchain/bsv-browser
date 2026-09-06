@@ -38,6 +38,9 @@ jest.mock('react-native-safe-area-context', () => ({
 
 // `t` returns the key, so every assertion below names the key it depends on.
 jest.mock('react-i18next', () => ({
+  // The library's translations module calls i18n.use(initReactI18next)
+  // at import time, so the mock has to supply it or i18next throws.
+  initReactI18next: { type: '3rdParty', init: () => {} },
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } })
 }))
 
@@ -60,7 +63,7 @@ jest.mock('@bsv/expo-wallet-toolbox/core/context/WalletContext', () => ({
 // Without this, the real hook pulls in NetInfo, which has no native module
 // under Jest and crashes the process with an unhandled rejection.
 let mockOnline = true
-jest.mock('@/hooks/useOnline', () => ({ useOnline: () => mockOnline }))
+jest.mock('@bsv/expo-wallet-toolbox/ui/hooks/useOnline', () => ({ useOnline: () => mockOnline }))
 
 const mockParams: Record<string, string> = {}
 jest.mock('expo-router', () => ({
@@ -77,17 +80,17 @@ jest.mock('expo-router', () => ({
   useFocusEffect: () => {}
 }))
 
-jest.mock('@/components/pay/NearbyFlow', () => 'NearbyFlow')
+jest.mock('@bsv/expo-wallet-toolbox/ui/components/pay/NearbyFlow', () => 'NearbyFlow')
 jest.mock('@/components/pay/HandleSend', () => 'HandleSend')
-jest.mock('@/components/pay/HandleReceive', () => 'HandleReceive')
+jest.mock('@bsv/expo-wallet-toolbox/ui/components/pay/HandleReceive', () => 'HandleReceive')
 jest.mock('@/components/pay/AddressSend', () => 'AddressSend')
-jest.mock('@/components/pay/AddressReceive', () => 'AddressReceive')
+jest.mock('@bsv/expo-wallet-toolbox/ui/components/pay/AddressReceive', () => 'AddressReceive')
 
 import React from 'react'
 import { render } from '@testing-library/react-native'
 import PayScreen from '@/app/pay'
-import { ThemeProvider } from '@/context/theme/ThemeContext'
-import { resetProofNudgeForTests } from '@/utils/pay/proofNudge'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { resetProofNudgeForTests } from '@bsv/expo-wallet-toolbox/core/pay/proofNudge'
 import type { OfflineActionRow } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 
 // Lowercase hex: validatePeerPayURI's compressed-key regex is case-sensitive,

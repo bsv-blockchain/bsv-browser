@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import { BlurChrome } from '@/components/ui/BlurChrome'
-import { useTheme } from '@/context/theme/ThemeContext'
-import { spacing, radii, typography } from '@/context/theme/tokens'
+import { BlurChrome } from '@bsv/expo-wallet-toolbox/ui/components/ui/BlurChrome'
+import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { spacing, radii, typography } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
 
 let LiquidGlassView: React.ComponentType<any> | null = null
 let isLiquidGlassSupported = false

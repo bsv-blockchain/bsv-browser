@@ -8,7 +8,7 @@
  * debugger console (e.g. `globalThis.perf.dump()`).
  */
 import { perf } from '@/utils/perf'
-import { setLoggingEnabled, isLoggingEnabled, setForwardWebViewLogs, shouldForwardWebViewLogs } from '@/utils/logging'
+import { setLoggingEnabled, isLoggingEnabled, setForwardWebViewLogs, shouldForwardWebViewLogs } from '@bsv/expo-wallet-toolbox/core/logging'
 
 if (__DEV__) {
   // globalThis fallbacks (callable from a connected JS debugger).

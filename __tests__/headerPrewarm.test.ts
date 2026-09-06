@@ -1,6 +1,6 @@
-import { prewarmOwnRoots } from '@/utils/headers/prewarm'
-import { HeaderStore } from '@/utils/headers/headerStore'
-import { memoryHeaderFs } from '@/utils/headers/fs'
+import { prewarmOwnRoots } from '@bsv/expo-wallet-toolbox/core/headers/prewarm'
+import { HeaderStore } from '@bsv/expo-wallet-toolbox/core/headers/headerStore'
+import { memoryHeaderFs } from '@bsv/expo-wallet-toolbox/core/headers/fs'
 
 const ANCHOR = { height: 100, hash: '00'.repeat(32) }
 

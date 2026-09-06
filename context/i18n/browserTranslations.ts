@@ -17,6 +17,7 @@ export { LanguageProvider, useLanguage } from '@bsv/expo-wallet-toolbox/core/i18
  */
 const browserOnlyResources: Record<string, Record<string, string>> = {
   en: {
+    back_to_browser: 'Back to browser',
     local_pay_amount_optional_hint: 'Enter an amount, or leave it at zero and the payer decides.',
     message_box_tap_to_configure: 'Tap to configure your Message Box server',
     scan_bsv_address_hint: 'Point the camera at a BSV address QR code',

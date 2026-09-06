@@ -18,8 +18,8 @@ import {
   readSentinel,
   recordSecretName,
   unlockKek
-} from '../../services/secrets/kek'
-import { KEK_AUTH_KEY, KEK_PLAIN_KEY } from '../../services/secrets/policy'
+} from '@bsv/expo-wallet-toolbox/core/services/secrets/kek'
+import { KEK_AUTH_KEY, KEK_PLAIN_KEY } from '@bsv/expo-wallet-toolbox/core/services/secrets/policy'
 
 const KEK_SERVICE = 'bsvb.kek.v1'
 const ENV_SERVICE = 'bsvb.secrets.v1'

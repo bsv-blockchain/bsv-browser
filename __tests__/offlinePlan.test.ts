@@ -9,8 +9,8 @@ import {
   refusedReqStatuses,
   undecidedReqStatuses,
   type PostedResult
-} from '@/utils/offline/plan'
-import type { OrderableTx } from '@/utils/offline/order'
+} from '@bsv/expo-wallet-toolbox/core/offline/plan'
+import type { OrderableTx } from '@bsv/expo-wallet-toolbox/core/offline/order'
 import type { OfflineActionRow } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 
 const tx = (txid: string, inputTxids: string[] = [], extra: Partial<OrderableTx> = {}): OrderableTx => ({

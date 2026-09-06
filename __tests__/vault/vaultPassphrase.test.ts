@@ -25,7 +25,7 @@ import {
   MINIMUM_WORD_COUNT,
   generatePassphrase,
   VAULT_PASSPHRASE_MIN_BITS
-} from '../../services/vault/vaultPassphrase'
+} from '@bsv/expo-wallet-toolbox/core/services/vault/vaultPassphrase'
 
 describe('passphraseEntropyBits', () => {
   it('scores an empty passphrase as zero', () => {

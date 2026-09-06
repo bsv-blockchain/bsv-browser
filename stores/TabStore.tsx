@@ -9,8 +9,8 @@ import { buildLocationHrefScript, isValidUrl, normalizeUrlForHistory } from '@/u
 import { deleteThumbnail } from '@/utils/thumbnailService'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { WebViewNavigation } from 'react-native-webview'
-import { maxTabsForTier, warmPoolSizeForTier } from '@/utils/deviceTier'
-import { devLog } from '@/utils/logging'
+import { maxTabsForTier, warmPoolSizeForTier } from '@bsv/expo-wallet-toolbox/core/deviceTier'
+import { devLog } from '@bsv/expo-wallet-toolbox/core/logging'
 import { perf } from '@/utils/perf'
 const STORAGE_KEYS = {
   TABS: 'tabs',

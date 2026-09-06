@@ -1,6 +1,6 @@
-import { syncHeaders } from '@/utils/headers/syncHeaders'
-import { HeaderStore } from '@/utils/headers/headerStore'
-import { memoryHeaderFs } from '@/utils/headers/fs'
+import { syncHeaders } from '@bsv/expo-wallet-toolbox/core/headers/syncHeaders'
+import { HeaderStore } from '@bsv/expo-wallet-toolbox/core/headers/headerStore'
+import { memoryHeaderFs } from '@bsv/expo-wallet-toolbox/core/headers/fs'
 
 // Same two verified ttn headers as __tests__/headerStore.test.ts, one per line.
 const ANCHOR = { height: 0, hash: '000000000499eabba0a88f5b3747231c74b9191c1a4a04b2c2ea817976b7776d' }

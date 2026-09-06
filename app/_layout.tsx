@@ -18,14 +18,14 @@ import { UserContextProvider, NativeHandlers } from '@bsv/expo-wallet-toolbox/co
 import packageJson from '../package.json'
 import { WalletContextProvider, useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { ExchangeRateContextProvider } from '@bsv/expo-wallet-toolbox/core/context/ExchangeRateContext'
-import { ThemeProvider } from '@/context/theme/ThemeContext'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
 // TODO: Re-add RecoveryKeySaver when WAB support returns
 import LocalStorageProvider from '@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider'
-import PermissionSheet from '@/components/ui/PermissionSheet'
-import { AlertHost } from '@/components/ui/AlertCard'
+import PermissionSheet from '@bsv/expo-wallet-toolbox/ui/components/ui/PermissionSheet'
+import { AlertHost } from '@bsv/expo-wallet-toolbox/ui/components/ui/AlertCard'
 import { VaultProvider } from '@bsv/expo-wallet-toolbox/core/context/VaultContext'
-import { VaultCeremonySheet } from '@/components/vault/VaultCeremonySheet'
-import { ToastHost, showToast } from '@/components/ui/Toast'
+import { VaultCeremonySheet } from '@bsv/expo-wallet-toolbox/ui/components/vault/VaultCeremonySheet'
+import { ToastHost, showToast } from '@bsv/expo-wallet-toolbox/ui/components/ui/Toast'
 import { useDeepLinking } from '@/hooks/useDeepLinking'
 import { LanguageProvider } from '@/context/i18n/browserTranslations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
@@ -33,7 +33,7 @@ import Web3BenefitsModalHandler from '@/components/onboarding/Web3BenefitsModalH
 import { WalletConnectionProvider } from '@bsv/expo-wallet-toolbox/core/context/WalletConnectionContext'
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+import { ErrorBoundary } from '@bsv/expo-wallet-toolbox/ui/components/ui/ErrorBoundary'
 
 export const FIRST_TOUCH_DATE_KEY = 'firstTouchDate'
 

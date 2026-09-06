@@ -8,7 +8,7 @@ import {
   sendToAddress,
   sweepAddress,
   wocConfigFor
-} from '@/utils/pay/rails/address'
+} from '@bsv/expo-wallet-toolbox/core/pay/rails/address'
 
 const woc = wocConfigFor('main')
 const ADDRESS = '1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2'

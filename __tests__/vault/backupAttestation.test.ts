@@ -15,7 +15,7 @@ import {
   resolveAttestationIdentity,
   readBackupAttestation,
   recordBackupAttestation
-} from '../../services/vault/backupAttestation'
+} from '@bsv/expo-wallet-toolbox/core/services/vault/backupAttestation'
 
 const IDENTITY_A = '02' + 'a'.repeat(62)
 const IDENTITY_B = '02' + 'b'.repeat(62)

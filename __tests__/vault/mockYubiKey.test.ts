@@ -5,10 +5,10 @@
  */
 import { p256 } from '@noble/curves/nist.js'
 import { Utils } from '@bsv/sdk'
-import { MockYubiKey } from '../../services/vault/mockYubiKey'
-import { getVaultDriver, setMockDriver } from '../../services/vault/driver'
-import { VaultError } from '../../services/vault/types'
-import { sealVaultKey, unsealVaultKey } from '../../services/vault/sealing'
+import { MockYubiKey } from '@bsv/expo-wallet-toolbox/core/services/vault/mockYubiKey'
+import { getVaultDriver, setMockDriver } from '@bsv/expo-wallet-toolbox/core/services/vault/driver'
+import { VaultError } from '@bsv/expo-wallet-toolbox/core/services/vault/types'
+import { sealVaultKey, unsealVaultKey } from '@bsv/expo-wallet-toolbox/core/services/vault/sealing'
 
 describe('MockYubiKey', () => {
   test('wrong PIN decrements retries then locks at zero', async () => {
@@ -53,7 +53,7 @@ describe('getVaultDriver', () => {
 })
 
 // ── native event vocabulary (fix #1) ──
-import { mapNativeKeyEvent } from '../../services/vault/driver'
+import { mapNativeKeyEvent } from '@bsv/expo-wallet-toolbox/core/services/vault/driver'
 
 describe('mapNativeKeyEvent', () => {
   test("native 'connected' maps to attached (not detached)", () => {
@@ -272,7 +272,7 @@ describe('generateVaultKey policy', () => {
     jest.doMock('react-native-yubikey', () => ({ getYubiKeyPiv: () => native }))
     jest.resetModules()
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getVaultDriver } = require('@/services/vault/driver')
+    const { getVaultDriver } = require('@bsv/expo-wallet-toolbox/core/services/vault/driver')
 
     await getVaultDriver()!.generateVaultKey(0x82)
 

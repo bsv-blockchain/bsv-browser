@@ -1,6 +1,6 @@
-import { holdSentPaymentOffline } from '@/utils/offline/payerHold'
+import { holdSentPaymentOffline } from '@bsv/expo-wallet-toolbox/core/offline/payerHold'
 import { insertOfflineAction } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
-import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
+import { TaskSendOffline } from '@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline'
 import type { StorageExpoSQLite } from '@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite'
 
 // The DB mapper is its own tested unit (`storage/methods/offlineActions.ts`);

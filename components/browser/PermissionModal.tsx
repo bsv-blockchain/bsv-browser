@@ -1,11 +1,11 @@
 import React, { useRef } from 'react'
 import { View, Text, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import Sheet from '@/components/ui/Sheet'
-import PressableScale from '@/components/ui/PressableScale'
-import { useHaptics } from '@/hooks/useHaptics'
-import { useTheme } from '@/context/theme/ThemeContext'
-import { spacing, radii, typography, hitTargets } from '@/context/theme/tokens'
+import Sheet from '@bsv/expo-wallet-toolbox/ui/components/ui/Sheet'
+import PressableScale from '@bsv/expo-wallet-toolbox/ui/components/ui/PressableScale'
+import { useHaptics } from '@bsv/expo-wallet-toolbox/core/hooks/useHaptics'
+import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { spacing, radii, typography, hitTargets } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
 import { PermissionType } from '@/utils/permissionsManager'
 
 interface PermissionModalProps {

@@ -21,8 +21,8 @@ jest.mock('expo-secure-store', () => ({
 }))
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { vaultStore, VaultMetaV4 } from '@/services/vault/vaultStore'
-import { SealedBlob } from '@/services/vault/types'
+import { vaultStore, VaultMetaV4 } from '@bsv/expo-wallet-toolbox/core/services/vault/vaultStore'
+import { SealedBlob } from '@bsv/expo-wallet-toolbox/core/services/vault/types'
 
 const META: VaultMetaV4 = {
   v: 4,

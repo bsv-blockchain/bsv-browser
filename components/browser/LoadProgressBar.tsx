@@ -6,7 +6,7 @@
 import React from 'react'
 import { StyleSheet } from 'react-native'
 import Animated, { useAnimatedStyle, SharedValue } from 'react-native-reanimated'
-import { useTheme } from '@/context/theme/ThemeContext'
+import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
 
 interface Props {
   /** 0..1 load progress; set to 0 when idle, 1 triggers instant hide. */

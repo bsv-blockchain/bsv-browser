@@ -7,7 +7,7 @@
  * the vectors move with the function rather than being deleted with the file.
  */
 import { Utils } from '@bsv/sdk'
-import { hkdfSha256 } from '../../services/secrets/hkdf'
+import { hkdfSha256 } from '@bsv/expo-wallet-toolbox/core/services/secrets/hkdf'
 
 describe('hkdfSha256 (RFC 5869)', () => {
   test('test case 1: basic SHA-256', () => {

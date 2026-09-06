@@ -1,4 +1,4 @@
-import { springs, durations } from '@/context/theme/motion'
+import { springs, durations } from '@bsv/expo-wallet-toolbox/core/theme/motion'
 
 describe('motion tokens', () => {
   it('defines the two approved springs', () => {

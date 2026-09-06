@@ -1,9 +1,9 @@
-import { SWEEP_INTERVAL_MS, runSweep, shouldSweepNow, sweptTotal } from '@/utils/pay/sweeper'
-import { wocConfigFor } from '@/utils/pay/rails/address'
-import { getWatchlist, watchAddress } from '@/utils/pay/watchlist'
+import { SWEEP_INTERVAL_MS, runSweep, shouldSweepNow, sweptTotal } from '@bsv/expo-wallet-toolbox/core/pay/sweeper'
+import { wocConfigFor } from '@bsv/expo-wallet-toolbox/core/pay/rails/address'
+import { getWatchlist, watchAddress } from '@bsv/expo-wallet-toolbox/core/pay/watchlist'
 
-jest.mock('@/utils/pay/rails/address', () => {
-  const actual = jest.requireActual('@/utils/pay/rails/address')
+jest.mock('@bsv/expo-wallet-toolbox/core/pay/rails/address', () => {
+  const actual = jest.requireActual('@bsv/expo-wallet-toolbox/core/pay/rails/address')
   return { ...actual, sweepAddress: jest.fn() }
 })
 // The mock has to be reached through require, not an import: the import above is
@@ -11,7 +11,7 @@ jest.mock('@/utils/pay/rails/address', () => {
 // would be captured before the factory ever runs. wocConfigFor stays real via
 // the requireActual spread.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { sweepAddress } = require('@/utils/pay/rails/address') as { sweepAddress: jest.Mock }
+const { sweepAddress } = require('@bsv/expo-wallet-toolbox/core/pay/rails/address') as { sweepAddress: jest.Mock }
 
 function fakeStorage() {
   const map = new Map<string, string>()

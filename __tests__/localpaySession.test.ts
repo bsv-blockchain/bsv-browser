@@ -1,7 +1,7 @@
 import {
   mintSession, encodeSession, decodeSession, instanceName, CAP_AWDL, CAP_NEARBY, SESSION_VERSION, CAP_BLE, type SessionAsset,
-} from '@/utils/localpay/session'
-import { CodecError } from '@/utils/localpay/codec'
+} from '@bsv/expo-wallet-toolbox/core/localpay/session'
+import { CodecError } from '@bsv/expo-wallet-toolbox/core/localpay/codec'
 
 const args = {
   identityKey: '02'.padEnd(66, 'b'),

@@ -2,7 +2,7 @@ import React from 'react'
 import { Keyboard, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
-import { spacing, typography } from '@/context/theme/tokens'
+import { spacing, typography } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
 import { GlassPill, useGlassColors, PILL_RADIUS } from '@/components/browser/GlassPill'
 
 interface AddressBarRowProps {

@@ -3,7 +3,7 @@ import {
   createServices,
   installOfflineChainTracker,
   chaintracksUrlFor
-} from '@/services/walletServiceConfig'
+} from '@bsv/expo-wallet-toolbox/core/services/walletServiceConfig'
 import { Services } from '@bsv/wallet-toolbox-mobile'
 
 const exchangeRate = () => ({ timestamp: new Date(), base: 'USD' as const, rate: 1 })

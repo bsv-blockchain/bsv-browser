@@ -14,7 +14,7 @@ import '@/context/i18n/browserTranslations'
 
 import React from 'react'
 import { fireEvent, render } from '@testing-library/react-native'
-import OfflineNotice from '@/components/pay/OfflineNotice'
+import OfflineNotice from '@bsv/expo-wallet-toolbox/ui/components/pay/OfflineNotice'
 
 const row = (txid: string) => ({
   offlineActionId: 1,

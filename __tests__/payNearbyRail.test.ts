@@ -1,11 +1,11 @@
-import * as nearby from '@/utils/pay/rails/nearby'
-import * as session from '@/utils/localpay/session'
-import * as verify from '@/utils/localpay/verify'
-import * as codec from '@/utils/localpay/codec'
-import * as pending from '@/utils/localpay/pending'
-import * as build from '@/utils/localpay/build'
-import { awdlTransport } from '@/utils/localpay/transport/awdl'
-import { localSupportsAwdl, selectTransport } from '@/utils/localpay/transport/select'
+import * as nearby from '@bsv/expo-wallet-toolbox/core/pay/rails/nearby'
+import * as session from '@bsv/expo-wallet-toolbox/core/localpay/session'
+import * as verify from '@bsv/expo-wallet-toolbox/core/localpay/verify'
+import * as codec from '@bsv/expo-wallet-toolbox/core/localpay/codec'
+import * as pending from '@bsv/expo-wallet-toolbox/core/localpay/pending'
+import * as build from '@bsv/expo-wallet-toolbox/core/localpay/build'
+import { awdlTransport } from '@bsv/expo-wallet-toolbox/core/localpay/transport/awdl'
+import { localSupportsAwdl, selectTransport } from '@bsv/expo-wallet-toolbox/core/localpay/transport/select'
 
 describe('nearby rail adapter', () => {
   it('re-exports the localpay functions by identity, so nothing is reimplemented', () => {

@@ -1,8 +1,8 @@
 import { PrivateKey, Utils } from '@bsv/sdk'
 import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
-import { CHUNK_ENTITIES, decodeChunk, emptyChunk, encodeChunk, isEmptyChunk } from '@/utils/backup/codec'
-import { BACKUP_PROTOCOL, backupKeyId } from '@/utils/backup/constants'
-import { deriveBackupWallet } from '@/utils/backup/derive'
+import { CHUNK_ENTITIES, decodeChunk, emptyChunk, encodeChunk, isEmptyChunk } from '@bsv/expo-wallet-toolbox/core/backup/codec'
+import { BACKUP_PROTOCOL, backupKeyId } from '@bsv/expo-wallet-toolbox/core/backup/constants'
+import { deriveBackupWallet } from '@bsv/expo-wallet-toolbox/core/backup/derive'
 
 const KEY = new PrivateKey(7).toArray('be', 32)
 

@@ -1,5 +1,5 @@
-import { HeaderStore } from '@/utils/headers/headerStore'
-import { memoryHeaderFs } from '@/utils/headers/fs'
+import { HeaderStore } from '@bsv/expo-wallet-toolbox/core/headers/headerStore'
+import { memoryHeaderFs } from '@bsv/expo-wallet-toolbox/core/headers/fs'
 import { Utils } from '@bsv/sdk'
 
 // Two real consecutive ttn headers, heights 1 and 2, from

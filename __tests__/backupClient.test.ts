@@ -13,8 +13,8 @@ import {
   BACKUP_REQUEST_TIMEOUT_MS,
   ERR_BLOB_TOO_LARGE,
   ERR_SEQ_CONFLICT
-} from '@/utils/backup/client'
-import { backupPseudonym } from '@/utils/backup/derive'
+} from '@bsv/expo-wallet-toolbox/core/backup/client'
+import { backupPseudonym } from '@bsv/expo-wallet-toolbox/core/backup/derive'
 
 const KEY = new PrivateKey(9).toArray('be', 32)
 const DEVICE = 'a'.repeat(32)

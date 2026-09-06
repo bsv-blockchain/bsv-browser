@@ -2,9 +2,9 @@
  * Vault access guard — external origins must not reach privileged (vault) key
  * material. The load-bearing defense against the privilege-escalation finding.
  */
-import { guardVaultAccess, VaultAccessDenied } from '../../services/vault/guard'
-import { capWalletArgs } from '../../services/capWalletArgs'
-import { limitsForTier } from '../../services/walletArgLimits'
+import { guardVaultAccess, VaultAccessDenied } from '@bsv/expo-wallet-toolbox/core/services/vault/guard'
+import { capWalletArgs } from '@bsv/expo-wallet-toolbox/core/services/capWalletArgs'
+import { limitsForTier } from '@bsv/expo-wallet-toolbox/core/services/walletArgLimits'
 
 const ADMIN = 'admin.com'
 

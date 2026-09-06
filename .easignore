@@ -91,6 +91,11 @@ build-*.tar.gz
 docs/marketing
 marketing.html
 Dev Builds.zip
+# Local dev-build artifacts (build-*.tar.gz + unpacked BSVBrowser.app, ~283 MB).
+# The /BSVBrowser.app rule above is root-anchored and misses the nested copy.
+# Mirrors .gitignore; this file must carry the rule itself because eas-cli
+# ignores every .gitignore once .easignore exists (see the header).
+dev builds/
 .opencode
 credentials.json
 .superpowers/

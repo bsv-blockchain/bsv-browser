@@ -5,13 +5,13 @@ import { useTranslation } from 'react-i18next'
 import type { Tab, HistoryEntry } from '@/shared/types/browser'
 import { kNEW_TAB_URL } from '@/shared/constants'
 import { PermissionType, PermissionState } from '@/utils/permissionsManager'
-import { spacing } from '@/context/theme/tokens'
+import { spacing } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
 import type { SheetContextType } from '@/context/SheetContext'
 
 import { BrowserPage } from '@/components/browser/BrowserPage'
 import { HistoryList } from '@/components/browser/HistoryList'
 import { BookmarkList } from '@/components/browser/BookmarkList'
-import Sheet from '@/components/ui/Sheet'
+import Sheet from '@bsv/expo-wallet-toolbox/ui/components/ui/Sheet'
 
 type Props = {
   sheet: SheetContextType

@@ -17,7 +17,7 @@ import {
   generateEntropyShares,
   generateLegacyKeyShares,
   recoverSecretFromShares
-} from '../utils/backupShares'
+} from '@bsv/expo-wallet-toolbox/ui/backupShares'
 
 const entropyOf = (m: Mnemonic): number[] => m.toEntropy()
 

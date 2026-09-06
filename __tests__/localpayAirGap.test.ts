@@ -18,7 +18,7 @@ import {
   frameToQr,
   unsealFrame,
   type PaymentFrame
-} from '@/utils/localpay/codec'
+} from '@bsv/expo-wallet-toolbox/core/localpay/codec'
 
 /** Version-40 QR, error-correction level M, byte mode. */
 const SYMBOL_CAPACITY_M = 2331

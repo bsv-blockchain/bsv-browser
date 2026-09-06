@@ -17,13 +17,13 @@ jest.mock('@react-native-async-storage/async-storage', () => {
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { PrivateKey } from '@bsv/sdk'
 import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
-import { BackupHttpError, ERR_SEQ_CONFLICT } from '@/utils/backup/client'
-import { emptyChunk } from '@/utils/backup/codec'
-import { GENERATION_CHUNK_THRESHOLD } from '@/utils/backup/constants'
-import { loadCursor, saveCursor, freshCursor, zeroOffsets } from '@/utils/backup/cursor'
-import { backupPseudonym } from '@/utils/backup/derive'
-import { setBackupPushEnabled } from '@/utils/backup/preference'
-import { pushOnce } from '@/utils/backup/push'
+import { BackupHttpError, ERR_SEQ_CONFLICT } from '@bsv/expo-wallet-toolbox/core/backup/client'
+import { emptyChunk } from '@bsv/expo-wallet-toolbox/core/backup/codec'
+import { GENERATION_CHUNK_THRESHOLD } from '@bsv/expo-wallet-toolbox/core/backup/constants'
+import { loadCursor, saveCursor, freshCursor, zeroOffsets } from '@bsv/expo-wallet-toolbox/core/backup/cursor'
+import { backupPseudonym } from '@bsv/expo-wallet-toolbox/core/backup/derive'
+import { setBackupPushEnabled } from '@bsv/expo-wallet-toolbox/core/backup/preference'
+import { pushOnce } from '@bsv/expo-wallet-toolbox/core/backup/push'
 
 const PRIMARY = new PrivateKey(11).toArray('be', 32)
 const IDENTITY = '02' + 'ab'.repeat(32)

@@ -3,7 +3,7 @@ import {
   DISK_WARN_BYTES,
   availableDiskBytes,
   diskPressure
-} from '@/utils/diskSpace'
+} from '@bsv/expo-wallet-toolbox/core/diskSpace'
 
 describe('diskPressure', () => {
   it('reports ok well above the warn threshold', () => {

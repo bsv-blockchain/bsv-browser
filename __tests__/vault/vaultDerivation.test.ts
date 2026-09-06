@@ -24,7 +24,7 @@ import {
   bip32KeyID,
   indexFromKeyID,
   randomDepositStartIndex
-} from '../../services/vault/vaultDerivation'
+} from '@bsv/expo-wallet-toolbox/core/services/vault/vaultDerivation'
 
 // A fixed, well-known throwaway BIP39 test vector. NEVER a real wallet phrase.
 const TEST_MNEMONIC =

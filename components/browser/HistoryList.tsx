@@ -3,9 +3,9 @@ import { FlatList, Pressable, Text, TouchableOpacity, View, StyleSheet } from 'r
 import ReanimatedSwipeable, { SwipeDirection } from 'react-native-gesture-handler/ReanimatedSwipeable'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
-import { haptics } from '@/hooks/useHaptics'
-import { useTheme } from '@/context/theme/ThemeContext'
-import { spacing, typography, radii } from '@/context/theme/tokens'
+import { haptics } from '@bsv/expo-wallet-toolbox/core/hooks/useHaptics'
+import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { spacing, typography, radii } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
 
 export interface HistoryEntry {
   title: string

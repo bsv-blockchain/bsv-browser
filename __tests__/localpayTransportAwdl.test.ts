@@ -1,7 +1,7 @@
-import { awdlTransport } from '@/utils/localpay/transport/awdl'
-import { AckError } from '@/utils/localpay/transport/types'
-import { mintSession, instanceName } from '@/utils/localpay/session'
-import { CodecError, FRAME_VERSION, SEAL_VERSION, encodeFrame, sealFrame, unsealFrame, type PaymentFrame } from '@/utils/localpay/codec'
+import { awdlTransport } from '@bsv/expo-wallet-toolbox/core/localpay/transport/awdl'
+import { AckError } from '@bsv/expo-wallet-toolbox/core/localpay/types'
+import { mintSession, instanceName } from '@bsv/expo-wallet-toolbox/core/localpay/session'
+import { CodecError, FRAME_VERSION, SEAL_VERSION, encodeFrame, sealFrame, unsealFrame, type PaymentFrame } from '@bsv/expo-wallet-toolbox/core/localpay/codec'
 import type { LocalPayTransport } from '@bsv/react-native-localpay-transport'
 
 jest.mock('@bsv/react-native-localpay-transport', () => ({

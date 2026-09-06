@@ -9,10 +9,10 @@ import {
   peerPayLinkFor,
   retryDelivery,
   sendViaHandle
-} from '@/utils/pay/rails/handle'
+} from '@bsv/expo-wallet-toolbox/core/pay/rails/handle'
 import { P2PKH, PrivateKey, Transaction } from '@bsv/sdk'
-import { getOutboxEntries } from '@/utils/peerpay/outbox'
-import { validatePeerPayURI } from '@/utils/parsePeerPayURI'
+import { getOutboxEntries } from '@bsv/expo-wallet-toolbox/core/peerpay/outbox'
+import { validatePeerPayURI } from '@bsv/expo-wallet-toolbox/core/parsePeerPayURI'
 
 // secp256k1 generator point, in the lowercase hex PublicKey.toString() emits —
 // which is also the only form utils/parsePeerPayURI.ts's identity-key regex accepts.

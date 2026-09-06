@@ -7,7 +7,7 @@
  * BEFORE anything allocates, which is why nothing here serialises: sizes are
  * summed from lengths that are already materialised.
  */
-import { checkWalletArgs, limitsForTier } from '@/services/walletArgLimits'
+import { checkWalletArgs, limitsForTier } from '@bsv/expo-wallet-toolbox/core/services/walletArgLimits'
 
 const L = limitsForTier('mid')
 const hex = (bytes: number) => 'ab'.repeat(bytes)

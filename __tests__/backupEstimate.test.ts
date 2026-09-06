@@ -7,8 +7,8 @@
  * arrays, so such a chunk estimated at ~0, sailed past the gate, and hit the
  * exact ~50 s encrypt-then-413 loop the gate exists to prevent.
  */
-import { estimateEncodedBytes } from '@/utils/backup/codec'
-import { MAX_BLOB_BYTES } from '@/utils/backup/constants'
+import { estimateEncodedBytes } from '@bsv/expo-wallet-toolbox/core/backup/codec'
+import { MAX_BLOB_BYTES } from '@bsv/expo-wallet-toolbox/core/backup/constants'
 import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
 
 const chunk = (over: Record<string, unknown>): SyncChunk =>

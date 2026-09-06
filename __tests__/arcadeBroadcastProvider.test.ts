@@ -1,5 +1,5 @@
 import { Beef, Transaction } from '@bsv/sdk'
-import { createWocBroadcastService, handleArcResponse } from '@/services/arcadeBroadcastProvider'
+import { createWocBroadcastService, handleArcResponse } from '@bsv/expo-wallet-toolbox/core/services/arcadeBroadcastProvider'
 
 describe('handleArcResponse', () => {
   const txids = ['abc123']

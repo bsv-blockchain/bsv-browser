@@ -1,4 +1,4 @@
-import { QrHandoffRequired, type LocalPaymentTransport } from './types'
+import { QrHandoffRequired, type LocalPaymentTransport } from '@bsv/expo-wallet-toolbox/core/localpay/types'
 
 /**
  * The QR path has no socket: the payer renders a frame and the payee scans it.

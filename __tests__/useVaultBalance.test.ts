@@ -18,13 +18,13 @@ jest.mock('@bsv/expo-wallet-toolbox/core/context/WalletContext', () => ({
 jest.mock('@bsv/expo-wallet-toolbox/core/context/VaultContext', () => ({
   useVault: () => ({ state: { phase: mockVaultPhase }, submitPin: () => {}, cancel: () => {}, retry: () => {} })
 }))
-jest.mock('@/services/vault/transfers', () => ({
+jest.mock('@bsv/expo-wallet-toolbox/core/services/vault/transfers', () => ({
   getVaultBalance: jest.fn()
 }))
 
 import { act, renderHook } from '@testing-library/react-native'
-import { getVaultBalance } from '@/services/vault/transfers'
-import { useVaultBalance } from '@/hooks/useVaultBalance'
+import { getVaultBalance } from '@bsv/expo-wallet-toolbox/core/services/vault/transfers'
+import { useVaultBalance } from '@bsv/expo-wallet-toolbox/ui/hooks/useVaultBalance'
 
 const fetchBalance = getVaultBalance as jest.Mock
 

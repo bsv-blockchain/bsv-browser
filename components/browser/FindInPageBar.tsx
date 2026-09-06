@@ -2,9 +2,9 @@ import React, { useEffect, useRef } from 'react'
 import { StyleSheet, TextInput, Text, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTranslation } from 'react-i18next'
-import { useTheme } from '@/context/theme/ThemeContext'
-import { BlurChrome } from '@/components/ui/BlurChrome'
-import { spacing, radii, typography } from '@/context/theme/tokens'
+import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { BlurChrome } from '@bsv/expo-wallet-toolbox/ui/components/ui/BlurChrome'
+import { spacing, radii, typography } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
 
 let LiquidGlassView: React.ComponentType<any> | null = null
 let isLiquidGlassSupported = false

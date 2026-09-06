@@ -31,9 +31,9 @@ jest.mock('expo-secure-store', () => ({
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { HD, Hash, Utils } from '@bsv/sdk'
-import { MockYubiKey } from '../../services/vault/mockYubiKey'
-import { setMockDriver } from '../../services/vault/driver'
-import { vaultStore } from '../../services/vault/vaultStore'
+import { MockYubiKey } from '@bsv/expo-wallet-toolbox/core/services/vault/mockYubiKey'
+import { setMockDriver } from '@bsv/expo-wallet-toolbox/core/services/vault/driver'
+import { vaultStore } from '@bsv/expo-wallet-toolbox/core/services/vault/vaultStore'
 import {
   enrollVault,
   finalizeEnrollment,
@@ -41,9 +41,9 @@ import {
   disableVault,
   resealToNewKey,
   VAULT_SLOT
-} from '../../services/vault/VaultKeyService'
-import { deriveVaultHD } from '../../services/vault/vaultDerivation'
-import { unsealVaultKey } from '../../services/vault/sealing'
+} from '@bsv/expo-wallet-toolbox/core/services/vault/VaultKeyService'
+import { deriveVaultHD } from '@bsv/expo-wallet-toolbox/core/services/vault/vaultDerivation'
+import { unsealVaultKey } from '@bsv/expo-wallet-toolbox/core/services/vault/sealing'
 
 let mock: MockYubiKey
 

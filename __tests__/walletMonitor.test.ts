@@ -2,9 +2,9 @@ import {
   configureNewHeaderPolling,
   NEW_HEADER_FAILURE_BACKOFF_MS,
   NEW_HEADER_POLL_INTERVAL_MS
-} from '@/utils/walletMonitor'
+} from '@bsv/expo-wallet-toolbox/core/walletMonitor'
 import { Monitor, Services } from '@bsv/wallet-toolbox-mobile'
-import { TaskSendOffline } from '@/utils/monitor/TaskSendOffline'
+import { TaskSendOffline } from '@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline'
 
 function createTask(runTask: () => Promise<string>) {
   return {

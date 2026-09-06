@@ -1,11 +1,11 @@
 import React from 'react'
 import { Linking, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { BlurChrome } from '@/components/ui/BlurChrome'
+import { BlurChrome } from '@bsv/expo-wallet-toolbox/ui/components/ui/BlurChrome'
 import { useTranslation } from 'react-i18next'
-import { useTheme } from '@/context/theme/ThemeContext'
+import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
 import { useBrowserMode } from '@/context/BrowserModeContext'
-import { spacing, radii, typography } from '@/context/theme/tokens'
+import { spacing, radii, typography } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
 
 let LiquidGlassView: React.ComponentType<any> | null = null
 let isLiquidGlassSupported = false

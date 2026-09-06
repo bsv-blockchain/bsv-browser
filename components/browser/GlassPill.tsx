@@ -1,7 +1,7 @@
 import React from 'react'
 import { PlatformColor, StyleSheet, View, ViewStyle, StyleProp } from 'react-native'
-import { useTheme } from '@/context/theme/ThemeContext'
-import { BlurChrome } from '@/components/ui/BlurChrome'
+import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { BlurChrome } from '@bsv/expo-wallet-toolbox/ui/components/ui/BlurChrome'
 
 let LiquidGlassView: React.ComponentType<any> | null = null
 let isLiquidGlassSupported = false

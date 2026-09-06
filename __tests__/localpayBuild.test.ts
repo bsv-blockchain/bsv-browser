@@ -1,6 +1,6 @@
-import { broadcastPayment, buildPaymentFrame, finalizeDelivery } from '@/utils/localpay/build'
-import { mintSession } from '@/utils/localpay/session'
-import { PEERPAY_PROTOCOL_ID } from '@/utils/localpay/pending'
+import { broadcastPayment, buildPaymentFrame, finalizeDelivery } from '@bsv/expo-wallet-toolbox/core/localpay/build'
+import { mintSession } from '@bsv/expo-wallet-toolbox/core/localpay/session'
+import { PEERPAY_PROTOCOL_ID } from '@bsv/expo-wallet-toolbox/core/localpay/pending'
 
 const session = () => mintSession({
   identityKey: '02'.padEnd(66, 'e'),
@@ -243,7 +243,7 @@ describe('finalizeDelivery', () => {
     }
   }
 
-  const built = { frame: {} as never, reference: 'ref-1', txid: 'tx-1' }
+  const built = { frame: {} as never, reference: 'ref-1', txid: 'tx-1', satoshis: 777 }
   // These tests are pinning the ONLINE path, so connectivity is injected rather
   // than left to the real default (`@/utils/net/online`'s `getOnline`, which
   // calls the native NetInfo module and has nothing to answer with under Jest).
@@ -335,7 +335,7 @@ describe('finalizeDelivery', () => {
 })
 
 describe('finalizeDelivery when offline', () => {
-  const built = { frame: {} as never, reference: 'ref-1', txid: 'aa'.repeat(32) }
+  const built = { frame: {} as never, reference: 'ref-1', txid: 'aa'.repeat(32), satoshis: 777 }
 
   it('enqueues instead of broadcasting and reports pending', async () => {
     const wallet = {

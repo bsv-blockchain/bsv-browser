@@ -1,9 +1,9 @@
 import React from 'react'
 import { StyleSheet, Text, View } from 'react-native'
-import { useTheme } from '@/context/theme/ThemeContext'
-import { radii, spacing, typography } from '@/context/theme/tokens'
-import Sheet from '@/components/ui/Sheet'
-import PressableScale from '@/components/ui/PressableScale'
+import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { radii, spacing, typography } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
+import Sheet from '@bsv/expo-wallet-toolbox/ui/components/ui/Sheet'
+import PressableScale from '@bsv/expo-wallet-toolbox/ui/components/ui/PressableScale'
 
 interface Web3BenefitsModalProps {
   visible: boolean

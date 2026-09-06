@@ -69,15 +69,15 @@ jest.mock('expo-sqlite', () => {
 })
 
 // Native/expo modules the storage layer touches incidentally.
-jest.mock('@/utils/diskSpace', () => ({
+jest.mock('@bsv/expo-wallet-toolbox/core/diskSpace', () => ({
   availableDiskBytes: jest.fn(async () => 10_000_000_000),
   diskPressure: jest.fn(async () => ({ pressured: false }))
 }))
 
 import { Mnemonic } from '@bsv/sdk'
-import { recoverSecretFromShares } from '@/utils/backupShares'
-import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
-import { restoreOnImport } from '@/utils/backup/restoreOnImport'
+import { recoverSecretFromShares } from '@bsv/expo-wallet-toolbox/ui/backupShares'
+import { recoverMnemonicWallet } from '@bsv/expo-wallet-toolbox/core/mnemonicWallet'
+import { restoreOnImport } from '@bsv/expo-wallet-toolbox/core/backup/restoreOnImport'
 import { StorageExpoSQLite } from '@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite'
 import { StorageProvider } from '@bsv/wallet-toolbox-mobile'
 

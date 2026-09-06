@@ -8,10 +8,10 @@
  */
 import { PrivateKey } from '@bsv/sdk'
 import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
-import type { DeviceSummary, LogEntry } from '@/utils/backup/client'
-import { encodeChunk, emptyChunk } from '@/utils/backup/codec'
-import { deriveBackupWallet } from '@/utils/backup/derive'
-import { restoreOnImport } from '@/utils/backup/restoreOnImport'
+import type { DeviceSummary, LogEntry } from '@bsv/expo-wallet-toolbox/core/backup/client'
+import { encodeChunk, emptyChunk } from '@bsv/expo-wallet-toolbox/core/backup/codec'
+import { deriveBackupWallet } from '@bsv/expo-wallet-toolbox/core/backup/derive'
+import { restoreOnImport } from '@bsv/expo-wallet-toolbox/core/backup/restoreOnImport'
 
 const PRIMARY = new PrivateKey(21).toArray('be', 32)
 const OLD_DEVICE = 'a'.repeat(32)

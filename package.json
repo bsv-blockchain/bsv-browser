@@ -181,8 +181,11 @@
       "^expo-sqlite$": "<rootDir>/__tests__/__mocks__/expo-sqlite.js"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/expo-wallet-toolbox|@bsv/react-native-localpay-transport|@bsv/auth)/)",
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|expo-.*|react-native-localize|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/expo-wallet-toolbox|@bsv/react-native-localpay-transport|@bsv/auth)/)",
       "/node_modules/react-native-reanimated/plugin/"
+    ],
+    "setupFiles": [
+      "<rootDir>/__tests__/setup/asyncStorage.js"
     ]
   }
 }

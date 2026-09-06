@@ -13,8 +13,8 @@ import {
   FRAME_QR_PREFIX,
   SEAL_VERSION,
   type PaymentFrame
-} from '@/utils/localpay/codec'
-import type { TokenPayment } from '@/utils/localpay/codec'
+} from '@bsv/expo-wallet-toolbox/core/localpay/codec'
+import type { TokenPayment } from '@bsv/expo-wallet-toolbox/core/localpay/codec'
 
 const sample = (): PaymentFrame => ({
   version: FRAME_VERSION,

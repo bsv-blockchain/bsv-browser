@@ -1,4 +1,4 @@
-import isImageUrl from './isImageUrl'
+import isImageUrl from '@bsv/expo-wallet-toolbox/ui/isImageUrl'
 import parseAppManifest from './parseAppManifest'
 
 interface AppManifest {

@@ -7,14 +7,14 @@ jest.mock('expo-local-authentication', () => require('../__mocks__/localAuthFake
 
 import { fake as secureStore } from '../__mocks__/secureStoreFake'
 import { fake as localAuth } from '../__mocks__/localAuthFake'
-import { __resetForTests, readSentinel, unlockKek } from '../../services/secrets/kek'
+import { __resetForTests, readSentinel, unlockKek } from '@bsv/expo-wallet-toolbox/core/services/secrets/kek'
 import {
   deleteAllSecrets,
   deleteSecret,
   getSecret,
   hasSecret,
   putSecret
-} from '../../services/secrets/store'
+} from '@bsv/expo-wallet-toolbox/core/services/secrets/store'
 
 const ENV_SERVICE = 'bsvb.secrets.v1'
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'

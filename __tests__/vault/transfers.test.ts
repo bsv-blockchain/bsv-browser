@@ -16,7 +16,7 @@ import {
   buildVaultLockingScript,
   decodeVaultInstructions,
   encodeVaultInstructions
-} from '@/services/vault/k1'
+} from '@bsv/expo-wallet-toolbox/core/services/vault/k1'
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
@@ -36,18 +36,18 @@ jest.mock('expo-secure-store', () => ({
 // Mocked lazily (see beforeEach) so the factory itself never touches
 // module-scope consts declared later in the file — avoids TDZ issues with
 // jest's hoisting of jest.mock() above imports.
-jest.mock('@/services/vault/ceremonyHost', () => ({
+jest.mock('@bsv/expo-wallet-toolbox/core/services/vault/ceremonyHost', () => ({
   requestVaultKey: jest.fn(),
   noteVaultProgress: jest.fn()
 }))
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { vaultStore } from '@/services/vault/vaultStore'
-import { backupAttestation } from '@/services/vault/backupAttestation'
-import { bip32KeyID, depositPubKeyHash } from '@/services/vault/vaultDerivation'
-import { requestVaultKey, noteVaultProgress } from '@/services/vault/ceremonyHost'
-import type { VaultKeyHandle } from '@/services/vault/ceremony'
-import { VaultError } from '@/services/vault/types'
+import { vaultStore } from '@bsv/expo-wallet-toolbox/core/services/vault/vaultStore'
+import { backupAttestation } from '@bsv/expo-wallet-toolbox/core/services/vault/backupAttestation'
+import { bip32KeyID, depositPubKeyHash } from '@bsv/expo-wallet-toolbox/core/services/vault/vaultDerivation'
+import { requestVaultKey, noteVaultProgress } from '@bsv/expo-wallet-toolbox/core/services/vault/ceremonyHost'
+import type { VaultKeyHandle } from '@bsv/expo-wallet-toolbox/core/services/vault/ceremony'
+import { VaultError } from '@bsv/expo-wallet-toolbox/core/services/vault/types'
 import {
   VAULT_BASKET,
   VAULT_STAGING_BASKET,
@@ -60,7 +60,7 @@ import {
   VaultWallet,
   VAULT_MAX_INPUTS,
   VAULT_HARD_MAX_INPUTS
-} from '@/services/vault/transfers'
+} from '@bsv/expo-wallet-toolbox/core/services/vault/transfers'
 
 const ADMIN = 'admin.com'
 const IDENTITY_KEY = '02' + 'f'.repeat(62)

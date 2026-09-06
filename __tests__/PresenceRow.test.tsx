@@ -16,9 +16,9 @@ jest.mock('@expo/vector-icons', () => {
 
 import React from 'react'
 import { render } from '@testing-library/react-native'
-import PresenceRow, { type PresenceState } from '@/components/localpay/PresenceRow'
-import { ThemeProvider } from '@/context/theme/ThemeContext'
-import { lightColors } from '@/context/theme/tokens'
+import PresenceRow, { type PresenceState } from '@bsv/expo-wallet-toolbox/ui/components/ui/PresenceRow'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { lightColors } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
 
 const draw = (state: PresenceState, label = 'status', peer?: string | null) =>
   render(

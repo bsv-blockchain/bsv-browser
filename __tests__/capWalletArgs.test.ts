@@ -5,9 +5,9 @@
  * what matters is that the underlying wallet is NOT called for a refused
  * payload, because the whole purpose is to refuse before anything allocates.
  */
-import { capWalletArgs } from '@/services/capWalletArgs'
-import { guardVaultAccess } from '@/services/vault/guard'
-import { limitsForTier } from '@/services/walletArgLimits'
+import { capWalletArgs } from '@bsv/expo-wallet-toolbox/core/services/capWalletArgs'
+import { guardVaultAccess } from '@bsv/expo-wallet-toolbox/core/services/vault/guard'
+import { limitsForTier } from '@bsv/expo-wallet-toolbox/core/services/walletArgLimits'
 
 const L = limitsForTier('mid')
 const hex = (bytes: number) => 'ab'.repeat(bytes)

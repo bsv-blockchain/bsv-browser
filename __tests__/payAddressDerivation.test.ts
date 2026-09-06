@@ -7,7 +7,7 @@ import {
   getPaymentAddress,
   legacyKeyId,
   wocConfigFor
-} from '@/utils/pay/rails/address'
+} from '@bsv/expo-wallet-toolbox/core/pay/rails/address'
 
 const dayMs = 86_400_000
 

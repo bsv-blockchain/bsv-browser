@@ -1,2 +1,0 @@
-// Configuration utilities
-export default {}

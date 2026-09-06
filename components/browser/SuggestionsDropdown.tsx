@@ -2,8 +2,8 @@ import React, { memo, useCallback, useMemo, useRef } from 'react'
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import Animated, { FadeIn, FadeInDown, FadeOut, useReducedMotion } from 'react-native-reanimated'
 import type { HistoryEntry, Bookmark } from '@/shared/types/browser'
-import { spacing, radii, typography } from '@/context/theme/tokens'
-import { durations, springs } from '@/context/theme/motion'
+import { spacing, radii, typography } from '@bsv/expo-wallet-toolbox/core/theme/tokens'
+import { durations, springs } from '@bsv/expo-wallet-toolbox/core/theme/motion'
 
 type Suggestion = HistoryEntry | Bookmark
 

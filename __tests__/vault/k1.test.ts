@@ -2,7 +2,7 @@ import { P2PKH, PrivateKey, Hash, Transaction, Spend } from '@bsv/sdk'
 import {
   K1_LOCK_LEN, K1_UNLOCK_LEN, buildVaultLockingScript,
   encodeVaultInstructions, decodeVaultInstructions, VaultInstructions
-} from '../../services/vault/k1'
+} from '@bsv/expo-wallet-toolbox/core/services/vault/k1'
 
 describe('K1 vault module', () => {
   const priv = PrivateKey.fromRandom()

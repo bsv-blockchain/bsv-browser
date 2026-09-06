@@ -14,9 +14,9 @@ jest.mock('expo-local-authentication', () => require('../__mocks__/localAuthFake
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { fake as secureStore } from '../__mocks__/secureStoreFake'
 import { fake as localAuth } from '../__mocks__/localAuthFake'
-import { __resetForTests, readSentinel, unlockKek } from '../../services/secrets/kek'
-import { migrateLegacySecrets } from '../../services/secrets/migration'
-import { getSecret, hasSecret } from '../../services/secrets/store'
+import { __resetForTests, readSentinel, unlockKek } from '@bsv/expo-wallet-toolbox/core/services/secrets/kek'
+import { migrateLegacySecrets } from '@bsv/expo-wallet-toolbox/core/services/secrets/migration'
+import { getSecret, hasSecret } from '@bsv/expo-wallet-toolbox/core/services/secrets/store'
 
 const ENV_SERVICE = 'bsvb.secrets.v1'
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'

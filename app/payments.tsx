@@ -6,7 +6,7 @@
  * computed by legacyRedirectTarget so the mapping is tested in one place.
  */
 import { Redirect, useLocalSearchParams } from 'expo-router'
-import { legacyRedirectTarget } from '@/utils/pay/rails'
+import { legacyRedirectTarget } from '@bsv/expo-wallet-toolbox/core/pay/rails'
 
 export default function RetiredPaymentsRoute() {
   const params = useLocalSearchParams<Record<string, string | string[]>>()

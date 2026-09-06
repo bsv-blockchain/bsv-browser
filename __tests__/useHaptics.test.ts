@@ -8,7 +8,7 @@ jest.mock('expo-haptics', () => ({
 
 import * as Haptics from 'expo-haptics'
 import { Platform } from 'react-native'
-import { haptics } from '@/hooks/useHaptics'
+import { haptics } from '@bsv/expo-wallet-toolbox/core/hooks/useHaptics'
 
 describe('haptic vocabulary', () => {
   beforeEach(() => jest.clearAllMocks())

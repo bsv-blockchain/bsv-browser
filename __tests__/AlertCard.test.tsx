@@ -8,8 +8,8 @@ jest.mock('expo-haptics', () => ({
 
 import React from 'react'
 import { render, fireEvent, act } from '@testing-library/react-native'
-import { AlertHost, showAlert } from '@/components/ui/AlertCard'
-import { ThemeProvider } from '@/context/theme/ThemeContext'
+import { AlertHost, showAlert } from '@bsv/expo-wallet-toolbox/ui/components/ui/AlertCard'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
 
 const host = () => render(<ThemeProvider><AlertHost /></ThemeProvider>)
 

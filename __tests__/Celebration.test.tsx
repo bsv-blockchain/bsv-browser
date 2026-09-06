@@ -19,8 +19,8 @@ jest.mock('react-native-svg', () => {
 import React from 'react'
 import { render, act } from '@testing-library/react-native'
 import * as Haptics from 'expo-haptics'
-import Celebration from '@/components/ui/Celebration'
-import { ThemeProvider } from '@/context/theme/ThemeContext'
+import Celebration from '@bsv/expo-wallet-toolbox/ui/components/ui/Celebration'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
 
 jest.useFakeTimers()
 

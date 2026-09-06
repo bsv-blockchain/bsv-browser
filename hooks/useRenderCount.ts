@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { perf } from '@/utils/perf'
-import { isLoggingEnabled } from '@/utils/logging'
+import { isLoggingEnabled } from '@bsv/expo-wallet-toolbox/core/logging'
 
 /**
  * Counts renders of a component and records each as a `render:<name>` perf span

@@ -6,8 +6,8 @@ import {
   legacyRedirectTarget,
   PRECONDITION_KEYS,
   CONSEQUENCE_KEYS
-} from '@/utils/pay/rails'
-import { encodeSession, mintSession } from '@/utils/localpay/session'
+} from '@bsv/expo-wallet-toolbox/core/pay/rails'
+import { encodeSession, mintSession } from '@bsv/expo-wallet-toolbox/core/localpay/session'
 
 // secp256k1 generator point — a genuinely valid compressed pubkey.
 //

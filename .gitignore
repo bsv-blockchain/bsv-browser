@@ -66,6 +66,12 @@ build-*.tar.gz
 docs/marketing
 marketing.html
 Dev Builds.zip
+# Local dev-build artifacts kept beside the project (a build-*.tar.gz plus an
+# unpacked BSVBrowser.app). The bare /BSVBrowser.app rule above is root-anchored,
+# so it does not cover the nested copy. Mirrored in .easignore -- that file
+# REPLACES every .gitignore for the EAS archive, so a rule added only here
+# would still ship 283 MB of build output in each build.
+dev builds/
 .opencode
 credentials.json
 .superpowers/

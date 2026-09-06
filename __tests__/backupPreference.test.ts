@@ -14,7 +14,7 @@ import {
   BACKUP_PUSH_ENABLED_KEY,
   isBackupPushEnabled,
   setBackupPushEnabled
-} from '@/utils/backup/preference'
+} from '@bsv/expo-wallet-toolbox/core/backup/preference'
 
 beforeEach(async () => {
   await AsyncStorage.clear()

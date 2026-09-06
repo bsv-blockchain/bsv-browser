@@ -1,7 +1,7 @@
 import { Utils } from '@bsv/sdk'
 import { p256 } from '@noble/curves/nist.js'
-import { sealVaultKey, unsealVaultKey, softwareEcdh, SEAL_INFO } from '../../services/vault/sealing'
-import { VaultError } from '../../services/vault/types'
+import { sealVaultKey, unsealVaultKey, softwareEcdh, SEAL_INFO } from '@bsv/expo-wallet-toolbox/core/services/vault/sealing'
+import { VaultError } from '@bsv/expo-wallet-toolbox/core/services/vault/types'
 
 function cardKeypair() {
   const priv = new Uint8Array(32).fill(7); priv[31] = 1

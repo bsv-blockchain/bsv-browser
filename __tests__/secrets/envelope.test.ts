@@ -2,8 +2,8 @@
  * Envelope crypto — pure, no mocks needed.
  */
 import { Random, Utils } from '@bsv/sdk'
-import { openSecret, sealSecret, assertKekId, generateKek } from '../../services/secrets/envelope'
-import { EnvelopeError } from '../../services/secrets/types'
+import { openSecret, sealSecret, assertKekId, generateKek } from '@bsv/expo-wallet-toolbox/core/services/secrets/envelope'
+import { EnvelopeError } from '@bsv/expo-wallet-toolbox/core/services/secrets/types'
 
 const KEK_ID = 'a1b2c3d4e5f60718'
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'

@@ -17,8 +17,8 @@ jest.mock('react-native-safe-area-context', () => ({
 
 import React from 'react'
 import { render, act } from '@testing-library/react-native'
-import { ToastHost, showToast } from '@/components/ui/Toast'
-import { ThemeProvider } from '@/context/theme/ThemeContext'
+import { ToastHost, showToast } from '@bsv/expo-wallet-toolbox/ui/components/ui/Toast'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
 
 jest.useFakeTimers()
 

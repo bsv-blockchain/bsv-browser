@@ -23,8 +23,8 @@ import React from 'react'
 import { render, fireEvent, waitFor } from '@testing-library/react-native'
 import { WalletClient } from '@bsv/sdk'
 import PairScreen from '@/app/pair'
-import { ThemeProvider } from '@/context/theme/ThemeContext'
-import { VaultAccessDenied } from '@/services/vault/guard'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { VaultAccessDenied } from '@bsv/expo-wallet-toolbox/core/services/vault/guard'
 import type { ConnectParams } from '@bsv/expo-wallet-toolbox/core/context/WalletConnectionContext'
 
 // The wallet the screen is handed — a stand-in for the real

@@ -2,7 +2,7 @@ import { RefObject } from 'react'
 import { View } from 'react-native'
 import { captureRef } from 'react-native-view-shot'
 import { File, Directory, Paths } from 'expo-file-system'
-import { thumbnailQualityForTier } from '@/utils/deviceTier'
+import { thumbnailQualityForTier } from '@bsv/expo-wallet-toolbox/core/deviceTier'
 
 const THUMBNAILS_DIR_NAME = 'tab-thumbnails'
 

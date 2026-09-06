@@ -16,6 +16,9 @@ jest.mock('expo-haptics', () => ({
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }))
 
 jest.mock('react-i18next', () => ({
+  // The library's translations module calls i18n.use(initReactI18next)
+  // at import time, so the mock has to supply it or i18next throws.
+  initReactI18next: { type: '3rdParty', init: () => {} },
   useTranslation: () => ({
     t: (key: string) => key,
     i18n: { language: 'en' }
@@ -24,11 +27,11 @@ jest.mock('react-i18next', () => ({
 
 // The pieces under test compose AvailableBalance and AmountInput; both reach
 // for the wallet context, which is not what this file is about.
-jest.mock('@/components/pay/AvailableBalance', () => {
+jest.mock('@bsv/expo-wallet-toolbox/ui/components/pay/AvailableBalance', () => {
   const { Text } = require('react-native')
   return { __esModule: true, default: () => <Text testID="available-balance">balance</Text> }
 })
-jest.mock('@/components/wallet/AmountInput', () => {
+jest.mock('@bsv/expo-wallet-toolbox/ui/components/wallet/AmountInput', () => {
   const { TextInput } = require('react-native')
   return {
     __esModule: true,
@@ -42,8 +45,8 @@ jest.mock('@/components/wallet/AmountInput', () => {
 import React from 'react'
 import { Text } from 'react-native'
 import { fireEvent, render } from '@testing-library/react-native'
-import { ThemeProvider } from '@/context/theme/ThemeContext'
-import { PayField, PayAmountField, ConsequenceNote, PayCta, RecipientSummary } from '@/components/pay/PayForm'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { PayField, PayAmountField, ConsequenceNote, PayCta, RecipientSummary } from '@bsv/expo-wallet-toolbox/ui/components/pay/PayForm'
 
 const wrap = (ui: React.ReactElement) => render(<ThemeProvider>{ui}</ThemeProvider>)
 

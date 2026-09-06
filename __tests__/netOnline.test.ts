@@ -1,4 +1,4 @@
-import { isOnlineState } from '@/utils/net/online'
+import { isOnlineState } from '@bsv/expo-wallet-toolbox/core/net/online'
 
 describe('isOnlineState', () => {
   it('is online when connected and reachability is unknown', () => {

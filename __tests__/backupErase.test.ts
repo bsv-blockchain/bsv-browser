@@ -18,12 +18,12 @@ jest.mock('@react-native-async-storage/async-storage', () => {
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { PrivateKey } from '@bsv/sdk'
-import { BackupHttpError } from '@/utils/backup/client'
-import { cursorKey } from '@/utils/backup/constants'
-import { freshCursor, loadCursor, saveCursor } from '@/utils/backup/cursor'
-import { backupPseudonym } from '@/utils/backup/derive'
-import { eraseRemoteBackup } from '@/utils/backup/erase'
-import { isBackupPushEnabled, setBackupPushEnabled } from '@/utils/backup/preference'
+import { BackupHttpError } from '@bsv/expo-wallet-toolbox/core/backup/client'
+import { cursorKey } from '@bsv/expo-wallet-toolbox/core/backup/constants'
+import { freshCursor, loadCursor, saveCursor } from '@bsv/expo-wallet-toolbox/core/backup/cursor'
+import { backupPseudonym } from '@bsv/expo-wallet-toolbox/core/backup/derive'
+import { eraseRemoteBackup } from '@bsv/expo-wallet-toolbox/core/backup/erase'
+import { isBackupPushEnabled, setBackupPushEnabled } from '@bsv/expo-wallet-toolbox/core/backup/preference'
 
 const PRIMARY = new PrivateKey(31).toArray('be', 32)
 const OTHER = new PrivateKey(32).toArray('be', 32)

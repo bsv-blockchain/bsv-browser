@@ -1,7 +1,7 @@
-import { recoverSecretFromShares } from '@/utils/backupShares'
-import { recoverMnemonicWallet } from '@/utils/mnemonicWallet'
+import { recoverSecretFromShares } from '@bsv/expo-wallet-toolbox/ui/backupShares'
+import { recoverMnemonicWallet } from '@bsv/expo-wallet-toolbox/core/mnemonicWallet'
 import { Mnemonic } from '@bsv/sdk'
-import { BackupClient } from '@/utils/backup/client'
+import { BackupClient } from '@bsv/expo-wallet-toolbox/core/backup/client'
 
 const RUN = process.env.RESTORE_REPRO === '1'
 ;(RUN ? describe : describe.skip)('manifest probe', () => {
