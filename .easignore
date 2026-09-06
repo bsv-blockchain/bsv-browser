@@ -96,6 +96,11 @@ Dev Builds.zip
 # Mirrors .gitignore; this file must carry the rule itself because eas-cli
 # ignores every .gitignore once .easignore exists (see the header).
 dev builds/
+# Browser-pane / dev-server launch config. Machine-local: its runtimeArgs carry
+# absolute paths to per-session scratch directories that exist on one machine
+# only, so a committed copy is a broken config for everyone else. The rest of
+# .claude/ (commands, skills, tasks) IS tracked -- ignore the file, not the dir.
+.claude/launch.json
 .opencode
 credentials.json
 .superpowers/
