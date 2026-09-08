@@ -218,6 +218,32 @@ it('displays the saved phrase only after its read completes and confirms a handw
   expect(mockMarkPending).not.toHaveBeenCalled()
 })
 
+/**
+ * Shape, not content: this screen's whole job is to put key material on
+ * screen, so its layout is asserted here rather than by looking at a running
+ * app. Pins the parity redesign — one warning treatment (the bordered phrase
+ * block), no banner, no inline biometric note, and the print button introduced
+ * as its own distinct medium.
+ */
+it('renders the backup screen as one warning treatment with a distinct print section', async () => {
+  mockFlow = 'backup'
+  const screen = await renderScreen()
+
+  expect(screen.getByText('Save these words')).toBeTruthy()
+  expect(screen.getByText('Distribute shares')).toBeTruthy()
+  expect(screen.getByText('Any 2 of the 3 pages can be used to recover your wallet.')).toBeTruthy()
+  expect(screen.getByText('print_recovery_shares')).toBeTruthy()
+  expect(screen.getByText('save')).toBeTruthy()
+  expect(screen.getByText('copy')).toBeTruthy()
+
+  // Removed upstream: the red banner duplicated the warning the phrase block
+  // now carries, and the biometric note has no counterpart on this screen.
+  expect(screen.queryByText(/only way/)).toBeNull()
+  expect(screen.queryByText(/Write down these/)).toBeNull()
+  expect(screen.queryByText(/keep them somewhere safe/)).toBeNull()
+  expect(screen.queryByText(/encrypted with a key that Face ID/)).toBeNull()
+})
+
 it.each(['cancelled', 'failed', 'missing'])('keeps a %s backup read in a retry-only state', async outcome => {
   mockFlow = 'backup'
   if (outcome === 'failed') mockGetMnemonic.mockRejectedValueOnce(new Error('read failed'))
