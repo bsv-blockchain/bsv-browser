@@ -1322,11 +1322,15 @@ const Browser = observer(function Browser() {
           }
           return
         }
-        // No wallet, not building, not web2 → user has no wallet configured
+        // No wallet, not building, not web2 → user has no wallet configured.
+        // The wallet screen creates one lazily on the first Pay / Get Paid tap
+        // (behind the library's biometric advisory) and offers import at the
+        // bottom, so it is the landing spot for "you need a wallet for this",
+        // not the create-or-import chooser.
         if (msg.type === 'CWI' && msg.id) {
           sendErrorToWebView(msg.id, 'Wallet is not authenticated', 1)
         }
-        router.push('/auth/mnemonic')
+        router.push('/wallet')
         return
       }
 
@@ -1720,7 +1724,7 @@ const Browser = observer(function Browser() {
               setShowTabsView(true)
             }}
             onNewTab={handleNewTab}
-            onEnableWeb3={() => router.push('/auth/mnemonic')}
+            onEnableWeb3={() => router.push('/wallet')}
             onConnections={() => router.push('/connections')}
             onOpenSheet={route => sheet.push(route)}
             history={history}
