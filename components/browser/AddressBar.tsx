@@ -101,7 +101,6 @@ export interface AddressBarProps {
   onShowTabs: () => void
   // handleNewTab from the shell (sets focusAddressBarOnNewTab + opens a new tab).
   onNewTab: () => void
-  onEnableWeb3: () => void
   onConnections: () => void
   // Push a sheet route (e.g. 'browser-menu', 'settings').
   onOpenSheet: (route: SheetRoute) => void
@@ -120,7 +119,6 @@ export const AddressBar = observer(
       cancelledLoadTabIds,
       onShowTabs,
       onNewTab,
-      onEnableWeb3,
       onConnections,
       onOpenSheet,
       history,
@@ -1122,8 +1120,7 @@ export const AddressBar = observer(
               onNewTab={onNewTab}
               // Full-screen wallet, not a bottom sheet: balance, the three
               // destinations, and activity all live on one screen now.
-              onSettings={() => router.push('/wallet')}
-              onEnableWeb3={onEnableWeb3}
+              onWallet={() => router.push('/wallet')}
               onConnections={onConnections}
               onToggleDesktopMode={() => {
                 if (!activeTab || desktopModeCooldown.current) return

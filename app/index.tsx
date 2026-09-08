@@ -1724,7 +1724,6 @@ const Browser = observer(function Browser() {
               setShowTabsView(true)
             }}
             onNewTab={handleNewTab}
-            onEnableWeb3={() => router.push('/wallet')}
             onConnections={() => router.push('/connections')}
             onOpenSheet={route => sheet.push(route)}
             history={history}

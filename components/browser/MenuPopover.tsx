@@ -31,8 +31,7 @@ interface MenuPopoverProps {
   onBookmarks: () => void
   onTabs: () => void
   onNewTab: () => void
-  onSettings: () => void
-  onEnableWeb3: () => void
+  onWallet: () => void
   onConnections: () => void
   onToggleDesktopMode: () => void
 }
@@ -84,8 +83,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   onBookmarks,
   onTabs,
   onNewTab,
-  onSettings,
-  onEnableWeb3,
+  onWallet,
   onConnections,
   onToggleDesktopMode
 }) => {
@@ -152,20 +150,26 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
         label={t('bug_report')}
         onPress={dismiss(() => Linking.openURL('https://github.com/bsv-blockchain/bsv-browser/issues'))}
       />
-      {isWeb2Mode ? (
-        <Row icon="flash-outline" label={t('enable_web3')} onPress={dismiss(onEnableWeb3)} />
-      ) : (
-        <View style={styles.splitRow}>
-          <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onSettings)} activeOpacity={0.6}>
-            <Ionicons name="wallet-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
-            <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('wallet')}</Text>
-          </TouchableOpacity>
-          <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
-          <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onConnections)} activeOpacity={0.6}>
-            <Ionicons name="link-outline" size={22} color={colors.textPrimary} />
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* Always "Wallet", never "Enable Web3": the wallet screen renders with
+        or without a wallet behind it, and creation happens there on the first
+        Pay / Get Paid tap. Naming the destination after a setup step the user
+        no longer performs would describe a flow that no longer exists.
+        Connections lists paired dApps, so it only appears once there is a
+        wallet for them to be paired with. */}
+      <View style={styles.splitRow}>
+        <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onWallet)} activeOpacity={0.6}>
+          <Ionicons name="wallet-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
+          <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('wallet')}</Text>
+        </TouchableOpacity>
+        {!isWeb2Mode && (
+          <>
+            <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
+            <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onConnections)} activeOpacity={0.6}>
+              <Ionicons name="link-outline" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
 
       <Divider />
 
