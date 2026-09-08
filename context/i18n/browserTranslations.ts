@@ -10,13 +10,15 @@ export { LanguageProvider, useLanguage } from '@bsv/expo-wallet-toolbox/core/i18
  * than merge it, so these keys are added as a resource bundle instead. Importing
  * the library's module above is what guarantees `init()` ran before we add to it.
  *
- * The 20 keys bsv-browser references that the library does not ship: the BEEF/txid
- * copy affordances, the message-box bar, the vault enrolment steps this app still
- * renders, and hints for its own address/handle send components. Most exist only in
- * `en` here, exactly as they did before — i18next falls back to `en` for the rest.
+ * Keys bsv-browser references that the library does not ship: the backup Confirm
+ * button, the BEEF/txid copy affordances, the message-box bar, the vault enrolment
+ * steps this app still renders, and hints for its own address/handle send
+ * components. Most exist only in `en` here, exactly as they did before — i18next
+ * falls back to `en` for the rest.
  */
 const browserOnlyResources: Record<string, Record<string, string>> = {
   en: {
+    confirm: 'Confirm',
     back_to_browser: 'Back to browser',
     local_pay_amount_optional_hint: 'Enter an amount, or leave it at zero and the payer decides.',
     message_box_tap_to_configure: 'Tap to configure your Message Box server',
@@ -40,6 +42,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_recovery_paths_title: 'Two ways to recover this vault',
   },
   zh: {
+    confirm: '确认',
     local_pay_amount_optional_hint: '输入金额，或保持为零，由付款方决定。',
     message_box_tap_to_configure: '点击配置您的消息箱服务器',
     scan_bsv_address_hint: '将相机对准 BSV 地址二维码',
@@ -50,6 +53,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: '为此密钥命名（可选）',
   },
   hi: {
+    confirm: 'पुष्टि करें',
     local_pay_amount_optional_hint: 'राशि दर्ज करें, या शून्य पर छोड़ दें और भुगतानकर्ता तय करेगा।',
     message_box_tap_to_configure: 'अपना मैसेज बॉक्स सर्वर कॉन्फ़िगर करने के लिए टैप करें',
     scan_bsv_address_hint: 'कैमरे को BSV एड्रेस QR कोड पर लगाएं',
@@ -60,6 +64,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: 'इस कुंजी को नाम दें (वैकल्पिक)',
   },
   es: {
+    confirm: 'Confirmar',
     local_pay_amount_optional_hint: 'Introduce un importe, o déjalo en cero y el pagador decidirá.',
     message_box_tap_to_configure: 'Toca para configurar tu servidor de Buzón de Mensajes',
     scan_bsv_address_hint: 'Apunte la cámara hacia un código QR de dirección BSV',
@@ -70,6 +75,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: 'Nombra esta llave (opcional)',
   },
   fr: {
+    confirm: 'Confirmer',
     local_pay_amount_optional_hint: 'Saisissez un montant, ou laissez-le à zéro et le payeur décidera.',
     message_box_tap_to_configure: 'Appuyez pour configurer votre serveur de boîte aux lettres',
     scan_bsv_address_hint: "Pointez la caméra vers un code QR d'adresse BSV",
@@ -80,6 +86,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: 'Nommez cette clé (facultatif)',
   },
   ar: {
+    confirm: 'تأكيد',
     local_pay_amount_optional_hint: 'أدخل مبلغًا، أو اتركه صفرًا ليحدده الدافع.',
     message_box_tap_to_configure: 'انقر لتكوين خادم صندوق الرسائل الخاص بك',
     scan_bsv_address_hint: 'وجّه الكاميرا نحو رمز QR لعنوان BSV',
@@ -90,6 +97,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: 'سمِّ هذا المفتاح (اختياري)',
   },
   pt: {
+    confirm: 'Confirmar',
     local_pay_amount_optional_hint: 'Insira um valor, ou deixe em zero e quem paga decide.',
     message_box_tap_to_configure: 'Toque para configurar seu servidor de Caixa de Mensagens',
     scan_bsv_address_hint: 'Aponte a câmera para um código QR de endereço BSV',
@@ -100,6 +108,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: 'Dê um nome a esta chave (opcional)',
   },
   bn: {
+    confirm: 'নিশ্চিত করুন',
     local_pay_amount_optional_hint: 'একটি পরিমাণ লিখুন, বা শূন্য রেখে দিন — প্রদানকারী ঠিক করবেন।',
     message_box_tap_to_configure: 'আপনার মেসেজ বক্স সার্ভার কনফিগার করতে ট্যাপ করুন',
     scan_bsv_address_hint: 'BSV ঠিকানার QR কোডে ক্যামেরা তাক করুন',
@@ -110,6 +119,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: 'এই কী-এর নাম দিন (ঐচ্ছিক)',
   },
   ru: {
+    confirm: 'Подтвердить',
     local_pay_amount_optional_hint: 'Введите сумму или оставьте ноль — плательщик решит сам.',
     message_box_tap_to_configure: 'Нажмите, чтобы настроить сервер почтового ящика',
     scan_bsv_address_hint: 'Направьте камеру на QR-код адреса BSV',
@@ -120,6 +130,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: 'Назовите этот ключ (необязательно)',
   },
   id: {
+    confirm: 'Konfirmasi',
     local_pay_amount_optional_hint: 'Masukkan jumlah, atau biarkan nol dan pembayar yang menentukan.',
     message_box_tap_to_configure: 'Ketuk untuk mengonfigurasi server Kotak Pesan Anda',
     scan_bsv_address_hint: 'Arahkan kamera ke kode QR alamat BSV',
@@ -130,6 +141,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: 'Beri nama kunci ini (opsional)',
   },
   ja: {
+    confirm: '確認',
     local_pay_amount_optional_hint: '金額を入力するか、ゼロのままにすると支払う人が決めます。',
     message_box_tap_to_configure: 'タップしてメッセージボックスサーバーを設定',
     scan_bsv_address_hint: 'BSVアドレスのQRコードにカメラを向けてください',
@@ -140,6 +152,7 @@ const browserOnlyResources: Record<string, Record<string, string>> = {
     vault_nickname_placeholder: 'このキーに名前を付ける（任意）',
   },
   pl: {
+    confirm: 'Potwierdź',
     local_pay_amount_optional_hint: 'Wpisz kwotę lub pozostaw zero, a płacący sam zdecyduje.',
     message_box_tap_to_configure: 'Dotknij, aby skonfigurować serwer skrzynki wiadomości',
     scan_bsv_address_hint: 'Skieruj kamerę na kod QR adresu BSV',

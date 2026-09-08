@@ -1,15 +1,17 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import {
   View,
   Text,
   ScrollView,
   TextInput,
   ActivityIndicator,
+  TouchableOpacity,
   StyleSheet,
-  Linking
+  Linking,
+  Platform
 } from 'react-native'
 import CustomSafeArea from '@bsv/expo-wallet-toolbox/ui/components/ui/CustomSafeArea'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
@@ -17,11 +19,11 @@ import { spacing, radii, typography } from '@bsv/expo-wallet-toolbox/core/theme/
 import { useTranslation } from 'react-i18next'
 import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { PrivateKey } from '@bsv/sdk'
-import { generateMnemonicWallet, validateMnemonic } from '@bsv/expo-wallet-toolbox/core/mnemonicWallet'
+import { generateMnemonicWallet, recoverMnemonicWallet, validateMnemonic } from '@bsv/expo-wallet-toolbox/core/mnemonicWallet'
+import { backupAttestation, type BackupMedium } from '@bsv/expo-wallet-toolbox/core/services/vault/backupAttestation'
 import { printRecoveryShares } from '@bsv/expo-wallet-toolbox/ui/printRecoveryShares'
 import * as Clipboard from 'expo-clipboard'
-import { Paths, File as ExpoFile } from 'expo-file-system'
-import * as Sharing from 'expo-sharing'
+import { Directory } from 'expo-file-system'
 import { useLocalStorage } from '@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider'
 import { showAlert } from '@bsv/expo-wallet-toolbox/ui/components/ui/AlertCard'
 import { showToast } from '@bsv/expo-wallet-toolbox/ui/components/ui/Toast'
@@ -29,96 +31,279 @@ import Celebration from '@bsv/expo-wallet-toolbox/ui/components/ui/Celebration'
 import PressableScale from '@bsv/expo-wallet-toolbox/ui/components/ui/PressableScale'
 
 type MnemonicMode = 'choose' | 'generate' | 'import'
+const HANDWRITTEN_BACKUP_DELAY_MS = 15_000
+
+type BackupSession = { identityKey: string }
+type BackupProgress = { session: BackupSession; medium: BackupMedium; attested: boolean }
+type BackupMaterial = {
+  mnemonic: string | null
+  recoveredKeyWif: string | null
+  value: string
+  identityKey: string
+}
 
 export default function MnemonicScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
-  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey, backupRestore, getBackupRestore } =
+  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey, backupRestore, getBackupRestore, walletBuilt, walletBuilding } =
     useWallet()
-  const { setMnemonic: storeMnemonic, setRecoveredKey } = useLocalStorage()
+  const { setMnemonic: storeMnemonic, createMnemonic, getMnemonic, setRecoveredKey, getRecoveredKey, hasStoredIdentity, secretsReady, unlock } = useLocalStorage()
+  const { flow } = useLocalSearchParams<{ flow?: 'backup' | 'import' }>()
 
-  const [mode, setMode] = useState<MnemonicMode>('choose')
+  const [mode, setMode] = useState<MnemonicMode>(flow === 'backup' ? 'generate' : flow === 'import' ? 'import' : 'choose')
   const [mnemonic, setMnemonic] = useState<string>('')
   const [importedMnemonic, setImportedMnemonic] = useState<string>('')
 
-  const [hasAcknowledged, setHasAcknowledged] = useState(false)
+  const [confirmationSession, setConfirmationSession] = useState<BackupSession | null>(null)
+  const backupProgressRef = useRef<BackupProgress | null>(null)
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [loading, setLoading] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [isCopying, setIsCopying] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
   const [celebrating, setCelebrating] = useState(false)
+  const [hasExistingWallet, setHasExistingWallet] = useState<boolean | null>(null)
+  const [backupMaterial, setBackupMaterial] = useState<BackupMaterial | null>(null)
+  const [backupReadFailed, setBackupReadFailed] = useState(false)
+  const [backupReadAttempt, setBackupReadAttempt] = useState(0)
+  const generatingRef = useRef(false)
+  const confirmingRef = useRef(false)
+  const exportingRef = useRef(false)
+  const flowRef = useRef(flow)
+  flowRef.current = flow
+  const isCurrentBackupFlow = () => flowRef.current === 'backup'
+  const isBackup = flow === 'backup'
+  const isRecoveryKey = isBackup && !!backupMaterial?.recoveredKeyWif
+  const recoveryValue = isBackup ? backupMaterial?.value ?? '' : mnemonic
+  const backupBusy = loading || isPrinting || isSaving || isCopying
+  // A new display of saved key material gets its own confirmation window.
+  // Time spent migrating, unlocking, or creating an unsaved phrase never counts.
+  const backupSession = useMemo<BackupSession | null>(() => {
+    if (!secretsReady || !recoveryValue || celebrating ||
+      (!isBackup && (mode !== 'generate' || hasExistingWallet !== true))) return null
+    return { identityKey: isBackup ? backupMaterial!.identityKey : recoverMnemonicWallet(mnemonic).identityKey }
+  }, [flow, isBackup, secretsReady, recoveryValue, celebrating, mode, hasExistingWallet, backupMaterial, mnemonic])
+  const backupSessionRef = useRef(backupSession)
+  backupSessionRef.current = backupSession
+  const confirmationAvailable = backupSession !== null && confirmationSession === backupSession
+
+  useEffect(() => {
+    backupSessionRef.current = backupSession
+    confirmingRef.current = false
+    backupProgressRef.current = null
+    setCopied(false)
+    if (!backupSession) return
+    const timer = setTimeout(() => {
+      if (backupSessionRef.current === backupSession) setConfirmationSession(backupSession)
+    }, HANDWRITTEN_BACKUP_DELAY_MS)
+    return () => {
+      clearTimeout(timer)
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+      if (backupSessionRef.current === backupSession) backupSessionRef.current = null
+    }
+  }, [backupSession])
+
+  // Expo Router can reuse this screen when only its flow parameter changes.
+  useEffect(() => {
+    setMode(flow === 'backup' ? 'generate' : flow === 'import' ? 'import' : 'choose')
+    confirmingRef.current = false
+    backupProgressRef.current = null
+    setCelebrating(false)
+  }, [flow])
+
+  // Read the saved identity only after migration. Failed or cancelled unlocks
+  // remain in this backup-only screen and can never fall through to creation.
+  useEffect(() => {
+    let cancelled = false
+    setBackupMaterial(null)
+    setBackupReadFailed(false)
+    backupProgressRef.current = null
+    if (flow !== 'backup' || !secretsReady) return
+
+    const readBackup = async () => {
+      try {
+        const phrase = await getMnemonic()
+        if (cancelled) return
+        let material: BackupMaterial
+        if (phrase) {
+          material = {
+            mnemonic: phrase, recoveredKeyWif: null, value: phrase,
+            identityKey: recoverMnemonicWallet(phrase).identityKey
+          }
+        } else {
+          const wif = await getRecoveredKey()
+          if (cancelled) return
+          if (!wif) throw new Error('Recovery material unavailable')
+          const key = PrivateKey.fromWif(wif)
+          material = {
+            mnemonic: null, recoveredKeyWif: wif, value: key.toHex(),
+            identityKey: key.toPublicKey().toString()
+          }
+        }
+        setBackupMaterial(material)
+      } catch {
+        if (!cancelled) setBackupReadFailed(true)
+      }
+    }
+    void readBackup()
+    return () => { cancelled = true }
+  }, [flow, secretsReady, getMnemonic, getRecoveredKey, backupReadAttempt])
+
+  const handleRetryBackup = async () => {
+    if (loading) return
+    setLoading(true)
+    try {
+      await unlock()
+      if (isCurrentBackupFlow()) setBackupReadAttempt(attempt => attempt + 1)
+    } catch {
+      setBackupReadFailed(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Existing keys can be present before the wallet manager finishes migrating,
+  // unlocking, or building. Check storage before offering a new identity.
+  useEffect(() => {
+    if (!secretsReady || flow === 'backup') return
+    let cancelled = false
+    hasStoredIdentity().then(existing => {
+      if (!cancelled) setHasExistingWallet(existing)
+    }).catch(() => {
+      if (!cancelled) {
+        showToast('Unable to check existing wallet. Please try again.', { type: 'error' })
+        router.back()
+      }
+    })
+    return () => { cancelled = true }
+  }, [flow, secretsReady, hasStoredIdentity])
+
+  useEffect(() => {
+    if (flow !== 'backup' && mode === 'choose' && hasExistingWallet) router.replace({ pathname: '/auth/mnemonic', params: { flow: 'backup' } })
+  }, [flow, mode, hasExistingWallet])
 
   // Generate a new mnemonic and immediately build the wallet
   const handleGenerateNew = async () => {
+    if (isCurrentBackupFlow() || generatingRef.current || !secretsReady || walletBuilding) return
+    generatingRef.current = true
+    setLoading(true)
     try {
+      if (walletBuilt || await hasStoredIdentity()) {
+        router.replace({ pathname: '/auth/mnemonic', params: { flow: 'backup' } })
+        return
+      }
+      if (isCurrentBackupFlow()) return
       const wallet = generateMnemonicWallet()
-      setMnemonic(wallet.mnemonic)
-      setMode('generate')
 
       // Store and build the wallet immediately so it is ready by the time the
       // user finishes the save screen. (Print Recovery Shares no longer needs
       // this — it derives the identity key from the mnemonic itself.)
       console.log('[Mnemonic] Building wallet eagerly after mnemonic generation')
-      const stored = await storeMnemonic(wallet.mnemonic)
+      const stored = await createMnemonic(wallet.mnemonic)
+      if (isCurrentBackupFlow()) return
       if (!stored) {
-        const choice = await showAlert({
-          title: 'Biometric Access Required',
-          message: 'Biometric access is needed to protect your wallet keys. Please try again.',
-          buttons: [
-            { text: 'Cancel', style: 'cancel', key: 'cancel' },
-            { text: 'Try Again', key: 'retry' },
-          ],
-        })
-        if (choice === 'cancel') setMode('choose')
-        else handleGenerateNew()
+        if (await hasStoredIdentity()) router.replace({ pathname: '/auth/mnemonic', params: { flow: 'backup' } })
+        else showToast('Unable to create wallet. Please try again.', { type: 'error' })
         return
       }
+      setMnemonic(wallet.mnemonic)
+      setMode('generate')
+      setHasExistingWallet(true)
+      try {
+        await backupAttestation.markPending(wallet.identityKey)
+      } catch (error) {
+        console.warn('[Mnemonic] Could not record pending backup reminder:', error)
+      }
+      if (isCurrentBackupFlow()) return
       await buildWalletFromMnemonic(wallet.mnemonic)
       console.log('[Mnemonic] Wallet built successfully during generate flow')
     } catch (error: any) {
       console.error('Error generating mnemonic:', error)
       showToast('Failed to generate mnemonic. Please try again.', { type: 'error' })
+    } finally {
+      generatingRef.current = false
+      setLoading(false)
     }
   }
 
-  // Share mnemonic as text file via system share dialog
-  const handleShareMnemonic = async () => {
-    const timestamp = Math.floor(Date.now() / 1000)
-    const filename = `wallet-recovery-phrase-${timestamp}.txt`
-    const file = new ExpoFile(Paths.cache, filename)
+  // Completed exports count as a backup immediately. Platforms that only report
+  // opening an export dialog reveal Confirm for the user to attest completion.
+  const recordExport = async (session: BackupSession, medium: BackupMedium, attestImmediately = true) => {
+    if (backupSessionRef.current !== session) return
+    setConfirmationSession(session)
+    const progress: BackupProgress = { session, medium, attested: false }
+    backupProgressRef.current = progress
+    if (!attestImmediately) return
     try {
-      file.write(mnemonic)
-      await Sharing.shareAsync(file.uri, {
-        mimeType: 'text/plain',
-        UTI: 'public.plain-text',
-        dialogTitle: 'Save Your Recovery Phrase'
-      })
-      setHasAcknowledged(true)
-    } catch (error) {
-      console.error('Error sharing mnemonic:', error)
-    } finally {
-      if (file.exists) {
-        file.delete()
+      await backupAttestation.set(session.identityKey, medium)
+      if (backupSessionRef.current === session && backupProgressRef.current === progress) progress.attested = true
+    } catch {
+      if (backupSessionRef.current === session) {
+        showToast('Unable to save backup confirmation. Please try again.', { type: 'error' })
       }
     }
   }
 
-  // Copy mnemonic to clipboard
-  const handleCopyMnemonic = async () => {
-    await Clipboard.setStringAsync(mnemonic)
-    showToast('Copied', { type: 'success' })
-    setCopied(true)
-    setTimeout(() => {
-      setCopied(false)
-      setHasAcknowledged(true)
-    }, 3000)
+  // Save to a user-selected folder. A dismissed share sheet does not prove a
+  // file was saved, so attest only after writing and verifying the actual file.
+  const handleSaveMnemonic = async () => {
+    if (!backupSession || backupSessionRef.current !== backupSession || backupBusy || confirmingRef.current || exportingRef.current) return
+    exportingRef.current = true
+    setIsSaving(true)
+    let directorySelected = false
+    try {
+      const directory = await Directory.pickDirectoryAsync()
+      if (backupSessionRef.current !== backupSession) return
+      directorySelected = true
+      const filename = `wallet-recovery-${isRecoveryKey ? 'key' : 'phrase'}-${Date.now()}.txt`
+      const file = directory.createFile(filename, 'text/plain')
+      file.write(recoveryValue)
+      if (await file.text() !== recoveryValue) throw new Error('Recovery file could not be verified')
+      await recordExport(backupSession, 'phrase')
+    } catch (error) {
+      console.info('[Mnemonic] Saving recovery keys did not complete:', error instanceof Error ? error.message : error)
+      if (directorySelected && backupSessionRef.current === backupSession) {
+        showToast('Unable to save recovery keys. Please try again.', { type: 'error' })
+      }
+    } finally {
+      exportingRef.current = false
+      setIsSaving(false)
+    }
   }
 
-  // Print recovery shares (same as Settings page)
+  const handleCopyMnemonic = async () => {
+    if (!backupSession || backupSessionRef.current !== backupSession || backupBusy || confirmingRef.current || exportingRef.current) return
+    exportingRef.current = true
+    setIsCopying(true)
+    try {
+      const succeeded = await Clipboard.setStringAsync(recoveryValue)
+      if (!succeeded || backupSessionRef.current !== backupSession) return
+      setCopied(true)
+      showToast('Copied', { type: 'success' })
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+      copiedTimeoutRef.current = setTimeout(() => {
+        if (backupSessionRef.current === backupSession) setCopied(false)
+      }, 3000)
+      await recordExport(backupSession, 'phrase')
+    } catch (error) {
+      console.info('[Mnemonic] Copying recovery keys did not complete:', error instanceof Error ? error.message : error)
+    } finally {
+      exportingRef.current = false
+      setIsCopying(false)
+    }
+  }
+
   const handlePrintRecoveryShares = async () => {
-    if (isPrinting) return
+    if (!backupSession || backupSessionRef.current !== backupSession || backupBusy || confirmingRef.current || exportingRef.current) return
+    exportingRef.current = true
     setIsPrinting(true)
     try {
-      const result = await printRecoveryShares({ mnemonic, recoveredKeyWif: null })
+      const result = await printRecoveryShares({
+        mnemonic: isBackup ? backupMaterial!.mnemonic : mnemonic,
+        recoveredKeyWif: isBackup ? backupMaterial!.recoveredKeyWif : null
+      })
+      if (backupSessionRef.current !== backupSession) return
       if (!result.ok) {
         showToast(
           result.reason === 'unsupported-word-count'
@@ -127,24 +312,51 @@ export default function MnemonicScreen() {
           { type: 'error' }
         )
       } else {
-        setHasAcknowledged(true)
+        // Android resolves when the print dialog opens, so Confirm must attest
+        // that printing completed. iOS reports completion or cancellation.
+        await recordExport(backupSession, 'shares', Platform.OS !== 'android')
       }
     } catch (error: any) {
       console.info('[Mnemonic] Print recovery shares did not complete:', error?.message)
     } finally {
+      exportingRef.current = false
       setIsPrinting(false)
     }
   }
 
-  // Continue with generated mnemonic after acknowledgment
-  // Wallet was already built in handleGenerateNew, so just navigate.
-  const handleContinueWithGenerated = () => {
-    if (!hasAcknowledged) return
-    setCelebrating(true)
+  // Handwritten backups become eligible after the delay; elapsed time alone
+  // never marks a wallet backed up. Export attestations need no duplicate write.
+  const handleConfirmBackup = async () => {
+    if (!backupSession || backupSessionRef.current !== backupSession || !confirmationAvailable || backupBusy || confirmingRef.current || exportingRef.current || flowRef.current !== flow) return
+    confirmingRef.current = true
+    setLoading(true)
+    try {
+      const progress = backupProgressRef.current?.session === backupSession ? backupProgressRef.current : null
+      if (!progress?.attested) {
+        const medium = progress?.medium ?? 'phrase'
+        await backupAttestation.set(backupSession.identityKey, medium)
+        if (backupSessionRef.current !== backupSession) return
+        backupProgressRef.current = { session: backupSession, medium, attested: true }
+      }
+      if (backupSessionRef.current !== backupSession) return
+      if (isBackup) {
+        showToast('Backup confirmed', { type: 'success' })
+        router.back()
+      }
+      else setCelebrating(true)
+    } catch {
+      confirmingRef.current = false
+      if (backupSessionRef.current === backupSession) {
+        showToast('Unable to save backup confirmation. Please try again.', { type: 'error' })
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   // Validate and continue with imported mnemonic or hex private key
   const handleContinueWithImported = async () => {
+    if (isCurrentBackupFlow()) return
     const trimmed = importedMnemonic.trim()
 
     // Detect 64-char hex string as a raw private key
@@ -153,6 +365,7 @@ export default function MnemonicScreen() {
       try {
         const wif = PrivateKey.fromHex(trimmed).toWif()
         const stored = await setRecoveredKey(wif)
+        if (isCurrentBackupFlow()) return
         if (!stored) {
           const choice = await showAlert({
             title: 'Biometric Access Required',
@@ -231,10 +444,12 @@ export default function MnemonicScreen() {
 
   // Initialize wallet with mnemonic
   const initializeWallet = async (mnemonicPhrase: string, opts?: { restore?: boolean }) => {
+    if (isCurrentBackupFlow()) return
     setLoading(true)
     try {
       console.log('[Mnemonic] Starting wallet initialization with mnemonic')
       const stored = await storeMnemonic(mnemonicPhrase)
+      if (isCurrentBackupFlow()) return
       if (!stored) {
         const choice = await showAlert({
           title: 'Biometric Access Required',
@@ -264,8 +479,45 @@ export default function MnemonicScreen() {
     }
   }
 
+  const backupBackHeader = (
+    <View style={s.backupHeader}>
+      <TouchableOpacity
+        style={s.backButton}
+        onPress={() => router.back()}
+        accessibilityRole="button"
+        accessibilityLabel={t('go_back')}
+      >
+        <Ionicons name="chevron-back" size={24} color={colors.textSecondary} />
+      </TouchableOpacity>
+    </View>
+  )
+
+  if (isBackup && (!secretsReady || !backupMaterial)) {
+    return (
+      <CustomSafeArea style={[s.screen, { backgroundColor: colors.background }]}>
+        {backupBackHeader}
+        <View style={s.centeredContent}>
+          {backupReadFailed ? (
+            <>
+              <Text style={[s.bodyText, { color: colors.textPrimary }]}>
+                Unable to unlock your recovery keys. Please try again.
+              </Text>
+              <PressableScale style={[s.primaryButton, { backgroundColor: colors.accent }]} onPress={handleRetryBackup} disabled={loading} haptic="tap">
+                {loading ? <ActivityIndicator color={colors.textOnAccent} /> : <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>Try Again</Text>}
+              </PressableScale>
+            </>
+          ) : <ActivityIndicator />}
+        </View>
+      </CustomSafeArea>
+    )
+  }
+
+  if (!isBackup && (!secretsReady || hasExistingWallet === null || (mode === 'choose' && hasExistingWallet))) {
+    return <CustomSafeArea style={[s.screen, { backgroundColor: colors.background }]}><ActivityIndicator /></CustomSafeArea>
+  }
+
   // ─── Celebration overlay (wallet created) ────────────────────────────
-  if (celebrating) {
+  if (celebrating && !isBackup) {
     return (
       <View style={[s.screen, s.celebrationScreen, { backgroundColor: colors.background }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -282,7 +534,7 @@ export default function MnemonicScreen() {
   }
 
   // ─── Choose mode ──────────────────────────────────────────────────────
-  if (mode === 'choose') {
+  if (!isBackup && mode === 'choose') {
     return (
       <CustomSafeArea style={[s.screen, { backgroundColor: colors.background }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -305,6 +557,7 @@ export default function MnemonicScreen() {
             <PressableScale
               style={[s.primaryButton, { backgroundColor: colors.accent }]}
               onPress={handleGenerateNew}
+              disabled={loading || walletBuilding}
               haptic="confirm"
             >
               <Ionicons name="add-circle-outline" size={22} color={colors.textOnAccent} style={s.btnIcon} />
@@ -364,16 +617,17 @@ export default function MnemonicScreen() {
   }
 
   // ─── Generate mode ────────────────────────────────────────────────────
-  if (mode === 'generate') {
+  if (isBackup || mode === 'generate') {
     return (
       <CustomSafeArea style={[s.screen, { backgroundColor: colors.background }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
-        <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+        {backupBackHeader}
+        <ScrollView contentContainerStyle={[s.scrollContent, s.backupScrollContent]} showsVerticalScrollIndicator={false}>
           <Text style={[s.largeTitle, { color: colors.textPrimary, textAlign: 'left' }]}>
-            {t('save_recovery_phrase_heading')}
+            {isRecoveryKey ? 'Save Your Recovery Key' : t('save_recovery_phrase_heading')}
           </Text>
           <Text style={[s.sectionSubtitle, { color: colors.textSecondary }]}>
-            Write down these words in order and keep them somewhere safe.
+            {isRecoveryKey ? 'Save this private key and keep it somewhere safe.' : 'Write down these words in order and keep them somewhere safe.'}
           </Text>
 
           {/* Warning banner */}
@@ -393,8 +647,7 @@ export default function MnemonicScreen() {
               style={{ marginRight: spacing.md }}
             />
             <Text style={[s.warningText, { color: colors.textPrimary }]}>
-              Write down these 12 words. This is the <Text style={{ fontWeight: '700' }}>only way</Text> to recover your
-              wallet.
+              {isRecoveryKey ? 'Save this recovery key.' : `Write down these ${recoveryValue.trim().split(/\s+/).length} words.`} This is the <Text style={{ fontWeight: '700' }}>only way</Text> to recover your wallet.
             </Text>
           </View>
 
@@ -409,7 +662,7 @@ export default function MnemonicScreen() {
             ]}
           >
             <Text style={[s.mnemonicDisplayText, { color: colors.textPrimary }]} selectable>
-              {mnemonic}
+              {recoveryValue}
             </Text>
           </View>
 
@@ -418,7 +671,8 @@ export default function MnemonicScreen() {
             <View style={s.inlineButtonRow}>
               <PressableScale
                 style={[s.inlineButton, { backgroundColor: colors.accent }]}
-                onPress={handleShareMnemonic}
+                onPress={handleSaveMnemonic}
+                disabled={backupBusy}
                 haptic="confirm"
               >
                 <Ionicons name="share-outline" size={20} color={colors.textOnAccent} style={s.btnIcon} />
@@ -428,6 +682,7 @@ export default function MnemonicScreen() {
               <PressableScale
                 style={[s.inlineButton, { backgroundColor: colors.fillTertiary }]}
                 onPress={handleCopyMnemonic}
+                disabled={backupBusy}
                 haptic="tap"
               >
                 <Ionicons
@@ -443,7 +698,7 @@ export default function MnemonicScreen() {
             <PressableScale
               style={[s.primaryButton, { backgroundColor: colors.accent }]}
               onPress={handlePrintRecoveryShares}
-              disabled={isPrinting}
+              disabled={backupBusy}
               haptic="confirm"
             >
               {isPrinting ? (
@@ -462,77 +717,47 @@ export default function MnemonicScreen() {
           <View style={[s.biometricNote, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}>
             <Ionicons name="finger-print" size={32} color={colors.textSecondary} style={s.biometricIcon} />
             <Text style={[s.biometricText, { color: colors.textSecondary }]}>
-              On this device your recovery phrase is encrypted with a key that Face ID or your
-              fingerprint unlocks. Write the phrase down anyway — if your biometrics change, the
-              key is destroyed and the phrase is the only way back in.
+              On this device your {isRecoveryKey ? 'recovery key' : 'recovery phrase'} is encrypted with a key that Face ID or your
+              fingerprint unlocks. Keep a backup anyway — if your biometrics change, the
+              encryption key is destroyed and the backup is the only way back in.
             </Text>
           </View>
 
-          {/* Acknowledgment */}
-          <PressableScale
-            style={[
-              s.acknowledgment,
-              {
-                backgroundColor: hasAcknowledged
-                  ? isDark
-                    ? 'rgba(10, 132, 255, 0.1)'
-                    : 'rgba(0, 122, 255, 0.06)'
-                  : colors.fillTertiary,
-                borderColor: hasAcknowledged ? colors.accent : colors.separator
-              }
-            ]}
-            onPress={() => setHasAcknowledged(!hasAcknowledged)}
-            haptic="tap"
-          >
-            <Ionicons
-              name={hasAcknowledged ? 'checkmark-circle' : 'ellipse-outline'}
-              size={24}
-              color={hasAcknowledged ? colors.accent : colors.textTertiary}
-              style={{ marginRight: spacing.md }}
-            />
-            <Text style={[s.acknowledgmentText, { color: colors.textPrimary }]}>{t('acknowledgment_text')}</Text>
-          </PressableScale>
+          {confirmationAvailable && (
+            <View testID="backup-confirmation-section">
+              <View style={[s.divider, { backgroundColor: colors.separator }]} />
 
-          {/* Continue */}
-          <PressableScale
-            style={[
-              s.primaryButton,
-              {
-                backgroundColor: hasAcknowledged ? colors.accent : colors.fillSecondary,
-                opacity: loading ? 0.6 : 1
-              }
-            ]}
-            onPress={handleContinueWithGenerated}
-            disabled={!hasAcknowledged || loading}
-            haptic="confirm"
-          >
-            {loading ? (
-              <ActivityIndicator color={colors.textOnAccent} />
-            ) : (
-              <Text
+              <Text style={[s.confirmationText, { color: colors.textSecondary }]}>
+                Confirm that you have saved your recovery keys somewhere safe.
+              </Text>
+
+              {/* Confirm is the explicit backup acknowledgment, including handwritten copies. */}
+              <PressableScale
                 style={[
-                  s.btnLabel,
+                  s.primaryButton,
+                  s.confirmButton,
                   {
-                    color: hasAcknowledged ? colors.textOnAccent : colors.textTertiary
+                    borderColor: colors.accent,
+                    opacity: backupBusy || !recoveryValue ? 0.6 : 1
                   }
                 ]}
+                onPress={handleConfirmBackup}
+                disabled={backupBusy || !recoveryValue}
+                accessibilityRole="button"
+                accessibilityLabel={t('confirm', { defaultValue: 'Confirm' })}
+                accessibilityState={{ disabled: backupBusy || !recoveryValue, busy: loading }}
+                haptic="confirm"
               >
-                {t('continue')}
-              </Text>
-            )}
-          </PressableScale>
-
-          {/* Back link */}
-          <PressableScale
-            style={s.textButton}
-            onPress={() => {
-              setMode('choose')
-              setHasAcknowledged(false)
-            }}
-            haptic="tap"
-          >
-            <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>{t('go_back')}</Text>
-          </PressableScale>
+                {loading ? (
+                  <ActivityIndicator color={colors.accent} />
+                ) : (
+                  <Text style={[s.btnLabel, { color: colors.accent }]}>
+                    {t('confirm', { defaultValue: 'Confirm' })}
+                  </Text>
+                )}
+              </PressableScale>
+            </View>
+          )}
         </ScrollView>
       </CustomSafeArea>
     )
@@ -647,7 +872,7 @@ export default function MnemonicScreen() {
           </View>
         </PressableScale>
 
-        <PressableScale style={s.textButton} onPress={() => setMode('choose')} haptic="tap">
+        <PressableScale style={s.textButton} onPress={() => flow === 'import' ? router.back() : setMode('choose')} haptic="tap">
           <Text style={[s.textButtonLabel, { color: colors.textSecondary }]}>Go Back</Text>
         </PressableScale>
       </ScrollView>
@@ -664,6 +889,22 @@ const s = StyleSheet.create({
   celebrationScreen: {
     alignItems: 'center',
     justifyContent: 'center'
+  },
+
+  backupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  backupScrollContent: {
+    paddingTop: spacing.md
   },
 
   // Centered layout for the choose screen
@@ -850,19 +1091,18 @@ const s = StyleSheet.create({
     ...typography.subhead
   },
 
-  // ─── Acknowledgment ────────────────────────────────────────────────
-  acknowledgment: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    marginBottom: spacing.xl
+  confirmButton: {
+    borderWidth: 2
   },
-  acknowledgmentText: {
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 20
+  },
+  confirmationText: {
     ...typography.subhead,
-    flex: 1,
-    lineHeight: 21
+    lineHeight: 21,
+    textAlign: 'center',
+    marginBottom: spacing.lg
   },
 
   // ─── Import text input ─────────────────────────────────────────────
