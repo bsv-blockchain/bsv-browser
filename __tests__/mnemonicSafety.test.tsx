@@ -28,6 +28,7 @@ let mockIdentityKey: string
 const mockStoreMnemonic = jest.fn()
 const mockGenerate = jest.fn()
 const mockBuild = jest.fn()
+const mockRebuild = jest.fn()
 const mockMarkPending = jest.fn()
 const mockAttest = jest.fn()
 const mockPrint = jest.fn()
@@ -53,6 +54,7 @@ jest.mock('@bsv/expo-wallet-toolbox/core/context/WalletContext', () => ({
   useWallet: () => ({
     buildWalletFromMnemonic: mockBuild,
     buildWalletFromRecoveredKey: mockBuildRecoveredKey,
+    rebuildWallet: mockRebuild,
     backupRestore: { phase: 'idle' },
     getBackupRestore: () => ({ phase: 'idle' }),
     walletBuilt: mockWalletBuilt,
@@ -124,6 +126,7 @@ beforeEach(() => {
   mockGetRecoveredKey.mockResolvedValue(null)
   mockGenerate.mockReturnValue({ mnemonic: mockPhrase, identityKey: mockIdentityKey })
   mockBuild.mockResolvedValue(undefined)
+  mockRebuild.mockResolvedValue(undefined)
   mockMarkPending.mockResolvedValue(undefined)
   mockAttest.mockResolvedValue(undefined)
   mockPrint.mockResolvedValue({ ok: true })
@@ -641,12 +644,39 @@ it('keeps explicit import available without passing through fresh creation', asy
   expect(screen.queryByText('create_new_wallet')).toBeNull()
   expect(mockReplace).not.toHaveBeenCalled()
 
-  fireEvent.changeText(screen.getByPlaceholderText('enter_recovery_words'), 'imported test mnemonic')
+  fireEvent.changeText(screen.getByPlaceholderText('enter_recovery_words'), mockPhrase)
   await act(async () => fireEvent.press(screen.getAllByText('import_wallet')[1]))
 
-  expect(mockStoreMnemonic).toHaveBeenCalledWith('imported test mnemonic')
-  expect(mockBuild).toHaveBeenCalledWith('imported test mnemonic', { restoreFromBackup: true })
+  expect(mockStoreMnemonic).toHaveBeenCalledWith(mockPhrase)
+  expect(mockBuild).toHaveBeenCalledWith(mockPhrase, { restoreFromBackup: true })
   expect(mockCreateMnemonic).not.toHaveBeenCalled()
+  // Importing IS the proof of a backup, so the reminder must never nag for it.
+  expect(mockAttest).toHaveBeenCalledWith(mockIdentityKey, 'phrase')
+})
+
+it.each([
+  ['phrase', () => mockPhrase, () => mockIdentityKey],
+  [
+    'hex key',
+    () => PrivateKey.fromHex('01'.padStart(64, '0')).toHex(),
+    () => PrivateKey.fromHex('01'.padStart(64, '0')).toPublicKey().toString()
+  ]
+])('rebuilds rather than no-ops when an imported %s replaces an auto-created wallet', async (_kind, value, identity) => {
+  mockFlow = 'import'
+  mockExistingIdentity = true
+  mockWalletBuilt = true
+  mockSetRecoveredKey.mockResolvedValue(true)
+  const screen = await renderScreen()
+
+  fireEvent.changeText(screen.getByPlaceholderText('enter_recovery_words'), value())
+  await act(async () => fireEvent.press(screen.getAllByText('import_wallet')[1]))
+
+  // buildWalletFrom* no-op once a wallet is already built, so the imported
+  // secret would never take effect without the teardown-and-rebuild path.
+  expect(mockRebuild).toHaveBeenCalledWith({ restoreFromBackup: true })
+  expect(mockBuild).not.toHaveBeenCalled()
+  expect(mockBuildRecoveredKey).not.toHaveBeenCalled()
+  expect(mockAttest).toHaveBeenCalledWith(identity(), 'phrase')
 })
 
 
