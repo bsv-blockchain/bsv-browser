@@ -65,7 +65,7 @@ export default function MnemonicScreen() {
   const [celebrating, setCelebrating] = useState(false)
   const [hasExistingWallet, setHasExistingWallet] = useState<boolean | null>(null)
   const [backupMaterial, setBackupMaterial] = useState<BackupMaterial | null>(null)
-  const [backupReadFailed, setBackupReadFailed] = useState(false)
+  const [backupReadStatus, setBackupReadStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [backupReadAttempt, setBackupReadAttempt] = useState(0)
   const generatingRef = useRef(false)
   const confirmingRef = useRef(false)
@@ -117,7 +117,7 @@ export default function MnemonicScreen() {
   useEffect(() => {
     let cancelled = false
     setBackupMaterial(null)
-    setBackupReadFailed(false)
+    setBackupReadStatus('loading')
     backupProgressRef.current = null
     if (flow !== 'backup' || !secretsReady) return
 
@@ -142,8 +142,9 @@ export default function MnemonicScreen() {
           }
         }
         setBackupMaterial(material)
+        setBackupReadStatus('ready')
       } catch {
-        if (!cancelled) setBackupReadFailed(true)
+        if (!cancelled) setBackupReadStatus('error')
       }
     }
     void readBackup()
@@ -151,15 +152,12 @@ export default function MnemonicScreen() {
   }, [flow, secretsReady, getMnemonic, getRecoveredKey, backupReadAttempt])
 
   const handleRetryBackup = async () => {
-    if (loading) return
-    setLoading(true)
+    setBackupReadStatus('loading')
     try {
       await unlock()
       if (isCurrentBackupFlow()) setBackupReadAttempt(attempt => attempt + 1)
     } catch {
-      setBackupReadFailed(true)
-    } finally {
-      setLoading(false)
+      setBackupReadStatus('error')
     }
   }
 
@@ -301,7 +299,11 @@ export default function MnemonicScreen() {
     try {
       const result = await printRecoveryShares({
         mnemonic: isBackup ? backupMaterial!.mnemonic : mnemonic,
-        recoveredKeyWif: isBackup ? backupMaterial!.recoveredKeyWif : null
+        recoveredKeyWif: isBackup ? backupMaterial!.recoveredKeyWif : null,
+        // Without this, generatePrintHTML falls back to "your wallet app" and
+        // the printed sheet — a permanent offline artefact — never names the
+        // app that can actually read it back.
+        appName: 'BSV Browser'
       })
       if (backupSessionRef.current !== backupSession) return
       if (!result.ok) {
@@ -492,18 +494,18 @@ export default function MnemonicScreen() {
     </View>
   )
 
-  if (isBackup && (!secretsReady || !backupMaterial)) {
+  if (isBackup && (!secretsReady || backupReadStatus !== 'ready' || !backupMaterial)) {
     return (
       <CustomSafeArea style={[s.screen, { backgroundColor: colors.background }]}>
         {backupBackHeader}
         <View style={s.centeredContent}>
-          {backupReadFailed ? (
+          {backupReadStatus === 'error' ? (
             <>
               <Text style={[s.bodyText, { color: colors.textPrimary }]}>
-                Unable to unlock your recovery keys. Please try again.
+                Unable to access wallet keys. Unlock your wallet and try again.
               </Text>
-              <PressableScale style={[s.primaryButton, { backgroundColor: colors.accent }]} onPress={handleRetryBackup} disabled={loading} haptic="tap">
-                {loading ? <ActivityIndicator color={colors.textOnAccent} /> : <Text style={[s.btnLabel, { color: colors.textOnAccent }]}>Try Again</Text>}
+              <PressableScale onPress={handleRetryBackup} style={s.textButton} haptic="tap">
+                <Text style={[s.textButtonLabel, { color: colors.accent }]}>{t('retry')}</Text>
               </PressableScale>
             </>
           ) : <ActivityIndicator />}
@@ -623,41 +625,23 @@ export default function MnemonicScreen() {
         <StatusBar style={isDark ? 'light' : 'dark'} />
         {backupBackHeader}
         <ScrollView contentContainerStyle={[s.scrollContent, s.backupScrollContent]} showsVerticalScrollIndicator={false}>
-          <Text style={[s.largeTitle, { color: colors.textPrimary, textAlign: 'left' }]}>
-            {isRecoveryKey ? 'Save Your Recovery Key' : t('save_recovery_phrase_heading')}
-          </Text>
-          <Text style={[s.sectionSubtitle, { color: colors.textSecondary }]}>
-            {isRecoveryKey ? 'Save this private key and keep it somewhere safe.' : 'Write down these words in order and keep them somewhere safe.'}
+          <Text style={[s.largeTitle, { color: colors.textPrimary, textAlign: 'left', marginTop: spacing.xl }]}>
+            {isRecoveryKey ? t('save_recovery_phrase_heading') : 'Save these words'}
           </Text>
 
-          {/* Warning banner */}
-          <View
-            style={[
-              s.warningBanner,
-              {
-                backgroundColor: isDark ? 'rgba(255, 69, 58, 0.12)' : 'rgba(255, 59, 48, 0.08)',
-                borderColor: isDark ? 'rgba(255, 69, 58, 0.25)' : 'rgba(255, 59, 48, 0.2)'
-              }
-            ]}
-          >
-            <Ionicons
-              name="shield-checkmark-outline"
-              size={22}
-              color={colors.error}
-              style={{ marginRight: spacing.md }}
-            />
-            <Text style={[s.warningText, { color: colors.textPrimary }]}>
-              {isRecoveryKey ? 'Save this recovery key.' : `Write down these ${recoveryValue.trim().split(/\s+/).length} words.`} This is the <Text style={{ fontWeight: '700' }}>only way</Text> to recover your wallet.
-            </Text>
-          </View>
-
-          {/* Mnemonic display — compact selectable block */}
+          {/* Mnemonic display — compact selectable block. Page-ground fill with
+              a warning-colored border rather than the ordinary card styling:
+              this is the one block of content the user actually has to act on,
+              so it needs to read as distinct from the surrounding chrome, not
+              blend into it. Carries the warning weight that a separate banner
+              above the phrase used to. */}
           <View
             style={[
               s.mnemonicDisplay,
               {
-                backgroundColor: colors.fillTertiary,
-                borderColor: colors.separator
+                backgroundColor: colors.background,
+                borderColor: colors.warning,
+                borderWidth: 2
               }
             ]}
           >
@@ -695,8 +679,18 @@ export default function MnemonicScreen() {
               </PressableScale>
             </View>
 
+            {/* Print recovery shares is a distinct backup medium, not a step
+                in saving the words above — a divider keeps it from reading
+                as part of the same action. */}
+            <View style={[s.divider, { backgroundColor: colors.separator }]} />
+
+            <Text style={[s.printSectionTitle, { color: colors.textPrimary }]}>Distribute shares</Text>
+            <Text style={[s.printExplainer, { color: colors.textSecondary }]}>
+              Any 2 of the 3 pages can be used to recover your wallet.
+            </Text>
+
             <PressableScale
-              style={[s.primaryButton, { backgroundColor: colors.accent }]}
+              style={[s.primaryButton, { backgroundColor: colors.warning }]}
               onPress={handlePrintRecoveryShares}
               disabled={backupBusy}
               haptic="confirm"
@@ -710,24 +704,11 @@ export default function MnemonicScreen() {
             </PressableScale>
           </View>
 
-          {/* Biometric protection note. Keep this claim accurate: the phrase is
-              encrypted on this device under a key the OS releases only after a
-              biometric match — and if those biometrics change, the OS destroys
-              that key, which is why the written copy matters. */}
-          <View style={[s.biometricNote, { backgroundColor: colors.fillTertiary, borderColor: colors.separator }]}>
-            <Ionicons name="finger-print" size={32} color={colors.textSecondary} style={s.biometricIcon} />
-            <Text style={[s.biometricText, { color: colors.textSecondary }]}>
-              On this device your {isRecoveryKey ? 'recovery key' : 'recovery phrase'} is encrypted with a key that Face ID or your
-              fingerprint unlocks. Keep a backup anyway — if your biometrics change, the
-              encryption key is destroyed and the backup is the only way back in.
-            </Text>
-          </View>
-
           {confirmationAvailable && (
             <View testID="backup-confirmation-section">
-              <View style={[s.divider, { backgroundColor: colors.separator }]} />
+              <View testID="backup-confirmation-divider" style={[s.divider, { backgroundColor: colors.separator }]} />
 
-              <Text style={[s.confirmationText, { color: colors.textSecondary }]}>
+              <Text style={[s.bodyText, { color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md }]}>
                 Confirm that you have saved your recovery keys somewhere safe.
               </Text>
 
@@ -745,7 +726,7 @@ export default function MnemonicScreen() {
                 disabled={backupBusy || !recoveryValue}
                 accessibilityRole="button"
                 accessibilityLabel={t('confirm', { defaultValue: 'Confirm' })}
-                accessibilityState={{ disabled: backupBusy || !recoveryValue, busy: loading }}
+                accessibilityState={{ disabled: backupBusy || !recoveryValue, busy: backupBusy }}
                 haptic="confirm"
               >
                 {loading ? (
@@ -945,30 +926,9 @@ const s = StyleSheet.create({
     lineHeight: 22,
     marginBottom: spacing.xxxl + spacing.sm
   },
-  sectionSubtitle: {
-    ...typography.subhead,
-    marginBottom: spacing.xxl,
-    lineHeight: 20
-  },
   bodyText: {
     ...typography.body,
     lineHeight: 24
-  },
-
-  // ─── Warning banner ────────────────────────────────────────────────
-  warningBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radii.md,
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.xxl
-  },
-  warningText: {
-    ...typography.subhead,
-    flex: 1,
-    lineHeight: 21
   },
 
   // ─── Mnemonic display ──────────────────────────────────────────────
@@ -983,26 +943,6 @@ const s = StyleSheet.create({
     fontFamily: 'monospace',
     lineHeight: 24,
     textAlign: 'center'
-  },
-
-  // ─── Biometric note ────────────────────────────────────────────────
-  biometricNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radii.md,
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.xl,
-    gap: spacing.md
-  },
-  biometricIcon: {
-    flexShrink: 0
-  },
-  biometricText: {
-    ...typography.footnote,
-    flex: 1,
-    lineHeight: 18
   },
 
   // ─── Buttons ────────────────────────────────────────────────────────
@@ -1098,11 +1038,13 @@ const s = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginVertical: 20
   },
-  confirmationText: {
-    ...typography.subhead,
-    lineHeight: 21,
-    textAlign: 'center',
-    marginBottom: spacing.lg
+  printSectionTitle: {
+    ...typography.largeTitle
+  },
+  printExplainer: {
+    ...typography.footnote,
+    lineHeight: 18,
+    marginBottom: spacing.xs
   },
 
   // ─── Import text input ─────────────────────────────────────────────

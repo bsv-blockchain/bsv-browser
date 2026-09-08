@@ -221,7 +221,7 @@ it.each(['cancelled', 'failed', 'missing'])('keeps a %s backup read in a retry-o
   else mockGetMnemonic.mockResolvedValueOnce(null)
   const screen = await renderScreen()
 
-  expect(screen.getByText('Unable to unlock your recovery keys. Please try again.')).toBeTruthy()
+  expect(screen.getByText('Unable to access wallet keys. Unlock your wallet and try again.')).toBeTruthy()
   expect(screen.queryByText('create_new_wallet')).toBeNull()
   expect(screen.queryByPlaceholderText('enter_recovery_words')).toBeNull()
   expect(mockReplace).not.toHaveBeenCalled()
@@ -231,7 +231,7 @@ it.each(['cancelled', 'failed', 'missing'])('keeps a %s backup read in a retry-o
   expect(mockBack).toHaveBeenCalledTimes(1)
   expect(mockAttest).not.toHaveBeenCalled()
 
-  await act(async () => fireEvent.press(screen.getByText('Try Again')))
+  await act(async () => fireEvent.press(screen.getByText('retry')))
   expect(mockUnlock).toHaveBeenCalledTimes(1)
   expect(screen.getByText(mockPhrase)).toBeTruthy()
   expect(mockGetMnemonic).toHaveBeenCalledTimes(2)
@@ -258,15 +258,15 @@ it('keeps unlock failures on the backup retry screen', async () => {
   mockGetMnemonic.mockResolvedValueOnce(null)
   mockUnlock.mockRejectedValueOnce(new Error('unlock failed'))
   const screen = await renderScreen()
-  await act(async () => fireEvent.press(screen.getByText('Try Again')))
+  await act(async () => fireEvent.press(screen.getByText('retry')))
 
-  expect(screen.getByText('Unable to unlock your recovery keys. Please try again.')).toBeTruthy()
+  expect(screen.getByText('Unable to access wallet keys. Unlock your wallet and try again.')).toBeTruthy()
   expect(mockGetMnemonic).toHaveBeenCalledTimes(1)
   expect(screen.queryByText('create_new_wallet')).toBeNull()
   expect(mockCreateMnemonic).not.toHaveBeenCalled()
   expect(mockReplace).not.toHaveBeenCalled()
 
-  await act(async () => fireEvent.press(screen.getByText('Try Again')))
+  await act(async () => fireEvent.press(screen.getByText('retry')))
   expect(screen.getByText(mockPhrase)).toBeTruthy()
 })
 
@@ -482,9 +482,9 @@ it('backs up a recovered private key with accurate labels, export material, and 
   mockGetRecoveredKey.mockResolvedValue(key.toWif())
   const screen = await renderScreen()
 
-  expect(screen.getByText('Save Your Recovery Key')).toBeTruthy()
+  expect(screen.getByText('save_recovery_phrase_heading')).toBeTruthy()
   expect(screen.getByText(key.toHex())).toBeTruthy()
-  expect(screen.queryByText('save_recovery_phrase_heading')).toBeNull()
+  expect(screen.queryByText('Save these words')).toBeNull()
   expect(mockRecoverMnemonic).not.toHaveBeenCalled()
   await act(async () => fireEvent.press(screen.getByText('save')))
   expect(mockWriteFile).toHaveBeenCalledWith(key.toHex())
@@ -494,7 +494,7 @@ it('backs up a recovered private key with accurate labels, export material, and 
   await act(async () => fireEvent.press(screen.getByText('copy')))
   expect(Clipboard.setStringAsync).toHaveBeenCalledWith(key.toHex())
   await act(async () => fireEvent.press(screen.getByText('print_recovery_shares')))
-  expect(mockPrint).toHaveBeenCalledWith({ mnemonic: null, recoveredKeyWif: key.toWif() })
+  expect(mockPrint).toHaveBeenCalledWith({ mnemonic: null, recoveredKeyWif: key.toWif(), appName: 'BSV Browser' })
   expect(mockAttest).toHaveBeenCalledTimes(3)
   await act(async () => fireEvent.press(screen.getByRole('button', { name: 'Confirm' })))
   expect(mockAttest).toHaveBeenCalledWith(key.toPublicKey().toString(), 'shares')
@@ -625,6 +625,9 @@ it('records the shares medium when a generated wallet prints recovery shares', a
   const screen = await renderScreen()
   await act(async () => fireEvent.press(screen.getByText('create_new_wallet')))
   await act(async () => fireEvent.press(screen.getByText('print_recovery_shares')))
+  // The printed sheet is a permanent offline artefact and names the app that
+  // can read it back, so the app name is part of the print contract.
+  expect(mockPrint).toHaveBeenCalledWith({ mnemonic: mockPhrase, recoveredKeyWif: null, appName: 'BSV Browser' })
   expect(mockAttest).toHaveBeenCalledWith(mockIdentityKey, 'shares')
   await act(async () => fireEvent.press(screen.getByRole('button', { name: 'Confirm' })))
 
