@@ -4,7 +4,19 @@ import {
   installOfflineChainTracker,
   chaintracksUrlFor
 } from '@bsv/expo-wallet-toolbox/core/services/walletServiceConfig'
+import { configureToolbox, resetToolboxConfig } from '@bsv/expo-wallet-toolbox'
 import { Services } from '@bsv/wallet-toolbox-mobile'
+
+// Since 0.4.0 the toolbox reads no env of its own: the host states endpoints via
+// configureToolbox, and any read before that throws. These cases assert the built-in
+// defaults, so they configure with no service overrides at all.
+beforeEach(() => {
+  configureToolbox({ backupUrl: null, services: {} })
+})
+
+afterEach(() => {
+  resetToolboxConfig()
+})
 
 const exchangeRate = () => ({ timestamp: new Date(), base: 'USD' as const, rate: 1 })
 

@@ -34,6 +34,58 @@ import { WalletConnectionProvider } from '@bsv/expo-wallet-toolbox/core/context/
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ErrorBoundary } from '@bsv/expo-wallet-toolbox/ui/components/ui/ErrorBoundary'
+import { configureToolbox } from '@bsv/expo-wallet-toolbox'
+
+// Host-supplied toolbox configuration. Must run at module scope, before anything from the
+// package renders or builds a wallet: chaintracksUrlFor and createServiceOptions are plain
+// functions called outside React, and they throw if reached before this call.
+//
+// The reads below must stay literal `process.env.EXPO_PUBLIC_*` member expressions. Babel
+// only inlines that exact shape, and it refuses to inline for files under node_modules —
+// which is why the toolbox reads no env of its own and takes these values from the host.
+//
+// backupUrl is the encrypted wallet-backup origin: no trailing slash, no path, because the
+// BRC-103/104 handshake posts to the origin root. `null` disables backup entirely — no
+// monitor task, nothing sent, no backup UI.
+configureToolbox({
+  backupUrl: process.env.EXPO_PUBLIC_BACKUP_URL ?? null,
+  services: {
+    main: {
+      arcUrl: process.env.EXPO_PUBLIC_ARC_URL,
+      arcApiKey: process.env.EXPO_PUBLIC_ARC_API_KEY,
+      chaintracksUrl: process.env.EXPO_PUBLIC_CHAINTRACKS_URL,
+      whatsOnChainApiKey: process.env.EXPO_PUBLIC_WOC_API_KEY,
+      taalApiKey: process.env.EXPO_PUBLIC_WOC_API_KEY
+    },
+    test: {
+      arcUrl: process.env.EXPO_PUBLIC_TEST_ARC_URL,
+      arcApiKey: process.env.EXPO_PUBLIC_TEST_ARC_API_KEY,
+      chaintracksUrl: process.env.EXPO_PUBLIC_TEST_CHAINTRACKS_URL,
+      whatsOnChainApiKey: process.env.EXPO_PUBLIC_TEST_WOC_API_KEY,
+      taalApiKey: process.env.EXPO_PUBLIC_TEST_TAAL_API_KEY
+    },
+    teratest: {
+      arcUrl: process.env.EXPO_PUBLIC_TERATEST_ARC_URL,
+      arcApiKey: process.env.EXPO_PUBLIC_TERATEST_ARC_API_KEY,
+      chaintracksUrl: process.env.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL,
+      whatsOnChainApiKey: process.env.EXPO_PUBLIC_TERATEST_WOC_API_KEY,
+      taalApiKey: process.env.EXPO_PUBLIC_TERATEST_WOC_API_KEY
+    }
+  }
+})
+
+// Fail the release profiles that are supposed to carry backup, loudly, at boot.
+//
+// The type and first-access checks in the toolbox catch "the host forgot to configure".
+// They cannot catch "a build profile has no env var set", because an undefined backupUrl
+// is indistinguishable from a deliberate opt-out. So assert here instead.
+//
+// EXPO_PUBLIC_ARC_URL stands in for "this profile has an env block at all": preview-apk
+// deliberately has none, so it is legitimately backup-free and must not throw. The
+// development, dev-physical and production profiles all set both (see eas.json).
+if (!__DEV__ && process.env.EXPO_PUBLIC_ARC_URL != null && process.env.EXPO_PUBLIC_BACKUP_URL == null) {
+  throw new Error('Production build has no EXPO_PUBLIC_BACKUP_URL — check the eas.json env block for this profile')
+}
 
 export const FIRST_TOUCH_DATE_KEY = 'firstTouchDate'
 
