@@ -667,33 +667,38 @@
       <div class="container">
         <h2 data-i18n="getting_started.heading">Getting Started</h2>
         <p class="section-intro" data-i18n="getting_started.intro">
-          Two steps: enable Web3 and save your recovery phrase. After that, you have a fully working wallet and identity
-          on your phone.
+          Two steps: open your wallet and save your recovery phrase. After that, you have a fully working wallet and
+          identity on your phone.
         </p>
 
         <div class="guide-row">
           <div class="guide-text">
-            <h3 data-i18n="getting_started.step1_heading">Step 1: Enable Web3</h3>
+            <h3 data-i18n="getting_started.step1_heading">Step 1: Open your wallet</h3>
             <p data-i18n-html="getting_started.step1_p1">
-              When you first open the app, you are in Web2 mode. To unlock wallet and blockchain features, tap the menu
-              button (the three dots at the bottom-right of the screen) and select <strong>Enable Web3</strong>. You
-              will be presented with two options:
+              Tap the menu button (the three dots at the bottom-right of the screen) and select <strong>Wallet</strong>.
+              The wallet opens right away, with nothing created yet &mdash; you can look around first. It is created the
+              moment you actually use it:
             </p>
             <ul>
-              <li data-i18n-html="getting_started.step1_li1"><strong>Create New Wallet</strong> &mdash; generates a fresh 12-word recovery phrase.</li>
+              <li data-i18n-html="getting_started.step1_li1">
+                <strong>Pay</strong> or <strong>Get paid</strong> &mdash; creates a wallet for you. A
+                <strong>Secure Your Wallet</strong> notice explains why Face ID or Touch ID is needed before the prompt
+                appears; approving it generates a fresh 12-word recovery phrase and unlocks blockchain features.
+              </li>
               <li data-i18n-html="getting_started.step1_li2">
-                <strong>Import Existing Wallet</strong> &mdash; paste a BIP-39 recovery phrase you already have, or scan
-                backup shares from a printed recovery sheet.
+                <strong>Import from backup</strong>, at the bottom of the wallet screen &mdash; paste a BIP-39 recovery
+                phrase you already have, or scan backup shares from a printed recovery sheet.
               </li>
             </ul>
             <p data-i18n-html="getting_started.step1_p2">
-              If you are not ready to create a wallet, tap <strong>Cancel</strong> and continue browsing in Web2 mode.
+              Not ready? Go back to browsing. Nothing has been created, and no keys exist on the device until you choose
+              one of the two above.
             </p>
           </div>
           <div class="guide-image">
             <img
-              src="enable_web3_options.png"
-              alt="Wallet setup screen with Create and Import options"
+              src="wallet_overview.png"
+              alt="Wallet screen with Pay, Get paid and Vault, before any wallet exists"
               class="guide-screenshot"
             />
           </div>
@@ -703,16 +708,24 @@
           <div class="guide-text">
             <h3 data-i18n="getting_started.step2_heading">Step 2: Secure your recovery phrase</h3>
             <p data-i18n-html="getting_started.step2_p1">
-              If you create a new wallet, you will see a 12-word recovery phrase. This is the
-              <strong>only way</strong> to recover your wallet if you lose your device or reinstall the app.
+              A new wallet reminds you to back it up, and you can reopen the same screen at any time from
+              <strong>Wallet &gt; Settings &gt; Backup Wallet Keys</strong>. It shows your 12-word recovery phrase
+              &mdash; the <strong>only way</strong> to recover your wallet if you lose your device or reinstall the app.
             </p>
             <ul>
               <li data-i18n-html="getting_started.step2_li1">
-                <strong>Save Recovery Phrase</strong> &mdash; exports your phrase as a text file via the system share
-                sheet, so you can save it to cloud storage, AirDrop it, or print it.
+                <strong>Save</strong> &mdash; exports your phrase as a text file via the system share sheet, so you can
+                save it to cloud storage, AirDrop it, or print it.
               </li>
-              <li data-i18n-html="getting_started.step2_li2"><strong>Copy to Clipboard</strong> &mdash; copies the phrase so you can paste it somewhere safe.</li>
-              <li data-i18n-html="getting_started.step2_li3">Confirm you have saved it by checking the acknowledgment box, then tap <strong>Continue</strong>.</li>
+              <li data-i18n-html="getting_started.step2_li2"><strong>Copy</strong> &mdash; copies the phrase so you can paste it somewhere safe.</li>
+              <li data-i18n-html="getting_started.step2_li3">
+                <strong>Print Recovery Shares</strong> &mdash; splits the key across three printed pages, any two of
+                which restore the wallet.
+              </li>
+              <li data-i18n-html="getting_started.step2_li4">
+                Once the words are written down, tap <strong>Confirm</strong> to record the backup. The button appears
+                after a short pause, so there is time to actually write them.
+              </li>
             </ul>
             <div class="warning-box">
               <p data-i18n-html="getting_started.warning">
@@ -885,7 +898,8 @@
               <li data-i18n-html="browsing.menu.li3">Open the <strong>Browser</strong> page (bookmarks, history, homepage, search engine).</li>
               <li data-i18n-html="browsing.menu.li4">Submit a <strong>Bug Report</strong> (links directly to the GitHub issues page).</li>
               <li data-i18n-html="browsing.menu.li5">
-                Open <strong>Wallet</strong> settings (or <strong>Enable Web3</strong> if you have not set up yet).
+                Open your <strong>Wallet</strong> &mdash; with a <strong>Connections</strong> shortcut beside it once
+                you have one.
               </li>
               <li data-i18n-html="browsing.menu.li6">View and manage <strong>Tabs</strong>.</li>
             </ul>
@@ -1337,9 +1351,9 @@
             <p data-i18n-html="backup.phrase.p1">
               When you create a wallet, a 12-word recovery phrase is generated. This phrase can restore your wallet on
               any compatible device. You can access it at any time from
-              <strong>Wallet &gt; Settings &gt; Recovery Phrase</strong>.
+              <strong>Wallet &gt; Settings &gt; Backup Wallet Keys</strong>.
             </p>
-            <p data-i18n="backup.phrase.p2">During wallet creation, you can save it two ways:</p>
+            <p data-i18n="backup.phrase.p2">From that screen you can save it two ways:</p>
             <ul>
               <li data-i18n-html="backup.phrase.li1">
                 <strong>Save Recovery Phrase</strong> &mdash; exports a <code>.txt</code> file via the system share
@@ -1376,7 +1390,7 @@
             </p>
             <p data-i18n="backup.shares.p2">To generate shares:</p>
             <ul>
-              <li data-i18n-html="backup.shares.li1">Go to <strong>Wallet &gt; Settings &gt; Print Recovery Shares</strong>.</li>
+              <li data-i18n-html="backup.shares.li1">Go to <strong>Wallet &gt; Settings &gt; Backup Wallet Keys</strong> and tap <strong>Print Recovery Shares</strong>.</li>
               <li data-i18n-html="backup.shares.li2">The app generates three pages, each containing a QR code and the share text.</li>
               <li data-i18n-html="backup.shares.li3">The system print dialog opens so you can print them to paper or save as PDF.</li>
             </ul>
@@ -1402,7 +1416,7 @@
             </p>
             <ul>
               <li data-i18n-html="backup.recover.li1">
-                On the wallet setup screen, tap <strong>Import Existing Wallet</strong>, then tap
+                On the wallet screen, tap <strong>Import from backup</strong> at the bottom, then tap
                 <strong>Scan Backup Shares</strong>.
               </li>
               <li data-i18n-html="backup.recover.li2">The camera opens with a QR scanner. Point it at your first share.</li>
