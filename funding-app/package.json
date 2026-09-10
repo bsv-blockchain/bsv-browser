@@ -7,7 +7,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@bsv/sdk": "^2.0.0"
+    "@bsv/sdk": "^2.5.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
