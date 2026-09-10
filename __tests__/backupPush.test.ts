@@ -16,7 +16,9 @@ jest.mock('@react-native-async-storage/async-storage', () => {
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { PrivateKey } from '@bsv/sdk'
-import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
+import type { sdk } from '@bsv/wallet-toolbox-mobile'
+
+type SyncChunk = sdk.SyncChunk
 import { BackupHttpError, ERR_SEQ_CONFLICT } from '@bsv/expo-wallet-toolbox/core/backup/client'
 import { emptyChunk } from '@bsv/expo-wallet-toolbox/core/backup/codec'
 import { GENERATION_CHUNK_THRESHOLD } from '@bsv/expo-wallet-toolbox/core/backup/constants'

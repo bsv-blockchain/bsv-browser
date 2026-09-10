@@ -9,7 +9,9 @@
  */
 import { estimateEncodedBytes } from '@bsv/expo-wallet-toolbox/core/backup/codec'
 import { MAX_BLOB_BYTES } from '@bsv/expo-wallet-toolbox/core/backup/constants'
-import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
+import type { sdk } from '@bsv/wallet-toolbox-mobile'
+
+type SyncChunk = sdk.SyncChunk
 
 const chunk = (over: Record<string, unknown>): SyncChunk =>
   ({ fromStorageIdentityKey: '', toStorageIdentityKey: '', userIdentityKey: '', ...over }) as unknown as SyncChunk
