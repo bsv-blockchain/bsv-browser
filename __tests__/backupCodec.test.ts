@@ -1,5 +1,7 @@
 import { PrivateKey, Utils } from '@bsv/sdk'
-import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
+import type { sdk } from '@bsv/wallet-toolbox-mobile'
+
+type SyncChunk = sdk.SyncChunk
 import { CHUNK_ENTITIES, decodeChunk, emptyChunk, encodeChunk, isEmptyChunk } from '@bsv/expo-wallet-toolbox/core/backup/codec'
 import { BACKUP_PROTOCOL, backupKeyId } from '@bsv/expo-wallet-toolbox/core/backup/constants'
 import { deriveBackupWallet } from '@bsv/expo-wallet-toolbox/core/backup/derive'

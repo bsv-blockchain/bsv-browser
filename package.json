@@ -37,14 +37,14 @@
     "@bsv/air-gap": "^0.1.1",
     "@bsv/backup-cache-client": "^0.1.0",
     "@bsv/btms": "^1.1.0",
-    "@bsv/btms-permission-module": "^1.1.0",
+    "@bsv/btms-permission-module": "^1.2.0",
     "@bsv/expo-wallet-toolbox": "^0.4.0",
-    "@bsv/message-box-client": "^2.2.1",
+    "@bsv/message-box-client": "^2.5.0",
     "@bsv/react-native-localpay-transport": "0.1.1",
-    "@bsv/sdk": "^2.4.1",
+    "@bsv/sdk": "^2.5.0",
     "@bsv/templates": "^1.10.0",
-    "@bsv/wallet-relay": "^0.2.1",
-    "@bsv/wallet-toolbox-mobile": "^2.4.3",
+    "@bsv/wallet-relay": "^0.4.0",
+    "@bsv/wallet-toolbox-mobile": "^2.12.0",
     "@callstack/liquid-glass": "^0.7.1",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",
@@ -174,6 +174,7 @@
       "<rootDir>/.claude/worktrees/"
     ],
     "moduleNameMapper": {
+      "^@bsv/wallet-toolbox-mobile$": "<rootDir>/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs",
       "^@bsv/backup-cache-client$": "<rootDir>/node_modules/@bsv/backup-cache-client/dist/index.js",
       "^react-native-reanimated$": "<rootDir>/__tests__/__mocks__/reanimated.js",
       "^react-native-worklets$": "<rootDir>/node_modules/react-native-worklets/lib/module/mock.js",
@@ -181,7 +182,7 @@
       "^expo-sqlite$": "<rootDir>/__tests__/__mocks__/expo-sqlite.js"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|expo-.*|react-native-localize|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/expo-wallet-toolbox|@bsv/react-native-localpay-transport|@bsv/auth)/)",
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|expo-.*|react-native-localize|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/expo-wallet-toolbox|@bsv/wallet-toolbox-mobile|@bsv/react-native-localpay-transport|@bsv/auth)/)",
       "/node_modules/react-native-reanimated/plugin/"
     ],
     "setupFiles": [
