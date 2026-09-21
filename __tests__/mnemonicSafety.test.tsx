@@ -31,8 +31,11 @@ const mockBuild = jest.fn()
 const mockRebuild = jest.fn()
 const mockMarkPending = jest.fn()
 const mockAttest = jest.fn()
+const mockRecordWalletAttest = jest.fn()
+const mockGetManagers = jest.fn()
 const mockPrint = jest.fn()
 const mockToast = jest.fn()
+const mockAdminOriginator = 'urn:bsv-wallet:internal-admin'
 
 jest.mock('expo-router', () => ({
   router: { replace: (...args: unknown[]) => mockReplace(...args), back: () => mockBack(), dismissAll: jest.fn(), push: jest.fn() },
@@ -58,7 +61,9 @@ jest.mock('@bsv/expo-wallet-toolbox/core/context/WalletContext', () => ({
     backupRestore: { phase: 'idle' },
     getBackupRestore: () => ({ phase: 'idle' }),
     walletBuilt: mockWalletBuilt,
-    walletBuilding: false
+    walletBuilding: false,
+    getManagers: () => mockGetManagers(),
+    adminOriginator: mockAdminOriginator
   })
 }))
 jest.mock('@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider', () => ({
@@ -79,7 +84,8 @@ jest.mock('@bsv/expo-wallet-toolbox/core/mnemonicWallet', () => ({
   validateMnemonic: () => true
 }))
 jest.mock('@bsv/expo-wallet-toolbox/core/services/vault/backupAttestation', () => ({
-  backupAttestation: { markPending: (...args: unknown[]) => mockMarkPending(...args), set: (...args: unknown[]) => mockAttest(...args) }
+  backupAttestation: { markPending: (...args: unknown[]) => mockMarkPending(...args), set: (...args: unknown[]) => mockAttest(...args) },
+  recordBackupAttestation: (...args: unknown[]) => mockRecordWalletAttest(...args)
 }))
 jest.mock('@bsv/expo-wallet-toolbox/ui/printRecoveryShares', () => ({ printRecoveryShares: (...args: unknown[]) => mockPrint(...args) }))
 jest.mock('@bsv/expo-wallet-toolbox/ui/components/ui/AlertCard', () => ({ showAlert: jest.fn() }))
@@ -129,6 +135,8 @@ beforeEach(() => {
   mockRebuild.mockResolvedValue(undefined)
   mockMarkPending.mockResolvedValue(undefined)
   mockAttest.mockResolvedValue(undefined)
+  mockRecordWalletAttest.mockResolvedValue(true)
+  mockGetManagers.mockReturnValue({})
   mockPrint.mockResolvedValue({ ok: true })
   mockWriteFile.mockReset()
   mockReadFile.mockImplementation(async () => mockWriteFile.mock.calls.at(-1)?.[0])
@@ -297,6 +305,60 @@ it('keeps unlock failures on the backup retry screen', async () => {
 
   await act(async () => fireEvent.press(screen.getByText('retry')))
   expect(screen.getByText(mockPhrase)).toBeTruthy()
+})
+
+it('persists confirmation under the live wallet identity the reminder banner reads', async () => {
+  mockFlow = 'backup'
+  const walletIdentity = '03' + 'c'.repeat(62)
+  const wallet = { getPublicKey: jest.fn(async () => ({ publicKey: walletIdentity })) }
+  mockGetManagers.mockReturnValue({ permissionsManager: wallet })
+  const screen = await renderScreen()
+  await waitForHandwrittenBackup()
+  await act(async () => fireEvent.press(screen.getByRole('button', { name: 'Confirm' })))
+
+  // Phrase-derived key (what this screen computes) and the wallet identity
+  // (what WalletHome's needsReminder reads) must both be written. Either
+  // alone left the "Your Wallet is Not Backed Up" card in place.
+  expect(mockAttest).toHaveBeenCalledWith(mockIdentityKey, 'phrase')
+  expect(mockRecordWalletAttest).toHaveBeenCalledWith(wallet, mockAdminOriginator, 'phrase')
+  expect(walletIdentity).not.toBe(mockIdentityKey)
+  expect(mockBack).toHaveBeenCalledTimes(1)
+  expect(mockToast).toHaveBeenCalledWith('Backup confirmed', { type: 'success' })
+})
+
+it('writes the wallet-scoped flag on Confirm even after copy already attested the phrase key', async () => {
+  mockFlow = 'backup'
+  const walletIdentity = '03' + 'd'.repeat(62)
+  const wallet = { getPublicKey: jest.fn(async () => ({ publicKey: walletIdentity })) }
+  mockGetManagers.mockReturnValue({ permissionsManager: wallet })
+  const screen = await renderScreen()
+  await act(async () => fireEvent.press(screen.getByText('copy')))
+  expect(mockAttest).toHaveBeenCalledWith(mockIdentityKey, 'phrase')
+  expect(mockRecordWalletAttest).not.toHaveBeenCalled()
+  expect(mockBack).not.toHaveBeenCalled()
+
+  await act(async () => fireEvent.press(screen.getByRole('button', { name: 'Confirm' })))
+  expect(mockRecordWalletAttest).toHaveBeenCalledWith(wallet, mockAdminOriginator, 'phrase')
+  expect(mockAttest).toHaveBeenCalledTimes(1)
+  expect(mockBack).toHaveBeenCalledTimes(1)
+})
+
+it('does not leave backup when the wallet-scoped flag cannot be saved', async () => {
+  mockFlow = 'backup'
+  const wallet = { getPublicKey: jest.fn(async () => ({ publicKey: '03' + 'e'.repeat(62) })) }
+  mockGetManagers.mockReturnValue({ permissionsManager: wallet })
+  mockRecordWalletAttest.mockResolvedValueOnce(false)
+  const screen = await renderScreen()
+  await waitForHandwrittenBackup()
+  await act(async () => fireEvent.press(screen.getByRole('button', { name: 'Confirm' })))
+
+  expect(mockToast).toHaveBeenCalledWith('Unable to save backup confirmation. Please try again.', { type: 'error' })
+  expect(mockBack).not.toHaveBeenCalled()
+  expect(screen.getByText(mockPhrase)).toBeTruthy()
+
+  await act(async () => fireEvent.press(screen.getByRole('button', { name: 'Confirm' })))
+  expect(mockBack).toHaveBeenCalledTimes(1)
+  expect(mockRecordWalletAttest).toHaveBeenCalledTimes(2)
 })
 
 it('does not leave backup when saving its acknowledgment fails', async () => {
