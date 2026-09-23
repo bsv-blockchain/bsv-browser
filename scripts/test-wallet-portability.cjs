@@ -16,6 +16,7 @@ function load(filename) {
   new Function('module', 'exports', 'require', source)(module, module.exports, name => name === '@craftzdog/react-native-buffer' ? { Buffer } : name === '@bsv/expo-wallet-toolbox/core/storage/schema/createTables' ? load('../node_modules/@bsv/expo-wallet-toolbox/core/storage/schema/createTables.ts') : name.startsWith('.') ? load(path.resolve(path.dirname(filename), name + '.ts')) : require(name))
   return module.exports
 }
+const { copyToNewWalletDocument } = load('../utils/walletPortability/saveDocument.ts')
 const { databaseDirectoryUri } = load('../utils/walletPortability/fileUris.ts')
 assert.equal(databaseDirectoryUri('/data/user/0/app/files/SQLite'), 'file:///data/user/0/app/files/SQLite')
 assert.equal(databaseDirectoryUri('/data/user/0/a #%.app/files'), 'file:///data/user/0/a%20%23%25.app/files')
@@ -61,7 +62,47 @@ async function stage(bytes, password = '') {
   } catch (error) { db.close(); throw error }
 }
 async function collect(source) { const chunks = []; for await (const chunk of source) chunks.push(Buffer.from(chunk)); return Buffer.concat(chunks) }
+async function testDocumentSave() {
+  const input = crypto.randomBytes(1024 * 1024 + 37)
+  const fixture = () => {
+    let offset = 0, closed = false, deleted = false, maxRead = 0
+    const chunks = []
+    const source = { size: input.length, open: () => ({
+      readBytes: length => { maxRead = Math.max(maxRead, length); const bytes = Uint8Array.from(input.subarray(offset, offset + length)); offset += bytes.length; return bytes },
+      close: () => { closed = true }
+    }) }
+    const destination = { get size() { return Buffer.concat(chunks).length },
+      write: (bytes, { append }) => { if (!append) chunks.length = 0; chunks.push(Buffer.from(bytes)) },
+      delete: () => { deleted = true; chunks.length = 0 }
+    }
+    return { source, destination, bytes: () => Buffer.concat(chunks), state: () => ({ closed, deleted, maxRead }) }
+  }
+  const full = fixture()
+  await copyToNewWalletDocument(full.source, full.destination, () => {})
+  assert.deepEqual(full.bytes(), input)
+  assert.deepEqual(full.state(), { closed: true, deleted: false, maxRead: 256 * 1024 })
+  const interrupted = fixture(), abort = new AbortController()
+  await assert.rejects(copyToNewWalletDocument(interrupted.source, interrupted.destination, () => abort.abort(), abort.signal))
+  assert.equal(interrupted.state().closed, true)
+  assert.equal(interrupted.state().deleted, true)
+  const failed = fixture()
+  failed.destination.write = () => { throw new Error('provider full') }
+  await assert.rejects(copyToNewWalletDocument(failed.source, failed.destination, () => {}), /complete file could not be saved/)
+  assert.equal(failed.state().closed, true)
+  assert.equal(failed.state().deleted, true)
+  const truncated = fixture()
+  truncated.destination.write = () => { /* provider silently drops output */ }
+  await assert.rejects(copyToNewWalletDocument(truncated.source, truncated.destination, () => {}), /complete file could not be saved/)
+  assert.equal(truncated.state().deleted, true)
+  const existing = fixture()
+  existing.destination.write(new Uint8Array([1, 2]), { append: false })
+  await assert.rejects(copyToNewWalletDocument(existing.source, existing.destination, () => {}), /Nothing was overwritten/)
+  assert.deepEqual(existing.bytes(), Buffer.from([1, 2]))
+  assert.equal(existing.state().deleted, false)
+  console.log('PASS: provider save preserves exact bytes with bounded reads, cancellation/failure cleanup, and no overwrite of existing data')
+}
 async function main() {
+  await testDocumentSave()
   const fixture = portabilityFixture()
   fixture.tables.provenTxReqs[0].wasBroadcast = 0
   const json = Buffer.from(canonicalArchiveJson(fixture))

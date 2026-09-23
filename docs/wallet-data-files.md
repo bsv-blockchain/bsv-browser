@@ -25,3 +25,7 @@ References: [BRC-38](https://github.com/bsv-blockchain/BRCs/blob/2b959b13f1f7304
 Normalize Expo SQLite’s Android filesystem directory to an absolute file URI before checking for saved databases; retain iOS file URIs unchanged. Native Android qualification of the shared flow found this before restoration.
 
 The narrow SDK 2.8.0 compatibility patch removes an incorrect rejection of authenticated empty AES-GCM plaintext while retaining the complete authentication-tag check. The forced-portable CJS/ESM test covers 24 cross-runtime vectors and rejects altered tags, wrong keys/IVs and truncated envelopes. Follow [TS Stack #573](https://github.com/bsv-blockchain/ts-stack/issues/573) and remove the patch after adopting its tested published fix.
+
+## Android file destinations
+
+Save/share offers **Save to folder** through the Android document-provider picker as well as the platform share sheet. This works when no installed sharing app offers a local-save destination. Saving creates a new provider file and copies in 256 KiB chunks, verifies its size and yields between writes; it never loads the complete archive into JavaScript memory. Interrupted/failed saves remove only the newly created partial output when possible and retain the app’s original. Provider selection stays outside the cancellable copy so the system picker’s background transition does not abort a fresh save. Nonempty destination files are refused without deletion.

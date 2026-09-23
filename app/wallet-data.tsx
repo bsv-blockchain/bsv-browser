@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, AppState, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { Alert, AppState, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Stack } from 'expo-router'
 import * as DocumentPicker from 'expo-document-picker'
 import * as Sharing from 'expo-sharing'
+import { Directory, File } from 'expo-file-system'
+import { copyToNewWalletDocument } from '@/utils/walletPortability/saveDocument'
 import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
 import { useThemeStyles } from '@bsv/expo-wallet-toolbox/core/theme/useThemeStyles'
@@ -22,8 +24,10 @@ export default function WalletDataScreen() {
   const [confirmation, setConfirmation] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
+  const [choosingFolder, setChoosingFolder] = useState(false)
   const [exportUri, setExportUri] = useState<string>()
   const operation = useRef<AbortController | undefined>(undefined)
+  const pickerActive = useRef(false)
   const mounted = useRef(true)
   const refresh = useCallback(async () => {
     const next = await listArchiveJobs()
@@ -56,11 +60,43 @@ export default function WalletDataScreen() {
       if (mounted.current) { setBusy(false); await refresh().catch(() => {}) }
     }
   }
-  const share = async (uri: string) => {
+  const shareWithApp = async (uri: string) => {
     try {
       if (!(await Sharing.isAvailableAsync())) throw new Error('File sharing is unavailable on this device. The file remains saved in the app.')
       await Sharing.shareAsync(uri, { mimeType: 'application/octet-stream', UTI: 'public.data', dialogTitle: 'Save wallet data file' })
     } catch (error) { report(error instanceof Error ? error.message : 'Could not open the file sharing sheet. The file remains saved.') }
+  }
+  const saveToFolder = async (uri: string) => {
+    if (pickerActive.current || operation.current) return
+    pickerActive.current = true
+    setChoosingFolder(true)
+    let directory: Directory
+    try {
+      // Keep the OS picker outside run(): opening it backgrounds the screen.
+      directory = await Directory.pickDirectoryAsync()
+    } catch {
+      report('No file saved. Your original remains in this app.')
+      setChoosingFolder(false)
+      pickerActive.current = false
+      return
+    }
+    setChoosingFolder(false)
+    pickerActive.current = false
+    if (!mounted.current) return
+    await run(async signal => {
+      const source = new File(uri)
+      const destination = directory.createFile(source.name, 'application/octet-stream')
+      await copyToNewWalletDocument(source, destination, report, signal)
+      report('File saved to the chosen folder. Your original remains in this app.')
+    })
+  }
+  const share = async (uri: string) => {
+    if (Platform.OS !== 'android') { await shareWithApp(uri); return }
+    Alert.alert('Save wallet data file', 'Save a copy to a folder, or choose an app to share it with.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Save to folder', onPress: () => { void saveToFolder(uri) } },
+      { text: 'Share', onPress: () => { void shareWithApp(uri) } }
+    ])
   }
   const choose = async () => {
     try {
@@ -95,8 +131,8 @@ export default function WalletDataScreen() {
       }) } }
     ])
   const button = (title: string, onPress: () => void, disabled = false, testID?: string) => (
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel={title} disabled={disabled || busy} testID={testID}
-      onPress={onPress} style={[local.button, { backgroundColor: colors.secondary, opacity: disabled || busy ? 0.45 : 1 }]}>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={title} disabled={disabled || busy || choosingFolder} testID={testID}
+      onPress={onPress} style={[local.button, { backgroundColor: colors.secondary, opacity: disabled || busy || choosingFolder ? 0.45 : 1 }]}>
       <Text style={{ color: colors.buttonText, fontWeight: '600', textAlign: 'center' }}>{title}</Text>
     </TouchableOpacity>
   )
