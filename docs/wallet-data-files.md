@@ -39,3 +39,10 @@ Save/share offers **Save to folder** through the Android document-provider picke
 The wallet now pins published SDK 2.8.2, retaining the authenticated AES-GCM fix from 2.8.1 and adding [TS Stack #581](https://github.com/bsv-blockchain/ts-stack/pull/581). Successful automatic React Native/XDM discovery no longer leaves subsequent wallet calls subject to the short probe deadline. Discovery remains bounded, explicit operation timeouts and response/origin validation are unchanged. Web applications must also update their own SDK bundle; upgrading a wallet alone cannot repair an older application bundle.
 
 The funding app also pins 2.8.2; `docs/fund.html` is regenerated from that locked dependency graph. The acceleration patch changes only its SDK version context; the published AES and wallet-discovery fixes remain intact.
+
+Signed-out iOS Apple Pay mode retains its script-injection prohibition. A narrow
+`react-native-webview` patch observes [WebKit's KVO-compliant native URL](https://developer.apple.com/documentation/webkit/wkwebview/url)
+to report completed same-document navigation when the normal injected history
+shim is unavailable. It emits only for the current mounted WebView and matching
+URL after native history state settles, and removes its observer on teardown.
+Native reader back/forward and restart acceptance are required after rebuilding.

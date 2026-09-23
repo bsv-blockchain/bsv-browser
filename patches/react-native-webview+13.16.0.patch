@@ -1,0 +1,48 @@
+diff --git a/node_modules/react-native-webview/apple/RNCWebViewImpl.m b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
+index 7f5c24d..e71e7ed 100644
+--- a/node_modules/react-native-webview/apple/RNCWebViewImpl.m
++++ b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
+@@ -548,6 +548,7 @@ - (void)didMoveToWindow
+ #endif // !TARGET_OS_OSX
+     _webView.allowsLinkPreview = _allowsLinkPreview;
+     [_webView addObserver:self forKeyPath:@"estimatedProgress" options:NSKeyValueObservingOptionOld | NSKeyValueObservingOptionNew context:nil];
++    [_webView addObserver:self forKeyPath:@"URL" options:NSKeyValueObservingOptionOld | NSKeyValueObservingOptionNew context:nil];
+     _webView.allowsBackForwardNavigationGestures = _allowsBackForwardNavigationGestures;
+ 
+     _webView.customUserAgent = _userAgent;
+@@ -617,6 +618,7 @@ - (void)removeFromSuperview
+     [_webView.configuration.userContentController removeScriptMessageHandlerForName:HistoryShimName];
+     [_webView.configuration.userContentController removeScriptMessageHandlerForName:MessageHandlerName];
+     [_webView removeObserver:self forKeyPath:@"estimatedProgress"];
++    [_webView removeObserver:self forKeyPath:@"URL"];
+     [_webView removeFromSuperview];
+     if (@available(iOS 15.0, macOS 12.0, *)) {
+         [_webView pauseAllMediaPlaybackWithCompletionHandler:nil];
+@@ -701,7 +703,26 @@ -(void)keyboardDisplacementFix
+ #endif // TARGET_OS_IOS
+ 
+ - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context{
+-  if ([keyPath isEqual:@"estimatedProgress"] && object == self.webView) {
++  if ([keyPath isEqual:@"URL"] && object == self.webView) {
++    // Apple Pay forbids the injected history shim. Observe WebKit's native URL
++    // for same-document navigation without enabling any script execution.
++    if (self.enableApplePay && !self.webView.loading) {
++      NSURL *observedURL = self.webView.URL;
++      WKWebView *observedWebView = self.webView;
++      __weak RNCWebViewImpl *weakSelf = self;
++      dispatch_async(dispatch_get_main_queue(), ^{
++        RNCWebViewImpl *strongSelf = weakSelf;
++        if (!strongSelf || strongSelf.webView != observedWebView ||
++            observedWebView.superview != strongSelf || !strongSelf.enableApplePay ||
++            observedWebView.loading || ![observedWebView.URL isEqual:observedURL]) return;
++        if (strongSelf.onLoadingFinish) {
++          NSMutableDictionary<NSString *, id> *event = [strongSelf baseEvent];
++          event[@"navigationType"] = @"other";
++          strongSelf.onLoadingFinish(event);
++        }
++      });
++    }
++  } else if ([keyPath isEqual:@"estimatedProgress"] && object == self.webView) {
+     if(_onLoadingProgress){
+       NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+       [event addEntriesFromDictionary:@{@"progress":[NSNumber numberWithDouble:self.webView.estimatedProgress]}];
