@@ -48,8 +48,9 @@ describe('printRecoveryShares', () => {
     expect(printAsync).not.toHaveBeenCalled()
   })
 
-  test('prints legacy shares for a wallet that has only a recovered key', async () => {
-    const wif = PrivateKey.fromRandom().toWif()
+  test.each(['01', '00' + '53'.repeat(31), '53'.repeat(32)])(
+    'prints legacy shares with fixed-width recovery for key %s', async (hex) => {
+    const wif = PrivateKey.fromHex(hex).toWif()
     const result = await printRecoveryShares({ mnemonic: null, recoveredKeyWif: wif })
 
     expect(result).toEqual({ ok: true, format: 'legacy' })
@@ -58,7 +59,7 @@ describe('printRecoveryShares', () => {
     const recovered = recoverSecretFromShares(sharesFromHtml(html).slice(0, 2))
     expect(recovered.kind).toBe('legacy')
     expect(recovered.kind === 'legacy' && recovered.primaryKey).toEqual(
-      Array.from(PrivateKey.fromWif(wif).toArray())
+      Array.from(PrivateKey.fromWif(wif).toArray('be', 32))
     )
   })
 
