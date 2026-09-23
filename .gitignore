@@ -85,3 +85,6 @@ credentials.json
 ios/build-release/
 # Local xcodebuild output (e.g. ad-hoc Release simulator builds for screenshotting)
 /build_release
+
+# Local cross-platform bundle validation output
+/dist-qa/

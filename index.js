@@ -49,7 +49,7 @@ if (global.crypto && typeof global.crypto.getRandomValues === 'function') {
 
 // Native secp256k1 (Nitro module, rust-secp256k1) — exposes SecpNative at
 // globalThis.__bsvSecpNative so the patched @bsv/sdk primitives (see
-// patches/@bsv+sdk+2.1.6.patch) route EC hot paths natively. Safe no-op when
+// patches/@bsv+sdk+2.8.0.patch) route EC hot paths natively. Safe no-op when
 // the native module is unavailable (web, jest, Expo Go): the SDK then uses its
 // original pure-JS implementations.
 try {
@@ -66,8 +66,9 @@ try {
 
 // Native tx engine (Nitro module, native-engine-ffi / bsv-rs) — exposes
 // EngineNative at globalThis.__bsvEngineNative. The patched @bsv/sdk
-// Transaction.sign probes this seam to batch-sign all-P2PKH input sets in ONE
-// async native crossing (BIP-143 midstates computed once per scope class).
+// SDK 2.8 Transaction.sign retains its guarded snapshot/commit implementation.
+// This engine remains available to its explicit diagnostics; transaction signing
+// uses compatible primitive acceleration until batch signing supports those guards.
 // Safe no-op when the native module is unavailable (web, jest, Expo Go): the
 // complete pure-JS tx path remains.
 try {

@@ -1,8 +1,7 @@
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/backup/RemoteSyncReader.ts b/node_modules/@bsv/expo-wallet-toolbox/core/backup/RemoteSyncReader.ts
-index e105353..92f8155 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/backup/RemoteSyncReader.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/backup/RemoteSyncReader.ts
-@@ -7,15 +7,14 @@
+@@ -7,14 +7,13 @@
   * drive a live remote storage provider.
   */
  import type { CompletedProtoWallet } from '@bsv/sdk'
@@ -15,16 +14,14 @@ index e105353..92f8155 100644
  import type { BackupClient, LogEntry } from './client'
  import { decodeChunk, emptyChunk } from './codec'
  import type { BackupChain } from './constants'
- 
++
 +type RequestSyncChunkArgs = sdk.RequestSyncChunkArgs
 +type SyncChunk = sdk.SyncChunk
-+
+ 
  export class BackupChainError extends Error {
    constructor (message: string) {
-     super(message)
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/backup/binaryJson.ts b/node_modules/@bsv/expo-wallet-toolbox/core/backup/binaryJson.ts
 new file mode 100644
-index 0000000..3f1e696
 --- /dev/null
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/backup/binaryJson.ts
 @@ -0,0 +1,81 @@
@@ -110,7 +107,6 @@ index 0000000..3f1e696
 +  return JSON.parse(text, binary ? reviver : undefined)
 +}
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/backup/codec.ts b/node_modules/@bsv/expo-wallet-toolbox/core/backup/codec.ts
-index 691eb24..3527e74 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/backup/codec.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/backup/codec.ts
 @@ -16,11 +16,11 @@
@@ -127,7 +123,7 @@ index 691eb24..3527e74 100644
  import { BACKUP_PROTOCOL, backupKeyId, type BackupChain } from './constants'
  
  /**
-@@ -30,6 +30,7 @@ import { BACKUP_PROTOCOL, backupKeyId, type BackupChain } from './constants'
+@@ -30,6 +30,7 @@
   * usually ids rather than payloads.
   */
  const PACK_MIN_LENGTH = 32
@@ -136,7 +132,6 @@ index 691eb24..3527e74 100644
  /**
   * Repack byte-valued numeric arrays as Uint8Array so the binary serialiser can base64 them.
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/backup/push.ts b/node_modules/@bsv/expo-wallet-toolbox/core/backup/push.ts
-index 01df5d3..e07cfad 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/backup/push.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/backup/push.ts
 @@ -16,9 +16,11 @@
@@ -153,10 +148,17 @@ index 01df5d3..e07cfad 100644
  import {
    ENTITY_NAMES,
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.tsx b/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.tsx
-index 5cf9846..7e0325e 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.tsx
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.tsx
-@@ -9,17 +9,15 @@ import {
+@@ -1,4 +1,7 @@
+ const F = 'context/WalletContext'
++import { WalletDataStorageManager } from '../../../../../utils/walletPortability/WalletDataStorageManager'
++import type { WalletDataSession } from '../../../../../utils/walletPortability/session'
++import { WalletDataMonitorFence } from '../../../../../utils/walletPortability/monitorFence'
+ 
+ import React, { useState, useEffect, createContext, useMemo, useCallback, useContext, useRef } from 'react'
+ import {
+@@ -9,17 +12,15 @@
    WalletSigner,
    PermissionRequest,
    SimpleWalletManager,
@@ -178,8 +180,125 @@ index 5cf9846..7e0325e 100644
  
  /** App-level defaults: library defaults + additional certifiers */
  /**
+@@ -219,6 +220,7 @@
+ // -----
+ 
+ interface ManagerState {
++  walletData?: WalletDataSession
+   walletManager?: SimpleWalletManager
+   permissionsManager?: WalletPermissionsManager
+   settingsManager?: WalletSettingsManager
+@@ -965,6 +967,8 @@
+       const buildToken = buildGenRef.current.current()
+       const stillWanted = () => buildGenRef.current.isCurrent(buildToken)
+       try {
++        // Native file/crypto modules load only when constructing a wallet.
++        const { WalletDataSession, loadWalletDataBinding, openBoundWalletData } = require('../../../../../utils/walletPortability/session') as typeof import('../../../../../utils/walletPortability/session')
+         logWithTimestamp(F, 'Building wallet')
+         const newManagers = {} as any
+         // Deliberately the ref, not the state: see selectedNetworkRef.
+@@ -976,7 +980,8 @@
+         const backupChain =
+           chain === 'main' ? ('main' as const) : chain === 'test' ? ('test' as const) : ('teratest' as const)
+         const keyDeriver = new KeyDeriver(new PrivateKey(primaryKey))
+-        const storageManager = new WalletStorageManager(keyDeriver.identityKey)
++        await managersRef.current.walletData?.close()
++        const storageManager = new WalletDataStorageManager(keyDeriver.identityKey)
+         const signer = new WalletSigner(walletChain, keyDeriver, storageManager)
+ 
+         const bsvExchangeRate = await getExchangeRate()
+@@ -1152,14 +1157,15 @@
+           const selectedDb = selectLatestDb(knownDbs)
+           console.log(`[WalletContext] Selected DB: ${selectedDb} (from ${knownDbs.length} registered)`)
+ 
+-          phoneStorage = new StorageExpoSQLite({
++          const fileBinding = await loadWalletDataBinding(walletChain, identityKey)
++          phoneStorage = fileBinding ? await openBoundWalletData(fileBinding, walletChain, identityKey) : new StorageExpoSQLite({
+             ...StorageProvider.createStorageBaseOptions(walletChain),
+             feeModel: { model: 'sat/kb', value: 100 },
+             identityKey,
+             databaseName: selectedDb
+           })
+           phoneStorage.setServices(services)
+-          await phoneStorage.migrate('bsv-wallet', identityKey)
++          if (!fileBinding) await phoneStorage.migrate('bsv-wallet', identityKey)
+ 
+           console.log('[WalletContext] Local SQLite storage initialized successfully')
+ 
+@@ -1180,6 +1186,7 @@
+             localStorageAdded = true
+           }
+ 
++          if (fileBinding) restoreIntentRef.current = false
+           if (restoreIntentRef.current) {
+             restoreIntentRef.current = false
+             setBackupRestore({ phase: 'checking', chunks: 0, total: 0 })
+@@ -1238,6 +1245,7 @@
+             console.log('[WalletContext] Local storage provider added to wallet')
+           } catch (error) {
+             console.error('[WalletContext] Failed to add local storage provider:', error)
++            throw error
+           }
+ 
+           try {
+@@ -1308,7 +1316,7 @@
+           if (staleMonitor) {
+             monitorRef.current = null
+             try {
+-              staleMonitor.stopTasks()
++              await stopMonitorAndDrain(staleMonitor)
+             } catch {}
+             console.warn('[WalletContext] Stopped a leftover monitor from a previous wallet build')
+           }
+@@ -1723,6 +1731,15 @@
+           logWithTimestamp(F, 'Discarding a build the network switch overtook')
+           return null
+         }
++        if (phoneStorage) {
++          const lifecycle = new WalletDataMonitorFence<Monitor>(
++            () => monitorRef.current,
++            monitor => { monitorRef.current = monitor },
++            stillWanted,
++            error => console.error('[WalletContext] Monitor restart failed', error)
++          )
++          newManagers.walletData = new WalletDataSession(keyDeriver.identityKey, walletChain, storageManager, phoneStorage as any, services, lifecycle)
++        }
+         updateManagers(m => ({ ...m, ...newManagers }))
+         logWithTimestamp(F, 'Wallet build completed successfully')
+ 
+@@ -1925,6 +1942,7 @@
+     restoreIntentRef.current = opts?.restoreFromBackup === true
+     // Any build already in flight belongs to the configuration being replaced.
+     const token = buildGenRef.current.bump()
++    await managersRef.current.walletData?.close()
+ 
+     // Stop any running monitor and let its current pass drain before the
+     // storage teardown below closes the connection under it.
+@@ -1980,6 +1998,7 @@
+       if (network === selectedNetwork) return
+       logWithTimestamp(F, `Switching network from ${selectedNetwork} to ${network}`)
+       buildGenRef.current.bump()
++      await managersRef.current.walletData?.close()
+ 
+       // Stop any running monitor and let its current pass drain before the
+       // storage teardown below closes the connection under it.
+@@ -2306,6 +2325,7 @@
+   // Cleanup monitor on unmount
+   useEffect(() => {
+     return () => {
++      void managersRef.current.walletData?.close().catch(error => console.error('[WalletContext] Wallet close failed', error))
+       try {
+         monitorRef.current?.stopTasks()
+       } catch {}
+@@ -2322,6 +2342,7 @@
+   const logout = useCallback(() => {
+     logWithTimestamp(F, 'Logout')
+     ;(async () => {
++      await managersRef.current.walletData?.close()
+       // Tear the wallet down the same way rebuildWallet does. Logout used to
+       // skip this, which orphaned a running monitor AND left the SQLite
+       // connection open: a re-import of the same phrase then opened a second
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/headers/OfflineFirstChaintracks.ts b/node_modules/@bsv/expo-wallet-toolbox/core/headers/OfflineFirstChaintracks.ts
-index 72208de..3c4bef5 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/headers/OfflineFirstChaintracks.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/headers/OfflineFirstChaintracks.ts
 @@ -14,7 +14,7 @@
@@ -192,7 +311,6 @@ index 72208de..3c4bef5 100644
  
  /** A merkle root as display-order hex, whether the source gave us a hex string
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/headers/headerStore.ts b/node_modules/@bsv/expo-wallet-toolbox/core/headers/headerStore.ts
-index 8b75144..91af08f 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/headers/headerStore.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/headers/headerStore.ts
 @@ -20,16 +20,13 @@
@@ -214,8 +332,20 @@ index 8b75144..91af08f 100644
  
  interface StoredMeta {
    chain: string
+@@ -196,10 +193,8 @@
+       const hash = blockHash(header)
+       // Throws on failure — a header that does not meet its own target is not a
+       // header, and accepting it would let anyone mint merkle roots.
+-      // The upstream .d.ts types `hash` as Buffer, but the implementation only
+-      // ever does `asArray(hash)`, which accepts a display-order hex string
+-      // (what blockHash returns) identically to a Buffer — hence the cast.
+-      validateHeaderDifficulty(hash as unknown as Buffer, parsed.bits)
++      // Toolbox validates a 32-byte display-order hash at this boundary.
++      validateHeaderDifficulty(Uint8Array.from(Utils.toArray(hash, 'hex')), parsed.bits)
+       newRoots.set(new Uint8Array(Utils.toArray(parsed.merkleRoot, 'hex')), i * ROOT_BYTES)
+       prev = hash
+     }
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskBackupPush.ts b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskBackupPush.ts
-index b17aca6..5526a6f 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskBackupPush.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskBackupPush.ts
 @@ -13,7 +13,7 @@
@@ -228,7 +358,6 @@ index b17aca6..5526a6f 100644
  import { MIN_PUSH_INTERVAL_MS } from '../backup/constants'
  import type { PushResult } from '../backup/push'
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskCreditInbox.ts b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskCreditInbox.ts
-index 09355d1..bf0a2a2 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskCreditInbox.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskCreditInbox.ts
 @@ -11,7 +11,7 @@
@@ -241,7 +370,6 @@ index 09355d1..bf0a2a2 100644
  
  export interface CreditInboxTaskResult {
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskDrainOutbox.ts b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskDrainOutbox.ts
-index ee18220..ce1ec37 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskDrainOutbox.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskDrainOutbox.ts
 @@ -11,7 +11,7 @@
@@ -254,7 +382,6 @@ index ee18220..ce1ec37 100644
  import type { OutboxEntry } from '../peerpay/outbox'
  
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline.ts b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline.ts
-index aa9db93..27dff2f 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline.ts
 @@ -19,7 +19,7 @@
@@ -268,7 +395,6 @@ index aa9db93..27dff2f 100644
  
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/WalletMonitorTask.ts b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/WalletMonitorTask.ts
 new file mode 100644
-index 0000000..a4ebf7a
 --- /dev/null
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/WalletMonitorTask.ts
 @@ -0,0 +1,22 @@
@@ -295,7 +421,6 @@ index 0000000..a4ebf7a
 +  abstract runTask(): Promise<string>
 +}
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/offline/plan.ts b/node_modules/@bsv/expo-wallet-toolbox/core/offline/plan.ts
-index 004f35b..a990034 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/offline/plan.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/offline/plan.ts
 @@ -9,7 +9,9 @@
@@ -310,7 +435,6 @@ index 004f35b..a990034 100644
  export type PostOutcome = 'success' | 'serviceError' | 'invalidTx' | 'doubleSpend'
  
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/pay/recordProof.ts b/node_modules/@bsv/expo-wallet-toolbox/core/pay/recordProof.ts
-index 9104646..b088e62 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/pay/recordProof.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/pay/recordProof.ts
 @@ -10,12 +10,14 @@
@@ -331,7 +455,6 @@ index 9104646..b088e62 100644
  export interface ProofStorage {
    findProvenTxReqs(args: {
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/services/arcadeBroadcastProvider.ts b/node_modules/@bsv/expo-wallet-toolbox/core/services/arcadeBroadcastProvider.ts
-index 05b4b2a..1250672 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/services/arcadeBroadcastProvider.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/services/arcadeBroadcastProvider.ts
 @@ -1,8 +1,8 @@
@@ -348,24 +471,21 @@ index 05b4b2a..1250672 100644
  /**
   * ARC intermediate statuses that still mean "accepted for relay".
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/services/exchangeRate.ts b/node_modules/@bsv/expo-wallet-toolbox/core/services/exchangeRate.ts
-index 97ccb47..53609dd 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/services/exchangeRate.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/services/exchangeRate.ts
-@@ -1,6 +1,8 @@
+@@ -1,5 +1,7 @@
 -import type { BsvExchangeRate } from '@bsv/wallet-toolbox-mobile/out/src/sdk'
 +import type { sdk } from '@bsv/wallet-toolbox-mobile'
  import AsyncStorage from '@react-native-async-storage/async-storage'
- 
-+type BsvExchangeRate = sdk.BsvExchangeRate
 +
++type BsvExchangeRate = sdk.BsvExchangeRate
+ 
  // Shared with context/ExchangeRateContext.tsx so a single cache serves both the
  // fiat-display UI and the wallet-build seed. Same key + same { usdPerBsv } shape.
- const CACHE_KEY = 'cached_exchange_rate'
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/services/walletServiceConfig.ts b/node_modules/@bsv/expo-wallet-toolbox/core/services/walletServiceConfig.ts
-index 6edb83d..883eeba 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/services/walletServiceConfig.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/services/walletServiceConfig.ts
-@@ -5,13 +5,12 @@ import {
+@@ -5,12 +5,11 @@
    ChaintracksServiceClient,
    Services
  } from '@bsv/wallet-toolbox-mobile'
@@ -376,18 +496,16 @@ index 6edb83d..883eeba 100644
 -import type { ChaintracksClientApi } from '@bsv/wallet-toolbox-mobile/out/src/services/chaintracker/chaintracks/Api/ChaintracksClientApi'
 +import type { ChaintracksClientApi, sdk } from '@bsv/wallet-toolbox-mobile'
  import type { ChainTracker } from '@bsv/sdk'
- 
++
 +type BsvExchangeRate = sdk.BsvExchangeRate
 +type WalletServicesOptions = sdk.WalletServicesOptions
-+
+ 
  /**
   * The chaintracks URL for a network — the one place this table is defined.
-  * `createServiceOptions` below and `WalletContext` (which needs the same URL
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite.ts b/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite.ts
-index 78c929a..fe68c27 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite.ts
-@@ -23,36 +23,11 @@ import {
+@@ -23,36 +23,11 @@
  } from './methods/reclaim'
  import { availableDiskBytes, diskPressure } from '../diskSpace'
  import { devLog } from '../logging'
@@ -429,7 +547,7 @@ index 78c929a..fe68c27 100644
    TableCertificate,
    TableCertificateField,
    TableCertificateX,
-@@ -69,12 +44,11 @@ import type {
+@@ -69,12 +44,11 @@
    TableTransaction,
    TableTxLabel,
    TableTxLabelMap,
@@ -445,10 +563,11 @@ index 78c929a..fe68c27 100644
  import { listActionsSql } from './methods/listActionsSql'
  import { listOutputsSql } from './methods/listOutputsSql'
  import { findUnprovenTxidsWithoutReq } from './methods/unprovenWithoutReqSql'
-@@ -95,6 +69,32 @@ import { buildOfflineHoldResult, groupOfflineHolds } from '../offline/hold'
+@@ -94,6 +68,32 @@
+ import { buildOfflineHoldResult, groupOfflineHolds } from '../offline/hold'
  import { getOnline } from '../net/online'
  import { TaskSendOffline } from '../monitor/TaskSendOffline'
- 
++
 +type AuthId = sdk.AuthId
 +type FindCertificateFieldsArgs = sdk.FindCertificateFieldsArgs
 +type FindCertificatesArgs = sdk.FindCertificatesArgs
@@ -474,12 +593,10 @@ index 78c929a..fe68c27 100644
 +type SyncChunk = sdk.SyncChunk
 +type TrxToken = sdk.TrxToken
 +type PostReqsToNetworkResult = Awaited<ReturnType<StorageProvider['attemptToPostReqsToNetwork']>>
-+
+ 
  export interface StorageExpoSQLiteOptions extends StorageProviderOptions {
    databaseName?: string
-   identityKey?: string
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listActionsSql.ts b/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listActionsSql.ts
-index 3fbf701..c046ded 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listActionsSql.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listActionsSql.ts
 @@ -4,11 +4,15 @@
@@ -502,7 +619,7 @@ index 3fbf701..c046ded 100644
  
  export async function listActionsSql(
    storage: StorageExpoSQLite,
-@@ -32,7 +36,7 @@ export async function listActionsSql(
+@@ -32,7 +36,7 @@
    let specOpLabels: string[] = []
    let labels: string[] = []
    for (const label of ordinaryLabelsPreSpecOp) {
@@ -512,10 +629,9 @@ index 3fbf701..c046ded 100644
      } else {
        labels.push(label)
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listOutputsSql.ts b/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listOutputsSql.ts
-index 3b666f3..887bf82 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listOutputsSql.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listOutputsSql.ts
-@@ -4,11 +4,12 @@
+@@ -4,10 +4,11 @@
   * Handles specOp patterns (wallet balance, invalid change, etc.)
   */
  import type { ListOutputsResult, Validation } from '@bsv/sdk'
@@ -524,14 +640,12 @@ index 3b666f3..887bf82 100644
  import type { StorageExpoSQLite } from '../StorageExpoSQLite'
 -import { getListOutputsSpecOp } from '@bsv/wallet-toolbox-mobile/out/src/storage/methods/ListOutputsSpecOp'
  import { devLog, isLoggingEnabled } from '../../logging'
- 
-+type AuthId = sdk.AuthId
 +
++type AuthId = sdk.AuthId
+ 
  export async function listOutputsSql(
    storage: StorageExpoSQLite,
-   auth: AuthId,
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions.ts b/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions.ts
-index fcb5830..1b7bf9d 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions.ts
 @@ -18,9 +18,7 @@
@@ -545,7 +659,7 @@ index fcb5830..1b7bf9d 100644
  import type { StorageExpoSQLite } from '../StorageExpoSQLite'
  import { findOfflineActions, updateOfflineAction, type OfflineActionRow, type OfflineDb } from './offlineActions'
  import {
-@@ -384,7 +382,7 @@ async function postOwned(storage: StorageExpoSQLite, api: TableProvenTxReq): Pro
+@@ -384,7 +382,7 @@
  
    let detailStatus: string | undefined
    try {
@@ -555,7 +669,6 @@ index fcb5830..1b7bf9d 100644
    } catch (e) {
      devLog(`[processOfflineActions] posting ${api.txid} threw:`, e)
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/package.json b/node_modules/@bsv/expo-wallet-toolbox/package.json
-index f1e0ebb..6f4cda0 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/package.json
 +++ b/node_modules/@bsv/expo-wallet-toolbox/package.json
 @@ -31,12 +31,12 @@
@@ -575,11 +688,23 @@ index f1e0ebb..6f4cda0 100644
      "@expo/vector-icons": "^15.0.3",
      "@noble/curves": "^2.3.0",
      "@react-native-async-storage/async-storage": "^2.2.0",
+diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/screens/SettingsScreen.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/screens/SettingsScreen.tsx
+--- a/node_modules/@bsv/expo-wallet-toolbox/ui/screens/SettingsScreen.tsx
++++ b/node_modules/@bsv/expo-wallet-toolbox/ui/screens/SettingsScreen.tsx
+@@ -116,6 +116,9 @@
+         </View>
+ 
+         {/* ── Activity ── */}
++        <GroupedSection header="Wallet data">
++          <ListRow label="Wallet data files" icon="document-outline" onPress={() => router.push('/wallet-data' as any)} isLast />
++        </GroupedSection>
+         <GroupedSection header={t('activity')}>
+           <ListRow
+             label={t('transactions')}
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/screens/TrustScreen.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/screens/TrustScreen.tsx
-index ecf6004..d7bbad7 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/ui/screens/TrustScreen.tsx
 +++ b/node_modules/@bsv/expo-wallet-toolbox/ui/screens/TrustScreen.tsx
-@@ -13,9 +13,7 @@ import type { StyleProp, ViewStyle } from 'react-native'
+@@ -13,9 +13,7 @@
  import { SvgUri } from 'react-native-svg'
  import { useSafeAreaInsets } from 'react-native-safe-area-context'
  import { useTranslation } from 'react-i18next'
@@ -590,3 +715,16 @@ index ecf6004..d7bbad7 100644
  import validateTrust from '../validateTrust'
  import { GroupedSection } from '../components/ui/GroupedList'
  import { showAlert } from '../components/ui/AlertCard'
+diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/screens/WalletConfigScreen.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/screens/WalletConfigScreen.tsx
+--- a/node_modules/@bsv/expo-wallet-toolbox/ui/screens/WalletConfigScreen.tsx
++++ b/node_modules/@bsv/expo-wallet-toolbox/ui/screens/WalletConfigScreen.tsx
+@@ -488,6 +488,9 @@
+             is denominated in, how to hand an app access, and the two ways out of
+             a lost phone. Everything else is engine-room detail and sits behind
+             Advanced, collapsed, so this screen opens as four choices not twenty. */}
++        <GroupedSection header="Wallet data">
++          <ListRow label="Wallet data files" icon="document-outline" onPress={() => router.push('/wallet-data' as any)} isLast />
++        </GroupedSection>
+         <GroupedSection>
+           <ListRow
+             label={t('display_currency')}

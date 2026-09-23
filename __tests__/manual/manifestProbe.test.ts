@@ -7,7 +7,7 @@ const RUN = process.env.RESTORE_REPRO === '1'
 ;(RUN ? describe : describe.skip)('manifest probe', () => {
   jest.setTimeout(60000)
   it('lists devices', async () => {
-    const shares = (process.env.RESTORE_SHARES ?? '').split(',').map(s => s.trim())
+    const shares = (process.env.RESTORE_SHARES ?? '').split(',').map((s: string) => s.trim())
     const secret = recoverSecretFromShares(shares)
     if (secret.kind !== 'entropy') throw new Error('legacy')
     const w = recoverMnemonicWallet(Mnemonic.fromEntropy(secret.entropy).toString())

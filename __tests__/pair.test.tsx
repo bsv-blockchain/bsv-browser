@@ -32,7 +32,7 @@ import type { ConnectParams } from '@bsv/expo-wallet-toolbox/core/context/Wallet
 // Proxy only intercepts methods in its privileged-capable set, and getPublicKey
 // is one of the 9 the finding calls out as reachable through IMPLEMENTED_METHODS.
 const mockPermissionsManager = {
-  getPublicKey: jest.fn(async () => ({ publicKey: '02' + '11'.repeat(32) }))
+  getPublicKey: jest.fn(async () => ({ publicKey: '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798' }))
 }
 
 jest.mock('@bsv/expo-wallet-toolbox/core/context/WalletContext', () => ({
@@ -95,6 +95,7 @@ test('Approve constructs the WalletClient from a GUARDED wallet, not the raw per
   await expect(
     (walletArg as WalletClient).getPublicKey({
       privileged: true,
+      privilegedReason: 'Test delegated vault access rejection',
       protocolID: [2, 'vault'],
       keyID: 'vault/0',
       counterparty: 'self'
@@ -107,7 +108,7 @@ test('Approve constructs the WalletClient from a GUARDED wallet, not the raw per
   // not some blanket block that would just as well pass with an unguarded
   // wallet swapped back in.
   await (walletArg as WalletClient).getPublicKey({
-    protocolID: [1, 'x'],
+    protocolID: [1, 'pair fixture'],
     keyID: '1',
     counterparty: 'self'
   } as any)

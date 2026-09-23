@@ -1,0 +1,57 @@
+diff --git a/node_modules/expo-sqlite/android/src/main/java/expo/modules/sqlite/SQLiteModule.kt b/node_modules/expo-sqlite/android/src/main/java/expo/modules/sqlite/SQLiteModule.kt
+index ac800ac..9229c48 100644
+--- a/node_modules/expo-sqlite/android/src/main/java/expo/modules/sqlite/SQLiteModule.kt
++++ b/node_modules/expo-sqlite/android/src/main/java/expo/modules/sqlite/SQLiteModule.kt
+@@ -475,10 +475,12 @@ class SQLiteModule : Module() {
+   private fun finalize(statement: NativeStatement, database: NativeDatabase) {
+     maybeThrowForClosedDatabase(database)
+     maybeThrowForFinalizedStatement(statement)
+-    if (statement.ref.sqlite3_finalize() != NativeDatabaseBinding.SQLITE_OK) {
++    // Finalize frees the pointer even when it reports a previous SQL error.
++    val ret = statement.ref.sqlite3_finalize()
++    statement.isFinalized = true
++    if (ret != NativeDatabaseBinding.SQLITE_OK) {
+       throw SQLiteErrorException(database.ref.convertSqlLiteErrorToString())
+     }
+-    statement.isFinalized = true
+   }
+ 
+   private fun addUpdateHook(database: NativeDatabase) {
+diff --git a/node_modules/expo-sqlite/ios/SQLiteModule.swift b/node_modules/expo-sqlite/ios/SQLiteModule.swift
+index 15c784f..9e8d1a5 100644
+--- a/node_modules/expo-sqlite/ios/SQLiteModule.swift
++++ b/node_modules/expo-sqlite/ios/SQLiteModule.swift
+@@ -467,10 +467,12 @@ public final class SQLiteModule: Module {
+   private func finalize(statement: NativeStatement, database: NativeDatabase) throws {
+     try maybeThrowForClosedDatabase(database)
+     try maybeThrowForFinalizedStatement(statement)
+-    if exsqlite3_finalize(statement.pointer) != SQLITE_OK {
++    // Finalize frees the pointer even when it reports a previous SQL error.
++    let ret = exsqlite3_finalize(statement.pointer)
++    statement.isFinalized = true
++    if ret != SQLITE_OK {
+       throw SQLiteErrorException(convertSqlLiteErrorToString(database))
+     }
+-    statement.isFinalized = true
+   }
+ 
+   private func convertSqlLiteErrorToString(_ db: OpaquePointer?) -> String {
+@@ -612,7 +614,8 @@ public final class SQLiteModule: Module {
+       guard let text = exsqlite3_column_text(instance, index) else {
+         throw InvalidConvertibleException("Null text")
+       }
+-      return String(cString: text)
++      let count = Int(exsqlite3_column_bytes(instance, index))
++      return String(decoding: UnsafeBufferPointer(start: text, count: count), as: UTF8.self)
+     case SQLITE_BLOB:
+       guard let blob = exsqlite3_column_blob(instance, index) else {
+         return Data()
+@@ -638,7 +641,7 @@ public final class SQLiteModule: Module {
+     case let param as Double:
+       exsqlite3_bind_double(instance, index, param)
+     case let param as String:
+-      exsqlite3_bind_text(instance, index, param, -1, SQLITE_TRANSIENT)
++      exsqlite3_bind_text(instance, index, param, Int32(param.utf8.count), SQLITE_TRANSIENT)
+     case let param as Data:
+       _ = param.withUnsafeBytes {
+         exsqlite3_bind_blob(instance, index, $0.baseAddress, Int32(param.count), SQLITE_TRANSIENT)

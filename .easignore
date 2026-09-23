@@ -151,3 +151,6 @@ native-secp-poc/sdk-2.1.6/
 # deliberately NOT listed here (the whole point of this file).
 native-engine-ffi/packages/EngineNativeFFI/EngineNative.xcframework/
 native-secp-poc/packages/SecpNativeFFI/SecpNative.xcframework/
+
+# Local cross-platform bundle validation output
+/dist-qa/
