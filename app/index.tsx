@@ -1686,7 +1686,7 @@ const Browser = observer(function Browser() {
 
   return (
     <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
-      <StatusBar style={isDark ? 'light' : 'dark'} translucent hidden={isFullscreen} />
+      <StatusBar style={isDark ? 'light' : 'dark'} hidden={isFullscreen} />
       <ManifestWatcher onRedirect={handleManifestRedirect} />
 
       {/* ---- Main content: WebView lives between the safe-area bars ----

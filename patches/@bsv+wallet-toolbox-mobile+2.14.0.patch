@@ -1,0 +1,500 @@
+diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
+index 26e6377..5f231a4 100644
+--- a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
++++ b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
+@@ -9456,10 +9456,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {
+ * @throws WERR_INVALID_PARAMETER if any unlocking script is invalid, if sourceTXID is invalid, if beef doesn't contain required transactions.
+ */
+ async function verifyUnlockScripts(txid, beef, verifier) {
+-	return (await verifyUnlockScriptsBatch([txid], beef, verifier))[0];
++	const result = (await verifyUnlockScriptsBatch([txid], beef, verifier))[0];
++	// BSV Browser patch (native-crypto M5.6, issue #24): SHADOW-MODE Tier-3
++	// engine verify. The JS verification above stays AUTHORITATIVE (reaching
++	// here means every resolvable input verified valid). Re-verify the whole tx
++	// through the native engine's ONE batchVerifyP2pkhInputs crossing and log
++	// any divergence loudly, but never change the verdict. Skipped when a
++	// source transaction was unavailable, as before.
++	if (result.skippedInputs === 0) engineShadowVerify(txid, beef.findTxid(txid)?.tx);
++	return result;
++}
++/**
++* Shadow-mode native verify (issue #24). Fire-and-(mostly)-forget: kicks the
++* engine's async batchVerifyP2pkhInputs and compares its per-input verdict
++* bitmap to the JS result (which, at this call site, is all-valid).
++* Divergences → console.error with tx/input detail + a global counter the
++* proof harness reads. The comparison promise is stashed on
++* globalThis.__bsvEngineShadow.pending so tests can await it.
++*/
++function engineShadowVerify(txid, tx) {
++	const shadow = globalThis.__bsvEngineShadow ??= {
++		verifyChecks: 0,
++		verifyEligible: 0,
++		verifySkipped: 0,
++		verifyDivergences: 0,
++		verifyAgreeInputs: 0,
++		pending: Promise.resolve(),
++		lastDivergence: null
++	};
++	shadow.verifyChecks++;
++	try {
++		const eng = globalThis.__bsvEngineNative;
++		if (tx == null || eng == null || typeof eng.batchVerifyP2pkhInputs !== "function") {
++			shadow.verifySkipped++;
++			return;
++		}
++		const SIGHASH_FORKID = 64;
++		const SIGHASH_CHRONICLE = 32;
++		const n = tx.inputs.length;
++		if (n === 0) {
++			shadow.verifySkipped++;
++			return;
++		}
++		const metaBytes = new Uint8Array(n * 37);
++		const mv = new DataView(metaBytes.buffer);
++		for (let i = 0; i < n; i++) {
++			const input = tx.inputs[i];
++			const sourceOutput = input.sourceTransaction?.outputs?.[input.sourceOutputIndex];
++			if (sourceOutput == null) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const lock = sourceOutput.lockingScript.toBinary();
++			if (lock.length !== 25 || lock[0] !== 118 || lock[1] !== 169 || lock[2] !== 20 || lock[23] !== 136 || lock[24] !== 172) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const unlock = input.unlockingScript?.toBinary();
++			if (unlock == null || unlock.length < 2) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const l1 = unlock[0];
++			if (l1 < 2 || l1 >= 76 || unlock.length !== 1 + l1 + 1 + 33 || unlock[1 + l1] !== 33) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const scopeByte = unlock[l1];
++			if ((scopeByte & SIGHASH_FORKID) === 0 || (scopeByte & SIGHASH_CHRONICLE) !== 0) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const sats = sourceOutput.satoshis ?? 0;
++			if (!Number.isInteger(sats) || sats < 0 || sats > Number.MAX_SAFE_INTEGER) {
++				shadow.verifySkipped++;
++				return;
++			}
++			mv.setUint32(i * 37, i, true);
++			mv.setUint32(i * 37 + 4, sats >>> 0, true);
++			mv.setUint32(i * 37 + 8, Math.floor(sats / 4294967296), true);
++			metaBytes.set(lock, i * 37 + 12);
++		}
++		shadow.verifyEligible++;
++		const signedBuf = Uint8Array.from(tx.toBinary()).buffer;
++		const metaBuf = metaBytes.buffer;
++		shadow.pending = (async () => {
++			try {
++				const bitmap = new Uint8Array(await eng.batchVerifyP2pkhInputs(signedBuf, metaBuf));
++				let diverged = false;
++				if (bitmap.length !== n) diverged = true;
++				else for (let i = 0; i < n; i++) if (bitmap[i] === 1) shadow.verifyAgreeInputs++;
++				else {
++					diverged = true;
++					console.error(`[EngineShadow] VERIFY DIVERGENCE txid=${txid} input=${i}: engine=INVALID, JS=VALID`);
++				}
++				if (diverged) {
++					shadow.verifyDivergences++;
++					shadow.lastDivergence = { txid, bitmap: Array.from(bitmap), n };
++				}
++			} catch (e) {
++				shadow.verifyDivergences++;
++				shadow.lastDivergence = { txid, error: String(e), n };
++				console.error(`[EngineShadow] VERIFY DIVERGENCE txid=${txid}: engine rejected an eligible JS-valid tx: ${String(e)}`);
++			}
++		})();
++	} catch (e) {
++		shadow.verifySkipped++;
++	}
+ }
+ //#endregion
+ //#region ../src/signer/methods/completeSignedTransaction.ts
++/**
++* BSV Browser patch (native-crypto M3, issue #9): derive the BRC-29 unlock
++* keys through ONE async native crossing per counterparty
++* (globalThis.__bsvSecpNative.batchBrc42DeriveChild, an off-JS-thread Nitro
++* method; the ECDH shared secret is computed once per counterparty). Taken
++* only for a plain callback-free KeyDeriver, the case where the SDK derives
++* from rootKey with no shared-secret cache contract to honor. Derived keys
++* are byte-identical to derivePrivateKey (bsv-fuzz batch_derive class +
++* vectors, 0 mismatches). Returns undefined on any ineligibility or failure,
++* and the caller falls back to the SDK derivation.
++*/
++async function bsvNativeDerivePrivateKeys(kd, derivations) {
++	try {
++		const nat = globalThis.__bsvSecpNative;
++		if (derivations.length === 0 || nat == null || typeof nat.batchBrc42DeriveChild !== "function") return void 0;
++		if (kd == null || kd.cacheSharedSecret !== void 0 || kd.retrieveCachedSharedSecret !== void 0 || typeof kd.computeInvoiceNumber !== "function" || typeof kd.normalizeCounterparty !== "function" || kd.rootKey == null || typeof kd.rootKey.toArray !== "function") return void 0;
++		const groups = /* @__PURE__ */ new Map();
++		for (let index = 0; index < derivations.length; index++) {
++			const derivation = derivations[index];
++			const cp = kd.normalizeCounterparty(derivation.counterparty);
++			const cpHex = cp.encode(true, "hex");
++			let group = groups.get(cpHex);
++			if (group == null) {
++				group = { cp, indices: [], invoices: [] };
++				groups.set(cpHex, group);
++			}
++			group.indices.push(index);
++			group.invoices.push(kd.computeInvoiceNumber(derivation.protocolID, derivation.keyID));
++		}
++		const root32 = Uint8Array.from(kd.rootKey.toArray("be", 32)).buffer;
++		const results = new Array(derivations.length);
++		for (const group of groups.values()) {
++			const cp33 = Uint8Array.from(group.cp.encode(true)).buffer;
++			const childCat = new Uint8Array(await nat.batchBrc42DeriveChild(root32, cp33, group.invoices));
++			if (childCat.length !== group.indices.length * 32) throw new Error("batchBrc42DeriveChild length mismatch");
++			for (let j = 0; j < group.indices.length; j++) results[group.indices[j]] = new _bsv_sdk.PrivateKey(Array.from(childCat.subarray(j * 32, (j + 1) * 32)));
++		}
++		return results;
++	} catch {
++		return;
++	}
++}
+ async function completeSignedTransaction(prior, spends, wallet) {
+ 	for (const [key, spend] of Object.entries(spends)) {
+ 		const vin = Number(key);
+@@ -9470,7 +9618,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+ 		input.unlockingScript = asBsvSdkScript(spend.unlockingScript);
+ 		if (spend.sequenceNumber !== void 0) input.sequence = spend.sequenceNumber;
+ 	}
+-	const prepareUnlockingTemplates = (keys) => {
++	const prepareUnlockingTemplates = async (keys) => {
+ 		const counterparties = /* @__PURE__ */ new Map();
+ 		const counterparty = (publicKey) => {
+ 			let parsed = counterparties.get(publicKey);
+@@ -9496,7 +9644,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+ 			keyID: template.getKeyID(),
+ 			counterparty: unlockerPubKey
+ 		}));
+-		const derivedPrivateKeys = wallet.keyDeriver.derivePrivateKeys?.(derivations) ?? derivations.map((derivation) => wallet.keyDeriver.derivePrivateKey(derivation.protocolID, derivation.keyID, derivation.counterparty));
++		const derivedPrivateKeys = await bsvNativeDerivePrivateKeys(wallet.keyDeriver, derivations) ?? wallet.keyDeriver.derivePrivateKeys?.(derivations) ?? derivations.map((derivation) => wallet.keyDeriver.derivePrivateKey(derivation.protocolID, derivation.keyID, derivation.counterparty));
+ 		for (let index = 0; index < prepared.length; index++) {
+ 			const { pdi, template } = prepared[index];
+ 			const unlockTemplate = template.unlockWithDerivedPrivateKey(derivedPrivateKeys[index], pdi.sourceSatoshis, asBsvSdkScript(pdi.lockingScript));
+@@ -9519,7 +9667,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+ 			attributes: { "crypto.managed_input_count": prior.pdi.length }
+ 		}, () => prepareUnlockingTemplates(keys));
+ 	});
+-	else if (prior.pdi.length > 0) prepareUnlockingTemplates(wallet.getClientChangeKeyPair());
++	else if (prior.pdi.length > 0) await prepareUnlockingTemplates(wallet.getClientChangeKeyPair());
+ 	if (wallet.telemetry.enabled) await wallet.telemetry.withSpan("wallet.crypto.transaction_sign", {
+ 		component: "wallet-toolbox",
+ 		carrier: prior.args,
+@@ -12688,7 +12836,12 @@ var Wallet = class {
+ 			offset: 0
+ 		} : vargs;
+ 		const r = this.actionBatch.overlayListActions(await this.storage.listActions(storageArgs), vargs);
+-		for (const action of r.actions) if (action.outputs != null) for (const output of action.outputs) output.customInstructions = void 0;
++		// PATCH(bsv-browser): custom instructions are wallet-private metadata.
++		// The first-party Vault needs its own authenticated history in order to
++		// prove that a derived salt was never reused, but connected applications
++		// must keep seeing the upstream redacted shape.
++		const vaultAdmin = this.__bsvVaultAdminOriginator !== void 0 && originator === this.__bsvVaultAdminOriginator;
++		if (!vaultAdmin) for (const action of r.actions) if (action.outputs != null) for (const output of action.outputs) output.customInstructions = void 0;
+ 		return r;
+ 	}
+ 	get storageParty() {
+@@ -12990,6 +13143,12 @@ var Wallet = class {
+ 			prepareKnownTxidsForCreateAction(this, args);
+ 			const { auth, vargs } = this.validateAuthAndArgs(args, _bsv_sdk_wallet_validationHelpers.validateCreateActionArgs, logger);
+ 			logger?.log("validated args");
++			// PATCH(bsv-browser): Vault authorization is decided from the originator
++			// supplied by WalletClient, never from caller-controlled action fields.
++			// Carry that decision only inside the validated storage request so the
++			// provider can reject R1C inputs atomically at its authenticated
++			// source-script boundary (validateResolvedActionInput).
++			vargs.__bsvVaultAdminAuthorized = this.__bsvVaultAdminOriginator !== void 0 && originator === this.__bsvVaultAdminOriginator;
+ 			vargs.includeAllSourceTransactions = this.includeAllSourceTransactions;
+ 			if (this.randomVals != null && this.randomVals.length > 1) vargs.randomVals = [...this.randomVals];
+ 			const brc177Requested = hasBrc177NoSendExpiryLabel(vargs.labels);
+@@ -13962,6 +14121,11 @@ async function resolveInputScript(storage, userId, vargs, input, beef, preloaded
+ 	} }));
+ 	if (output != null) applyStoredInputScript(output, input, vargs);
+ 	else await applyBeefInputScript(storage, beef, input);
++	// PATCH(bsv-browser): optional host policy hook. It runs only after the
++	// source output has been resolved from authenticated local storage or
++	// verified BEEF, so a caller cannot lie about the locking script to bypass
++	// a protected-input rule.
++	if (typeof storage.validateResolvedActionInput === "function") await storage.validateResolvedActionInput(vargs, input);
+ }
+ async function validateNoSendChange(storage, userId, vargs, changeBasket) {
+ 	const r = [];
+@@ -14015,10 +14179,16 @@ function makeFundingParams(args) {
+ 		changeFirstSatoshis: compatibilityFallback ? 1 : preferredSatoshis,
+ 		changeLockingScriptLength: 25,
+ 		changeUnlockingScriptLength: 107,
+-		targetNetCount: changeBasket.numberOfDesiredUTXOs - healthyChangeCount,
++		// PATCH(bsv-browser): keep a Vault deposit's transaction plan minimal.
++		// UTXO-pool growth (targetNetCount), surplus shaping and change migration
++		// would add funding inputs and split unrelated change into a transaction
++		// carrying the large R1C output, increasing later BEEF and review costs.
++		// The Vault path validates the complete signed plan before releasing it
++		// from noSend.
++		targetNetCount: (vargs.labels ?? []).includes("vault-deposit") ? void 0 : changeBasket.numberOfDesiredUTXOs - healthyChangeCount,
+ 		maxChangeOutputs: brc177?.kind === "protected" ? 1 : storage.managedChangePolicy.maxOutputsPerAction,
+-		surplusPoolShaping: !compatibilityFallback,
+-		maxMigrationInputs: compatibilityFallback ? 0 : storage.managedChangePolicy.migrationInputsPerAction,
++		surplusPoolShaping: !compatibilityFallback && !(vargs.labels ?? []).includes("vault-deposit"),
++		maxMigrationInputs: compatibilityFallback || (vargs.labels ?? []).includes("vault-deposit") ? 0 : storage.managedChangePolicy.migrationInputsPerAction,
+ 		randomVals: vargs.randomVals
+ 	};
+ }
+diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
+index 81baa70..cfadaf5 100644
+--- a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
++++ b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
+@@ -9421,10 +9421,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {
+ * @throws WERR_INVALID_PARAMETER if any unlocking script is invalid, if sourceTXID is invalid, if beef doesn't contain required transactions.
+ */
+ async function verifyUnlockScripts(txid, beef, verifier) {
+-	return (await verifyUnlockScriptsBatch([txid], beef, verifier))[0];
++	const result = (await verifyUnlockScriptsBatch([txid], beef, verifier))[0];
++	// BSV Browser patch (native-crypto M5.6, issue #24): SHADOW-MODE Tier-3
++	// engine verify. The JS verification above stays AUTHORITATIVE (reaching
++	// here means every resolvable input verified valid). Re-verify the whole tx
++	// through the native engine's ONE batchVerifyP2pkhInputs crossing and log
++	// any divergence loudly, but never change the verdict. Skipped when a
++	// source transaction was unavailable, as before.
++	if (result.skippedInputs === 0) engineShadowVerify(txid, beef.findTxid(txid)?.tx);
++	return result;
++}
++/**
++* Shadow-mode native verify (issue #24). Fire-and-(mostly)-forget: kicks the
++* engine's async batchVerifyP2pkhInputs and compares its per-input verdict
++* bitmap to the JS result (which, at this call site, is all-valid).
++* Divergences → console.error with tx/input detail + a global counter the
++* proof harness reads. The comparison promise is stashed on
++* globalThis.__bsvEngineShadow.pending so tests can await it.
++*/
++function engineShadowVerify(txid, tx) {
++	const shadow = globalThis.__bsvEngineShadow ??= {
++		verifyChecks: 0,
++		verifyEligible: 0,
++		verifySkipped: 0,
++		verifyDivergences: 0,
++		verifyAgreeInputs: 0,
++		pending: Promise.resolve(),
++		lastDivergence: null
++	};
++	shadow.verifyChecks++;
++	try {
++		const eng = globalThis.__bsvEngineNative;
++		if (tx == null || eng == null || typeof eng.batchVerifyP2pkhInputs !== "function") {
++			shadow.verifySkipped++;
++			return;
++		}
++		const SIGHASH_FORKID = 64;
++		const SIGHASH_CHRONICLE = 32;
++		const n = tx.inputs.length;
++		if (n === 0) {
++			shadow.verifySkipped++;
++			return;
++		}
++		const metaBytes = new Uint8Array(n * 37);
++		const mv = new DataView(metaBytes.buffer);
++		for (let i = 0; i < n; i++) {
++			const input = tx.inputs[i];
++			const sourceOutput = input.sourceTransaction?.outputs?.[input.sourceOutputIndex];
++			if (sourceOutput == null) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const lock = sourceOutput.lockingScript.toBinary();
++			if (lock.length !== 25 || lock[0] !== 118 || lock[1] !== 169 || lock[2] !== 20 || lock[23] !== 136 || lock[24] !== 172) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const unlock = input.unlockingScript?.toBinary();
++			if (unlock == null || unlock.length < 2) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const l1 = unlock[0];
++			if (l1 < 2 || l1 >= 76 || unlock.length !== 1 + l1 + 1 + 33 || unlock[1 + l1] !== 33) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const scopeByte = unlock[l1];
++			if ((scopeByte & SIGHASH_FORKID) === 0 || (scopeByte & SIGHASH_CHRONICLE) !== 0) {
++				shadow.verifySkipped++;
++				return;
++			}
++			const sats = sourceOutput.satoshis ?? 0;
++			if (!Number.isInteger(sats) || sats < 0 || sats > Number.MAX_SAFE_INTEGER) {
++				shadow.verifySkipped++;
++				return;
++			}
++			mv.setUint32(i * 37, i, true);
++			mv.setUint32(i * 37 + 4, sats >>> 0, true);
++			mv.setUint32(i * 37 + 8, Math.floor(sats / 4294967296), true);
++			metaBytes.set(lock, i * 37 + 12);
++		}
++		shadow.verifyEligible++;
++		const signedBuf = Uint8Array.from(tx.toBinary()).buffer;
++		const metaBuf = metaBytes.buffer;
++		shadow.pending = (async () => {
++			try {
++				const bitmap = new Uint8Array(await eng.batchVerifyP2pkhInputs(signedBuf, metaBuf));
++				let diverged = false;
++				if (bitmap.length !== n) diverged = true;
++				else for (let i = 0; i < n; i++) if (bitmap[i] === 1) shadow.verifyAgreeInputs++;
++				else {
++					diverged = true;
++					console.error(`[EngineShadow] VERIFY DIVERGENCE txid=${txid} input=${i}: engine=INVALID, JS=VALID`);
++				}
++				if (diverged) {
++					shadow.verifyDivergences++;
++					shadow.lastDivergence = { txid, bitmap: Array.from(bitmap), n };
++				}
++			} catch (e) {
++				shadow.verifyDivergences++;
++				shadow.lastDivergence = { txid, error: String(e), n };
++				console.error(`[EngineShadow] VERIFY DIVERGENCE txid=${txid}: engine rejected an eligible JS-valid tx: ${String(e)}`);
++			}
++		})();
++	} catch (e) {
++		shadow.verifySkipped++;
++	}
+ }
+ //#endregion
+ //#region ../src/signer/methods/completeSignedTransaction.ts
++/**
++* BSV Browser patch (native-crypto M3, issue #9): derive the BRC-29 unlock
++* keys through ONE async native crossing per counterparty
++* (globalThis.__bsvSecpNative.batchBrc42DeriveChild, an off-JS-thread Nitro
++* method; the ECDH shared secret is computed once per counterparty). Taken
++* only for a plain callback-free KeyDeriver, the case where the SDK derives
++* from rootKey with no shared-secret cache contract to honor. Derived keys
++* are byte-identical to derivePrivateKey (bsv-fuzz batch_derive class +
++* vectors, 0 mismatches). Returns undefined on any ineligibility or failure,
++* and the caller falls back to the SDK derivation.
++*/
++async function bsvNativeDerivePrivateKeys(kd, derivations) {
++	try {
++		const nat = globalThis.__bsvSecpNative;
++		if (derivations.length === 0 || nat == null || typeof nat.batchBrc42DeriveChild !== "function") return void 0;
++		if (kd == null || kd.cacheSharedSecret !== void 0 || kd.retrieveCachedSharedSecret !== void 0 || typeof kd.computeInvoiceNumber !== "function" || typeof kd.normalizeCounterparty !== "function" || kd.rootKey == null || typeof kd.rootKey.toArray !== "function") return void 0;
++		const groups = /* @__PURE__ */ new Map();
++		for (let index = 0; index < derivations.length; index++) {
++			const derivation = derivations[index];
++			const cp = kd.normalizeCounterparty(derivation.counterparty);
++			const cpHex = cp.encode(true, "hex");
++			let group = groups.get(cpHex);
++			if (group == null) {
++				group = { cp, indices: [], invoices: [] };
++				groups.set(cpHex, group);
++			}
++			group.indices.push(index);
++			group.invoices.push(kd.computeInvoiceNumber(derivation.protocolID, derivation.keyID));
++		}
++		const root32 = Uint8Array.from(kd.rootKey.toArray("be", 32)).buffer;
++		const results = new Array(derivations.length);
++		for (const group of groups.values()) {
++			const cp33 = Uint8Array.from(group.cp.encode(true)).buffer;
++			const childCat = new Uint8Array(await nat.batchBrc42DeriveChild(root32, cp33, group.invoices));
++			if (childCat.length !== group.indices.length * 32) throw new Error("batchBrc42DeriveChild length mismatch");
++			for (let j = 0; j < group.indices.length; j++) results[group.indices[j]] = new PrivateKey(Array.from(childCat.subarray(j * 32, (j + 1) * 32)));
++		}
++		return results;
++	} catch {
++		return;
++	}
++}
+ async function completeSignedTransaction(prior, spends, wallet) {
+ 	for (const [key, spend] of Object.entries(spends)) {
+ 		const vin = Number(key);
+@@ -9435,7 +9583,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+ 		input.unlockingScript = asBsvSdkScript(spend.unlockingScript);
+ 		if (spend.sequenceNumber !== void 0) input.sequence = spend.sequenceNumber;
+ 	}
+-	const prepareUnlockingTemplates = (keys) => {
++	const prepareUnlockingTemplates = async (keys) => {
+ 		const counterparties = /* @__PURE__ */ new Map();
+ 		const counterparty = (publicKey) => {
+ 			let parsed = counterparties.get(publicKey);
+@@ -9461,7 +9609,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+ 			keyID: template.getKeyID(),
+ 			counterparty: unlockerPubKey
+ 		}));
+-		const derivedPrivateKeys = wallet.keyDeriver.derivePrivateKeys?.(derivations) ?? derivations.map((derivation) => wallet.keyDeriver.derivePrivateKey(derivation.protocolID, derivation.keyID, derivation.counterparty));
++		const derivedPrivateKeys = await bsvNativeDerivePrivateKeys(wallet.keyDeriver, derivations) ?? wallet.keyDeriver.derivePrivateKeys?.(derivations) ?? derivations.map((derivation) => wallet.keyDeriver.derivePrivateKey(derivation.protocolID, derivation.keyID, derivation.counterparty));
+ 		for (let index = 0; index < prepared.length; index++) {
+ 			const { pdi, template } = prepared[index];
+ 			const unlockTemplate = template.unlockWithDerivedPrivateKey(derivedPrivateKeys[index], pdi.sourceSatoshis, asBsvSdkScript(pdi.lockingScript));
+@@ -9484,7 +9632,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+ 			attributes: { "crypto.managed_input_count": prior.pdi.length }
+ 		}, () => prepareUnlockingTemplates(keys));
+ 	});
+-	else if (prior.pdi.length > 0) prepareUnlockingTemplates(wallet.getClientChangeKeyPair());
++	else if (prior.pdi.length > 0) await prepareUnlockingTemplates(wallet.getClientChangeKeyPair());
+ 	if (wallet.telemetry.enabled) await wallet.telemetry.withSpan("wallet.crypto.transaction_sign", {
+ 		component: "wallet-toolbox",
+ 		carrier: prior.args,
+@@ -12653,7 +12801,12 @@ var Wallet = class {
+ 			offset: 0
+ 		} : vargs;
+ 		const r = this.actionBatch.overlayListActions(await this.storage.listActions(storageArgs), vargs);
+-		for (const action of r.actions) if (action.outputs != null) for (const output of action.outputs) output.customInstructions = void 0;
++		// PATCH(bsv-browser): custom instructions are wallet-private metadata.
++		// The first-party Vault needs its own authenticated history in order to
++		// prove that a derived salt was never reused, but connected applications
++		// must keep seeing the upstream redacted shape.
++		const vaultAdmin = this.__bsvVaultAdminOriginator !== void 0 && originator === this.__bsvVaultAdminOriginator;
++		if (!vaultAdmin) for (const action of r.actions) if (action.outputs != null) for (const output of action.outputs) output.customInstructions = void 0;
+ 		return r;
+ 	}
+ 	get storageParty() {
+@@ -12955,6 +13108,12 @@ var Wallet = class {
+ 			prepareKnownTxidsForCreateAction(this, args);
+ 			const { auth, vargs } = this.validateAuthAndArgs(args, validateCreateActionArgs, logger);
+ 			logger?.log("validated args");
++			// PATCH(bsv-browser): Vault authorization is decided from the originator
++			// supplied by WalletClient, never from caller-controlled action fields.
++			// Carry that decision only inside the validated storage request so the
++			// provider can reject R1C inputs atomically at its authenticated
++			// source-script boundary (validateResolvedActionInput).
++			vargs.__bsvVaultAdminAuthorized = this.__bsvVaultAdminOriginator !== void 0 && originator === this.__bsvVaultAdminOriginator;
+ 			vargs.includeAllSourceTransactions = this.includeAllSourceTransactions;
+ 			if (this.randomVals != null && this.randomVals.length > 1) vargs.randomVals = [...this.randomVals];
+ 			const brc177Requested = hasBrc177NoSendExpiryLabel(vargs.labels);
+@@ -13927,6 +14086,11 @@ async function resolveInputScript(storage, userId, vargs, input, beef, preloaded
+ 	} }));
+ 	if (output != null) applyStoredInputScript(output, input, vargs);
+ 	else await applyBeefInputScript(storage, beef, input);
++	// PATCH(bsv-browser): optional host policy hook. It runs only after the
++	// source output has been resolved from authenticated local storage or
++	// verified BEEF, so a caller cannot lie about the locking script to bypass
++	// a protected-input rule.
++	if (typeof storage.validateResolvedActionInput === "function") await storage.validateResolvedActionInput(vargs, input);
+ }
+ async function validateNoSendChange(storage, userId, vargs, changeBasket) {
+ 	const r = [];
+@@ -13980,10 +14144,16 @@ function makeFundingParams(args) {
+ 		changeFirstSatoshis: compatibilityFallback ? 1 : preferredSatoshis,
+ 		changeLockingScriptLength: 25,
+ 		changeUnlockingScriptLength: 107,
+-		targetNetCount: changeBasket.numberOfDesiredUTXOs - healthyChangeCount,
++		// PATCH(bsv-browser): keep a Vault deposit's transaction plan minimal.
++		// UTXO-pool growth (targetNetCount), surplus shaping and change migration
++		// would add funding inputs and split unrelated change into a transaction
++		// carrying the large R1C output, increasing later BEEF and review costs.
++		// The Vault path validates the complete signed plan before releasing it
++		// from noSend.
++		targetNetCount: (vargs.labels ?? []).includes("vault-deposit") ? void 0 : changeBasket.numberOfDesiredUTXOs - healthyChangeCount,
+ 		maxChangeOutputs: brc177?.kind === "protected" ? 1 : storage.managedChangePolicy.maxOutputsPerAction,
+-		surplusPoolShaping: !compatibilityFallback,
+-		maxMigrationInputs: compatibilityFallback ? 0 : storage.managedChangePolicy.migrationInputsPerAction,
++		surplusPoolShaping: !compatibilityFallback && !(vargs.labels ?? []).includes("vault-deposit"),
++		maxMigrationInputs: compatibilityFallback || (vargs.labels ?? []).includes("vault-deposit") ? 0 : storage.managedChangePolicy.migrationInputsPerAction,
+ 		randomVals: vargs.randomVals
+ 	};
+ }

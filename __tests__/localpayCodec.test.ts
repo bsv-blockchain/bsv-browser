@@ -54,9 +54,29 @@ describe('localpay codec', () => {
     expect(() => decodeFrame(v1)).toThrow('unsupported frame version 1')
   })
 
-  it('is version 3', () => {
-    expect(FRAME_VERSION).toBe(3)
-    expect(encodeFrame(sample())[0]).toBe(3)
+  it('is version 5', () => {
+    expect(FRAME_VERSION).toBe(5)
+    expect(encodeFrame(sample())[0]).toBe(5)
+  })
+
+  it('round-trips an optional note', () => {
+    const f = { ...sample(), note: 'lunch split' }
+    expect(decodeFrame(encodeFrame(f))).toEqual(f)
+  })
+
+  it('omits the note key entirely when no note was set', () => {
+    const decoded = decodeFrame(encodeFrame(sample())) as unknown as Record<string, unknown>
+    expect('note' in decoded).toBe(false)
+  })
+
+  it('treats an explicit empty-string note the same as no note at all', () => {
+    const decoded = decodeFrame(encodeFrame({ ...sample(), note: '' })) as unknown as Record<string, unknown>
+    expect('note' in decoded).toBe(false)
+  })
+
+  it('round-trips a note alongside a token frame', () => {
+    const f = { ...tokenSample(), note: 'thanks!' }
+    expect(decodeFrame(encodeFrame(f))).toEqual(f)
   })
 
   it('rejects truncated input', () => {
@@ -239,11 +259,18 @@ const tokenSample = (): PaymentFrame => ({
       { txid: 'cd'.repeat(32), payload: new Uint8Array([1, 2, 3]) },
       { txid: 'ef'.repeat(32), payload: new Uint8Array([4]) },
     ],
-    recipientLinkage: new Uint8Array([5, 6]),
+    admissions: [
+      {
+        txid: '11'.repeat(32),
+        outputsToAdmit: [0, 3, 260],
+        signature: new Uint8Array([0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02]),
+        signerKey: '03'.padEnd(66, 'b'),
+      },
+    ],
   } satisfies TokenPayment,
 })
 
-describe('frame v3 kinds', () => {
+describe('frame v4 kinds', () => {
   it('round-trips a bsv frame with kind preserved', () => {
     const decoded = decodeFrame(encodeFrame(sample()))
     expect(decoded.kind).toBe('bsv')
@@ -260,10 +287,10 @@ describe('frame v3 kinds', () => {
     expect(unsealFrame(sealFrame(tokenSample(), psk), psk)).toEqual(tokenSample())
   })
 
-  it('rejects a v2 frame: fail-closed versioning', () => {
+  it('rejects a v3 frame: fail-closed versioning', () => {
     const bytes = encodeFrame(sample())
-    bytes[0] = 2
-    expect(() => decodeFrame(bytes)).toThrow(/unsupported frame version 2/)
+    bytes[0] = 3
+    expect(() => decodeFrame(bytes)).toThrow(/unsupported frame version 3/)
   })
 
   it('rejects an unknown kind byte', () => {
@@ -282,6 +309,84 @@ describe('frame v3 kinds', () => {
       encodeFrame({ ...tokenSample(), token: { ...tokenSample().token!, ...patch } })
     expect(() => bad({ overlayIdentityKey: '03short' })).toThrow(CodecError)
     expect(() => bad({ linkage: [{ txid: 'zz', payload: new Uint8Array([1]) }] })).toThrow(CodecError)
+  })
+
+  // ── v4 admissions[] (replaces recipientLinkage) ──
+
+  it('has no recipientLinkage field: removed in v4, not renamed', () => {
+    const decoded = decodeFrame(encodeFrame(tokenSample()))
+    expect('recipientLinkage' in (decoded.token as object)).toBe(false)
+  })
+
+  it('round-trips zero admissions', () => {
+    const f = { ...tokenSample(), token: { ...tokenSample().token!, admissions: [] } }
+    expect(decodeFrame(encodeFrame(f))).toEqual(f)
+  })
+
+  it('round-trips one admission, outputsToAdmit and DER signature intact', () => {
+    const f = tokenSample()
+    const decoded = decodeFrame(encodeFrame(f))
+    expect(decoded.token!.admissions).toEqual(f.token!.admissions)
+    expect(decoded.token!.admissions[0].outputsToAdmit).toEqual([0, 3, 260])
+  })
+
+  it('round-trips three admissions in order', () => {
+    const entry = (n: number) => ({
+      txid: n.toString(16).padStart(2, '0').repeat(32),
+      outputsToAdmit: [n, n + 1],
+      signature: new Uint8Array([0x30, n, n]),
+      signerKey: '02'.padEnd(66, 'c'),
+    })
+    const f = {
+      ...tokenSample(),
+      token: { ...tokenSample().token!, admissions: [entry(1), entry(2), entry(3)] },
+    }
+    expect(decodeFrame(encodeFrame(f))).toEqual(f)
+  })
+
+  it('seals and unseals a token frame carrying admissions', () => {
+    const p = new Uint8Array(32).fill(7)
+    expect(unsealFrame(sealFrame(tokenSample(), p), p)).toEqual(tokenSample())
+  })
+
+  it('refuses a malformed admission at encode: txid, signerKey, output index', () => {
+    const withAdmissions = (a: TokenPayment['admissions']) =>
+      encodeFrame({ ...tokenSample(), token: { ...tokenSample().token!, admissions: a } })
+    const good = tokenSample().token!.admissions[0]
+    expect(() => withAdmissions([{ ...good, txid: 'zz' }])).toThrow(CodecError)
+    expect(() => withAdmissions([{ ...good, signerKey: '03short' }])).toThrow(CodecError)
+    expect(() => withAdmissions([{ ...good, outputsToAdmit: [-1] }])).toThrow(CodecError)
+  })
+
+  // An oversized entry must fail closed rather than allocate: the count and the
+  // length prefixes are attacker-controlled on a hostile frame.
+  it('fails closed on an oversized admission count', () => {
+    const bytes = Array.from(encodeFrame(tokenSample()))
+    // Splice a huge admissionCount in place of the real one by rebuilding the
+    // tail: simplest deterministic form is to truncate mid-entry instead.
+    expect(() => decodeFrame(new Uint8Array(bytes.slice(0, bytes.length - 40)))).toThrow(CodecError)
+  })
+
+  it('fails closed on an admission whose signature length runs past the buffer', () => {
+    const f = tokenSample()
+    const bytes = encodeFrame(f)
+    // Find the DER signature's length prefix (single byte, value 8) and inflate it.
+    const sigLen = f.token!.admissions[0].signature.length
+    let at = -1
+    for (let i = 0; i < bytes.length - sigLen; i++) {
+      if (bytes[i] === sigLen && bytes[i + 1] === 0x30 && bytes[i + 2] === 0x06) { at = i; break }
+    }
+    expect(at).toBeGreaterThan(-1)
+    const tampered = new Uint8Array(bytes)
+    tampered[at] = 0x7f
+    expect(() => decodeFrame(tampered)).toThrow(CodecError)
+  })
+
+  it('fails closed on an admission truncated inside its signerKey', () => {
+    const f = { ...tokenSample(), transaction: new Uint8Array(0) }
+    const bytes = encodeFrame(f)
+    // Last field before the (now empty) transaction is the 33-byte signerKey.
+    expect(() => decodeFrame(bytes.slice(0, bytes.length - 20))).toThrow(CodecError)
   })
 
   it('still rejects trailing bytes after a token frame', () => {

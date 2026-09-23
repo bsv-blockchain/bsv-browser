@@ -159,7 +159,7 @@ export class BsvPaymentHandler {
       const timestamp = String(Date.now())
       // Server derives suffix as Buffer.from(time).toString('base64') — match it exactly
       const derivationSuffix = btoa(timestamp)
-      const originator = new URL(url).origin
+      const originator = new URL(url).hostname
 
       // Derived (BRC-29) key and sender identity key are independent — derive
       // them concurrently instead of serially. Each getPublicKey is an async

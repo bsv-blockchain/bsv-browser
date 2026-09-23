@@ -7,8 +7,14 @@
  * and in particular the hole the module closes: correct derivation nonces with
  * an output paying somebody else.
  */
-import { Beef, BigNumber, Curve, Hash, LockingScript, P2PKH, PrivateKey, PublicKey, Transaction, Utils } from '@bsv/sdk'
-import { FrameVerifyError, FT_PROTOCOL_ID, verifyFramePayment, verifyRecipientLinkage } from '@bsv/expo-wallet-toolbox/core/localpay/verify'
+import { Beef, Hash, LockingScript, P2PKH, PrivateKey, Transaction, Utils } from '@bsv/sdk'
+import {
+  FrameVerifyError,
+  FT_PROTOCOL_ID,
+  declineReasonFor,
+  verifyFramePayment
+} from '@bsv/expo-wallet-toolbox/core/localpay/verify'
+import type { CoverResult } from '@bsv/expo-wallet-toolbox/core/mandala/types'
 import { PEERPAY_PROTOCOL_ID } from '@bsv/expo-wallet-toolbox/core/localpay/pending'
 import type { PaymentFrame } from '@bsv/expo-wallet-toolbox/core/localpay/codec'
 import { MandalaToken } from '@bsv/templates'
@@ -152,7 +158,7 @@ function tokenScript(amount: number, pkh: number[] = payeePkh()): string {
 }
 
 const tokenFrame = (overrides: Partial<PaymentFrame> = {}): PaymentFrame => ({
-  version: 3,
+  version: 4,
   kind: 'token',
   senderIdentityKey,
   outputIndex: 0,
@@ -164,21 +170,36 @@ const tokenFrame = (overrides: Partial<PaymentFrame> = {}): PaymentFrame => ({
     overlayIdentityKey: '03'.padEnd(66, 'b'),
     certificates: [],
     linkage: [],
-    recipientLinkage: new Uint8Array([1]),
+    admissions: [],
   },
   transaction: beefOf([{ satoshis: 1, scriptHex: tokenScript(500) }]),
   ...overrides,
 })
 
 describe('verifyFramePayment: token kind', () => {
-  it('returns the decoded token amount and assetId for an output locked to this device', async () => {
-    const result = await verifyFramePayment(payeeWallet(), tokenFrame(), 'test')
-    expect(result).toEqual({ kind: 'token', assetId: ASSET_ID, amount: 500 })
+  /**
+   * The session's OWN asset block — this device minted it, so it is the trust
+   * anchor wire contract §9.10 requires. It matches `tokenFrame()`'s token block
+   * exactly; the tests below are the ones that make it differ.
+   */
+  const ASSET = { overlayUrl: 'https://overlay.issuer.example', overlayIdentityKey: '03'.padEnd(66, 'b') }
+
+  // COVER is injected: the pure walk lives in @bsv/mandala, beside the overlay's
+  // own σ_I digest, so wallet and overlay cannot disagree about what a signature
+  // covers. These tests supply a stand-in and pin the wiring, not the walk.
+  const covers = {
+    cover: async (): Promise<CoverResult> => ({ ok: true, mustSubmit: ['tip'] }),
+    asset: ASSET
+  }
+
+  it('returns the decoded token amount, assetId, and what COVER says must still be submitted', async () => {
+    const result = await verifyFramePayment(payeeWallet(), tokenFrame(), 'test', covers)
+    expect(result).toEqual({ kind: 'token', assetId: ASSET_ID, amount: 500, mustSubmit: ['tip'] })
   })
 
   it('derives with the mandala FT protocol, not PEERPAY', async () => {
     const wallet = payeeWallet()
-    await verifyFramePayment(wallet, tokenFrame(), 'test')
+    await verifyFramePayment(wallet, tokenFrame(), 'test', covers)
     expect(wallet.getPublicKey).toHaveBeenCalledWith(
       expect.objectContaining({ protocolID: FT_PROTOCOL_ID, forSelf: true }),
       'test'
@@ -188,106 +209,129 @@ describe('verifyFramePayment: token kind', () => {
   it('refuses a token output locked to someone else as not_mine', async () => {
     const otherPkh = Hash.hash160(Utils.toArray('02'.padEnd(66, 'c'), 'hex'))
     const frame = tokenFrame({ transaction: beefOf([{ satoshis: 1, scriptHex: tokenScript(500, otherPkh) }]) })
-    await expect(verifyFramePayment(payeeWallet(), frame, 'test'))
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test', covers))
       .rejects.toMatchObject({ kind: 'not_mine' })
   })
 
   it('refuses an output whose script assetId disagrees with the frame', async () => {
     const frame = tokenFrame()
     frame.token!.assetId = 'cd'.repeat(32) + '.1'
-    await expect(verifyFramePayment(payeeWallet(), frame, 'test'))
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test', covers))
       .rejects.toMatchObject({ kind: 'not_mine' })
   })
 
   it('refuses a non-token script under kind token as not_mine', async () => {
     const frame = tokenFrame({ transaction: beefOf([{ satoshis: 1, scriptHex: minesScript() }]) })
-    await expect(verifyFramePayment(payeeWallet(), frame, 'test'))
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test', covers))
       .rejects.toMatchObject({ kind: 'not_mine' })
+  })
+
+  // §9: "a frame that fails COVER is refused at hand-over exactly like a
+  // not_mine/unparseable decode failure today". Nothing has latched and nothing
+  // has been written at this point, so the refusal is a provable "queued nothing".
+  it('refuses a frame COVER rejects, with its own kind', async () => {
+    const cover = async (): Promise<CoverResult> => ({ ok: false, reason: 'uncovered_ancestor' })
+    await expect(verifyFramePayment(payeeWallet(), tokenFrame(), 'test', { cover, asset: ASSET }))
+      .rejects.toMatchObject({ name: 'FrameVerifyError', kind: 'not_covered' })
+  })
+
+  it('names the COVER reason in the refusal, so a stuck chain is diagnosable', async () => {
+    const cover = async (): Promise<CoverResult> => ({ ok: false, reason: 'unsafe_asset' })
+    const err = await verifyFramePayment(payeeWallet(), tokenFrame(), 'test', { cover, asset: ASSET }).catch(e => e)
+    expect(String(err.message)).toMatch(/unsafe_asset/)
+  })
+
+  // ── the §9.10 trust anchor ──
+  //
+  // `coverFromFrame` builds the COVER bundle's `overlayIdentityKey` straight
+  // from `frame.token.overlayIdentityKey`. Unless that value is pinned to the
+  // key THIS device configured, a payer with any keypair can name itself the
+  // overlay, sign its own σ_I over its own coin, and be credited for money no
+  // issuer ever saw. So the comparison happens before the walk ever runs.
+  it('refuses a frame naming a different overlay identity key, before COVER runs', async () => {
+    const cover = jest.fn(async (): Promise<CoverResult> => ({ ok: true, mustSubmit: [] }))
+    const frame = tokenFrame()
+    frame.token!.overlayIdentityKey = '02'.padEnd(66, 'a')
+
+    const err = await verifyFramePayment(payeeWallet(), frame, 'test', { cover, asset: ASSET }).catch(e => e)
+
+    expect(err).toMatchObject({ name: 'FrameVerifyError', kind: 'not_covered' })
+    expect(String(err.message)).toMatch(/unsafe_asset/)
+    expect(cover).not.toHaveBeenCalled()
+  })
+
+  // The URL goes with the key: linkage payloads are the bytes a later /submit
+  // is aimed at, and aiming them at an attacker's overlay is how a wallet is
+  // talked into treating a stranger's "admitted" as the issuer's.
+  it('refuses a frame naming a different overlay URL', async () => {
+    const cover = jest.fn(async (): Promise<CoverResult> => ({ ok: true, mustSubmit: [] }))
+    const frame = tokenFrame()
+    frame.token!.overlayUrl = 'https://overlay.attacker.example'
+
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test', { cover, asset: ASSET })).rejects.toMatchObject({
+      kind: 'not_covered'
+    })
+    expect(cover).not.toHaveBeenCalled()
+  })
+
+  it('accepts the same overlay written with a trailing slash or a different key case', async () => {
+    const frame = tokenFrame()
+    frame.token!.overlayUrl = ASSET.overlayUrl + '/'
+    frame.token!.overlayIdentityKey = ASSET.overlayIdentityKey.toUpperCase()
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test', covers)).resolves.toMatchObject({ kind: 'token' })
+  })
+
+  // Fail closed, exactly as a missing verifier does: no configured asset is no
+  // anchor, and an unanchored COVER walk proves nothing.
+  it('refuses a token frame when no configured asset was supplied at all', async () => {
+    const cover = jest.fn(async (): Promise<CoverResult> => ({ ok: true, mustSubmit: [] }))
+    await expect(verifyFramePayment(payeeWallet(), tokenFrame(), 'test', { cover })).rejects.toMatchObject({
+      kind: 'not_covered'
+    })
+    expect(cover).not.toHaveBeenCalled()
+  })
+
+  // Fail closed. A caller that forgot to wire the verifier must not get a
+  // credit that looks identical to a covered one: no verifier is no evidence.
+  it('refuses a token frame when no COVER verifier was supplied at all', async () => {
+    await expect(verifyFramePayment(payeeWallet(), tokenFrame(), 'test'))
+      .rejects.toMatchObject({ kind: 'not_covered' })
+  })
+
+  // Ownership is checked BEFORE coverage: a frame that pays someone else is
+  // not this device's business, whatever its evidence says, and running an
+  // injected verifier over it would hand a stranger's frame to third-party code.
+  it('refuses a stranger’s output before it ever consults COVER', async () => {
+    const cover = jest.fn(async (): Promise<CoverResult> => ({ ok: true, mustSubmit: [] }))
+    const otherPkh = Hash.hash160(Utils.toArray('02'.padEnd(66, 'c'), 'hex'))
+    const frame = tokenFrame({ transaction: beefOf([{ satoshis: 1, scriptHex: tokenScript(500, otherPkh) }]) })
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test', { cover, asset: ASSET })).rejects.toMatchObject({
+      kind: 'not_mine'
+    })
+    expect(cover).not.toHaveBeenCalled()
+  })
+
+  it('leaves the BSV path untouched: no verifier needed, no cover call', async () => {
+    const cover = jest.fn(async (): Promise<CoverResult> => ({ ok: true, mustSubmit: [] }))
+    const frame = frameFor(beefOf([{ satoshis: 4200, scriptHex: minesScript() }]))
+    await expect(verifyFramePayment(payeeWallet(), frame, 'test', { cover })).resolves.toEqual({
+      kind: 'bsv',
+      satoshis: 4200
+    })
+    expect(cover).not.toHaveBeenCalled()
   })
 })
 
-describe('verifyRecipientLinkage', () => {
-  const scalar = new Uint8Array(32).fill(3)
-  const counterpartyKey = PrivateKey.fromRandom().toPublicKey()
-
-  function derivedPkh(): number[] {
-    const curve = new Curve()
-    const sum = counterpartyKey.add(curve.g.mul(new BigNumber(Array.from(scalar))))
-    const derived = new PublicKey(sum.x, sum.y)
-    return Hash.hash160(Utils.toArray(derived.toString(), 'hex'))
-  }
-
-  const linkageBytes = () => new TextEncoder().encode(JSON.stringify({
-    prover: senderIdentityKey,
-    verifier: payeeKey.toString(),
-    counterparty: counterpartyKey.toString(),
-    protocolID: FT_PROTOCOL_ID,
-    keyID: 'p x',
-    encryptedLinkage: [1, 2, 3],
-    encryptedLinkageProof: [0],
-    proofType: 0,
-  }))
-
-  const decryptingWallet = () => ({
-    decrypt: jest.fn().mockResolvedValue({ plaintext: Array.from(scalar) }),
+describe('declineReasonFor', () => {
+  // The payer renders these in ITS locale, so the wire carries a stable machine
+  // code. Every one of them must mean the payee queued nothing.
+  it('maps each verify failure to the decline the payer can act on', () => {
+    expect(declineReasonFor('unparseable')).toBe('decode_failed')
+    expect(declineReasonFor('not_mine')).toBe('session_mismatch')
+    expect(declineReasonFor('not_covered')).toBe('not_covered')
   })
 
-  it('accepts when the recovered key hashes to the expected pkh', async () => {
-    await expect(verifyRecipientLinkage(decryptingWallet(), linkageBytes(), derivedPkh(), 'test'))
-      .resolves.toBeUndefined()
-  })
-
-  it('decrypts under the mirrored specific-linkage-revelation protocol', async () => {
-    const wallet = decryptingWallet()
-    await verifyRecipientLinkage(wallet, linkageBytes(), derivedPkh(), 'test')
-    expect(wallet.decrypt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        protocolID: [2, 'specific linkage revelation 2 mandala token'],
-        keyID: 'p x',
-        counterparty: senderIdentityKey,
-      }),
-      'test'
-    )
-  })
-
-  it('refuses a pkh mismatch as not_mine', async () => {
-    await expect(verifyRecipientLinkage(decryptingWallet(), linkageBytes(), payeePkh(), 'test'))
-      .rejects.toMatchObject({ kind: 'not_mine' })
-  })
-
-  it('refuses unparseable linkage bytes', async () => {
-    await expect(verifyRecipientLinkage(decryptingWallet(), new Uint8Array([0xff]), derivedPkh(), 'test'))
-      .rejects.toMatchObject({ kind: 'unparseable' })
-  })
-
-  // `counterparty` feeds PublicKey.fromString + curve math below the shape
-  // check, and hostile JSON can name anything there. The length gate at the
-  // shape-validation stage is what turns "too short to even try" into the
-  // same 'unparseable' every other malformed-shape field produces.
-  it('refuses a counterparty that is not 66 hex chars as unparseable', async () => {
-    const bytes = new TextEncoder().encode(JSON.stringify({
-      prover: senderIdentityKey,
-      counterparty: '02ab',
-      protocolID: FT_PROTOCOL_ID,
-      keyID: 'p x',
-      encryptedLinkage: [1, 2, 3],
-    }))
-    await expect(verifyRecipientLinkage(decryptingWallet(), bytes, derivedPkh(), 'test'))
-      .rejects.toMatchObject({ name: 'FrameVerifyError', kind: 'unparseable' })
-  })
-
-  // 66 hex-shaped chars still is not hex: PublicKey.fromString throws a raw
-  // platform Error("Invalid hex string") on this, which must not escape the
-  // module's every-failure-is-FrameVerifyError contract.
-  it('refuses a 66-char counterparty of garbage hex as not_mine, not a raw throw', async () => {
-    const bytes = new TextEncoder().encode(JSON.stringify({
-      prover: senderIdentityKey,
-      counterparty: 'zz'.repeat(33),
-      protocolID: FT_PROTOCOL_ID,
-      keyID: 'p x',
-      encryptedLinkage: [1, 2, 3],
-    }))
-    await expect(verifyRecipientLinkage(decryptingWallet(), bytes, derivedPkh(), 'test'))
-      .rejects.toMatchObject({ name: 'FrameVerifyError', kind: 'not_mine' })
+  it('falls back to decode_failed for anything it does not recognise', () => {
+    expect(declineReasonFor('something else' as never)).toBe('decode_failed')
   })
 })

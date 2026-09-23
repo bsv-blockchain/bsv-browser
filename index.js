@@ -5,8 +5,8 @@
 
 // Initialize react-native-quick-crypto FIRST before any BSV SDK imports
 // This sets up the native crypto implementation via JSI
-import { install } from 'react-native-quick-crypto'
-install() // This sets global.Buffer and global.crypto
+const QuickCrypto = require('react-native-quick-crypto')
+QuickCrypto.install() // This sets global.Buffer and global.crypto
 
 // CRITICAL: Complete crypto setup for BSV SDK compatibility
 // The BSV SDK's Random.js checks crypto availability in this order:
@@ -20,6 +20,11 @@ install() // This sets global.Buffer and global.crypto
 if (typeof globalThis === 'undefined') {
   global.globalThis = global
 }
+
+// SDK Hash and SymmetricKey resolve their backend once at module load. Hermes
+// has no process.getBuiltinModule, so expose the installed Node-compatible JSI
+// backend explicitly before loading the router (and therefore any SDK modules).
+globalThis.__bsvNativeCrypto = QuickCrypto
 
 // Step 2: Verify global.crypto is set and propagate it to all references
 if (global.crypto && typeof global.crypto.getRandomValues === 'function') {
@@ -117,5 +122,6 @@ if (process.env.EXPO_PUBLIC_CR_DEVICE === '1') {
   }, 6000)
 }
 
-// Then start the normal Expo app
-import 'expo-router/entry'
+// Require after installation: static imports execute before this module body
+// and would let SDK primitives cache the pure-JS fallback before the seam exists.
+require('expo-router/entry')

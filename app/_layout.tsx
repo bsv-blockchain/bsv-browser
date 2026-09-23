@@ -47,8 +47,12 @@ import { configureToolbox } from '@bsv/expo-wallet-toolbox'
 // backupUrl is the encrypted wallet-backup origin: no trailing slash, no path, because the
 // BRC-103/104 handshake posts to the origin root. `null` disables backup entirely — no
 // monitor task, nothing sent, no backup UI.
+//
+// vaultEnabled stays off for this release: no Vault entry points, and the route reports it
+// unavailable. The package's storage-level vault guards still run either way.
 configureToolbox({
   backupUrl: process.env.EXPO_PUBLIC_BACKUP_URL ?? null,
+  vaultEnabled: false,
   services: {
     main: {
       arcUrl: process.env.EXPO_PUBLIC_ARC_URL,
@@ -225,7 +229,6 @@ export default function RootLayout() {
                             <Stack.Screen name="wallet" dangerouslySingular />
                             <Stack.Screen name="wallet-config" />
                             <Stack.Screen name="vault" />
-                            <Stack.Screen name="vault-recover" />
                             <Stack.Screen name="vault-transfer" />
                             <Stack.Screen name="pay" />
                             {/* The three below become redirect stubs into /pay (Task 14).

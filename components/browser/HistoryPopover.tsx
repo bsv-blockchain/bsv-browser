@@ -185,7 +185,7 @@ export const HistoryPopover: React.FC<HistoryPopoverProps> = ({
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 50
   },
   anchor: {

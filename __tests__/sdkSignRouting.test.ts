@@ -14,7 +14,7 @@
  * `input.unlockingScriptTemplate.sign(tx, i)` — i.e. the unpatched SDK flow.
  * Native modules are faked at the globals; jest never loads Nitro.
  */
-import { BigNumber, ECDSA, P2PKH, PrivateKey, Transaction, UnlockingScript } from '@bsv/sdk'
+import { BigNumber, ECDSA, LockingScript, P2PKH, PrivateKey, Transaction, UnlockingScript } from '@bsv/sdk'
 
 const g = globalThis as Record<string, any>
 
@@ -33,7 +33,12 @@ function fixture (n: number, opts: FixtureOpts = {}): { build: () => Transaction
   for (let i = 0; i < n; i++) {
     const k = new PrivateKey(200000 + i)
     keys.push(k)
-    srcTx.addOutput({ lockingScript: p2pkh.lock(k.toAddress()), satoshis: 1000 + i })
+    // An override must also be what the source output locks with: the SDK
+    // rejects a template script that contradicts the source transaction.
+    const lock = opts.lockingScriptOverride != null
+      ? LockingScript.fromHex(opts.lockingScriptOverride.toHex())
+      : p2pkh.lock(k.toAddress())
+    srcTx.addOutput({ lockingScript: lock, satoshis: 1000 + i })
   }
   const dest = new PrivateKey(999999).toAddress()
   const build = (): Transaction => {

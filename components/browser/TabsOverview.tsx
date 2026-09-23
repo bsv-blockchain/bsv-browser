@@ -253,7 +253,7 @@ export const TabsOverview = observer(TabsOverviewBase)
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 100,
   },
   tabPreview: {

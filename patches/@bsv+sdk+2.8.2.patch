@@ -59,6 +59,22 @@ index 34b8cce..10bf940 100644
      const publicKey = {
          x: bnToBigInt(key.x),
          y: bnToBigInt(key.y)
+diff --git a/node_modules/@bsv/sdk/dist/cjs/src/primitives/Hash.js b/node_modules/@bsv/sdk/dist/cjs/src/primitives/Hash.js
+index 4190e99..a1af04f 100644
+--- a/node_modules/@bsv/sdk/dist/cjs/src/primitives/Hash.js
++++ b/node_modules/@bsv/sdk/dist/cjs/src/primitives/Hash.js
+@@ -331,6 +331,11 @@ function bytesToHex(data) {
+     return out.join('');
+ }
+ const NODE_CRYPTO = (() => {
++    // Mobile hosts install a Node-compatible JSI backend before SDK modules load.
++    // Keep runtime injection explicit: ordinary Web Crypto lacks these APIs.
++    const injected = typeof globalThis === 'undefined' ? undefined : globalThis.__bsvNativeCrypto;
++    if (injected != null)
++        return injected;
+     const processLike = typeof globalThis === 'undefined' ? undefined : globalThis.process;
+     const getBuiltinModule = processLike?.getBuiltinModule;
+     if (typeof getBuiltinModule === 'function') {
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/primitives/NativeSecp.js b/node_modules/@bsv/sdk/dist/cjs/src/primitives/NativeSecp.js
 new file mode 100644
 index 0000000..2cedd4b
@@ -261,7 +277,7 @@ index 0000000..2cedd4b
 +    }
 +}
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/primitives/PrivateKey.js b/node_modules/@bsv/sdk/dist/cjs/src/primitives/PrivateKey.js
-index 2946cbe..859f6ad 100644
+index d80b162..df6af3d 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/primitives/PrivateKey.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/primitives/PrivateKey.js
 @@ -45,6 +45,8 @@ const Hash_js_1 = require("./Hash.js");
@@ -270,10 +286,10 @@ index 2946cbe..859f6ad 100644
  const Polynomial_js_1 = __importStar(require("./Polynomial.js"));
 +const Point_js_2 = __importDefault(require("./Point.js"));
 +const NativeSecp_js_1 = require("./NativeSecp.js");
- /**
-  * @class KeyShares
-  *
-@@ -267,6 +269,24 @@ class PrivateKey extends BigNumber_js_1.default {
+ const MAX_BACKUP_SHARE_LENGTH = 256;
+ const BACKUP_SHARE_FIELD = /^[1-9A-HJ-NP-Za-km-z]{1,64}$/;
+ const BACKUP_SHARE_THRESHOLD = /^(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])$/;
+@@ -314,6 +316,24 @@ class PrivateKey extends BigNumber_js_1.default {
       * const publicKey = privateKey.toPublicKey();
       */
      toPublicKey() {
@@ -298,7 +314,7 @@ index 2946cbe..859f6ad 100644
          const c = new Curve_js_1.default();
          const p = c.g.mulCT(this);
          return new PublicKey_js_1.default(p.x, p.y);
-@@ -355,6 +375,21 @@ class PrivateKey extends BigNumber_js_1.default {
+@@ -402,6 +422,21 @@ class PrivateKey extends BigNumber_js_1.default {
          if (!key.validate()) {
              throw new Error('Public key not valid for ECDH secret derivation');
          }
@@ -320,7 +336,7 @@ index 2946cbe..859f6ad 100644
          return key.mulCT(this);
      }
      /**
-@@ -393,6 +428,59 @@ class PrivateKey extends BigNumber_js_1.default {
+@@ -440,6 +475,59 @@ class PrivateKey extends BigNumber_js_1.default {
       * @returns The derived child key.
       */
      deriveChild(publicKey, invoiceNumber, cacheSharedSecret, retrieveCachedSharedSecret) {
@@ -618,11 +634,31 @@ index 171fc4d..667914d 100644
          for (let recovery = 0; recovery < 4; recovery++) {
              let Qprime;
              try {
+diff --git a/node_modules/@bsv/sdk/dist/cjs/src/primitives/SymmetricKey.js b/node_modules/@bsv/sdk/dist/cjs/src/primitives/SymmetricKey.js
+index efa3ecd..3300ce2 100644
+--- a/node_modules/@bsv/sdk/dist/cjs/src/primitives/SymmetricKey.js
++++ b/node_modules/@bsv/sdk/dist/cjs/src/primitives/SymmetricKey.js
+@@ -13,10 +13,13 @@ const utils_js_1 = require("./utils.js");
+ // Resolved once at module load using the same pattern as Hash.ts.  When
+ // supported Node exposes `node:crypto` through `process.getBuiltinModule`,
+ // encrypt and decrypt use it instead of the pure-TS implementation. The
+-// pure-TS path remains the unconditional fallback in browsers and mobile
+-// runtimes, without leaving a static Node dependency for their bundlers.
++// Mobile hosts may inject the same API via __bsvNativeCrypto. The pure-TS
++// path remains the fallback without a backend, with no static Node dependency.
+ // ---------------------------------------------------------------------------
++const INJECTED_CRYPTO_SYM = typeof globalThis === 'undefined' ? undefined : globalThis.__bsvNativeCrypto;
+ const NODE_CRYPTO_SYM = (() => {
++    if (INJECTED_CRYPTO_SYM != null)
++        return INJECTED_CRYPTO_SYM;
+     const processLike = typeof globalThis === 'undefined' ? undefined : globalThis.process;
+     const getBuiltinModule = processLike?.getBuiltinModule;
+     if (typeof getBuiltinModule === 'function') {
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js b/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js
-index 0aaf101..b9863d0 100644
+index e1fe832..fa75074 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/script/templates/P2PKH.js
-@@ -63,7 +63,19 @@ class P2PKH {
+@@ -72,7 +72,19 @@ class P2PKH {
       * @returns {Object} - An object containing the `sign` and `estimateLength` functions.
       */
      unlock(privateKey, signOutputs = 'all', anyoneCanPay = false, sourceSatoshis, lockingScript) {
@@ -643,84 +679,80 @@ index 0aaf101..b9863d0 100644
                  const signatureScope = (0, SignatureUtils_js_1.computeSignatureScope)(signOutputs, anyoneCanPay);
                  const resolved = (0, SignatureUtils_js_1.resolveSourceDetails)(tx, inputIndex, sourceSatoshis, lockingScript);
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js b/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js
-index f798e87..bc5a3dd 100644
+index 36655b1..2acf6ca 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/transaction/Transaction.js
-@@ -15,6 +15,9 @@ const Beef_js_1 = require("./Beef.js");
- const P2PKH_js_1 = __importDefault(require("../script/templates/P2PKH.js"));
+@@ -33,6 +33,9 @@ const P2PKH_js_1 = __importDefault(require("../script/templates/P2PKH.js"));
+ const completeBoundAction_js_1 = require("../wallet/completeBoundAction.js");
  const TransactionSignature_js_1 = __importDefault(require("../primitives/TransactionSignature.js"));
  const Random_js_1 = __importDefault(require("../primitives/Random.js"));
 +const Signature_js_1 = __importDefault(require("../primitives/Signature.js"));
 +const SignatureUtils_js_1 = require("../script/templates/SignatureUtils.js");
 +const NativeSecp_js_1 = require("../primitives/NativeSecp.js");
  const ScriptVerificationBackend_js_1 = require("./ScriptVerificationBackend.js");
- /** Post-Chronicle height used when an input's source UTXO mined-height is unobtainable. */
- const POST_CHRONICLE_HEIGHT_FALLBACK = 943816;
-@@ -658,6 +661,427 @@ class Transaction {
-             }
-         }
-         this.materializeSourceTXIDs();
-+        // ── Tier-1: ENGINE route (BSV Browser patch, M5.5 issue #23) ─────────
-+        // Sign the whole P2PKH path through ONE async crossing into the Tier-3
-+        // native engine (globalThis.__bsvEngineNative.batchSignP2pkhInputs —
-+        // the native-engine-ffi crate over bsv-rs: tx parse, BIP-143 midstates
-+        // computed once per scope-class, RFC 6979 low-S libsecp256k1 ECDSA;
-+        // byte-identical to this SDK over the 200k-case M5.3 differential gate
-+        // and the 53-case in-app corpus). JS builds the unsigned skeleton (all
-+        // input scripts empty) plus one fixed 73-byte meta record per routed
-+        // input ([u32 LE inputIndex][32B privkey][u64 LE satoshis][u32 LE
-+        // sigScope][25B P2PKH lockingScript]) with a single Uint8Array/DataView
-+        // each, and splices the returned unlocking scripts into the tx exactly
-+        // as today — the parity surface is script bytes only, never native tx
-+        // re-serialization.
-+        //
-+        // ELIGIBILITY (design-doc routing/fallback contract — ALL must hold,
-+        // anything else falls to tier 2 below, dev-logged via gate 6):
-+        //   • engine present;
-+        //   • every input either carries the standard P2PKH template metadata
-+        //     (nativeBatchP2pkh with a plain BigNumber private key) or has NO
-+        //     unlockingScriptTemplate at all (those are left untouched exactly
-+        //     as the original path leaves them);
-+        //   • per routed input: FORKID scope without CHRONICLE (the
-+        //     computeSignatureScope output), a resolvable 64-hex sourceTXID,
-+        //     integer sourceSatoshis in [0, 2^53), a 25-byte P2PKH locking
-+        //     script, and sourceOutputIndex + sequence present.
-+        //   The P2PKH template never supplies customK and always signs low-S
-+        //   (privateKey.sign defaults), so those ECDSA fallback classes are
-+        //   structurally absent from this tier.
-+        //
-+        // NO cooperative time-slicing here: the per-input JS sighash work that
-+        // motivated it (~0.5ms/input) moved into Rust — this tier only
-+        // assembles bytes. The fallback tiers below KEEP the slicing.
+ const EvidenceScriptWork_js_1 = require("./EvidenceScriptWork.js");
+ const serializedBytes = Symbol();
+@@ -590,6 +593,377 @@ class Transaction {
+         const templateRefs = this.inputs.map(input => input.unlockingScriptTemplate);
+         const outputRefs = [...this.outputs];
+         const skipExistingSignatures = options.skipExistingSignatures === true;
++        // ── BSV Browser patch (native-crypto M3/M5.5): native P2PKH presign ──
++        // Rebased onto @bsv/sdk 2.8.0's hardened sign(). Upstream input
++        // validation, snapshotting, skipExistingSignatures, the signing-state
++        // guard and script application all stay authoritative. The native
++        // tiers only stand in for the P2PKH template's own sign() on inputs
++        // whose template carries nativeBatchP2pkh metadata (see P2PKH.unlock):
++        // they compute those unlocking scripts from the immutable
++        // signingSnapshot, and the per-input loop below returns the
++        // precomputed script instead of calling template.sign. Every other
++        // template (PushDrop, RPuzzle, custom) signs through upstream exactly
++        // as before. FORKID/BIP-143 sighash for a P2PKH input does not depend
++        // on other inputs' unlocking scripts, so presigning the subset is
++        // byte-identical to per-template signing. A tier that fails leaves no
++        // partial result: tier 1 (engine) falls to tier 2 (batched secp, or
++        // pure JS without a native module), which falls to the upstream path.
++        const nativePresigned = new Map();
 +        {
-+            const eng = (0, NativeSecp_js_1.nativeEngine)();
-+            if (eng != null && this.inputs.length > 0) {
++            const tx = signingSnapshot;
++            const routed = [];
++            for (let i = 0; i < tx.inputs.length; i++) {
++                if (skipExistingSignatures && tx.inputs[i].unlockingScript != null)
++                    continue; // upstream keeps the existing script
++                const t = templateRefs[i];
++                if (t == null || typeof t !== 'object')
++                    continue; // no template: left untouched, as upstream does
++                const m = t.nativeBatchP2pkh;
++                if (m == null || m.privateKey == null || typeof m.privateKey.toArray !== 'function')
++                    continue; // custom template: signs itself in the loop below
++                routed.push(i);
++            }
++            // ── Tier-1: ENGINE route (M5.5 issue #23) ───────────────────────
++            // Sign the routed P2PKH subset through ONE async crossing into the
++            // Tier-3 native engine (globalThis.__bsvEngineNative
++            // .batchSignP2pkhInputs — the native-engine-ffi crate over bsv-rs:
++            // tx parse, BIP-143 midstates computed once per scope-class, RFC
++            // 6979 low-S libsecp256k1 ECDSA; byte-identical to this SDK over the
++            // 200k-case M5.3 differential gate and the 53-case in-app corpus).
++            // JS builds the unsigned skeleton (all input scripts empty) plus one
++            // fixed 73-byte meta record per routed input ([u32 LE inputIndex]
++            // [32B privkey][u64 LE satoshis][u32 LE sigScope][25B P2PKH
++            // lockingScript]); the parity surface is script bytes only, never
++            // native tx re-serialization.
++            //
++            // ELIGIBILITY (all must hold, anything else falls to tier 2, logged
++            // via warnEngineFallback): engine present; per routed input FORKID
++            // scope without CHRONICLE, a resolvable 64-hex sourceTXID, integer
++            // sourceSatoshis in [0, 2^53), a 25-byte P2PKH locking script, and
++            // sourceOutputIndex + sequence present. The P2PKH template never
++            // supplies customK and always signs low-S, so those ECDSA fallback
++            // classes are structurally absent from this tier.
++            //
++            // No cooperative time-slicing here: the per-input JS sighash work
++            // moved into Rust. Tier 2 keeps the slicing.
++            const eng = routed.length > 0 ? (0, NativeSecp_js_1.nativeEngine)() : null;
++            if (eng != null) {
 +                const buildEnginePlan = () => {
-+                    const nIn = this.inputs.length;
-+                    const routed = [];
-+                    // CR-5 (issue #33, caveat B7): SUBSET-route mixed txs. A
-+                    // non-P2PKH template (PushDrop, RPuzzle, custom) no longer
-+                    // drops the WHOLE tx to tier 2 — it is left to sign via its own
-+                    // template AFTER the P2PKH subset engine-signs. FORKID/BIP-143
-+                    // sighash for a P2PKH input does not depend on other inputs'
-+                    // unlocking scripts, so the routed subset is byte-identical
-+                    // whether signed alone or with the whole tx (the same
-+                    // splice-then-sign-rest ordering tier 2 already uses and jest
-+                    // proves for custom-template mixes).
-+                    const restTemplated = [];
-+                    for (let i = 0; i < nIn; i++) {
-+                        const t = this.inputs[i].unlockingScriptTemplate;
-+                        if (t == null || typeof t !== 'object')
-+                            continue; // no template — untouched, as in the original path
-+                        const m = t.nativeBatchP2pkh;
-+                        if (m == null || m.privateKey == null || typeof m.privateKey.toArray !== 'function') {
-+                            restTemplated.push(i); // custom template — signs itself below
-+                            continue;
-+                        }
-+                        routed.push(i);
-+                    }
-+                    if (routed.length === 0)
-+                        return null; // nothing for the engine to sign
++                    const nIn = tx.inputs.length;
 +                    const routedFlag = new Uint8Array(nIn);
 +                    for (const i of routed)
 +                        routedFlag[i] = 1;
@@ -731,7 +763,7 @@ index f798e87..bc5a3dd 100644
 +                    const vouts = new Array(nIn);
 +                    const seqs = new Array(nIn);
 +                    for (let i = 0; i < nIn; i++) {
-+                        const input = this.inputs[i];
++                        const input = tx.inputs[i];
 +                        const txidHex = input.sourceTXID ?? input.sourceTransaction?.id('hex');
 +                        if (typeof txidHex !== 'string' || !/^[0-9a-fA-F]{64}$/.test(txidHex)) {
 +                            (0, NativeSecp_js_1.warnEngineFallback)(`input ${i}: sourceTXID unavailable or not 64-hex`);
@@ -756,11 +788,11 @@ index f798e87..bc5a3dd 100644
 +                        vouts[i] = input.sourceOutputIndex;
 +                        seqs[i] = seq;
 +                    }
-+                    const nOut = this.outputs.length;
++                    const nOut = tx.outputs.length;
 +                    const outSats = new Array(nOut);
 +                    const outScripts = new Array(nOut);
 +                    for (let i = 0; i < nOut; i++) {
-+                        const out = this.outputs[i];
++                        const out = tx.outputs[i];
 +                        const sats = out.satoshis ?? 0;
 +                        if (!Number.isInteger(sats) || sats < 0 || sats > Number.MAX_SAFE_INTEGER) {
 +                            (0, NativeSecp_js_1.warnEngineFallback)(`output ${i}: satoshis not an integer in [0, 2^53)`);
@@ -804,7 +836,7 @@ index f798e87..bc5a3dd 100644
 +                        size += 8 + varintLen(outScripts[i].length) + outScripts[i].length;
 +                    const skel = new Uint8Array(size);
 +                    const sdv = new DataView(skel.buffer);
-+                    sdv.setUint32(0, this.version >>> 0, true);
++                    sdv.setUint32(0, tx.version >>> 0, true);
 +                    let o = writeVarint(sdv, skel, 4, nIn);
 +                    for (let i = 0; i < nIn; i++) {
 +                        const h = txids[i];
@@ -826,7 +858,7 @@ index f798e87..bc5a3dd 100644
 +                        skel.set(outScripts[i], o);
 +                        o += outScripts[i].length;
 +                    }
-+                    sdv.setUint32(o, this.lockTime >>> 0, true);
++                    sdv.setUint32(o, tx.lockTime >>> 0, true);
 +                    o += 4;
 +                    if (o !== size)
 +                        throw new Error('engine skeleton size mismatch');
@@ -835,7 +867,7 @@ index f798e87..bc5a3dd 100644
 +                    const mdv = new DataView(metas.buffer);
 +                    let mo = 0;
 +                    for (const i of routed) {
-+                        const m = this.inputs[i].unlockingScriptTemplate.nativeBatchP2pkh;
++                        const m = templateRefs[i].nativeBatchP2pkh;
 +                        const scope = (0, SignatureUtils_js_1.computeSignatureScope)(m.signOutputs, m.anyoneCanPay);
 +                        if ((scope & 0x40) === 0 || (scope & 0x20) !== 0) {
 +                            // FORKID required, CHRONICLE unsupported — the engine
@@ -844,7 +876,7 @@ index f798e87..bc5a3dd 100644
 +                            (0, NativeSecp_js_1.warnEngineFallback)(`input ${i}: unsupported sighash scope 0x${scope.toString(16)}`);
 +                            return null;
 +                        }
-+                        const resolved = (0, SignatureUtils_js_1.resolveSourceDetails)(this, i, m.getSourceSatoshis(), m.getLockingScript());
++                        const resolved = (0, SignatureUtils_js_1.resolveSourceDetails)(tx, i, m.getSourceSatoshis(), m.getLockingScript());
 +                        const lock = typeof resolved.lockingScript.toUint8Array === 'function'
 +                            ? resolved.lockingScript.toUint8Array()
 +                            : Uint8Array.from(resolved.lockingScript.toBinary());
@@ -864,7 +896,7 @@ index f798e87..bc5a3dd 100644
 +                        metas.set(lock, mo + 48);
 +                        mo += 73;
 +                    }
-+                    return { skeleton: skel.buffer, metas: metas.buffer, routed, restTemplated };
++                    return { skeleton: skel.buffer, metas: metas.buffer };
 +                };
 +                let plan = null;
 +                try {
@@ -884,11 +916,11 @@ index f798e87..bc5a3dd 100644
 +                        // meta order; script = push(DER‖scopeByte) push(pubkey33)
 +                        const scripts = [];
 +                        let off = 0;
-+                        for (let j = 0; j < plan.routed.length; j++) {
++                        for (let j = 0; j < routed.length; j++) {
 +                            if (off + 5 > framed.length)
 +                                throw new Error('engine reply truncated');
 +                            const idx = (framed[off] | (framed[off + 1] << 8) | (framed[off + 2] << 16) | (framed[off + 3] << 24)) >>> 0;
-+                            if (idx !== plan.routed[j])
++                            if (idx !== routed[j])
 +                                throw new Error('engine reply order mismatch');
 +                            const len = framed[off + 4];
 +                            const script = framed.subarray(off + 5, off + 5 + len);
@@ -904,89 +936,61 @@ index f798e87..bc5a3dd 100644
 +                        }
 +                        if (off !== framed.length)
 +                            throw new Error('engine reply framing mismatch');
-+                        for (let j = 0; j < plan.routed.length; j++) {
-+                            this.inputs[plan.routed[j]].unlockingScript = scripts[j];
++                        for (let j = 0; j < routed.length; j++) {
++                            nativePresigned.set(routed[j], scripts[j]);
 +                        }
-+                        // CR-5: sign any custom-template inputs of a MIXED tx via
-+                        // their own sign() (P2PKH subset already engine-signed and
-+                        // spliced above — same ordering tier 2 uses). A throw here
-+                        // is the SDK's own error and falls to the tiers below.
-+                        if (plan.restTemplated.length > 0) {
-+                            const rest = await Promise.all(plan.restTemplated.map(async (i) => await this.inputs[i].unlockingScriptTemplate.sign(this, i)));
-+                            for (let k = 0; k < plan.restTemplated.length; k++) {
-+                                this.inputs[plan.restTemplated[k]].unlockingScript = rest[k];
-+                            }
-+                        }
-+                        return; // P2PKH subset engine-signed, custom templates self-signed
 +                    }
 +                    catch (e) {
 +                        // Engine rejected the batch (UnsupportedScope / NotP2pkh /
-+                        // BadFraming / Crypto / seam failure) — or a custom template
-+                        // threw — the fallback tiers below reproduce the SDK output
-+                        // exactly (M5.4 must-Err contract).
++                        // BadFraming / Crypto / seam failure) — the fallback tiers
++                        // reproduce the SDK output exactly (M5.4 must-Err contract).
 +                        (0, NativeSecp_js_1.warnEngineFallback)(`engine batch rejected: ${String(e)}`);
 +                    }
 +                }
 +            }
-+        }
-+        // ── Tier-2 fallback (M3 issue #8, extended in M5.5): SecpNative-batched
-+        // P2PKH signing with ONE JS↔native crossing — and, when no
-+        // batch-capable native module is present (web/jest/Expo Go), the SAME
-+        // loop signs in pure JS. Either way the per-input sighash preimages are
-+        // now built with one shared SignatureHashCache (M5.5 interim win:
-+        // hashPrevouts/hashSequence/hashOutputs computed once per scope-class
-+        // per tx instead of once per input — kills the former O(n²) hashing).
-+        // Per input this replicates EXACTLY the P2PKH template's sign():
-+        // signatureScope → resolveSourceDetails → formatPreimage →
-+        // privateKey.sign semantics (sha256 first, then RFC 6979 low-S ECDSA;
-+        // the native batch passes (0, Hash_js_1.sha256)((0, Hash_js_1.sha256)(preimage)) since PrivateKey.sign
-+        // applies the second hash) → checksig script. batch element i ==
-+        // ecdsaSign(msg_i,key_i)+pubkeyCreate(key_i) is fuzz-proven
-+        // element-wise (bsv-fuzz batch_sign class). ANY failure falls through
-+        // to the original per-template path below (tier 3); non-P2PKH templates
-+        // always use their own sign().
-+        {
-+            const nat = (0, NativeSecp_js_1.nativeSecp)();
-+            const hasBatchNative = nat != null && typeof nat.batchEcdsaSign === 'function';
-+            const batchable = [];
-+            for (let i = 0, l = this.inputs.length; i < l; i++) {
-+                const t = this.inputs[i].unlockingScriptTemplate;
-+                if (typeof t === 'object' && t != null && t.nativeBatchP2pkh != null &&
-+                    t.nativeBatchP2pkh.privateKey != null) {
-+                    batchable.push(i);
-+                }
-+            }
-+            if (batchable.length > 0) {
++            // ── Tier-2 fallback (M3 issue #8, extended in M5.5): SecpNative-
++            // batched P2PKH signing with ONE JS↔native crossing — and, when no
++            // batch-capable native module is present (web/jest/Expo Go), the
++            // SAME loop signs in pure JS. The per-input sighash preimages share
++            // one SignatureHashCache, as upstream's pre-2.8 sign() did. Per
++            // input this replicates EXACTLY the P2PKH template's sign():
++            // signatureScope → resolveSourceDetails → formatPreimage →
++            // privateKey.sign semantics (sha256 first, then RFC 6979 low-S
++            // ECDSA; the native batch passes the double hash since
++            // PrivateKey.sign applies the second one) → checksig script. batch
++            // element i == ecdsaSign(msg_i,key_i)+pubkeyCreate(key_i) is
++            // fuzz-proven element-wise (bsv-fuzz batch_sign class). ANY failure
++            // leaves these inputs to the upstream per-template path.
++            if (routed.length > 0 && nativePresigned.size === 0) {
++                const nat = (0, NativeSecp_js_1.nativeSecp)();
++                const hasBatchNative = nat != null && typeof nat.batchEcdsaSign === 'function';
++                __classPrivateFieldSet(tx, _Transaction_activeSignatureHashCache, { hashOutputsSingle: new Map() }, "f");
 +                try {
-+                    const msgs = hasBatchNative ? new Uint8Array(batchable.length * 32) : null;
-+                    const keys = hasBatchNative ? new Uint8Array(batchable.length * 32) : null;
++                    const msgs = hasBatchNative ? new Uint8Array(routed.length * 32) : null;
++                    const keys = hasBatchNative ? new Uint8Array(routed.length * 32) : null;
 +                    const firstHashes = hasBatchNative ? null : [];
 +                    const scopes = [];
-+                    const cache = {}; // shared SignatureHashCache (see formatBip143)
-+                    // Cooperative time-slicing (KEPT on the fallback tiers only —
-+                    // the engine-routed tier above has none because its per-input
-+                    // JS work is gone): the per-input sighash preimage
++                    // Cooperative time-slicing: the per-input sighash preimage
 +                    // construction is JS work (~0.5ms/input release Hermes); on
 +                    // big transactions it would otherwise run as ONE synchronous
 +                    // chunk and stall rAF (measured: 2 dropped frames on a
-+                    // 20-input createAction-scale flow). Yield to the event
-+                    // loop whenever a slice exceeds ~6ms so frame callbacks
-+                    // interleave. Output bytes are unaffected.
++                    // 20-input createAction-scale flow). Yield to the event loop
++                    // whenever a slice exceeds ~6ms. Output bytes are unaffected.
 +                    const nowMs = typeof performance !== 'undefined' && typeof performance.now === 'function'
 +                        ? () => performance.now()
 +                        : () => Date.now();
 +                    let sliceStart = nowMs();
-+                    for (let j = 0; j < batchable.length; j++) {
++                    for (let j = 0; j < routed.length; j++) {
 +                        if (nowMs() - sliceStart > 6) {
 +                            await new Promise((resolve) => setTimeout(resolve, 0));
 +                            sliceStart = nowMs();
 +                        }
-+                        const i = batchable[j];
-+                        const meta = this.inputs[i].unlockingScriptTemplate.nativeBatchP2pkh;
++                        const i = routed[j];
++                        const meta = templateRefs[i].nativeBatchP2pkh;
 +                        const signatureScope = (0, SignatureUtils_js_1.computeSignatureScope)(meta.signOutputs, meta.anyoneCanPay);
-+                        const resolved = (0, SignatureUtils_js_1.resolveSourceDetails)(this, i, meta.getSourceSatoshis(), meta.getLockingScript());
++                        const resolved = (0, SignatureUtils_js_1.resolveSourceDetails)(tx, i, meta.getSourceSatoshis(), meta.getLockingScript());
 +                        const preimage = (0, SignatureUtils_js_1.formatPreimage)({
-+                            tx: this, inputIndex: i, signatureScope,
++                            tx, inputIndex: i, signatureScope,
 +                            sourceTXID: resolved.sourceTXID, sourceSatoshis: resolved.sourceSatoshis,
 +                            lockingScript: resolved.lockingScript,
 +                            allInputs: resolved.allInputs
@@ -1005,7 +1009,7 @@ index f798e87..bc5a3dd 100644
 +                    if (hasBatchNative) {
 +                        const framed = new Uint8Array(await nat.batchEcdsaSign(msgs.buffer, keys.buffer));
 +                        let off = 0;
-+                        for (let j = 0; j < batchable.length; j++) {
++                        for (let j = 0; j < routed.length; j++) {
 +                            const derLen = framed[off];
 +                            const der = Array.from(framed.subarray(off + 1, off + 1 + derLen));
 +                            const pubkeyForScript = Array.from(framed.subarray(off + 1 + derLen, off + 1 + derLen + 33));
@@ -1023,27 +1027,21 @@ index f798e87..bc5a3dd 100644
 +                        }
 +                    }
 +                    else {
-+                        // Tier-2 pure-JS signing branch: the identical call
-+                        // sequence as the P2PKH template's own sign() —
-+                        // privateKey.sign applies the second sha256 and the low-S
-+                        // RFC 6979 ECDSA (which itself still routes per-op through
-+                        // the secp backend when a single-op module is present).
-+                        // Sliced like the preimage loop above.
-+                        // CR-1 (issue #29, caveat B1): memoise toPublicKey PER
-+                        // DISTINCT private key within this batch. The former
-+                        // per-input toPublicKey at the seam was ~half the no-native
-+                        // 50-input cost (M5.7 asterisk 3: sign 9.19ms + toPublicKey
-+                        // 8.40ms per input); wallets reuse a key across inputs, so
-+                        // one derivation per distinct key drops this column toward
-+                        // sign-only×N. Keyed on the 32-byte scalar → byte-identical
-+                        // output, so jest byte-parity is preserved.
++                        // Pure-JS branch: the identical call sequence as the
++                        // P2PKH template's own sign() — privateKey.sign applies
++                        // the second sha256 and the low-S RFC 6979 ECDSA (which
++                        // itself still routes per-op through the secp backend
++                        // when a single-op module is present). CR-1 (issue #29):
++                        // memoise toPublicKey PER DISTINCT private key within
++                        // this batch; wallets reuse a key across inputs. Keyed
++                        // on the 32-byte scalar, so output is byte-identical.
 +                        const pubKeyCache = new Map();
-+                        for (let j = 0; j < batchable.length; j++) {
++                        for (let j = 0; j < routed.length; j++) {
 +                            if (nowMs() - sliceStart > 6) {
 +                                await new Promise((resolve) => setTimeout(resolve, 0));
 +                                sliceStart = nowMs();
 +                            }
-+                            const meta = this.inputs[batchable[j]].unlockingScriptTemplate.nativeBatchP2pkh;
++                            const meta = templateRefs[routed[j]].nativeBatchP2pkh;
 +                            const rawSignature = meta.privateKey.sign(firstHashes[j]);
 +                            const sig = new TransactionSignature_js_1.default(rawSignature.r, rawSignature.s, scopes[j]);
 +                            const sigForScript = sig.toChecksigFormat();
@@ -1059,31 +1057,29 @@ index f798e87..bc5a3dd 100644
 +                            ]));
 +                        }
 +                    }
-+                    // batch succeeded in full — assign scripts, then sign any
-+                    // remaining (non-P2PKH) templates through their own sign().
-+                    for (let j = 0; j < batchable.length; j++) {
-+                        this.inputs[batchable[j]].unlockingScript = scripts[j];
++                    for (let j = 0; j < routed.length; j++) {
++                        nativePresigned.set(routed[j], scripts[j]);
 +                    }
-+                    const batched = new Set(batchable);
-+                    const rest = await Promise.all(this.inputs.map(async (x, i) => {
-+                        if (!batched.has(i) && typeof this.inputs[i].unlockingScriptTemplate === 'object') {
-+                            return await this.inputs[i]?.unlockingScriptTemplate?.sign(this, i);
-+                        }
-+                        return await Promise.resolve(undefined);
-+                    }));
-+                    for (let i = 0, l = this.inputs.length; i < l; i++) {
-+                        if (!batched.has(i) && typeof this.inputs[i].unlockingScriptTemplate === 'object') {
-+                            this.inputs[i].unlockingScript = rest[i];
-+                        }
-+                    }
-+                    return;
 +                }
-+                catch (e) { /* fall through to the original per-template path (tier 3) */ }
++                catch (e) { /* leave these inputs to the upstream per-template path */ }
++                finally {
++                    __classPrivateFieldSet(tx, _Transaction_activeSignatureHashCache, undefined, "f");
++                }
 +            }
 +        }
-         const previousCache = this.activeSignatureHashCache;
-         this.activeSignatureHashCache = { hashOutputsSingle: new Map() };
          let unlockingScripts;
+         unlockingScripts = await Promise.all(signingSnapshot.inputs.map(async (input, index) => {
+             if (skipExistingSignatures && input.unlockingScript != null) {
+@@ -598,6 +972,9 @@ class Transaction {
+             const template = templateRefs[index];
+             if (template === undefined)
+                 return undefined;
++            const presigned = nativePresigned.get(index);
++            if (presigned !== undefined)
++                return new UnlockingScript_js_1.default([], Uint8Array.from(presigned.toUint8Array()), undefined, false);
+             const templateTransaction = __classPrivateFieldGet(signingSnapshot, _Transaction_instances, "m", _Transaction_snapshotTransactionGraph).call(signingSnapshot, true);
+             for (let templateIndex = 0; templateIndex < templateRefs.length; templateIndex++) {
+                 templateTransaction.inputs[templateIndex].unlockingScriptTemplate =
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js
 index 9e23ad4..dd88fd1 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js
@@ -1145,6 +1141,22 @@ index 9e23ad4..dd88fd1 100644
      const publicKey = {
          x: bnToBigInt(key.x),
          y: bnToBigInt(key.y)
+diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/Hash.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/Hash.js
+index f97e987..d2dc980 100644
+--- a/node_modules/@bsv/sdk/dist/esm/src/primitives/Hash.js
++++ b/node_modules/@bsv/sdk/dist/esm/src/primitives/Hash.js
+@@ -318,6 +318,11 @@ function bytesToHex(data) {
+     return out.join('');
+ }
+ const NODE_CRYPTO = (() => {
++    // Mobile hosts install a Node-compatible JSI backend before SDK modules load.
++    // Keep runtime injection explicit: ordinary Web Crypto lacks these APIs.
++    const injected = typeof globalThis === 'undefined' ? undefined : globalThis.__bsvNativeCrypto;
++    if (injected != null)
++        return injected;
+     const processLike = typeof globalThis === 'undefined' ? undefined : globalThis.process;
+     const getBuiltinModule = processLike?.getBuiltinModule;
+     if (typeof getBuiltinModule === 'function') {
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/NativeSecp.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/NativeSecp.js
 new file mode 100644
 index 0000000..9672b48
@@ -1327,19 +1339,19 @@ index 0000000..9672b48
 +    }
 +}
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/PrivateKey.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/PrivateKey.js
-index 59628ce..5f7019b 100644
+index 9f2ff03..adbcb3a 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/primitives/PrivateKey.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/primitives/PrivateKey.js
 @@ -6,6 +6,8 @@ import { sha256, sha256hmac, sha512hmac } from './Hash.js';
  import Random from './Random.js';
  import { fromBase58Check, toArray, toBase58Check } from './utils.js';
- import Polynomial, { PointInFiniteField } from './Polynomial.js';
+ import Polynomial, { MAX_SHAMIR_SHARES, PointInFiniteField } from './Polynomial.js';
 +import Point from './Point.js';
 +import { nativeSecp, secpBackend, bnToBuf32, numsToBuf, bufToNums } from './NativeSecp.js';
- /**
-  * @class KeyShares
-  *
-@@ -230,6 +232,24 @@ export default class PrivateKey extends BigNumber {
+ const MAX_BACKUP_SHARE_LENGTH = 256;
+ const BACKUP_SHARE_FIELD = /^[1-9A-HJ-NP-Za-km-z]{1,64}$/;
+ const BACKUP_SHARE_THRESHOLD = /^(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])$/;
+@@ -277,6 +279,24 @@ export default class PrivateKey extends BigNumber {
       * const publicKey = privateKey.toPublicKey();
       */
      toPublicKey() {
@@ -1364,7 +1376,7 @@ index 59628ce..5f7019b 100644
          const c = new Curve();
          const p = c.g.mulCT(this);
          return new PublicKey(p.x, p.y);
-@@ -318,6 +338,21 @@ export default class PrivateKey extends BigNumber {
+@@ -365,6 +385,21 @@ export default class PrivateKey extends BigNumber {
          if (!key.validate()) {
              throw new Error('Public key not valid for ECDH secret derivation');
          }
@@ -1386,7 +1398,7 @@ index 59628ce..5f7019b 100644
          return key.mulCT(this);
      }
      /**
-@@ -356,6 +391,59 @@ export default class PrivateKey extends BigNumber {
+@@ -403,6 +438,59 @@ export default class PrivateKey extends BigNumber {
       * @returns The derived child key.
       */
      deriveChild(publicKey, invoiceNumber, cacheSharedSecret, retrieveCachedSharedSecret) {
@@ -1684,11 +1696,31 @@ index da97bed..5792973 100644
          for (let recovery = 0; recovery < 4; recovery++) {
              let Qprime;
              try {
+diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/SymmetricKey.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/SymmetricKey.js
+index 18f2dcd..e125e20 100644
+--- a/node_modules/@bsv/sdk/dist/esm/src/primitives/SymmetricKey.js
++++ b/node_modules/@bsv/sdk/dist/esm/src/primitives/SymmetricKey.js
+@@ -8,10 +8,13 @@ import { toArray, encode } from './utils.js';
+ // Resolved once at module load using the same pattern as Hash.ts.  When
+ // supported Node exposes `node:crypto` through `process.getBuiltinModule`,
+ // encrypt and decrypt use it instead of the pure-TS implementation. The
+-// pure-TS path remains the unconditional fallback in browsers and mobile
+-// runtimes, without leaving a static Node dependency for their bundlers.
++// Mobile hosts may inject the same API via __bsvNativeCrypto. The pure-TS
++// path remains the fallback without a backend, with no static Node dependency.
+ // ---------------------------------------------------------------------------
++const INJECTED_CRYPTO_SYM = typeof globalThis === 'undefined' ? undefined : globalThis.__bsvNativeCrypto;
+ const NODE_CRYPTO_SYM = (() => {
++    if (INJECTED_CRYPTO_SYM != null)
++        return INJECTED_CRYPTO_SYM;
+     const processLike = typeof globalThis === 'undefined' ? undefined : globalThis.process;
+     const getBuiltinModule = processLike?.getBuiltinModule;
+     if (typeof getBuiltinModule === 'function') {
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js b/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js
-index b3f162e..e840f74 100644
+index 5c26fa1..01c7453 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/script/templates/P2PKH.js
-@@ -58,7 +58,19 @@ export default class P2PKH {
+@@ -67,7 +67,19 @@ export default class P2PKH {
       * @returns {Object} - An object containing the `sign` and `estimateLength` functions.
       */
      unlock(privateKey, signOutputs = 'all', anyoneCanPay = false, sourceSatoshis, lockingScript) {
@@ -1709,12 +1741,12 @@ index b3f162e..e840f74 100644
                  const signatureScope = computeSignatureScope(signOutputs, anyoneCanPay);
                  const resolved = resolveSourceDetails(tx, inputIndex, sourceSatoshis, lockingScript);
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js b/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js
-index 5ca4747..2beb7ab 100644
+index 55616a8..ff3a475 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/transaction/Transaction.js
-@@ -1,7 +1,10 @@
- import UnlockingScript from '../script/UnlockingScript.js';
+@@ -2,7 +2,10 @@ import UnlockingScript from '../script/UnlockingScript.js';
  import LockingScript from '../script/LockingScript.js';
+ import { scriptSerializationIdentity } from '../script/Script.js';
  import { Writer, toHex, toArray, ReaderUint8Array, toUint8Array, WriterUint8Array } from '../primitives/utils.js';
 -import { hash256 } from '../primitives/Hash.js';
 +import { hash256, sha256 } from '../primitives/Hash.js';
@@ -1722,73 +1754,69 @@ index 5ca4747..2beb7ab 100644
 +import { computeSignatureScope, resolveSourceDetails, formatPreimage } from '../script/templates/SignatureUtils.js';
 +import { nativeSecp, nativeEngine, warnEngineFallback } from '../primitives/NativeSecp.js';
  import LivePolicy from './fee-models/LivePolicy.js';
- import Spend from '../script/Spend.js';
- import { defaultBroadcaster } from './broadcasters/DefaultBroadcaster.js';
-@@ -666,6 +669,427 @@ export default class Transaction {
-             }
-         }
-         this.materializeSourceTXIDs();
-+        // ── Tier-1: ENGINE route (BSV Browser patch, M5.5 issue #23) ─────────
-+        // Sign the whole P2PKH path through ONE async crossing into the Tier-3
-+        // native engine (globalThis.__bsvEngineNative.batchSignP2pkhInputs —
-+        // the native-engine-ffi crate over bsv-rs: tx parse, BIP-143 midstates
-+        // computed once per scope-class, RFC 6979 low-S libsecp256k1 ECDSA;
-+        // byte-identical to this SDK over the 200k-case M5.3 differential gate
-+        // and the 53-case in-app corpus). JS builds the unsigned skeleton (all
-+        // input scripts empty) plus one fixed 73-byte meta record per routed
-+        // input ([u32 LE inputIndex][32B privkey][u64 LE satoshis][u32 LE
-+        // sigScope][25B P2PKH lockingScript]) with a single Uint8Array/DataView
-+        // each, and splices the returned unlocking scripts into the tx exactly
-+        // as today — the parity surface is script bytes only, never native tx
-+        // re-serialization.
-+        //
-+        // ELIGIBILITY (design-doc routing/fallback contract — ALL must hold,
-+        // anything else falls to tier 2 below, dev-logged via gate 6):
-+        //   • engine present;
-+        //   • every input either carries the standard P2PKH template metadata
-+        //     (nativeBatchP2pkh with a plain BigNumber private key) or has NO
-+        //     unlockingScriptTemplate at all (those are left untouched exactly
-+        //     as the original path leaves them);
-+        //   • per routed input: FORKID scope without CHRONICLE (the
-+        //     computeSignatureScope output), a resolvable 64-hex sourceTXID,
-+        //     integer sourceSatoshis in [0, 2^53), a 25-byte P2PKH locking
-+        //     script, and sourceOutputIndex + sequence present.
-+        //   The P2PKH template never supplies customK and always signs low-S
-+        //   (privateKey.sign defaults), so those ECDSA fallback classes are
-+        //   structurally absent from this tier.
-+        //
-+        // NO cooperative time-slicing here: the per-input JS sighash work that
-+        // motivated it (~0.5ms/input) moved into Rust — this tier only
-+        // assembles bytes. The fallback tiers below KEEP the slicing.
+ import { validateBroadcastResult } from './Broadcaster.js';
+ import MerklePath from './MerklePath.js';
+@@ -807,6 +810,377 @@ export default class Transaction {
+         const templateRefs = this.inputs.map(input => input.unlockingScriptTemplate);
+         const outputRefs = [...this.outputs];
+         const skipExistingSignatures = options.skipExistingSignatures === true;
++        // ── BSV Browser patch (native-crypto M3/M5.5): native P2PKH presign ──
++        // Rebased onto @bsv/sdk 2.8.0's hardened sign(). Upstream input
++        // validation, snapshotting, skipExistingSignatures, the signing-state
++        // guard and script application all stay authoritative. The native
++        // tiers only stand in for the P2PKH template's own sign() on inputs
++        // whose template carries nativeBatchP2pkh metadata (see P2PKH.unlock):
++        // they compute those unlocking scripts from the immutable
++        // signingSnapshot, and the per-input loop below returns the
++        // precomputed script instead of calling template.sign. Every other
++        // template (PushDrop, RPuzzle, custom) signs through upstream exactly
++        // as before. FORKID/BIP-143 sighash for a P2PKH input does not depend
++        // on other inputs' unlocking scripts, so presigning the subset is
++        // byte-identical to per-template signing. A tier that fails leaves no
++        // partial result: tier 1 (engine) falls to tier 2 (batched secp, or
++        // pure JS without a native module), which falls to the upstream path.
++        const nativePresigned = new Map();
 +        {
-+            const eng = nativeEngine();
-+            if (eng != null && this.inputs.length > 0) {
++            const tx = signingSnapshot;
++            const routed = [];
++            for (let i = 0; i < tx.inputs.length; i++) {
++                if (skipExistingSignatures && tx.inputs[i].unlockingScript != null)
++                    continue; // upstream keeps the existing script
++                const t = templateRefs[i];
++                if (t == null || typeof t !== 'object')
++                    continue; // no template: left untouched, as upstream does
++                const m = t.nativeBatchP2pkh;
++                if (m == null || m.privateKey == null || typeof m.privateKey.toArray !== 'function')
++                    continue; // custom template: signs itself in the loop below
++                routed.push(i);
++            }
++            // ── Tier-1: ENGINE route (M5.5 issue #23) ───────────────────────
++            // Sign the routed P2PKH subset through ONE async crossing into the
++            // Tier-3 native engine (globalThis.__bsvEngineNative
++            // .batchSignP2pkhInputs — the native-engine-ffi crate over bsv-rs:
++            // tx parse, BIP-143 midstates computed once per scope-class, RFC
++            // 6979 low-S libsecp256k1 ECDSA; byte-identical to this SDK over the
++            // 200k-case M5.3 differential gate and the 53-case in-app corpus).
++            // JS builds the unsigned skeleton (all input scripts empty) plus one
++            // fixed 73-byte meta record per routed input ([u32 LE inputIndex]
++            // [32B privkey][u64 LE satoshis][u32 LE sigScope][25B P2PKH
++            // lockingScript]); the parity surface is script bytes only, never
++            // native tx re-serialization.
++            //
++            // ELIGIBILITY (all must hold, anything else falls to tier 2, logged
++            // via warnEngineFallback): engine present; per routed input FORKID
++            // scope without CHRONICLE, a resolvable 64-hex sourceTXID, integer
++            // sourceSatoshis in [0, 2^53), a 25-byte P2PKH locking script, and
++            // sourceOutputIndex + sequence present. The P2PKH template never
++            // supplies customK and always signs low-S, so those ECDSA fallback
++            // classes are structurally absent from this tier.
++            //
++            // No cooperative time-slicing here: the per-input JS sighash work
++            // moved into Rust. Tier 2 keeps the slicing.
++            const eng = routed.length > 0 ? nativeEngine() : null;
++            if (eng != null) {
 +                const buildEnginePlan = () => {
-+                    const nIn = this.inputs.length;
-+                    const routed = [];
-+                    // CR-5 (issue #33, caveat B7): SUBSET-route mixed txs. A
-+                    // non-P2PKH template (PushDrop, RPuzzle, custom) no longer
-+                    // drops the WHOLE tx to tier 2 — it is left to sign via its own
-+                    // template AFTER the P2PKH subset engine-signs. FORKID/BIP-143
-+                    // sighash for a P2PKH input does not depend on other inputs'
-+                    // unlocking scripts, so the routed subset is byte-identical
-+                    // whether signed alone or with the whole tx (the same
-+                    // splice-then-sign-rest ordering tier 2 already uses and jest
-+                    // proves for custom-template mixes).
-+                    const restTemplated = [];
-+                    for (let i = 0; i < nIn; i++) {
-+                        const t = this.inputs[i].unlockingScriptTemplate;
-+                        if (t == null || typeof t !== 'object')
-+                            continue; // no template — untouched, as in the original path
-+                        const m = t.nativeBatchP2pkh;
-+                        if (m == null || m.privateKey == null || typeof m.privateKey.toArray !== 'function') {
-+                            restTemplated.push(i); // custom template — signs itself below
-+                            continue;
-+                        }
-+                        routed.push(i);
-+                    }
-+                    if (routed.length === 0)
-+                        return null; // nothing for the engine to sign
++                    const nIn = tx.inputs.length;
 +                    const routedFlag = new Uint8Array(nIn);
 +                    for (const i of routed)
 +                        routedFlag[i] = 1;
@@ -1799,7 +1827,7 @@ index 5ca4747..2beb7ab 100644
 +                    const vouts = new Array(nIn);
 +                    const seqs = new Array(nIn);
 +                    for (let i = 0; i < nIn; i++) {
-+                        const input = this.inputs[i];
++                        const input = tx.inputs[i];
 +                        const txidHex = input.sourceTXID ?? input.sourceTransaction?.id('hex');
 +                        if (typeof txidHex !== 'string' || !/^[0-9a-fA-F]{64}$/.test(txidHex)) {
 +                            warnEngineFallback(`input ${i}: sourceTXID unavailable or not 64-hex`);
@@ -1824,11 +1852,11 @@ index 5ca4747..2beb7ab 100644
 +                        vouts[i] = input.sourceOutputIndex;
 +                        seqs[i] = seq;
 +                    }
-+                    const nOut = this.outputs.length;
++                    const nOut = tx.outputs.length;
 +                    const outSats = new Array(nOut);
 +                    const outScripts = new Array(nOut);
 +                    for (let i = 0; i < nOut; i++) {
-+                        const out = this.outputs[i];
++                        const out = tx.outputs[i];
 +                        const sats = out.satoshis ?? 0;
 +                        if (!Number.isInteger(sats) || sats < 0 || sats > Number.MAX_SAFE_INTEGER) {
 +                            warnEngineFallback(`output ${i}: satoshis not an integer in [0, 2^53)`);
@@ -1872,7 +1900,7 @@ index 5ca4747..2beb7ab 100644
 +                        size += 8 + varintLen(outScripts[i].length) + outScripts[i].length;
 +                    const skel = new Uint8Array(size);
 +                    const sdv = new DataView(skel.buffer);
-+                    sdv.setUint32(0, this.version >>> 0, true);
++                    sdv.setUint32(0, tx.version >>> 0, true);
 +                    let o = writeVarint(sdv, skel, 4, nIn);
 +                    for (let i = 0; i < nIn; i++) {
 +                        const h = txids[i];
@@ -1894,7 +1922,7 @@ index 5ca4747..2beb7ab 100644
 +                        skel.set(outScripts[i], o);
 +                        o += outScripts[i].length;
 +                    }
-+                    sdv.setUint32(o, this.lockTime >>> 0, true);
++                    sdv.setUint32(o, tx.lockTime >>> 0, true);
 +                    o += 4;
 +                    if (o !== size)
 +                        throw new Error('engine skeleton size mismatch');
@@ -1903,7 +1931,7 @@ index 5ca4747..2beb7ab 100644
 +                    const mdv = new DataView(metas.buffer);
 +                    let mo = 0;
 +                    for (const i of routed) {
-+                        const m = this.inputs[i].unlockingScriptTemplate.nativeBatchP2pkh;
++                        const m = templateRefs[i].nativeBatchP2pkh;
 +                        const scope = computeSignatureScope(m.signOutputs, m.anyoneCanPay);
 +                        if ((scope & 0x40) === 0 || (scope & 0x20) !== 0) {
 +                            // FORKID required, CHRONICLE unsupported — the engine
@@ -1912,7 +1940,7 @@ index 5ca4747..2beb7ab 100644
 +                            warnEngineFallback(`input ${i}: unsupported sighash scope 0x${scope.toString(16)}`);
 +                            return null;
 +                        }
-+                        const resolved = resolveSourceDetails(this, i, m.getSourceSatoshis(), m.getLockingScript());
++                        const resolved = resolveSourceDetails(tx, i, m.getSourceSatoshis(), m.getLockingScript());
 +                        const lock = typeof resolved.lockingScript.toUint8Array === 'function'
 +                            ? resolved.lockingScript.toUint8Array()
 +                            : Uint8Array.from(resolved.lockingScript.toBinary());
@@ -1932,7 +1960,7 @@ index 5ca4747..2beb7ab 100644
 +                        metas.set(lock, mo + 48);
 +                        mo += 73;
 +                    }
-+                    return { skeleton: skel.buffer, metas: metas.buffer, routed, restTemplated };
++                    return { skeleton: skel.buffer, metas: metas.buffer };
 +                };
 +                let plan = null;
 +                try {
@@ -1952,11 +1980,11 @@ index 5ca4747..2beb7ab 100644
 +                        // meta order; script = push(DER‖scopeByte) push(pubkey33)
 +                        const scripts = [];
 +                        let off = 0;
-+                        for (let j = 0; j < plan.routed.length; j++) {
++                        for (let j = 0; j < routed.length; j++) {
 +                            if (off + 5 > framed.length)
 +                                throw new Error('engine reply truncated');
 +                            const idx = (framed[off] | (framed[off + 1] << 8) | (framed[off + 2] << 16) | (framed[off + 3] << 24)) >>> 0;
-+                            if (idx !== plan.routed[j])
++                            if (idx !== routed[j])
 +                                throw new Error('engine reply order mismatch');
 +                            const len = framed[off + 4];
 +                            const script = framed.subarray(off + 5, off + 5 + len);
@@ -1972,89 +2000,61 @@ index 5ca4747..2beb7ab 100644
 +                        }
 +                        if (off !== framed.length)
 +                            throw new Error('engine reply framing mismatch');
-+                        for (let j = 0; j < plan.routed.length; j++) {
-+                            this.inputs[plan.routed[j]].unlockingScript = scripts[j];
++                        for (let j = 0; j < routed.length; j++) {
++                            nativePresigned.set(routed[j], scripts[j]);
 +                        }
-+                        // CR-5: sign any custom-template inputs of a MIXED tx via
-+                        // their own sign() (P2PKH subset already engine-signed and
-+                        // spliced above — same ordering tier 2 uses). A throw here
-+                        // is the SDK's own error and falls to the tiers below.
-+                        if (plan.restTemplated.length > 0) {
-+                            const rest = await Promise.all(plan.restTemplated.map(async (i) => await this.inputs[i].unlockingScriptTemplate.sign(this, i)));
-+                            for (let k = 0; k < plan.restTemplated.length; k++) {
-+                                this.inputs[plan.restTemplated[k]].unlockingScript = rest[k];
-+                            }
-+                        }
-+                        return; // P2PKH subset engine-signed, custom templates self-signed
 +                    }
 +                    catch (e) {
 +                        // Engine rejected the batch (UnsupportedScope / NotP2pkh /
-+                        // BadFraming / Crypto / seam failure) — or a custom template
-+                        // threw — the fallback tiers below reproduce the SDK output
-+                        // exactly (M5.4 must-Err contract).
++                        // BadFraming / Crypto / seam failure) — the fallback tiers
++                        // reproduce the SDK output exactly (M5.4 must-Err contract).
 +                        warnEngineFallback(`engine batch rejected: ${String(e)}`);
 +                    }
 +                }
 +            }
-+        }
-+        // ── Tier-2 fallback (M3 issue #8, extended in M5.5): SecpNative-batched
-+        // P2PKH signing with ONE JS↔native crossing — and, when no
-+        // batch-capable native module is present (web/jest/Expo Go), the SAME
-+        // loop signs in pure JS. Either way the per-input sighash preimages are
-+        // now built with one shared SignatureHashCache (M5.5 interim win:
-+        // hashPrevouts/hashSequence/hashOutputs computed once per scope-class
-+        // per tx instead of once per input — kills the former O(n²) hashing).
-+        // Per input this replicates EXACTLY the P2PKH template's sign():
-+        // signatureScope → resolveSourceDetails → formatPreimage →
-+        // privateKey.sign semantics (sha256 first, then RFC 6979 low-S ECDSA;
-+        // the native batch passes sha256(sha256(preimage)) since PrivateKey.sign
-+        // applies the second hash) → checksig script. batch element i ==
-+        // ecdsaSign(msg_i,key_i)+pubkeyCreate(key_i) is fuzz-proven
-+        // element-wise (bsv-fuzz batch_sign class). ANY failure falls through
-+        // to the original per-template path below (tier 3); non-P2PKH templates
-+        // always use their own sign().
-+        {
-+            const nat = nativeSecp();
-+            const hasBatchNative = nat != null && typeof nat.batchEcdsaSign === 'function';
-+            const batchable = [];
-+            for (let i = 0, l = this.inputs.length; i < l; i++) {
-+                const t = this.inputs[i].unlockingScriptTemplate;
-+                if (typeof t === 'object' && t != null && t.nativeBatchP2pkh != null &&
-+                    t.nativeBatchP2pkh.privateKey != null) {
-+                    batchable.push(i);
-+                }
-+            }
-+            if (batchable.length > 0) {
++            // ── Tier-2 fallback (M3 issue #8, extended in M5.5): SecpNative-
++            // batched P2PKH signing with ONE JS↔native crossing — and, when no
++            // batch-capable native module is present (web/jest/Expo Go), the
++            // SAME loop signs in pure JS. The per-input sighash preimages share
++            // one SignatureHashCache, as upstream's pre-2.8 sign() did. Per
++            // input this replicates EXACTLY the P2PKH template's sign():
++            // signatureScope → resolveSourceDetails → formatPreimage →
++            // privateKey.sign semantics (sha256 first, then RFC 6979 low-S
++            // ECDSA; the native batch passes the double hash since
++            // PrivateKey.sign applies the second one) → checksig script. batch
++            // element i == ecdsaSign(msg_i,key_i)+pubkeyCreate(key_i) is
++            // fuzz-proven element-wise (bsv-fuzz batch_sign class). ANY failure
++            // leaves these inputs to the upstream per-template path.
++            if (routed.length > 0 && nativePresigned.size === 0) {
++                const nat = nativeSecp();
++                const hasBatchNative = nat != null && typeof nat.batchEcdsaSign === 'function';
++                tx.#activeSignatureHashCache = { hashOutputsSingle: new Map() };
 +                try {
-+                    const msgs = hasBatchNative ? new Uint8Array(batchable.length * 32) : null;
-+                    const keys = hasBatchNative ? new Uint8Array(batchable.length * 32) : null;
++                    const msgs = hasBatchNative ? new Uint8Array(routed.length * 32) : null;
++                    const keys = hasBatchNative ? new Uint8Array(routed.length * 32) : null;
 +                    const firstHashes = hasBatchNative ? null : [];
 +                    const scopes = [];
-+                    const cache = {}; // shared SignatureHashCache (see formatBip143)
-+                    // Cooperative time-slicing (KEPT on the fallback tiers only —
-+                    // the engine-routed tier above has none because its per-input
-+                    // JS work is gone): the per-input sighash preimage
++                    // Cooperative time-slicing: the per-input sighash preimage
 +                    // construction is JS work (~0.5ms/input release Hermes); on
 +                    // big transactions it would otherwise run as ONE synchronous
 +                    // chunk and stall rAF (measured: 2 dropped frames on a
-+                    // 20-input createAction-scale flow). Yield to the event
-+                    // loop whenever a slice exceeds ~6ms so frame callbacks
-+                    // interleave. Output bytes are unaffected.
++                    // 20-input createAction-scale flow). Yield to the event loop
++                    // whenever a slice exceeds ~6ms. Output bytes are unaffected.
 +                    const nowMs = typeof performance !== 'undefined' && typeof performance.now === 'function'
 +                        ? () => performance.now()
 +                        : () => Date.now();
 +                    let sliceStart = nowMs();
-+                    for (let j = 0; j < batchable.length; j++) {
++                    for (let j = 0; j < routed.length; j++) {
 +                        if (nowMs() - sliceStart > 6) {
 +                            await new Promise((resolve) => setTimeout(resolve, 0));
 +                            sliceStart = nowMs();
 +                        }
-+                        const i = batchable[j];
-+                        const meta = this.inputs[i].unlockingScriptTemplate.nativeBatchP2pkh;
++                        const i = routed[j];
++                        const meta = templateRefs[i].nativeBatchP2pkh;
 +                        const signatureScope = computeSignatureScope(meta.signOutputs, meta.anyoneCanPay);
-+                        const resolved = resolveSourceDetails(this, i, meta.getSourceSatoshis(), meta.getLockingScript());
++                        const resolved = resolveSourceDetails(tx, i, meta.getSourceSatoshis(), meta.getLockingScript());
 +                        const preimage = formatPreimage({
-+                            tx: this, inputIndex: i, signatureScope,
++                            tx, inputIndex: i, signatureScope,
 +                            sourceTXID: resolved.sourceTXID, sourceSatoshis: resolved.sourceSatoshis,
 +                            lockingScript: resolved.lockingScript,
 +                            allInputs: resolved.allInputs
@@ -2073,7 +2073,7 @@ index 5ca4747..2beb7ab 100644
 +                    if (hasBatchNative) {
 +                        const framed = new Uint8Array(await nat.batchEcdsaSign(msgs.buffer, keys.buffer));
 +                        let off = 0;
-+                        for (let j = 0; j < batchable.length; j++) {
++                        for (let j = 0; j < routed.length; j++) {
 +                            const derLen = framed[off];
 +                            const der = Array.from(framed.subarray(off + 1, off + 1 + derLen));
 +                            const pubkeyForScript = Array.from(framed.subarray(off + 1 + derLen, off + 1 + derLen + 33));
@@ -2091,27 +2091,21 @@ index 5ca4747..2beb7ab 100644
 +                        }
 +                    }
 +                    else {
-+                        // Tier-2 pure-JS signing branch: the identical call
-+                        // sequence as the P2PKH template's own sign() —
-+                        // privateKey.sign applies the second sha256 and the low-S
-+                        // RFC 6979 ECDSA (which itself still routes per-op through
-+                        // the secp backend when a single-op module is present).
-+                        // Sliced like the preimage loop above.
-+                        // CR-1 (issue #29, caveat B1): memoise toPublicKey PER
-+                        // DISTINCT private key within this batch. The former
-+                        // per-input toPublicKey at the seam was ~half the no-native
-+                        // 50-input cost (M5.7 asterisk 3: sign 9.19ms + toPublicKey
-+                        // 8.40ms per input); wallets reuse a key across inputs, so
-+                        // one derivation per distinct key drops this column toward
-+                        // sign-only×N. Keyed on the 32-byte scalar → byte-identical
-+                        // output, so jest byte-parity is preserved.
++                        // Pure-JS branch: the identical call sequence as the
++                        // P2PKH template's own sign() — privateKey.sign applies
++                        // the second sha256 and the low-S RFC 6979 ECDSA (which
++                        // itself still routes per-op through the secp backend
++                        // when a single-op module is present). CR-1 (issue #29):
++                        // memoise toPublicKey PER DISTINCT private key within
++                        // this batch; wallets reuse a key across inputs. Keyed
++                        // on the 32-byte scalar, so output is byte-identical.
 +                        const pubKeyCache = new Map();
-+                        for (let j = 0; j < batchable.length; j++) {
++                        for (let j = 0; j < routed.length; j++) {
 +                            if (nowMs() - sliceStart > 6) {
 +                                await new Promise((resolve) => setTimeout(resolve, 0));
 +                                sliceStart = nowMs();
 +                            }
-+                            const meta = this.inputs[batchable[j]].unlockingScriptTemplate.nativeBatchP2pkh;
++                            const meta = templateRefs[routed[j]].nativeBatchP2pkh;
 +                            const rawSignature = meta.privateKey.sign(firstHashes[j]);
 +                            const sig = new TransactionSignature(rawSignature.r, rawSignature.s, scopes[j]);
 +                            const sigForScript = sig.toChecksigFormat();
@@ -2127,28 +2121,26 @@ index 5ca4747..2beb7ab 100644
 +                            ]));
 +                        }
 +                    }
-+                    // batch succeeded in full — assign scripts, then sign any
-+                    // remaining (non-P2PKH) templates through their own sign().
-+                    for (let j = 0; j < batchable.length; j++) {
-+                        this.inputs[batchable[j]].unlockingScript = scripts[j];
++                    for (let j = 0; j < routed.length; j++) {
++                        nativePresigned.set(routed[j], scripts[j]);
 +                    }
-+                    const batched = new Set(batchable);
-+                    const rest = await Promise.all(this.inputs.map(async (x, i) => {
-+                        if (!batched.has(i) && typeof this.inputs[i].unlockingScriptTemplate === 'object') {
-+                            return await this.inputs[i]?.unlockingScriptTemplate?.sign(this, i);
-+                        }
-+                        return await Promise.resolve(undefined);
-+                    }));
-+                    for (let i = 0, l = this.inputs.length; i < l; i++) {
-+                        if (!batched.has(i) && typeof this.inputs[i].unlockingScriptTemplate === 'object') {
-+                            this.inputs[i].unlockingScript = rest[i];
-+                        }
-+                    }
-+                    return;
 +                }
-+                catch (e) { /* fall through to the original per-template path (tier 3) */ }
++                catch (e) { /* leave these inputs to the upstream per-template path */ }
++                finally {
++                    tx.#activeSignatureHashCache = undefined;
++                }
 +            }
 +        }
-         const previousCache = this.activeSignatureHashCache;
-         this.activeSignatureHashCache = { hashOutputsSingle: new Map() };
          let unlockingScripts;
+         unlockingScripts = await Promise.all(signingSnapshot.inputs.map(async (input, index) => {
+             if (skipExistingSignatures && input.unlockingScript != null) {
+@@ -815,6 +1189,9 @@ export default class Transaction {
+             const template = templateRefs[index];
+             if (template === undefined)
+                 return undefined;
++            const presigned = nativePresigned.get(index);
++            if (presigned !== undefined)
++                return new UnlockingScript([], Uint8Array.from(presigned.toUint8Array()), undefined, false);
+             const templateTransaction = signingSnapshot.#snapshotTransactionGraph(true);
+             for (let templateIndex = 0; templateIndex < templateRefs.length; templateIndex++) {
+                 templateTransaction.inputs[templateIndex].unlockingScriptTemplate =

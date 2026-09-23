@@ -42,8 +42,9 @@
  * the JS thread). Results go to console, Documents/engine-proof-result.json,
  * and best-effort POST http://localhost:8787/engine-proof.
  */
-import { Beef, P2PKH, PrivateKey, Spend, Transaction, LockingScript } from '@bsv/sdk'
+import { Beef, P2PKH, PrivateKey, Spend, Transaction } from '@bsv/sdk'
 import fixtures from '../native-engine-poc/fixtures/engine-sim-fixtures.json'
+import { hexToU8, u8ToHex, readVarint, writeVarint, txFromFixture, isFixtureInRange, rescaleFixtureInRange } from './engineFixtures'
 
 interface EngineNativeLike {
   version: () => string
@@ -87,6 +88,12 @@ interface RoutedReport {
     inputsSigned: number
     engineCrossings: number
     secpBatchCrossings: number
+    /** sdk-2.8 in-range fixtures: routed bytes == oracle expectedSignedTx. */
+    inRange: { cases: number; pass: number; fail: number }
+    /** out-of-range fixtures: tx.sign() rejects, zero native crossings, no unlocking script applied. */
+    outOfRangeRejected: { cases: number; pass: number; fail: number }
+    /** out-of-range fixtures' deterministic in-range rescale: routed == pure-JS bytes. */
+    rescaled: { cases: number; pass: number; fail: number }
   }
   jsResign: { pass: boolean; detail: string }
   fallbackPoisoned: { pass: boolean; detail: string; engineAttempts: number; secpBatchCrossings: number }
@@ -130,40 +137,12 @@ const now = (): number =>
     : Date.now()
 const r3 = (x: number): number => Math.round(x * 1000) / 1000
 
-const hexToU8 = (h: string): Uint8Array => {
-  const u = new Uint8Array(h.length / 2)
-  for (let i = 0; i < u.length; i++) u[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16)
-  return u
-}
-const u8ToHex = (u: Uint8Array): string => {
-  let s = ''
-  for (let i = 0; i < u.length; i++) s += u[i].toString(16).padStart(2, '0')
-  return s
-}
 /** Standalone ArrayBuffer copy (never a view offset) for the Nitro seam. */
 const toBuf = (u: Uint8Array): ArrayBuffer => u.slice().buffer as ArrayBuffer
 
 // ── minimal tx splice (mirrors the corpus driver's ser_tx/parse_framed) ──────
-
-function readVarint (u: Uint8Array, off: number): [number, number] {
-  const first = u[off]
-  if (first < 0xfd) return [first, off + 1]
-  if (first === 0xfd) return [u[off + 1] | (u[off + 2] << 8), off + 3]
-  if (first === 0xfe) {
-    return [(u[off + 1] | (u[off + 2] << 8) | (u[off + 3] << 16)) + u[off + 4] * 0x1000000, off + 5]
-  }
-  throw new Error('varint 0xff input count not expected in fixtures')
-}
-
-function writeVarint (v: number, out: number[]): void {
-  if (v < 0xfd) {
-    out.push(v)
-  } else if (v <= 0xffff) {
-    out.push(0xfd, v & 0xff, (v >> 8) & 0xff)
-  } else {
-    out.push(0xfe, v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff)
-  }
-}
+// hexToU8/u8ToHex/readVarint/writeVarint now live in ./engineFixtures (shared
+// with txFromFixture and its jest coverage — see the import above).
 
 /** Parse the engine's framed reply: [u32 LE idx][u8 len][script]* → idx→script. */
 function parseFramedScripts (framed: Uint8Array): Map<number, Uint8Array> {
@@ -330,88 +309,37 @@ function countProxy (real: Record<string, any>, counts: Record<string, number>, 
   return proxy
 }
 
-interface FixtureMetaRec { priv: number[]; sats: number; scope: number; lock: number[] }
+// txFromFixture now lives in ./engineFixtures (imported above) — shared with
+// its jest coverage in __tests__/engineFixtures.test.ts.
 
 /**
- * Rebuild a corpus fixture as a real SDK Transaction: skeleton bytes → inputs/
- * outputs/locktime, 73B meta records → P2PKH unlock templates (privkey,
- * signOutputs/anyoneCanPay recovered from the sigScope, satoshis + locking
- * script passed explicitly). Signing this through the PATCHED Transaction.sign
- * exercises the real routed path end to end.
+ * 53-fixture corpus through the PATCHED Transaction.sign (tier-1 routed),
+ * under sdk 2.8's monetary-range validation. Each fixture is classified by
+ * `isFixtureInRange` (mirrors Transaction.js sign()/#totalVerifiedOutputs +
+ * SignatureUtils.js resolveSourceDetails/formatPreimage — see
+ * ./engineFixtures) into one of two populations, and every out-of-range
+ * fixture gets a second, additional check:
+ *
+ *   (a) in-range (isFixtureInRange fixtures): routed bytes must equal the
+ *       oracle's expectedSignedTx, exactly as before the 2.8 upgrade.
+ *   (b) out-of-range: tx.sign() must REJECT, with ZERO
+ *       batchSignP2pkhInputs/batchEcdsaSign crossings during that attempt
+ *       and no unlocking script applied — this proves the SDK refuses
+ *       before any key material reaches native.
+ *   (c) out-of-range, rescaled variant (rescaleFixtureInRange): a
+ *       deterministic in-range rewrite of the SAME fixture (identical keys,
+ *       scopes, scripts, outpoints, sequences, locktime, version — only the
+ *       amounts change) must sign ROUTED and PURE-JS (native modules
+ *       temporarily removed, exactly as runJsResign does, restored in
+ *       finally) to IDENTICAL bytes — proving the routed tier is still
+ *       exhaustively exercised for every fixture the fuzz corpus produced,
+ *       not just the 11 that happen to fit sdk 2.8's range as-is.
+ *
+ * A fixture only counts as passing overall when BOTH (b) and (c) pass (for
+ * out-of-range fixtures) or when (a) passes (for in-range fixtures) — so
+ * `pass + fail === cases` throughout, and the per-class counters below give
+ * the finer breakdown.
  */
-function txFromFixture (unsignedHex: string, metaHex: string): Transaction {
-  const raw = hexToU8(unsignedHex)
-  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength)
-  const version = dv.getUint32(0, true)
-  let off = 4
-  const [nIn, o1] = readVarint(raw, off)
-  off = o1
-  const ins: { txidHex: string; vout: number; seq: number }[] = []
-  for (let i = 0; i < nIn; i++) {
-    let txidHex = ''
-    for (let k = 31; k >= 0; k--) txidHex += raw[off + k].toString(16).padStart(2, '0')
-    const vout = dv.getUint32(off + 32, true)
-    off += 36
-    const [scriptLen, o2] = readVarint(raw, off)
-    off = o2
-    if (scriptLen !== 0) throw new Error(`fixture skeleton input ${i} has a non-empty script`)
-    const seq = dv.getUint32(off, true)
-    off += 4
-    ins.push({ txidHex, vout, seq })
-  }
-  const [nOut, o3] = readVarint(raw, off)
-  off = o3
-  const outs: { sats: number; script: number[] }[] = []
-  for (let i = 0; i < nOut; i++) {
-    const sats = dv.getUint32(off + 4, true) * 0x100000000 + dv.getUint32(off, true)
-    off += 8
-    const [scriptLen, o4] = readVarint(raw, off)
-    off = o4
-    outs.push({ sats, script: Array.from(raw.subarray(off, off + scriptLen)) })
-    off += scriptLen
-  }
-  const lockTime = dv.getUint32(off, true)
-
-  const metaBytes = hexToU8(metaHex)
-  if (metaBytes.length % 73 !== 0) throw new Error('fixture meta not 73B records')
-  const metas = new Map<number, FixtureMetaRec>()
-  const mdv = new DataView(metaBytes.buffer, metaBytes.byteOffset, metaBytes.byteLength)
-  for (let mo = 0; mo < metaBytes.length; mo += 73) {
-    metas.set(mdv.getUint32(mo, true), {
-      priv: Array.from(metaBytes.subarray(mo + 4, mo + 36)),
-      sats: mdv.getUint32(mo + 40, true) * 0x100000000 + mdv.getUint32(mo + 36, true),
-      scope: mdv.getUint32(mo + 44, true),
-      lock: Array.from(metaBytes.subarray(mo + 48, mo + 73))
-    })
-  }
-
-  const p2pkh = new P2PKH()
-  const tx = new Transaction()
-  tx.version = version
-  tx.lockTime = lockTime
-  for (let i = 0; i < nIn; i++) {
-    const m = metas.get(i)
-    if (m == null) throw new Error(`fixture meta missing input ${i}`)
-    const base = m.scope & 0x1f
-    if (base !== 1 && base !== 2 && base !== 3) throw new Error(`unexpected scope base ${base} on input ${i}`)
-    const signOutputs = (base === 2 ? 'none' : base === 3 ? 'single' : 'all') as 'all' | 'none' | 'single'
-    const anyoneCanPay = (m.scope & 0x80) !== 0
-    tx.addInput({
-      sourceTXID: ins[i].txidHex,
-      sourceOutputIndex: ins[i].vout,
-      sequence: ins[i].seq,
-      unlockingScriptTemplate: p2pkh.unlock(
-        new PrivateKey(m.priv), signOutputs, anyoneCanPay, m.sats, LockingScript.fromBinary(m.lock)
-      )
-    })
-  }
-  for (const o of outs) {
-    tx.addOutput({ satoshis: o.sats, lockingScript: LockingScript.fromBinary(o.script) })
-  }
-  return tx
-}
-
-/** 53-fixture corpus through the PATCHED Transaction.sign (tier-1 routed). */
 async function runRoutedParity (): Promise<RoutedReport['parity']> {
   const realEngine = g.__bsvEngineNative
   const realSecp = g.__bsvSecpNative
@@ -421,20 +349,76 @@ async function runRoutedParity (): Promise<RoutedReport['parity']> {
   let pass = 0
   let inputsSigned = 0
   const failures: string[] = []
+  let inRangeCases = 0; let inRangePass = 0
+  let rejectCases = 0; let rejectPass = 0
+  let rescaledCases = 0; let rescaledPass = 0
   try {
     for (const f of fixtures.signFlow) {
-      try {
-        const tx = txFromFixture(f.unsignedTx, f.inputsMeta)
-        await tx.sign()
-        if (tx.toHex() === f.expectedSignedTx) {
-          pass++
-          inputsSigned += f.nInputs
-        } else {
-          failures.push(`case ${f.caseIdx}: routed bytes differ`)
+      if (isFixtureInRange(f.unsignedTx, f.inputsMeta)) {
+        // (a) in-range — unchanged from the pre-2.8 behavior.
+        inRangeCases++
+        try {
+          const tx = txFromFixture(f.unsignedTx, f.inputsMeta)
+          await tx.sign()
+          if (tx.toHex() === f.expectedSignedTx) {
+            pass++; inRangePass++
+            inputsSigned += f.nInputs
+          } else {
+            failures.push(`case ${f.caseIdx}: routed bytes differ`)
+          }
+        } catch (e) {
+          failures.push(`case ${f.caseIdx}: unexpected reject on an in-range fixture: ${String(e)}`)
         }
-      } catch (e) {
-        failures.push(`case ${f.caseIdx}: ${String(e)}`)
+        continue
       }
+
+      // (b) out-of-range — tx.sign() must reject, zero native crossings,
+      // no unlocking script applied.
+      rejectCases++
+      const crossingsBefore = (counts.batchSignP2pkhInputs ?? 0) + (counts.batchEcdsaSign ?? 0)
+      let tx: Transaction | null = null
+      let rejected = false
+      try {
+        tx = txFromFixture(f.unsignedTx, f.inputsMeta)
+        await tx.sign()
+      } catch {
+        rejected = true
+      }
+      const crossingsDuring = (counts.batchSignP2pkhInputs ?? 0) + (counts.batchEcdsaSign ?? 0) - crossingsBefore
+      const scriptApplied = tx != null && tx.inputs.some((i) => i.unlockingScript != null)
+      const rejectOk = rejected && crossingsDuring === 0 && !scriptApplied
+      if (rejectOk) rejectPass++
+      else failures.push(`case ${f.caseIdx}: out-of-range fixture did not reject cleanly (rejected=${String(rejected)}, crossings=${crossingsDuring}, scriptApplied=${String(scriptApplied)})`)
+
+      // (c) rescaled variant — must sign ROUTED and PURE-JS to identical bytes.
+      rescaledCases++
+      let rescaledOk = false
+      try {
+        const variant = rescaleFixtureInRange(f.unsignedTx, f.inputsMeta)
+        const routedTx = txFromFixture(variant.unsignedTx, variant.inputsMeta)
+        await routedTx.sign()
+        const routedHex = routedTx.toHex()
+
+        delete g.__bsvEngineNative
+        delete g.__bsvSecpNative
+        let jsHex: string
+        try {
+          const jsTx = txFromFixture(variant.unsignedTx, variant.inputsMeta)
+          await jsTx.sign()
+          jsHex = jsTx.toHex()
+        } finally {
+          g.__bsvEngineNative = countProxy(realEngine, counts, ENGINE_KEYS)
+          if (realSecp != null) g.__bsvSecpNative = countProxy(realSecp, counts, SECP_KEYS)
+        }
+        rescaledOk = routedHex === jsHex
+        if (rescaledOk) inputsSigned += f.nInputs
+        else failures.push(`case ${f.caseIdx}: rescaled variant routed bytes != pure-JS bytes`)
+      } catch (e) {
+        failures.push(`case ${f.caseIdx}: rescaled variant threw: ${String(e)}`)
+      }
+      if (rescaledOk) rescaledPass++
+
+      if (rejectOk && rescaledOk) pass++
     }
   } finally {
     g.__bsvEngineNative = realEngine
@@ -442,12 +426,15 @@ async function runRoutedParity (): Promise<RoutedReport['parity']> {
   }
   return {
     pass,
-    fail: failures.length,
+    fail: fixtures.signFlow.length - pass,
     failures,
     cases: fixtures.signFlow.length,
     inputsSigned,
     engineCrossings: counts.batchSignP2pkhInputs ?? 0,
-    secpBatchCrossings: counts.batchEcdsaSign ?? 0
+    secpBatchCrossings: counts.batchEcdsaSign ?? 0,
+    inRange: { cases: inRangeCases, pass: inRangePass, fail: inRangeCases - inRangePass },
+    outOfRangeRejected: { cases: rejectCases, pass: rejectPass, fail: rejectCases - rejectPass },
+    rescaled: { cases: rescaledCases, pass: rescaledPass, fail: rescaledCases - rescaledPass }
   }
 }
 
@@ -877,10 +864,10 @@ async function runVerifyCorrupted (native: EngineNativeLike): Promise<VerifyRepo
 async function runVerifyShadow (): Promise<VerifyReport['shadow']> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { verifyUnlockScripts } = require('@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction')
+    const { verifyUnlockScripts } = require('@bsv/wallet-toolbox-mobile')
     const { tx, beef, txid } = await signedP2pkhFixture(20, true).build()
     delete g.__bsvEngineShadow
-    verifyUnlockScripts(txid, beef) // JS authoritative; engine shadows alongside
+    await verifyUnlockScripts(txid, beef) // JS authoritative; engine shadows alongside
     const s = g.__bsvEngineShadow
     if (s?.pending != null) await s.pending
     const eligible = s?.verifyEligible ?? 0
@@ -906,7 +893,7 @@ async function runVerifyShadow (): Promise<VerifyReport['shadow']> {
 async function runVerifyBench (native: EngineNativeLike): Promise<VerifyReport['bench']> {
   const out: VerifyReport['bench'] = []
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { verifyUnlockScripts } = require('@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction')
+  const { verifyUnlockScripts } = require('@bsv/wallet-toolbox-mobile')
   const { tx, beef, txid } = await signedP2pkhFixture(50).build()
   const signedBuf = Uint8Array.from(tx.toBinary()).buffer as ArrayBuffer
   const metaBuf = buildVerifyMeta(tx)
@@ -918,7 +905,7 @@ async function runVerifyBench (native: EngineNativeLike): Promise<VerifyReport['
   const realEngine = g.__bsvEngineNative
   delete g.__bsvEngineNative
   try {
-    out.push({ flow: '50-input verifyUnlockScripts JS Spend (per-input) (ms)', iters: 12, stats: await benchFlowMs(12, async () => { verifyUnlockScripts(txid, beef) }) })
+    out.push({ flow: '50-input verifyUnlockScripts JS Spend (per-input) (ms)', iters: 12, stats: await benchFlowMs(12, async () => { await verifyUnlockScripts(txid, beef) }) })
   } finally {
     if (realEngine != null) g.__bsvEngineNative = realEngine
   }
@@ -1329,9 +1316,15 @@ function formatReport (r: EngineReport): string {
     lines.push('')
     lines.push('════ M5.5 — ROUTED Transaction.sign (issue #23) ════')
     lines.push(
-      `routed corpus parity: ${m.parity.pass}/${m.parity.cases} byte-identical through tx.sign() ` +
-        `(${m.parity.inputsSigned} inputs) | engine crossings ${m.parity.engineCrossings} ` +
+      `routed corpus parity: ${m.parity.pass}/${m.parity.cases} fixtures clean across all 3 classes ` +
+        `(${m.parity.inputsSigned} inputs signed) | engine crossings ${m.parity.engineCrossings} ` +
         `(expect ${m.parity.cases}) | tier-2 batchEcdsaSign crossings ${m.parity.secpBatchCrossings} (expect 0)`
+    )
+    lines.push(
+      `  in-range (routed bytes == oracle): ${m.parity.inRange.pass}/${m.parity.inRange.cases} | ` +
+        `out-of-range (tx.sign() rejects, zero native crossings, no script applied): ` +
+        `${m.parity.outOfRangeRejected.pass}/${m.parity.outOfRangeRejected.cases} | ` +
+        `rescaled variant (in range, routed == pure-JS): ${m.parity.rescaled.pass}/${m.parity.rescaled.cases}`
     )
     if (m.parity.failures.length > 0) lines.push(`ROUTED FAILURES: ${m.parity.failures.slice(0, 10).join(' | ')}`)
     lines.push(`pure-JS re-sign: ${m.jsResign.pass ? 'PASS' : 'FAIL'} — ${m.jsResign.detail}`)

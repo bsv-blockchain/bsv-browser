@@ -4,5 +4,6 @@
   "expo-image.disable-libdav1d": "false",
   "ios.useFrameworks": "static",
   "ios.forceStaticLinking": "[]",
-  "apple.privacyManifestAggregationEnabled": "true"
+  "apple.privacyManifestAggregationEnabled": "true",
+  "ios.deploymentTarget": "16.4"
 }

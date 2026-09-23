@@ -18,12 +18,13 @@ jest.mock('@bsv/expo-wallet-toolbox/core/net/online', () => ({ getOnline: jest.f
 
 // `mock`-prefixed so jest's out-of-scope guard allows the factory to close over it.
 const mockPostReqs = jest.fn()
-jest.mock('@bsv/wallet-toolbox-mobile/out/src/storage/methods/attemptToPostReqsToNetwork', () => ({
+jest.mock('@bsv/wallet-toolbox-mobile', () => ({
+  ...jest.requireActual('@bsv/wallet-toolbox-mobile'),
   attemptToPostReqsToNetwork: (...args: unknown[]) => mockPostReqs(...args)
 }))
 
 import { Beef, LockingScript, Transaction, UnlockingScript } from '@bsv/sdk'
-import type { TableProvenTxReq } from '@bsv/wallet-toolbox-mobile/out/src/storage/schema/tables'
+import type { TableProvenTxReq } from '@bsv/wallet-toolbox-mobile'
 import { processOfflineActions } from '@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions'
 import type { BindValue, OfflineActionRow } from '@bsv/expo-wallet-toolbox/core/storage/methods/offlineActions'
 import { ensureOfflineActionsColumns } from '@bsv/expo-wallet-toolbox/core/storage/schema/createTables'

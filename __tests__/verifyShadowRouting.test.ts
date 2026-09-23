@@ -30,7 +30,7 @@ import {
   UnlockingScript
 } from '@bsv/sdk'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { verifyUnlockScripts } = require('@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction.js')
+const { verifyUnlockScripts } = require('@bsv/wallet-toolbox-mobile')
 
 const g = globalThis as Record<string, any>
 
@@ -111,7 +111,7 @@ describe('M5.6 verifyUnlockScripts shadow-mode routing (issue #24)', () => {
   it('agree: engine all-valid ⇒ 0 divergences, JS authoritative (no throw)', async () => {
     const { txid, beef, nInputs } = await buildP2pkhBeef()
     g.__bsvEngineNative = allValidEngine()
-    expect(() => verifyUnlockScripts(txid, beef)).not.toThrow()
+    await expect(verifyUnlockScripts(txid, beef)).resolves.toBeDefined()
     const s = g.__bsvEngineShadow as ShadowState
     await s.pending
     expect(s.verifyEligible).toBe(1)
@@ -130,7 +130,7 @@ describe('M5.6 verifyUnlockScripts shadow-mode routing (issue #24)', () => {
       }
     }
     // JS said all valid ⇒ verifyUnlockScripts must NOT throw despite the shadow disagreeing.
-    expect(() => verifyUnlockScripts(txid, beef)).not.toThrow()
+    await expect(verifyUnlockScripts(txid, beef)).resolves.toBeDefined()
     const s = g.__bsvEngineShadow as ShadowState
     await s.pending
     expect(s.verifyDivergences).toBe(1)
@@ -140,7 +140,7 @@ describe('M5.6 verifyUnlockScripts shadow-mode routing (issue #24)', () => {
   it('poison: engine rejects an eligible JS-valid tx ⇒ divergence logged, no crash (fallback)', async () => {
     const { txid, beef } = await buildP2pkhBeef()
     g.__bsvEngineNative = { batchVerifyP2pkhInputs: async () => { throw new Error('poison') } }
-    expect(() => verifyUnlockScripts(txid, beef)).not.toThrow()
+    await expect(verifyUnlockScripts(txid, beef)).resolves.toBeDefined()
     const s = g.__bsvEngineShadow as ShadowState
     await s.pending
     expect(s.verifyDivergences).toBe(1)
@@ -150,7 +150,7 @@ describe('M5.6 verifyUnlockScripts shadow-mode routing (issue #24)', () => {
 
   it('absent: no engine ⇒ shadow skipped gracefully', async () => {
     const { txid, beef } = await buildP2pkhBeef()
-    expect(() => verifyUnlockScripts(txid, beef)).not.toThrow()
+    await expect(verifyUnlockScripts(txid, beef)).resolves.toBeDefined()
     const s = g.__bsvEngineShadow as ShadowState
     expect(s.verifyEligible).toBe(0)
     expect(s.verifySkipped).toBe(1)
@@ -167,7 +167,7 @@ describe('M5.6 verifyUnlockScripts shadow-mode routing (issue #24)', () => {
       }
     }
     // No throw ⇒ the full JS Spend validated BOTH the P2PKH and the OP_1 input.
-    expect(() => verifyUnlockScripts(txid, beef)).not.toThrow()
+    await expect(verifyUnlockScripts(txid, beef)).resolves.toBeDefined()
     const s = g.__bsvEngineShadow as ShadowState
     if (s.pending != null) await s.pending
     expect(engineCalls).toBe(0) // shadow skipped — no silent weakening
@@ -182,7 +182,7 @@ describe('M5.6 verifyUnlockScripts shadow-mode routing (issue #24)', () => {
     const unlock = tx.inputs[0].unlockingScript as UnlockingScript
     unlock.chunks[0].data![5] ^= 0xff // flip a byte inside the DER body
     g.__bsvEngineNative = allValidEngine()
-    expect(() => verifyUnlockScripts(txid, beef)).toThrow()
+    await expect(verifyUnlockScripts(txid, beef)).rejects.toThrow()
     // Shadow never ran (JS threw first) — engine parity is unaffected by the reject.
     expect(g.__bsvEngineShadow?.verifyChecks ?? 0).toBe(0)
   })

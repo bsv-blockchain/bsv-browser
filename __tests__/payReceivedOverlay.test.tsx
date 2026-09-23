@@ -19,26 +19,48 @@ jest.mock('expo-haptics', () => ({
   NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' }
 }))
 
-jest.mock('react-i18next', () => ({
-  // The library's translations module calls i18n.use(initReactI18next)
-  // at import time, so the mock has to supply it or i18next throws.
-  initReactI18next: { type: '3rdParty', init: () => {} },
-  useTranslation: () => ({
-    t: (key: string, opts?: { count?: number }) => (opts?.count ? `${key}:${opts.count}` : key),
-    i18n: { language: 'en' }
-  })
+// Pulled in as a side effect of requireActual-ing the barrel below: its
+// LocalStorageProvider chain reaches these native modules at module top level.
+jest.mock('expo-local-authentication', () => ({
+  getEnrolledLevelAsync: jest.fn(async () => 0),
+  hasHardwareAsync: jest.fn(async () => false),
+  isEnrolledAsync: jest.fn(async () => false),
+  authenticateAsync: jest.fn(async () => ({ success: false })),
+  SecurityLevel: { NONE: 0, SECRET: 1, BIOMETRIC_WEAK: 2, BIOMETRIC_STRONG: 3 },
+  AuthenticationType: { FINGERPRINT: 1, FACIAL_RECOGNITION: 2, IRIS: 3 }
+}))
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn(async () => null),
+  setItemAsync: jest.fn(async () => {}),
+  deleteItemAsync: jest.fn(async () => {}),
+  WHEN_UNLOCKED: 'wu',
+  AFTER_FIRST_UNLOCK: 'afu',
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'afudo',
+  WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'wudo'
 }))
 
-// The amount is rendered by AmountDisplay, which reaches for wallet settings and
-// an exchange rate. Neither is what this file is about, so it becomes plain text.
+jest.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, opts?: { count?: number; name?: string }) =>
+      opts?.count ? `${key}:${opts.count}` : opts?.name ? `${key}:${opts.name}` : key,
+    i18n: { language: 'en' }
+  }),
+  // Pulled in as a side effect of importing anything from the barrel: its
+  // i18n/translations module calls i18n.use(initReactI18next) at module load.
+  initReactI18next: { type: '3rdParty', init: () => {} }
+}))
+
+// PaymentSuccessOverlay.tsx pulls AmountDisplay/Celebration/PressableScale
+// each via its own relative sibling import (intra-`ui` convention), so each
+// gets its own targeted mock rather than one combined barrel override.
+// PressableScale is left untouched and stays REAL for rendering.
+//
+// AmountDisplay reaches for wallet settings and an exchange rate. Neither is
+// what this file is about, so it becomes plain text.
 jest.mock('@bsv/expo-wallet-toolbox/ui/components/wallet/AmountDisplay', () => {
   const { Text } = require('react-native')
-  return {
-    __esModule: true,
-    default: ({ children }: { children: number }) => <Text>{`sats:${children}`}</Text>
-  }
+  return { __esModule: true, default: ({ children }: { children: number }) => <Text>{`sats:${children}`}</Text> }
 })
-
 let mockMarkDone: (() => void) | undefined
 jest.mock('@bsv/expo-wallet-toolbox/ui/components/ui/Celebration', () => {
   const { View } = require('react-native')
@@ -51,18 +73,14 @@ jest.mock('@bsv/expo-wallet-toolbox/ui/components/ui/Celebration', () => {
   }
 })
 
-const mockConfirmation = jest.fn()
-// Upstream replaced the single `confirmation` cue with per-direction ones, so
-// the overlay now calls paymentSend() or paymentReceive() depending on which
-// way the money went.
-jest.mock('@bsv/expo-wallet-toolbox/core/hooks/useConfirmationSound', () => ({
-  sounds: {
-    paymentReceive: () => mockConfirmation(),
-    paymentSend: () => mockConfirmation(),
-    vaultOpen: jest.fn(),
-    vaultClose: jest.fn(),
-    release: jest.fn()
-  }
+// Partial mock: PaymentSuccessOverlay.tsx pulls `sounds` from the same package
+// barrel as useTheme/spacing/typography/etc — which this test needs REAL for
+// rendering — so only `sounds` is overridden, via requireActual for the rest.
+const mockPaymentReceive = jest.fn()
+const mockPaymentSend = jest.fn()
+jest.mock('@bsv/expo-wallet-toolbox', () => ({
+  ...jest.requireActual('@bsv/expo-wallet-toolbox'),
+  sounds: { paymentReceive: () => mockPaymentReceive(), paymentSend: () => mockPaymentSend(), release: jest.fn() }
 }))
 
 // Done returns the user to the wallet so the updated balance is the next thing
@@ -84,7 +102,7 @@ jest.mock('expo-router', () => ({
 
 import React from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react-native'
-import { ThemeProvider } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
+import { ThemeProvider } from '@bsv/expo-wallet-toolbox'
 import ReceivedOverlay from '@bsv/expo-wallet-toolbox/ui/components/pay/PaymentSuccessOverlay'
 
 function draw(props: {
@@ -97,16 +115,15 @@ function draw(props: {
 }) {
   return render(
     <ThemeProvider>
-      {/* The app wires dismissTo="/wallet" (PayScreen -> overlay): the library
-          defaults to '/', which is the Browser here, not the wallet. */}
-      <ReceivedOverlay dismissTo="/wallet" {...props} />
+      <ReceivedOverlay {...props} />
     </ThemeProvider>
   )
 }
 
 beforeEach(() => {
   mockMarkDone = undefined
-  mockConfirmation.mockClear()
+  mockPaymentReceive.mockClear()
+  mockPaymentSend.mockClear()
   mockNavigate.mockClear()
   mockDismissTo.mockClear()
 })
@@ -179,19 +196,20 @@ describe('ReceivedOverlay', () => {
     })
     expect(mockDismissTo).not.toHaveBeenCalled()
     fireEvent.press(screen.getByLabelText('done'))
-    expect(mockDismissTo).toHaveBeenCalledWith('/wallet')
+    expect(mockDismissTo).toHaveBeenCalledWith('/')
     // Not navigate: that would leave the finished flow on the stack beneath.
     expect(mockNavigate).not.toHaveBeenCalled()
   })
 
-  it('sounds the confirmation tone', () => {
+  it('sounds the paymentReceive tone, not paymentSend', () => {
     jest.useFakeTimers()
     try {
       draw({ amount: 5000, onDismiss: jest.fn() })
       act(() => {
         jest.advanceTimersByTime(500)
       })
-      expect(mockConfirmation).toHaveBeenCalled()
+      expect(mockPaymentReceive).toHaveBeenCalled()
+      expect(mockPaymentSend).not.toHaveBeenCalled()
     } finally {
       jest.useRealTimers()
     }
@@ -215,7 +233,8 @@ describe('PaymentSuccessOverlay (sent)', () => {
 
   it('names the recipient when the rail resolved one', () => {
     draw({ amount: 5000, direction: 'sent', recipientName: 'Alice', onDismiss: jest.fn() })
-    expect(screen.getByText('Alice')).toBeTruthy()
+    // The line reads "to Alice" — the recipient named, not a bare name floating under the figure.
+    expect(screen.getByText(/Alice/)).toBeTruthy()
   })
 
   it('withholds the acknowledgement until the mark has landed, same as receive', () => {
@@ -235,7 +254,21 @@ describe('PaymentSuccessOverlay (sent)', () => {
       mockMarkDone?.()
     })
     fireEvent.press(screen.getByLabelText('done'))
-    expect(mockDismissTo).toHaveBeenCalledWith('/wallet')
+    expect(mockDismissTo).toHaveBeenCalledWith('/')
     expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it('sounds the paymentSend tone, not paymentReceive', () => {
+    jest.useFakeTimers()
+    try {
+      draw({ amount: 5000, direction: 'sent', onDismiss: jest.fn() })
+      act(() => {
+        jest.advanceTimersByTime(500)
+      })
+      expect(mockPaymentSend).toHaveBeenCalled()
+      expect(mockPaymentReceive).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

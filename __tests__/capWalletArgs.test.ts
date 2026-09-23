@@ -18,6 +18,10 @@ const wallet = () => ({
   internalizeAction: jest.fn(async () => ({ accepted: true })),
   getPublicKey: jest.fn(async () => ({ publicKey: 'k' })),
   listOutputs: jest.fn(async () => ({ outputs: [] })),
+  // The vault guard proves a non-admin output-naming call names no vault
+  // output by scanning the action history first; an empty history is a
+  // wallet with no vault, so the scan passes and the guard lets it through.
+  listActions: jest.fn(async () => ({ actions: [], totalActions: 0 })),
   isAuthenticated: jest.fn(async () => ({ authenticated: true }))
 })
 
@@ -83,11 +87,12 @@ describe('capWalletArgs', () => {
   })
 
   it('composes over the vault guard, each still enforcing its own concern', async () => {
-    // The two wrappers cover disjoint method sets and answer different
-    // questions: the guard rejects `privileged` key-material ops from non-admin
-    // originators (createAction is deliberately NOT one of them — see
-    // PRIVILEGED_CAPABLE in services/vault/guard.ts), while the cap rejects
-    // oversize arguments on the three calls that carry bytes.
+    // The two wrappers answer different questions: the guard rejects
+    // `privileged` key-material ops from non-admin originators and refuses an
+    // output-naming call (createAction included — OUTPUT_NAMING in
+    // services/vault/guard.ts) that names a vault output, which it proves by
+    // scanning the action history; the cap rejects oversize arguments on the
+    // three calls that carry bytes.
     const w = wallet()
     const capped = capWalletArgs(guardVaultAccess(w as any, 'admin.originator'), L)
 
