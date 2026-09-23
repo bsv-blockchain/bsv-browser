@@ -24,7 +24,7 @@ References: [BRC-38](https://github.com/bsv-blockchain/BRCs/blob/2b959b13f1f7304
 
 Normalize Expo SQLite’s Android filesystem directory to an absolute file URI before checking for saved databases; retain iOS file URIs unchanged. Native Android qualification of the shared flow found this before restoration.
 
-The narrow SDK 2.8.0 compatibility patch removes an incorrect rejection of authenticated empty AES-GCM plaintext while retaining the complete authentication-tag check. The forced-portable CJS/ESM test covers 24 cross-runtime vectors and rejects altered tags, wrong keys/IVs and truncated envelopes. Follow [TS Stack #573](https://github.com/bsv-blockchain/ts-stack/issues/573) and remove the patch after adopting its tested published fix.
+Published SDK 2.8.1 supplies the authenticated empty AES-GCM fix from [TS Stack #574](https://github.com/bsv-blockchain/ts-stack/pull/574). The temporary AES patch is removed; the existing native primitive acceleration patch is preserved against 2.8.1. The forced-portable CJS/ESM test covers 24 cross-runtime vectors and rejects altered tags, wrong keys/IVs and truncated envelopes.
 
 ## Android file destinations
 

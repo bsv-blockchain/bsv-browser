@@ -43,7 +43,7 @@
     "@bsv/expo-wallet-toolbox": "^0.4.0",
     "@bsv/message-box-client": "2.5.2",
     "@bsv/react-native-localpay-transport": "0.1.1",
-    "@bsv/sdk": "2.8.0",
+    "@bsv/sdk": "2.8.1",
     "@bsv/templates": "^1.10.0",
     "@bsv/wallet-relay": "^0.4.0",
     "@bsv/wallet-toolbox-mobile": "2.13.2",
