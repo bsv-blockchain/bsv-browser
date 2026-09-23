@@ -16,6 +16,12 @@ function load(filename) {
   new Function('module', 'exports', 'require', source)(module, module.exports, name => name === '@craftzdog/react-native-buffer' ? { Buffer } : name === '@bsv/expo-wallet-toolbox/core/storage/schema/createTables' ? load('../node_modules/@bsv/expo-wallet-toolbox/core/storage/schema/createTables.ts') : name.startsWith('.') ? load(path.resolve(path.dirname(filename), name + '.ts')) : require(name))
   return module.exports
 }
+const { databaseDirectoryUri } = load('../utils/walletPortability/fileUris.ts')
+assert.equal(databaseDirectoryUri('/data/user/0/app/files/SQLite'), 'file:///data/user/0/app/files/SQLite')
+assert.equal(databaseDirectoryUri('/data/user/0/a #%.app/files'), 'file:///data/user/0/a%20%23%25.app/files')
+assert.equal(databaseDirectoryUri('file:///private/a%20b/SQLite'), 'file:///private/a%20b/SQLite')
+assert.throws(() => databaseDirectoryUri('relative/SQLite'), /invalid database directory/)
+assert.throws(() => databaseDirectoryUri('https://example.test/SQLite'), /invalid database directory/)
 const { portabilityFixture } = load('fixtures/wallet-portability.ts')
 const { ArchiveStreamParser } = load('../utils/walletPortability/streamParser.ts')
 const { canonicalArchiveJson, ARCHIVE_TABLES } = load('../utils/walletPortability/schema.ts')

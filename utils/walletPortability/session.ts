@@ -1,3 +1,4 @@
+import { databaseDirectoryUri } from './fileUris'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { File } from 'expo-file-system'
 import { defaultDatabaseDirectory, openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite'
@@ -34,7 +35,7 @@ class CheckedNativeStorage extends StorageExpoSQLite {
 }
 
 async function nativeProvider(name: string, chain: ArchiveChain, storageIdentityKey: string, existing: boolean, identityKey?: string): Promise<StorageExpoSQLite> {
-  if (existing !== new File(defaultDatabaseDirectory, name).exists) throw new PortabilityError('storage', existing ? 'saved wallet database missing' : 'new database already exists')
+  if (existing !== new File(databaseDirectoryUri(defaultDatabaseDirectory), name).exists) throw new PortabilityError('storage', existing ? 'saved wallet database missing' : 'new database already exists')
   if (existing) {
     const check = await openExistingArchiveDatabase(name)
     try {

@@ -1,3 +1,17 @@
+diff --git a/node_modules/@bsv/sdk/dist/cjs/src/primitives/AESGCM.js b/node_modules/@bsv/sdk/dist/cjs/src/primitives/AESGCM.js
+index 051de10..9c37cb4 100644
+--- a/node_modules/@bsv/sdk/dist/cjs/src/primitives/AESGCM.js
++++ b/node_modules/@bsv/sdk/dist/cjs/src/primitives/AESGCM.js
+@@ -462,9 +462,6 @@ function AESGCM(plainText, initializationVector, key) {
+     };
+ }
+ function AESGCMDecrypt(cipherText, initializationVector, authenticationTag, key) {
+-    if (cipherText.length === 0) {
+-        throw new Error('Cipher text must not be empty');
+-    }
+     if (initializationVector.length === 0) {
+         throw new Error('Initialization vector must not be empty');
+     }
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js b/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js
 index 34b8cce..7917477 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/primitives/ECDSA.js
@@ -618,6 +632,20 @@ index 171fc4d..667914d 100644
          for (let recovery = 0; recovery < 4; recovery++) {
              let Qprime;
              try {
+diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/AESGCM.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/AESGCM.js
+index a0ee35a..7ad3333 100644
+--- a/node_modules/@bsv/sdk/dist/esm/src/primitives/AESGCM.js
++++ b/node_modules/@bsv/sdk/dist/esm/src/primitives/AESGCM.js
+@@ -448,9 +448,6 @@ export function AESGCM(plainText, initializationVector, key) {
+     };
+ }
+ export function AESGCMDecrypt(cipherText, initializationVector, authenticationTag, key) {
+-    if (cipherText.length === 0) {
+-        throw new Error('Cipher text must not be empty');
+-    }
+     if (initializationVector.length === 0) {
+         throw new Error('Initialization vector must not be empty');
+     }
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js b/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js
 index 9e23ad4..6bfa02d 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/primitives/ECDSA.js

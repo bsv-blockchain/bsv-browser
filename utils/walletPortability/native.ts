@@ -1,3 +1,4 @@
+import { databaseDirectoryUri } from './fileUris'
 import { Buffer } from '@craftzdog/react-native-buffer'
 import { Directory, File, Paths } from 'expo-file-system'
 import { openDatabaseAsync, defaultDatabaseDirectory, type SQLiteDatabase } from 'expo-sqlite'
@@ -103,7 +104,7 @@ export async function archiveStageDigest(db: SQLiteDatabase, signal?: AbortSigna
 }
 
 export async function openExistingArchiveDatabase(name: string): Promise<SQLiteDatabase> {
-  if (!/^[a-zA-Z0-9_.-]+\.db$/.test(name) || !new File(defaultDatabaseDirectory, name).exists) throw new PortabilityError('storage', 'saved recovery database missing')
+  if (!/^[a-zA-Z0-9_.-]+\.db$/.test(name) || !new File(databaseDirectoryUri(defaultDatabaseDirectory), name).exists) throw new PortabilityError('storage', 'saved recovery database missing')
   return await openDatabaseAsync(name)
 }
 

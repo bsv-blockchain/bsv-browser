@@ -19,3 +19,9 @@ This repository tracks its iOS project. Expo Doctor therefore reports the existi
 Run `npm run test:wallet-files` on Node 24.18 or newer for the independent streaming/SQLite/codec/monitor checks, `npm test -- --runInBand`, `npx tsc --noEmit` and platform bundle builds. Native file-picker/share-sheet, cancellation/restart and cross-wallet application-state acceptance must be recorded for each supported device before release. Synthetic test results do not establish a production or laboratory conformance result.
 
 References: [BRC-38](https://github.com/bsv-blockchain/BRCs/blob/2b959b13f1f73040d13cc4eb14edbfc376f8010b/outpoints/0038.md), [BRC-39](https://github.com/bsv-blockchain/BRCs/blob/2b959b13f1f73040d13cc4eb14edbfc376f8010b/outpoints/0039.md).
+
+## Portable runtime qualification follow-ups
+
+Normalize Expo SQLite’s Android filesystem directory to an absolute file URI before checking for saved databases; retain iOS file URIs unchanged. Native Android qualification of the shared flow found this before restoration.
+
+The narrow SDK 2.8.0 compatibility patch removes an incorrect rejection of authenticated empty AES-GCM plaintext while retaining the complete authentication-tag check. The forced-portable CJS/ESM test covers 24 cross-runtime vectors and rejects altered tags, wrong keys/IVs and truncated envelopes. Follow [TS Stack #573](https://github.com/bsv-blockchain/ts-stack/issues/573) and remove the patch after adopting its tested published fix.
