@@ -26,7 +26,7 @@ Toolbox Mobile 2.14.0 incorporates [TS Stack #579](https://github.com/bsv-blockc
 
 Normalize Expo SQLite’s Android filesystem directory to an absolute file URI before checking for saved databases; retain iOS file URIs unchanged. Native Android qualification of the shared flow found this before restoration.
 
-Published SDK 2.8.1 supplies the authenticated empty AES-GCM fix from [TS Stack #574](https://github.com/bsv-blockchain/ts-stack/pull/574). The temporary AES patch is removed; the existing native primitive acceleration patch is preserved with the 2.8.4 dependency. The forced-portable CJS/ESM test covers 24 cross-runtime vectors and rejects altered tags, wrong keys/IVs and truncated envelopes.
+Published SDK 2.8.1 supplies the authenticated empty AES-GCM fix from [TS Stack #574](https://github.com/bsv-blockchain/ts-stack/pull/574). The temporary AES patch is removed; the existing native primitive acceleration patch is preserved with the 2.8.5 dependency. The forced-portable CJS/ESM test covers 24 cross-runtime vectors and rejects altered tags, wrong keys/IVs and truncated envelopes.
 
 BRC-100 app qualification also checks same-document navigation. Android may report a reader route through a loading-start callback without a later page-finished event. The browser retains that valid route immediately, keeps loading independent, and reconciles completion only from matching native progress. Cold WebView mounts resume the current route; passive route updates do not reload an already-mounted page. Regression coverage includes duplicate callbacks, invalid URLs, back/forward history, tab switching and restoration. Native qualification must repeat these checks after dependency changes.
 
@@ -34,7 +34,7 @@ BRC-100 app qualification also checks same-document navigation. Android may repo
 
 Save/share offers **Save to folder** through the Android document-provider picker as well as the platform share sheet. This works when no installed sharing app offers a local-save destination. Saving creates a new provider file and copies in 256 KiB chunks, verifies its size and yields between writes; it never loads the complete archive into JavaScript memory. Interrupted/failed saves remove only the newly created partial output when possible and retain the app’s original. Provider selection stays outside the cancellable copy so the system picker’s background transition does not abort a fresh save. Nonempty destination files are refused without deletion.
 
-## SDK 2.8.3 compatibility changes (included in 2.8.4)
+## SDK 2.8.3 compatibility changes (included in 2.8.5)
 
 SDK 2.8.3 included the authenticated AES-GCM and bounded discovery fixes from 2.8.1/2.8.2. [TS Stack #587](https://github.com/bsv-blockchain/ts-stack/pull/587) also preserves explicit originators during HTTP discovery, binds browser JSON fetch correctly, and restores signed `listActions` net amounts using the historical wire bytes. Counts, lengths, individual output values, origin binding and response validation remain strict.
 
@@ -42,7 +42,7 @@ These are SDK compatibility repairs. No BRC100 application API, wire format or a
 
 SDK release evidence includes 7,393 passing SDK tests and an old/new signed-history matrix preserving all 32 previously valid response-byte cases; the eight known 2.8.1/2.8.2 negative-history failures are recorded separately. The dependency upgrade still requires this wallet's own checks and native acceptance before release; SDK evidence alone is not app acceptance.
 
-The funding app also pins 2.8.4; `docs/fund.html` is regenerated from that locked dependency graph. The acceleration patch changes only its SDK version context; the published AES and wallet-discovery fixes remain intact.
+The funding app also pins 2.8.5; `docs/fund.html` is regenerated from that locked dependency graph. The acceleration patch changes only its SDK version context; the published AES and wallet-discovery fixes remain intact.
 
 Signed-out iOS Apple Pay mode retains its script-injection prohibition. A narrow
 `react-native-webview` patch observes [WebKit's KVO-compliant native URL](https://developer.apple.com/documentation/webkit/wkwebview/url)
@@ -69,3 +69,11 @@ upstream. `npm run test:wallet-files` exercises the actual patched find/count
 methods against SQLite with 2,000 proofs, including parameterization, paging,
 partial/date/transaction filters, and empty-list compatibility. Large native
 archive acceptance remains a separate device validation gate.
+
+## SDK 2.8.5 HTTP payment compatibility
+
+The published SDK patch increases HTTP client header capacity fourfold, including
+a 256 KiB aggregate request-header budget for larger valid payment proofs.
+Authentication signatures, canonical framing and existing BRC100 calls are
+unchanged. BRC-38/39 archives and wallet records need no migration. Server
+operators own HTTP transport admission and should check their complete route.
