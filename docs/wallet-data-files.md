@@ -26,7 +26,7 @@ Toolbox Mobile 2.14.0 incorporates [TS Stack #579](https://github.com/bsv-blockc
 
 Normalize Expo SQLite’s Android filesystem directory to an absolute file URI before checking for saved databases; retain iOS file URIs unchanged. Native Android qualification of the shared flow found this before restoration.
 
-Published SDK 2.8.1 supplies the authenticated empty AES-GCM fix from [TS Stack #574](https://github.com/bsv-blockchain/ts-stack/pull/574). The temporary AES patch is removed; the existing native primitive acceleration patch is preserved against 2.8.3. The forced-portable CJS/ESM test covers 24 cross-runtime vectors and rejects altered tags, wrong keys/IVs and truncated envelopes.
+Published SDK 2.8.1 supplies the authenticated empty AES-GCM fix from [TS Stack #574](https://github.com/bsv-blockchain/ts-stack/pull/574). The temporary AES patch is removed; the existing native primitive acceleration patch is preserved with the 2.8.4 dependency. The forced-portable CJS/ESM test covers 24 cross-runtime vectors and rejects altered tags, wrong keys/IVs and truncated envelopes.
 
 BRC-100 app qualification also checks same-document navigation. Android may report a reader route through a loading-start callback without a later page-finished event. The browser retains that valid route immediately, keeps loading independent, and reconciles completion only from matching native progress. Cold WebView mounts resume the current route; passive route updates do not reload an already-mounted page. Regression coverage includes duplicate callbacks, invalid URLs, back/forward history, tab switching and restoration. Native qualification must repeat these checks after dependency changes.
 
@@ -42,7 +42,7 @@ These are SDK compatibility repairs. No BRC100 application API, wire format or a
 
 SDK release evidence includes 7,393 passing SDK tests and an old/new signed-history matrix preserving all 32 previously valid response-byte cases; the eight known 2.8.1/2.8.2 negative-history failures are recorded separately. The dependency upgrade still requires this wallet's own checks and native acceptance before release; SDK evidence alone is not app acceptance.
 
-The funding app also pins 2.8.3; `docs/fund.html` is regenerated from that locked dependency graph. The acceleration patch changes only its SDK version context; the published AES and wallet-discovery fixes remain intact.
+The funding app also pins 2.8.4; `docs/fund.html` is regenerated from that locked dependency graph. The acceleration patch changes only its SDK version context; the published AES and wallet-discovery fixes remain intact.
 
 Signed-out iOS Apple Pay mode retains its script-injection prohibition. A narrow
 `react-native-webview` patch observes [WebKit's KVO-compliant native URL](https://developer.apple.com/documentation/webkit/wkwebview/url)
