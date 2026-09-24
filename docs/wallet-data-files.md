@@ -34,9 +34,9 @@ BRC-100 app qualification also checks same-document navigation. Android may repo
 
 Save/share offers **Save to folder** through the Android document-provider picker as well as the platform share sheet. This works when no installed sharing app offers a local-save destination. Saving creates a new provider file and copies in 256 KiB chunks, verifies its size and yields between writes; it never loads the complete archive into JavaScript memory. Interrupted/failed saves remove only the newly created partial output when possible and retain the app’s original. Provider selection stays outside the cancellable copy so the system picker’s background transition does not abort a fresh save. Nonempty destination files are refused without deletion.
 
-## SDK 2.8.3 integration
+## SDK 2.8.3 compatibility changes (included in 2.8.4)
 
-The wallet pins published SDK 2.8.3, including the authenticated AES-GCM and bounded discovery fixes from 2.8.1/2.8.2. [TS Stack #587](https://github.com/bsv-blockchain/ts-stack/pull/587) also preserves explicit originators during HTTP discovery, binds browser JSON fetch correctly, and restores signed `listActions` net amounts using the historical wire bytes. Counts, lengths, individual output values, origin binding and response validation remain strict.
+SDK 2.8.3 included the authenticated AES-GCM and bounded discovery fixes from 2.8.1/2.8.2. [TS Stack #587](https://github.com/bsv-blockchain/ts-stack/pull/587) also preserves explicit originators during HTTP discovery, binds browser JSON fetch correctly, and restores signed `listActions` net amounts using the historical wire bytes. Counts, lengths, individual output values, origin binding and response validation remain strict.
 
 These are SDK compatibility repairs. No BRC100 application API, wire format or account-data migration is required. Existing older clients retain their calls and wire bytes; applications that bundle an affected 2.8.x client can take the SDK patch without rewriting calls. This does not impose an ecosystem-wide SDK upgrade. Wallet provider installation and standard BRC100 responses must remain compatible with older clients.
 
@@ -50,3 +50,14 @@ to report completed same-document navigation when the normal injected history
 shim is unavailable. It emits only for the current mounted WebView and matching
 URL after native history state settles, and removes its observer on teardown.
 Native reader back/forward and restart acceptance are required after rebuilding.
+
+
+## SDK 2.8.4 history compatibility
+
+The published 2.8.4 SDK restores existing `listActions` histories containing
+empty stored descriptions and unassigned baskets. It preserves the original
+strings, signed net amounts, wire encoding and strict script/value/label checks.
+No application API or account-data migration is needed; affected hardened SDK
+clients can dependency-update without rewriting calls. Existing older clients
+remain supported. This dependency patch does not supersede upstream wallet
+portability, storage-fencing, fee-setting or identity fixes.
