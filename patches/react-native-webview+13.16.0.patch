@@ -1,3 +1,89 @@
+diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+index 80c6803..8ffea4f 100644
+--- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
++++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+@@ -18,6 +18,7 @@ import android.webkit.WebViewClient;
+ import androidx.annotation.NonNull;
+ import androidx.annotation.Nullable;
+ import androidx.webkit.JavaScriptReplyProxy;
++import androidx.webkit.ScriptHandler;
+ import androidx.webkit.WebMessageCompat;
+ import androidx.webkit.WebViewCompat;
+ import androidx.webkit.WebViewFeature;
+@@ -53,6 +54,7 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+     String injectedJS;
+     protected @Nullable
+     String injectedJSBeforeContentLoaded;
++    private ScriptHandler documentStartScript;
+     protected static final String JAVASCRIPT_INTERFACE = "ReactNativeWebView";
+     protected @Nullable
+     RNCWebViewBridge fallbackBridge;
+@@ -308,6 +310,32 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+         }
+     }
+ 
++    public void setInjectedJSBeforeContentLoaded(String script) {
++        injectedJSBeforeContentLoaded = script;
++        updateDocumentStartScript();
++    }
++
++    public void setInjectedJSBeforeContentLoadedForMainFrameOnly(boolean value) {
++        injectedJavaScriptBeforeContentLoadedForMainFrameOnly = value;
++        updateDocumentStartScript();
++    }
++
++    private void updateDocumentStartScript() {
++        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return;
++        if (documentStartScript != null) {
++            documentStartScript.remove();
++            documentStartScript = null;
++        }
++        if (!TextUtils.isEmpty(injectedJSBeforeContentLoaded)) {
++            // onPageStarted/evaluateJavascript can race the page's first script.
++            // Install wallet discovery at document start on supported WebViews.
++            String guard = injectedJavaScriptBeforeContentLoadedForMainFrameOnly
++                ? "if (window.top !== window) return;\n" : "";
++            documentStartScript = WebViewCompat.addDocumentStartJavaScript(this,
++                "(function(){\n" + guard + injectedJSBeforeContentLoaded + ";\n})();", Set.of("*"));
++        }
++    }
++
+     public void callInjectedJavaScriptBeforeContentLoaded() {
+         if (getSettings().getJavaScriptEnabled() &&
+                 injectedJSBeforeContentLoaded != null &&
+@@ -416,6 +444,10 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+ 
+     @Override
+     public void destroy() {
++        if (documentStartScript != null) {
++            documentStartScript.remove();
++            documentStartScript = null;
++        }
+         if (mWebChromeClient != null) {
+             mWebChromeClient.onHideCustomView();
+         }
+diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
+index f83033b..238204e 100644
+--- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
++++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
+@@ -494,7 +494,7 @@ class RNCWebViewManagerImpl(private val newArch: Boolean = false) {
+ 
+     fun setInjectedJavaScriptBeforeContentLoaded(viewWrapper: RNCWebViewWrapper, value: String?) {
+         val view = viewWrapper.webView
+-        view.injectedJSBeforeContentLoaded = value
++        view.setInjectedJSBeforeContentLoaded(value)
+     }
+ 
+     fun setInjectedJavaScriptForMainFrameOnly(viewWrapper: RNCWebViewWrapper, value: Boolean) {
+@@ -504,7 +504,7 @@ class RNCWebViewManagerImpl(private val newArch: Boolean = false) {
+ 
+     fun setInjectedJavaScriptBeforeContentLoadedForMainFrameOnly(viewWrapper: RNCWebViewWrapper, value: Boolean) {
+         val view = viewWrapper.webView
+-        view.injectedJavaScriptBeforeContentLoadedForMainFrameOnly = value
++        view.setInjectedJSBeforeContentLoadedForMainFrameOnly(value)
+     }
+ 
+     fun setInjectedJavaScriptObject(viewWrapper: RNCWebViewWrapper, value: String?) {
 diff --git a/node_modules/react-native-webview/apple/RNCWebViewImpl.m b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
 index 7f5c24d..e71e7ed 100644
 --- a/node_modules/react-native-webview/apple/RNCWebViewImpl.m
