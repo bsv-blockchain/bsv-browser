@@ -17,7 +17,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/backup/RemoteSyncReader.
 +
 +type RequestSyncChunkArgs = sdk.RequestSyncChunkArgs
 +type SyncChunk = sdk.SyncChunk
- 
+
  export class BackupChainError extends Error {
    constructor (message: string) {
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/backup/binaryJson.ts b/node_modules/@bsv/expo-wallet-toolbox/core/backup/binaryJson.ts
@@ -121,14 +121,14 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/backup/codec.ts b/node_m
 -} from '@bsv/wallet-toolbox-mobile/out/src/storage/remoting/BinaryJson'
 +} from './binaryJson'
  import { BACKUP_PROTOCOL, backupKeyId, type BackupChain } from './constants'
- 
+
  /**
 @@ -30,6 +30,7 @@
   * usually ids rather than payloads.
   */
  const PACK_MIN_LENGTH = 32
 +type SyncChunk = sdk.SyncChunk
- 
+
  /**
   * Repack byte-valued numeric arrays as Uint8Array so the binary serialiser can base64 them.
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/backup/push.ts b/node_modules/@bsv/expo-wallet-toolbox/core/backup/push.ts
@@ -155,7 +155,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.ts
 +import { WalletDataStorageManager } from '../../../../../utils/walletPortability/WalletDataStorageManager'
 +import type { WalletDataSession } from '../../../../../utils/walletPortability/session'
 +import { WalletDataMonitorFence } from '../../../../../utils/walletPortability/monitorFence'
- 
+
  import React, { useState, useEffect, createContext, useMemo, useCallback, useContext, useRef } from 'react'
  import {
 @@ -9,17 +12,15 @@
@@ -177,12 +177,12 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.ts
 -  WalletSettings,
 -  WalletSettingsManager
 -} from '@bsv/wallet-toolbox-mobile/out/src/WalletSettingsManager'
- 
+
  /** App-level defaults: library defaults + additional certifiers */
  /**
 @@ -219,6 +220,7 @@
  // -----
- 
+
  interface ManagerState {
 +  walletData?: WalletDataSession
    walletManager?: SimpleWalletManager
@@ -205,12 +205,12 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.ts
 +        await managersRef.current.walletData?.close()
 +        const storageManager = new WalletDataStorageManager(keyDeriver.identityKey)
          const signer = new WalletSigner(walletChain, keyDeriver, storageManager)
- 
+
          const bsvExchangeRate = await getExchangeRate()
 @@ -1152,14 +1157,15 @@
            const selectedDb = selectLatestDb(knownDbs)
            console.log(`[WalletContext] Selected DB: ${selectedDb} (from ${knownDbs.length} registered)`)
- 
+
 -          phoneStorage = new StorageExpoSQLite({
 +          const fileBinding = await loadWalletDataBinding(walletChain, identityKey)
 +          phoneStorage = fileBinding ? await openBoundWalletData(fileBinding, walletChain, identityKey) : new StorageExpoSQLite({
@@ -222,13 +222,13 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.ts
            phoneStorage.setServices(services)
 -          await phoneStorage.migrate('bsv-wallet', identityKey)
 +          if (!fileBinding) await phoneStorage.migrate('bsv-wallet', identityKey)
- 
+
            console.log('[WalletContext] Local SQLite storage initialized successfully')
- 
+
 @@ -1180,6 +1186,7 @@
              localStorageAdded = true
            }
- 
+
 +          if (fileBinding) restoreIntentRef.current = false
            if (restoreIntentRef.current) {
              restoreIntentRef.current = false
@@ -239,7 +239,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.ts
              console.error('[WalletContext] Failed to add local storage provider:', error)
 +            throw error
            }
- 
+
            try {
 @@ -1308,7 +1316,7 @@
            if (staleMonitor) {
@@ -265,13 +265,13 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.ts
 +        }
          updateManagers(m => ({ ...m, ...newManagers }))
          logWithTimestamp(F, 'Wallet build completed successfully')
- 
+
 @@ -1925,6 +1942,7 @@
      restoreIntentRef.current = opts?.restoreFromBackup === true
      // Any build already in flight belongs to the configuration being replaced.
      const token = buildGenRef.current.bump()
 +    await managersRef.current.walletData?.close()
- 
+
      // Stop any running monitor and let its current pass drain before the
      // storage teardown below closes the connection under it.
 @@ -1980,6 +1998,7 @@
@@ -279,7 +279,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.ts
        logWithTimestamp(F, `Switching network from ${selectedNetwork} to ${network}`)
        buildGenRef.current.bump()
 +      await managersRef.current.walletData?.close()
- 
+
        // Stop any running monitor and let its current pass drain before the
        // storage teardown below closes the connection under it.
 @@ -2306,6 +2325,7 @@
@@ -308,7 +308,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/headers/OfflineFirstChai
 -import type { ChaintracksClientApi } from '@bsv/wallet-toolbox-mobile/out/src/services/chaintracker/chaintracks/Api/ChaintracksClientApi'
 +import type { ChaintracksClientApi } from '@bsv/wallet-toolbox-mobile'
  import type { HeaderStore } from './headerStore'
- 
+
  /** A merkle root as display-order hex, whether the source gave us a hex string
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/headers/headerStore.ts b/node_modules/@bsv/expo-wallet-toolbox/core/headers/headerStore.ts
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/headers/headerStore.ts
@@ -325,11 +325,11 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/headers/headerStore.ts b
 +import { utils as toolboxUtils } from '@bsv/wallet-toolbox-mobile'
  import type { HeaderCheckpoint } from './checkpoints'
  import type { HeaderFs } from './fs'
- 
+
  const HEADER_BYTES = 80
  const ROOT_BYTES = 32
 +const { blockHash, deserializeBaseBlockHeader, validateHeaderDifficulty } = toolboxUtils
- 
+
  interface StoredMeta {
    chain: string
 @@ -196,10 +193,8 @@
@@ -367,7 +367,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskCreditInbox.
 -import { WalletMonitorTask } from '@bsv/wallet-toolbox-mobile/out/src/monitor/tasks/WalletMonitorTask'
 +import { WalletMonitorTask } from './WalletMonitorTask'
  import type { Monitor } from '@bsv/wallet-toolbox-mobile'
- 
+
  export interface CreditInboxTaskResult {
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskDrainOutbox.ts b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskDrainOutbox.ts
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskDrainOutbox.ts
@@ -380,7 +380,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskDrainOutbox.
 +import { WalletMonitorTask } from './WalletMonitorTask'
  import type { Monitor } from '@bsv/wallet-toolbox-mobile'
  import type { OutboxEntry } from '../peerpay/outbox'
- 
+
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline.ts b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline.ts
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline.ts
@@ -392,7 +392,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/TaskSendOffline.
 +import { WalletMonitorTask } from './WalletMonitorTask'
  import type { Monitor } from '@bsv/wallet-toolbox-mobile'
  import type { ProcessOfflineActionsResult } from '../storage/methods/processOfflineActions'
- 
+
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/monitor/WalletMonitorTask.ts b/node_modules/@bsv/expo-wallet-toolbox/core/monitor/WalletMonitorTask.ts
 new file mode 100644
 --- /dev/null
@@ -431,9 +431,9 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/offline/plan.ts b/node_m
 +import type { sdk } from '@bsv/wallet-toolbox-mobile'
 +
 +type ProvenTxReqStatus = sdk.ProvenTxReqStatus
- 
+
  export type PostOutcome = 'success' | 'serviceError' | 'invalidTx' | 'doubleSpend'
- 
+
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/pay/recordProof.ts b/node_modules/@bsv/expo-wallet-toolbox/core/pay/recordProof.ts
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/pay/recordProof.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/pay/recordProof.ts
@@ -451,7 +451,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/pay/recordProof.ts b/nod
 +} from '@bsv/wallet-toolbox-mobile'
 +
 +type UpdateProvenTxReqWithNewProvenTxArgs = sdk.UpdateProvenTxReqWithNewProvenTxArgs
- 
+
  export interface ProofStorage {
    findProvenTxReqs(args: {
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/services/arcadeBroadcastProvider.ts b/node_modules/@bsv/expo-wallet-toolbox/core/services/arcadeBroadcastProvider.ts
@@ -467,7 +467,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/services/arcadeBroadcast
 +
 +type PostBeefResult = sdk.PostBeefResult
 +type PostTxResultForTxid = sdk.PostTxResultForTxid
- 
+
  /**
   * ARC intermediate statuses that still mean "accepted for relay".
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/services/exchangeRate.ts b/node_modules/@bsv/expo-wallet-toolbox/core/services/exchangeRate.ts
@@ -479,7 +479,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/services/exchangeRate.ts
  import AsyncStorage from '@react-native-async-storage/async-storage'
 +
 +type BsvExchangeRate = sdk.BsvExchangeRate
- 
+
  // Shared with context/ExchangeRateContext.tsx so a single cache serves both the
  // fiat-display UI and the wallet-build seed. Same key + same { usdPerBsv } shape.
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/services/walletServiceConfig.ts b/node_modules/@bsv/expo-wallet-toolbox/core/services/walletServiceConfig.ts
@@ -499,13 +499,14 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/services/walletServiceCo
 +
 +type BsvExchangeRate = sdk.BsvExchangeRate
 +type WalletServicesOptions = sdk.WalletServicesOptions
- 
+
  /**
   * The chaintracks URL for a network — the one place this table is defined.
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite.ts b/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite.ts
+index 78c929a..db4c773 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLite.ts
-@@ -23,36 +23,11 @@
+@@ -23,36 +23,11 @@ import {
  } from './methods/reclaim'
  import { availableDiskBytes, diskPressure } from '../diskSpace'
  import { devLog } from '../logging'
@@ -547,7 +548,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLit
    TableCertificate,
    TableCertificateField,
    TableCertificateX,
-@@ -69,12 +44,11 @@
+@@ -69,12 +44,11 @@ import type {
    TableTransaction,
    TableTxLabel,
    TableTxLabelMap,
@@ -563,11 +564,10 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLit
  import { listActionsSql } from './methods/listActionsSql'
  import { listOutputsSql } from './methods/listOutputsSql'
  import { findUnprovenTxidsWithoutReq } from './methods/unprovenWithoutReqSql'
-@@ -94,6 +68,32 @@
- import { buildOfflineHoldResult, groupOfflineHolds } from '../offline/hold'
+@@ -95,6 +69,32 @@ import { buildOfflineHoldResult, groupOfflineHolds } from '../offline/hold'
  import { getOnline } from '../net/online'
  import { TaskSendOffline } from '../monitor/TaskSendOffline'
-+
+
 +type AuthId = sdk.AuthId
 +type FindCertificateFieldsArgs = sdk.FindCertificateFieldsArgs
 +type FindCertificatesArgs = sdk.FindCertificatesArgs
@@ -593,9 +593,37 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/StorageExpoSQLit
 +type SyncChunk = sdk.SyncChunk
 +type TrxToken = sdk.TrxToken
 +type PostReqsToNetworkResult = Awaited<ReturnType<StorageProvider['attemptToPostReqsToNetwork']>>
- 
++
  export interface StorageExpoSQLiteOptions extends StorageProviderOptions {
    databaseName?: string
+   identityKey?: string
+@@ -1187,10 +1187,16 @@ export class StorageExpoSQLite extends StorageProvider {
+     return reqs
+   }
+
++  private provenTxClauses(args: FindProvenTxsArgs): { conditions: string[]; params: string[] } | undefined {
++    const txids = [...new Set((args.txids ?? []).filter(txid => txid !== undefined))]
++    // Match the published provider contract: an absent/empty list adds no filter.
++    return txids.length > 0 ? { conditions: [`txid IN (${txids.map(() => '?').join(',')})`], params: txids } : undefined
++  }
++
+   async findProvenTxs(args: FindProvenTxsArgs): Promise<TableProvenTx[]> {
+     if ((args.partial as any).rawTx) throw new Error('ProvenTxs may not be found by rawTx value.')
+     if ((args.partial as any).merklePath) throw new Error('ProvenTxs may not be found by merklePath value.')
+-    const rows = await this.sqlFind<any>('proven_txs', args, 'provenTxId')
++    const rows = await this.sqlFind<any>('proven_txs', args, 'provenTxId', this.provenTxClauses(args))
+     const proven = this.validateEntities(rows)
+     return proven
+   }
+@@ -1336,7 +1342,7 @@ export class StorageExpoSQLite extends StorageProvider {
+   }
+
+   async countProvenTxs(args: FindProvenTxsArgs): Promise<number> {
+-    return this.sqlCount('proven_txs', args)
++    return this.sqlCount('proven_txs', args, this.provenTxClauses(args))
+   }
+
+   async countTxLabelMaps(args: FindTxLabelMapsArgs): Promise<number> {
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listActionsSql.ts b/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listActionsSql.ts
 --- a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listActionsSql.ts
 +++ b/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listActionsSql.ts
@@ -616,7 +644,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listActi
 -import { parseBrc114ActionTimeLabels, makeBrc114ActionTimeLabel } from '@bsv/wallet-toolbox-mobile/out/src/utility/brc114ActionTimeLabels'
 +
 +type AuthId = sdk.AuthId
- 
+
  export async function listActionsSql(
    storage: StorageExpoSQLite,
 @@ -32,7 +36,7 @@
@@ -642,7 +670,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/listOutp
  import { devLog, isLoggingEnabled } from '../../logging'
 +
 +type AuthId = sdk.AuthId
- 
+
  export async function listOutputsSql(
    storage: StorageExpoSQLite,
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions.ts b/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/processOfflineActions.ts
@@ -660,7 +688,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/storage/methods/processO
  import { findOfflineActions, updateOfflineAction, type OfflineActionRow, type OfflineDb } from './offlineActions'
  import {
 @@ -384,7 +382,7 @@
- 
+
    let detailStatus: string | undefined
    try {
 -    const posted = await attemptToPostReqsToNetwork(storage, [req])
@@ -693,7 +721,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/screens/SettingsScreen.tsx
 +++ b/node_modules/@bsv/expo-wallet-toolbox/ui/screens/SettingsScreen.tsx
 @@ -116,6 +116,9 @@
          </View>
- 
+
          {/* ── Activity ── */}
 +        <GroupedSection header="Wallet data">
 +          <ListRow label="Wallet data files" icon="document-outline" onPress={() => router.push('/wallet-data' as any)} isLast />

@@ -61,3 +61,11 @@ No application API or account-data migration is needed; affected hardened SDK
 clients can dependency-update without rewriting calls. Existing older clients
 remain supported. This dependency patch does not supersede upstream wallet
 portability, storage-fencing, fee-setting or identity fixes.
+
+The native SQLite adapter honors proof transaction-ID filters during archive
+synchronization, avoiding a complete proof-table read on every page. The
+existing dependency patch contains this correction until it is released
+upstream. `npm run test:wallet-files` exercises the actual patched find/count
+methods against SQLite with 2,000 proofs, including parameterization, paging,
+partial/date/transaction filters, and empty-list compatibility. Large native
+archive acceptance remains a separate device validation gate.
