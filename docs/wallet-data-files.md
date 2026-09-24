@@ -36,7 +36,7 @@ Save/share offers **Save to folder** through the Android document-provider picke
 
 ## SDK 2.8.2 integration
 
-The wallet now pins published SDK 2.8.2, retaining the authenticated AES-GCM fix from 2.8.1 and adding [TS Stack #581](https://github.com/bsv-blockchain/ts-stack/pull/581). Successful automatic React Native/XDM discovery no longer leaves subsequent wallet calls subject to the short probe deadline. Discovery remains bounded, explicit operation timeouts and response/origin validation are unchanged. Web applications must also update their own SDK bundle; upgrading a wallet alone cannot repair an older application bundle.
+The wallet now pins published SDK 2.8.2, retaining the authenticated AES-GCM fix from 2.8.1 and adding [TS Stack #581](https://github.com/bsv-blockchain/ts-stack/pull/581). Successful automatic React Native/XDM discovery no longer leaves subsequent wallet calls subject to the short probe deadline. Discovery remains bounded, explicit operation timeouts and response/origin validation are unchanged. The BRC100 API and wire contracts remain unchanged; this release does not require an ecosystem-wide application migration. SDK 2.8.2 is recommended for its client-side discovery fixes when React Native or XDM is selected. Wallets must still install their existing provider reliably before app scripts and return standard BRC100 responses so compatible older SDK bundles continue to work.
 
 The funding app also pins 2.8.2; `docs/fund.html` is regenerated from that locked dependency graph. The acceleration patch changes only its SDK version context; the published AES and wallet-discovery fixes remain intact.
 
