@@ -39,4 +39,9 @@ export const DEFAULT_MESSAGEBOX_URL = 'https://gmb.bsvblockchain.tech'
  *   EXPO_PUBLIC_BACKUP_URL=https://backup.example.com npm run ios
  */
 export const DEFAULT_CHAIN: AppChain = 'main'
-export const ADMIN_ORIGINATOR = 'admin.com'
+/**
+ * The wallet's own originator: the toolbox's value, so the permissions manager and the
+ * vault guard agree on one string. It sits in the reserved `.invalid` TLD, which no page
+ * can be served from, and walletFrameIdentityFromUrl refuses that TLD outright.
+ */
+export { ADMIN_ORIGINATOR } from '@bsv/expo-wallet-toolbox'

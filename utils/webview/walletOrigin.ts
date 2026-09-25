@@ -20,6 +20,10 @@ export function walletFrameIdentityFromUrl(frameUrl: unknown): WalletFrameIdenti
     const parsed = new URL(frameUrl)
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return undefined
     if (!parsed.hostname) return undefined
+    // The wallet's own originator lives in the reserved `.invalid` TLD; a frame
+    // claiming it must never reach the wallet as admin.
+    const host = parsed.hostname.toLowerCase().replace(/\.$/, '')
+    if (host === 'invalid' || host.endsWith('.invalid')) return undefined
     return { originator: parsed.hostname, responseOrigin: parsed.origin }
   } catch {
     return undefined

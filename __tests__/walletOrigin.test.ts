@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { ADMIN_ORIGINATOR } from '@/context/config'
+import { ADMIN_ORIGINATOR as TOOLBOX_ADMIN_ORIGINATOR } from '@bsv/expo-wallet-toolbox'
 import { resolveWalletFrameIdentity, walletFrameIdentityFromUrl } from '@/utils/webview/walletOrigin'
 
 describe('walletFrameIdentityFromUrl', () => {
@@ -58,5 +60,20 @@ describe('resolveWalletFrameIdentity', () => {
   it('handleMessage uses the native frame URL with a tab-URL fallback', () => {
     const index = readFileSync(resolve(process.cwd(), 'app/index.tsx'), 'utf8')
     expect(index).toContain('resolveWalletFrameIdentity(eventUrl, activeTab.url)')
+  })
+
+  it('refuses frames in the reserved .invalid TLD that holds the admin originator', () => {
+    expect(walletFrameIdentityFromUrl(`https://${ADMIN_ORIGINATOR}/`)).toBeUndefined()
+    expect(walletFrameIdentityFromUrl('https://evil.INVALID./x')).toBeUndefined()
+    expect(walletFrameIdentityFromUrl('http://invalid/')).toBeUndefined()
+    expect(resolveWalletFrameIdentity('https://admin.invalid/', 'https://example.com/')).toEqual({
+      originator: 'example.com',
+      responseOrigin: 'https://example.com'
+    })
+  })
+
+  it('uses the toolbox admin originator, not a registrable domain', () => {
+    expect(ADMIN_ORIGINATOR).toBe(TOOLBOX_ADMIN_ORIGINATOR)
+    expect(ADMIN_ORIGINATOR.endsWith('.invalid')).toBe(true)
   })
 })
