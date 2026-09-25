@@ -51,7 +51,6 @@ shim is unavailable. It emits only for the current mounted WebView and matching
 URL after native history state settles, and removes its observer on teardown.
 Native reader back/forward and restart acceptance are required after rebuilding.
 
-
 ## SDK 2.8.4 history compatibility
 
 The published 2.8.4 SDK restores existing `listActions` histories containing
@@ -78,7 +77,6 @@ Authentication signatures, canonical framing and existing BRC100 calls are
 unchanged. BRC-38/39 archives and wallet records need no migration. Server
 operators own HTTP transport admission and should check their complete route.
 
-
 ## SDK 2.8.6 payment ownership correction
 
 This release pins the published SDK 2.8.6 package, including its recipient-side
@@ -87,3 +85,13 @@ acceptance and refund paths receive the correction through the dependency.
 BRC100 public APIs and encodings, stored permissions, account snapshots and
 BRC-38/39 archives are unchanged; no application or archive migration is needed.
 Prior-version native evidence above remains identified by its tested version.
+
+## Toolbox 2.14.1 result compatibility
+
+The dependency follow-up retains SDK2.8.6 and consumes Toolbox Mobile2.14.1.
+Exact-spend accounting remains local and includes storage service charges; the
+internal metadata no longer appears on public `createAction` results. The offline
+regression suite exercises completed and partial results through the binary
+BRC100 codec, plus denial before signing. No BRC-38/39 archive, database or
+account-recovery migration is required. Existing native file and interop evidence
+remains applicable; normal dependency and package checks must pass before release.

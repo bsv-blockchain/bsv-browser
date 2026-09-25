@@ -46,7 +46,7 @@
     "@bsv/sdk": "2.8.6",
     "@bsv/templates": "1.10.3",
     "@bsv/wallet-relay": "^0.4.0",
-    "@bsv/wallet-toolbox-mobile": "2.14.0",
+    "@bsv/wallet-toolbox-mobile": "2.14.1",
     "@callstack/liquid-glass": "^0.7.1",
     "@craftzdog/react-native-buffer": "6.1.2",
     "@dicebear/core": "^9.2.2",
