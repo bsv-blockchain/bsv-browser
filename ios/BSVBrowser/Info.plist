@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.6.1</string>
+	<string>1.6.2</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleURLTypes</key>
@@ -72,6 +72,8 @@
 	<string>12.0</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NFCReaderUsageDescription</key>
+	<string>BSV Browser uses NFC to unlock your vault with your YubiKey. Hold the key to the top of your phone when asked.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -79,6 +81,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>BSV Browser uses Bluetooth to send and receive payments directly between nearby devices.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>BSV Browser uses Bluetooth to send and receive payments directly between nearby devices.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_bsvpay._tcp</string>
@@ -88,10 +94,6 @@
 	<string>This app needs camera access to scan QR codes.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>This app uses Face ID/Touch ID to securely authenticate you and protect your wallet.</string>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>BSV Browser uses Bluetooth to send and receive payments directly between nearby devices.</string>
-	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>BSV Browser uses Bluetooth to send and receive payments directly between nearby devices.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>BSV Browser uses the local network to send and receive payments directly between nearby devices.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -106,6 +108,23 @@
 	</array>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>SplashScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -134,8 +153,6 @@
 	<string>Automatic</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
-	<key>NFCReaderUsageDescription</key>
-	<string>BSV Browser uses NFC to unlock your vault with your YubiKey. Hold the key to the top of your phone when asked.</string>
 	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
 	<array>
 		<string>A000000308</string>
@@ -145,22 +162,5 @@
 		<string>A000000527471117</string>
 		<string>A0000005272001</string>
 	</array>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-		<key>UISceneConfigurations</key>
-		<dict>
-			<key>UIWindowSceneSessionRoleApplication</key>
-			<array>
-				<dict>
-					<key>UISceneConfigurationName</key>
-					<string>Default Configuration</string>
-					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
-				</dict>
-			</array>
-		</dict>
-	</dict>
 </dict>
 </plist>
