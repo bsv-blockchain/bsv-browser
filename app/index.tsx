@@ -747,7 +747,12 @@ const Browser = observer(function Browser() {
       // capWalletArgs sits OUTSIDE the vault guard so an oversize payload is
       // refused before it can cost a permission prompt or a storage touch. See
       // services/capWalletArgs.ts for why the cap cannot live any lower.
-      setWallet(capWalletArgs(guardVaultAccess(managers.walletManager as any, ADMIN_ORIGINATOR)))
+      // Wrap the permissions manager, as the toolbox's own screens do: the
+      // guard's vault-inventory scan runs as the admin originator, which the
+      // walletManager refuses from any caller, so wrapping it denied every
+      // page's createAction. The toolbox has already guarded this object, so
+      // the call below returns its existing proxy.
+      setWallet(capWalletArgs(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR)))
       paymentHandlerRef.current = getPaymentHandler(managers.walletManager)
     } else if (isWeb2Mode) {
       setWallet(undefined)
