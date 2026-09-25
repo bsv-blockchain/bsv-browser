@@ -1,8 +1,7 @@
 diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
-index 26e6377..5f231a4 100644
 --- a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
 +++ b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
-@@ -9456,10 +9456,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {
+@@ -9456,10 +9456,158 @@
  * @throws WERR_INVALID_PARAMETER if any unlocking script is invalid, if sourceTXID is invalid, if beef doesn't contain required transactions.
  */
  async function verifyUnlockScripts(txid, beef, verifier) {
@@ -162,7 +161,7 @@ index 26e6377..5f231a4 100644
  async function completeSignedTransaction(prior, spends, wallet) {
  	for (const [key, spend] of Object.entries(spends)) {
  		const vin = Number(key);
-@@ -9470,7 +9618,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9470,7 +9618,7 @@
  		input.unlockingScript = asBsvSdkScript(spend.unlockingScript);
  		if (spend.sequenceNumber !== void 0) input.sequence = spend.sequenceNumber;
  	}
@@ -171,7 +170,7 @@ index 26e6377..5f231a4 100644
  		const counterparties = /* @__PURE__ */ new Map();
  		const counterparty = (publicKey) => {
  			let parsed = counterparties.get(publicKey);
-@@ -9496,7 +9644,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9496,7 +9644,7 @@
  			keyID: template.getKeyID(),
  			counterparty: unlockerPubKey
  		}));
@@ -180,7 +179,7 @@ index 26e6377..5f231a4 100644
  		for (let index = 0; index < prepared.length; index++) {
  			const { pdi, template } = prepared[index];
  			const unlockTemplate = template.unlockWithDerivedPrivateKey(derivedPrivateKeys[index], pdi.sourceSatoshis, asBsvSdkScript(pdi.lockingScript));
-@@ -9519,7 +9667,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9519,7 +9667,7 @@
  			attributes: { "crypto.managed_input_count": prior.pdi.length }
  		}, () => prepareUnlockingTemplates(keys));
  	});
@@ -189,7 +188,7 @@ index 26e6377..5f231a4 100644
  	if (wallet.telemetry.enabled) await wallet.telemetry.withSpan("wallet.crypto.transaction_sign", {
  		component: "wallet-toolbox",
  		carrier: prior.args,
-@@ -12688,7 +12836,12 @@ var Wallet = class {
+@@ -12795,7 +12943,12 @@
  			offset: 0
  		} : vargs;
  		const r = this.actionBatch.overlayListActions(await this.storage.listActions(storageArgs), vargs);
@@ -203,7 +202,7 @@ index 26e6377..5f231a4 100644
  		return r;
  	}
  	get storageParty() {
-@@ -12990,6 +13143,12 @@ var Wallet = class {
+@@ -13097,6 +13250,12 @@
  			prepareKnownTxidsForCreateAction(this, args);
  			const { auth, vargs } = this.validateAuthAndArgs(args, _bsv_sdk_wallet_validationHelpers.validateCreateActionArgs, logger);
  			logger?.log("validated args");
@@ -216,7 +215,7 @@ index 26e6377..5f231a4 100644
  			vargs.includeAllSourceTransactions = this.includeAllSourceTransactions;
  			if (this.randomVals != null && this.randomVals.length > 1) vargs.randomVals = [...this.randomVals];
  			const brc177Requested = hasBrc177NoSendExpiryLabel(vargs.labels);
-@@ -13962,6 +14121,11 @@ async function resolveInputScript(storage, userId, vargs, input, beef, preloaded
+@@ -14069,6 +14228,11 @@
  	} }));
  	if (output != null) applyStoredInputScript(output, input, vargs);
  	else await applyBeefInputScript(storage, beef, input);
@@ -228,7 +227,7 @@ index 26e6377..5f231a4 100644
  }
  async function validateNoSendChange(storage, userId, vargs, changeBasket) {
  	const r = [];
-@@ -14015,10 +14179,16 @@ function makeFundingParams(args) {
+@@ -14122,10 +14286,16 @@
  		changeFirstSatoshis: compatibilityFallback ? 1 : preferredSatoshis,
  		changeLockingScriptLength: 25,
  		changeUnlockingScriptLength: 107,
@@ -249,10 +248,9 @@ index 26e6377..5f231a4 100644
  	};
  }
 diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
-index 81baa70..cfadaf5 100644
 --- a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
 +++ b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
-@@ -9421,10 +9421,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {
+@@ -9421,10 +9421,158 @@
  * @throws WERR_INVALID_PARAMETER if any unlocking script is invalid, if sourceTXID is invalid, if beef doesn't contain required transactions.
  */
  async function verifyUnlockScripts(txid, beef, verifier) {
@@ -412,7 +410,7 @@ index 81baa70..cfadaf5 100644
  async function completeSignedTransaction(prior, spends, wallet) {
  	for (const [key, spend] of Object.entries(spends)) {
  		const vin = Number(key);
-@@ -9435,7 +9583,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9435,7 +9583,7 @@
  		input.unlockingScript = asBsvSdkScript(spend.unlockingScript);
  		if (spend.sequenceNumber !== void 0) input.sequence = spend.sequenceNumber;
  	}
@@ -421,7 +419,7 @@ index 81baa70..cfadaf5 100644
  		const counterparties = /* @__PURE__ */ new Map();
  		const counterparty = (publicKey) => {
  			let parsed = counterparties.get(publicKey);
-@@ -9461,7 +9609,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9461,7 +9609,7 @@
  			keyID: template.getKeyID(),
  			counterparty: unlockerPubKey
  		}));
@@ -430,7 +428,7 @@ index 81baa70..cfadaf5 100644
  		for (let index = 0; index < prepared.length; index++) {
  			const { pdi, template } = prepared[index];
  			const unlockTemplate = template.unlockWithDerivedPrivateKey(derivedPrivateKeys[index], pdi.sourceSatoshis, asBsvSdkScript(pdi.lockingScript));
-@@ -9484,7 +9632,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9484,7 +9632,7 @@
  			attributes: { "crypto.managed_input_count": prior.pdi.length }
  		}, () => prepareUnlockingTemplates(keys));
  	});
@@ -439,7 +437,7 @@ index 81baa70..cfadaf5 100644
  	if (wallet.telemetry.enabled) await wallet.telemetry.withSpan("wallet.crypto.transaction_sign", {
  		component: "wallet-toolbox",
  		carrier: prior.args,
-@@ -12653,7 +12801,12 @@ var Wallet = class {
+@@ -12760,7 +12908,12 @@
  			offset: 0
  		} : vargs;
  		const r = this.actionBatch.overlayListActions(await this.storage.listActions(storageArgs), vargs);
@@ -453,7 +451,7 @@ index 81baa70..cfadaf5 100644
  		return r;
  	}
  	get storageParty() {
-@@ -12955,6 +13108,12 @@ var Wallet = class {
+@@ -13062,6 +13215,12 @@
  			prepareKnownTxidsForCreateAction(this, args);
  			const { auth, vargs } = this.validateAuthAndArgs(args, validateCreateActionArgs, logger);
  			logger?.log("validated args");
@@ -466,7 +464,7 @@ index 81baa70..cfadaf5 100644
  			vargs.includeAllSourceTransactions = this.includeAllSourceTransactions;
  			if (this.randomVals != null && this.randomVals.length > 1) vargs.randomVals = [...this.randomVals];
  			const brc177Requested = hasBrc177NoSendExpiryLabel(vargs.labels);
-@@ -13927,6 +14086,11 @@ async function resolveInputScript(storage, userId, vargs, input, beef, preloaded
+@@ -14034,6 +14193,11 @@
  	} }));
  	if (output != null) applyStoredInputScript(output, input, vargs);
  	else await applyBeefInputScript(storage, beef, input);
@@ -478,7 +476,7 @@ index 81baa70..cfadaf5 100644
  }
  async function validateNoSendChange(storage, userId, vargs, changeBasket) {
  	const r = [];
-@@ -13980,10 +14144,16 @@ function makeFundingParams(args) {
+@@ -14087,10 +14251,16 @@
  		changeFirstSatoshis: compatibilityFallback ? 1 : preferredSatoshis,
  		changeLockingScriptLength: 25,
  		changeUnlockingScriptLength: 107,

@@ -45,7 +45,7 @@
     "@bsv/sdk": "^2.8.2",
     "@bsv/templates": "^1.10.3",
     "@bsv/wallet-relay": "^0.5.1",
-    "@bsv/wallet-toolbox-mobile": "^2.14.0",
+    "@bsv/wallet-toolbox-mobile": "^2.14.2",
     "@callstack/liquid-glass": "^0.7.1",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",

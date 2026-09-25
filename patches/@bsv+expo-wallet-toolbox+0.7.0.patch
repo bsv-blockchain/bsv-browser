@@ -1,0 +1,46 @@
+diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
+--- a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
++++ b/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
+@@ -1343,20 +1343,7 @@
+               label={t('pay_step_continue')}
+               icon="arrow-forward"
+             />
+-          ) : (
+-            <PressableScale
+-              onPress={() => loadExpoRouter().router.push('/contacts' as never)}
+-              haptic="tap"
+-              style={[
+-                styles.outlineBtn,
+-                { backgroundColor: colors.surfaceRaised, borderColor: colors.surfaceRaisedBorder }
+-              ]}
+-              accessibilityRole="button"
+-            >
+-              <Ionicons name="people-outline" size={18} color={colors.textPrimary} />
+-              <Text style={[styles.outlineBtnText, { color: colors.textPrimary }]}>{t('pay_step_contacts')}</Text>
+-            </PressableScale>
+-          )}
++          ) : null}
+ 
+           {outbox.length > 0 && (
+             <OutgoingSection
+@@ -1554,7 +1541,7 @@
+           amountText={sent.amountText}
+           statusNote={sent.statusNote}
+           recipientName={sent.recipient}
+-          onAddContact={offerAddContact ? onAddContact : undefined}
++          onAddContact={undefined}
+           onDismiss={() => setSent(null)}
+           dismissTo={dismissTo}
+         />
+diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx
+--- a/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx
++++ b/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx
+@@ -304,7 +304,7 @@
+       cancelled = true
+     }
+   }, [counterpartyIdentityKey, contactsStore, walletUserId])
+-  const faceTappable = isContact && !!counterpartyIdentityKey
++  const faceTappable = false
+   const onPressFace = useCallback(() => {
+     if (!counterpartyIdentityKey) return
+     loadExpoRouter().router.push({ pathname: '/contact', params: { identityKey: counterpartyIdentityKey } } as never)
