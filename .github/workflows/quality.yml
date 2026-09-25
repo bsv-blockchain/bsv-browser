@@ -1,0 +1,22 @@
+name: Wallet quality
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix funding-app --ignore-scripts
+      - run: node scripts/generate-webview-sources.js --check
+      - run: npx tsc --noEmit
+      - run: npm test -- --runInBand
+      - run: npm run test:wallet-files
+      - run: npx expo export --platform ios --platform android --output-dir dist-qa

@@ -1,0 +1,97 @@
+# Wallet data files
+
+Open **Wallet data files** from Settings or Wallet configuration. Choose a BRC-38 or BRC-39 file with the native document picker, enter its passphrase if encrypted, and validate it. The screen displays the wallet identity, network and every record category before any activation. Signing keys are recovered separately.
+
+Create an encrypted export with a long passphrase of at least 12 characters. Save/share uses the native platform sheet. Completed exports and original imports remain available after restart or container relocation. Wrong passwords, corrupt tags and invalid records leave the active wallet unchanged.
+
+Restore a separate copy first, or merge into the matching active wallet. Merge saves a complete before point, reconciles records separately and retains resumable progress. Changed recovery data and mismatched destinations fail closed. Explicit activation stops and drains the existing monitor and wallet sessions, selects a verified database for the exact identity/network, and rebuilds the wallet with its existing keys.
+
+The native adapter retains the application's SQLite schema and monitor tasks. Operations use bounded streaming (2 GiB files, 64 MiB rows), strict category/reference validation, Argon2id and AES-256-GCM. The iOS SQLite text patch preserves embedded NUL values, and iOS/Android statement finalization records freed state before reporting an SQL error.
+
+## Dependency compatibility
+
+SDK 2.8.0's transaction snapshot and atomic signing checks are preserved. The previous native batch-signing shortcut is disabled until it implements those guards. Compatible native primitive acceleration remains. Header proof checks now supply exactly 32 hash bytes to the patched Toolbox API. Restored databases must match the selected identity, network and storage key before any migration. Protocol permissions and vault access checks remain active.
+
+The dependency update aligns Expo 55 and React Native 0.83 patch releases and their native pods. Published Templates 1.10.3 fixes the SDK import interoperability reported in [TS Stack #571](https://github.com/bsv-blockchain/ts-stack/issues/571), so the temporary CommonJS patch is removed. The Expo Router patch uses the default export of query-string 9.5.1, allowing its patched URI decoder without changing URL semantics. Template interoperability and the remaining router patch have targeted regression coverage. Native engine provenance is generated from the locked Cargo dependency rather than an absent sibling checkout.
+
+This repository tracks its iOS project. Expo Doctor therefore reports the existing non-CNG configuration-sync warning: changes to app.json native properties must also be applied to the native project. The aligned dependencies pass its other 19 checks. Do not regenerate the tracked iOS project without preserving the custom native modules and entitlements.
+
+Run `npm run test:wallet-files` on Node 24.18 or newer for the independent streaming/SQLite/codec/monitor checks, `npm test -- --runInBand`, `npx tsc --noEmit` and platform bundle builds. Native file-picker/share-sheet, cancellation/restart and cross-wallet application-state acceptance must be recorded for each supported device before release. Synthetic test results do not establish a production or laboratory conformance result.
+
+References: [BRC-38](https://github.com/bsv-blockchain/BRCs/blob/2b959b13f1f73040d13cc4eb14edbfc376f8010b/outpoints/0038.md), [BRC-39](https://github.com/bsv-blockchain/BRCs/blob/2b959b13f1f73040d13cc4eb14edbfc376f8010b/outpoints/0039.md).
+
+Toolbox Mobile 2.14.0 incorporates [TS Stack #579](https://github.com/bsv-blockchain/ts-stack/pull/579): basket membership/recovery corrections, send-max authorization, optional monitor subscription recovery and additive mobile exports. Message Box Client 2.5.3 uses the patched SDK peer floor. The lockfile pins the independently verified npm artifacts.
+
+## Portable runtime qualification follow-ups
+
+Normalize Expo SQLite’s Android filesystem directory to an absolute file URI before checking for saved databases; retain iOS file URIs unchanged. Native Android qualification of the shared flow found this before restoration.
+
+Published SDK 2.8.1 supplies the authenticated empty AES-GCM fix from [TS Stack #574](https://github.com/bsv-blockchain/ts-stack/pull/574). The temporary AES patch is removed; the existing native primitive acceleration patch is preserved with the 2.8.6 dependency. The forced-portable CJS/ESM test covers 24 cross-runtime vectors and rejects altered tags, wrong keys/IVs and truncated envelopes.
+
+BRC-100 app qualification also checks same-document navigation. Android may report a reader route through a loading-start callback without a later page-finished event. The browser retains that valid route immediately, keeps loading independent, and reconciles completion only from matching native progress. Cold WebView mounts resume the current route; passive route updates do not reload an already-mounted page. Regression coverage includes duplicate callbacks, invalid URLs, back/forward history, tab switching and restoration. Native qualification must repeat these checks after dependency changes.
+
+## Android file destinations
+
+Save/share offers **Save to folder** through the Android document-provider picker as well as the platform share sheet. This works when no installed sharing app offers a local-save destination. Saving creates a new provider file and copies in 256 KiB chunks, verifies its size and yields between writes; it never loads the complete archive into JavaScript memory. Interrupted/failed saves remove only the newly created partial output when possible and retain the app’s original. Provider selection stays outside the cancellable copy so the system picker’s background transition does not abort a fresh save. Nonempty destination files are refused without deletion.
+
+## SDK 2.8.3 compatibility changes (included in 2.8.5)
+
+SDK 2.8.3 included the authenticated AES-GCM and bounded discovery fixes from 2.8.1/2.8.2. [TS Stack #587](https://github.com/bsv-blockchain/ts-stack/pull/587) also preserves explicit originators during HTTP discovery, binds browser JSON fetch correctly, and restores signed `listActions` net amounts using the historical wire bytes. Counts, lengths, individual output values, origin binding and response validation remain strict.
+
+These are SDK compatibility repairs. No BRC100 application API, wire format or account-data migration is required. Existing older clients retain their calls and wire bytes; applications that bundle an affected 2.8.x client can take the SDK patch without rewriting calls. This does not impose an ecosystem-wide SDK upgrade. Wallet provider installation and standard BRC100 responses must remain compatible with older clients.
+
+SDK release evidence includes 7,393 passing SDK tests and an old/new signed-history matrix preserving all 32 previously valid response-byte cases; the eight known 2.8.1/2.8.2 negative-history failures are recorded separately. The dependency upgrade still requires this wallet's own checks and native acceptance before release; SDK evidence alone is not app acceptance.
+
+The funding app also pins 2.8.6; `docs/fund.html` is regenerated from that locked dependency graph. The acceleration patch changes only its SDK version context; the published AES and wallet-discovery fixes remain intact.
+
+Signed-out iOS Apple Pay mode retains its script-injection prohibition. A narrow
+`react-native-webview` patch observes [WebKit's KVO-compliant native URL](https://developer.apple.com/documentation/webkit/wkwebview/url)
+to report completed same-document navigation when the normal injected history
+shim is unavailable. It emits only for the current mounted WebView and matching
+URL after native history state settles, and removes its observer on teardown.
+Native reader back/forward and restart acceptance are required after rebuilding.
+
+## SDK 2.8.4 history compatibility
+
+The published 2.8.4 SDK restores existing `listActions` histories containing
+empty stored descriptions and unassigned baskets. It preserves the original
+strings, signed net amounts, wire encoding and strict script/value/label checks.
+No application API or account-data migration is needed; affected hardened SDK
+clients can dependency-update without rewriting calls. Existing older clients
+remain supported. This dependency patch does not supersede upstream wallet
+portability, storage-fencing, fee-setting or identity fixes.
+
+The native SQLite adapter honors proof transaction-ID filters during archive
+synchronization, avoiding a complete proof-table read on every page. The
+existing dependency patch contains this correction until it is released
+upstream. `npm run test:wallet-files` exercises the actual patched find/count
+methods against SQLite with 2,000 proofs, including parameterization, paging,
+partial/date/transaction filters, and empty-list compatibility. Large native
+archive acceptance remains a separate device validation gate.
+
+## SDK 2.8.5 HTTP payment compatibility
+
+The published SDK patch increases HTTP client header capacity fourfold, including
+a 256 KiB aggregate request-header budget for larger valid payment proofs.
+Authentication signatures, canonical framing and existing BRC100 calls are
+unchanged. BRC-38/39 archives and wallet records need no migration. Server
+operators own HTTP transport admission and should check their complete route.
+
+## SDK 2.8.6 payment ownership correction
+
+This release pins the published SDK 2.8.6 package, including its recipient-side
+BRC-29 child-key derivation correction (`forSelf: true`). Existing PeerPay
+acceptance and refund paths receive the correction through the dependency.
+BRC100 public APIs and encodings, stored permissions, account snapshots and
+BRC-38/39 archives are unchanged; no application or archive migration is needed.
+Prior-version native evidence above remains identified by its tested version.
+
+## Toolbox 2.14.1 result compatibility
+
+The dependency follow-up retains SDK2.8.6 and consumes Toolbox Mobile2.14.1.
+Exact-spend accounting remains local and includes storage service charges; the
+internal metadata no longer appears on public `createAction` results. The offline
+regression suite exercises completed and partial results through the binary
+BRC100 codec, plus denial before signing. No BRC-38/39 archive, database or
+account-recovery migration is required. Existing native file and interop evidence
+remains applicable; normal dependency and package checks must pass before release.

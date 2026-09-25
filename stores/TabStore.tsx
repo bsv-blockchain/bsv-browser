@@ -608,7 +608,8 @@ export class TabStore {
 
     // Note: Navigation state will be calculated after history updates to ensure accuracy
 
-    // Only update URL and history when navigation completes and we have a valid URL
+    // Android can report a same-document route only through a loading-start
+    // callback. Retain its URL independently of the loading state.
     const rawUrl = navState.url || kNEW_TAB_URL
     // Normalize the URL to strip transient challenge parameters (e.g. Cloudflare __cf_chl_tk)
     // that would otherwise cause redirect loops to be treated as distinct navigations.
@@ -624,7 +625,7 @@ export class TabStore {
     if (!jumpPending && this.lastNavSig.get(tabId) === navSig) return
     this.lastNavSig.set(tabId, navSig)
 
-    if (!navState.loading && currentUrl && isValidUrl(currentUrl)) {
+    if (currentUrl && isValidUrl(currentUrl)) {
       // Countdown-based jump detection: each programmatic navigation sets the count to 2
       // because both onNavigationStateChange and onLoadEnd fire handleNavigationStateChange
       // with loading=false for the same event.  Decrementing on each loading=false call
@@ -632,7 +633,7 @@ export class TabStore {
       // navigation.
       const jumpCount = this.pendingHistoryJumps.get(tabId) ?? 0
       const isJump = jumpCount > 0
-      if (isJump) {
+      if (isJump && !navState.loading) {
         const remaining = jumpCount - 1
         if (remaining <= 0) {
           this.pendingHistoryJumps.delete(tabId)
@@ -655,7 +656,7 @@ export class TabStore {
       // because the first navState event after a URL change still carries the *previous*
       // page's title. Title correction happens here, safely, once the page has settled.
       const freshTitle = navState.title?.trim() || ''
-      if (freshTitle) {
+      if (!navState.loading && freshTitle) {
         tab.title = freshTitle
         // Also update the history entry for the current position
         if (history[currentIndex]) {

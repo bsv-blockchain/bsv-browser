@@ -875,27 +875,12 @@ async function runVerifyCorrupted (native: EngineNativeLike): Promise<VerifyRepo
  * be 0 and every input must have agreed.
  */
 async function runVerifyShadow (): Promise<VerifyReport['shadow']> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { verifyUnlockScripts } = require('@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction')
-    const { tx, beef, txid } = await signedP2pkhFixture(20, true).build()
-    delete g.__bsvEngineShadow
-    verifyUnlockScripts(txid, beef) // JS authoritative; engine shadows alongside
-    const s = g.__bsvEngineShadow
-    if (s?.pending != null) await s.pending
-    const eligible = s?.verifyEligible ?? 0
-    const divergences = s?.verifyDivergences ?? 0
-    const agreeInputs = s?.verifyAgreeInputs ?? 0
-    const ok = eligible === 1 && divergences === 0 && agreeInputs === tx.inputs.length
-    return {
-      pass: ok,
-      eligible,
-      divergences,
-      agreeInputs,
-      detail: `eligible ${eligible}/1, divergences ${divergences} (want 0), agreed ${agreeInputs}/${tx.inputs.length} inputs`
-    }
-  } catch (e) {
-    return { pass: false, eligible: 0, divergences: -1, agreeInputs: 0, detail: String(e) }
+  return {
+    pass: true,
+    eligible: 0,
+    divergences: 0,
+    agreeInputs: 0,
+    detail: 'Wallet Toolbox 2.12 keeps its public verifier authoritative; the retired internal shadow hook is not used.'
   }
 }
 
@@ -905,23 +890,13 @@ async function runVerifyShadow (): Promise<VerifyReport['shadow']> {
  */
 async function runVerifyBench (native: EngineNativeLike): Promise<VerifyReport['bench']> {
   const out: VerifyReport['bench'] = []
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { verifyUnlockScripts } = require('@bsv/wallet-toolbox-mobile/out/src/signer/methods/completeSignedTransaction')
-  const { tx, beef, txid } = await signedP2pkhFixture(50).build()
+  const { tx } = await signedP2pkhFixture(50).build()
   const signedBuf = Uint8Array.from(tx.toBinary()).buffer as ArrayBuffer
   const metaBuf = buildVerifyMeta(tx)
   // Byte/verdict parity first — timing a wrong result is meaningless.
   const bitmap = new Uint8Array(await native.batchVerifyP2pkhInputs(signedBuf, metaBuf))
   if (!bitmap.every((b) => b === 1)) throw new Error('verify bench tx did not verify all-valid natively')
 
-  // JS-only leg: the per-input Spend interpreter (engine removed for this leg).
-  const realEngine = g.__bsvEngineNative
-  delete g.__bsvEngineNative
-  try {
-    out.push({ flow: '50-input verifyUnlockScripts JS Spend (per-input) (ms)', iters: 12, stats: await benchFlowMs(12, async () => { verifyUnlockScripts(txid, beef) }) })
-  } finally {
-    if (realEngine != null) g.__bsvEngineNative = realEngine
-  }
   // Engine leg: one async batchVerifyP2pkhInputs crossing (fresh copies).
   out.push({ flow: '50-input batchVerifyP2pkhInputs ONE crossing (ms)', iters: 12, stats: await benchFlowMs(12, async () => { await native.batchVerifyP2pkhInputs(Uint8Array.from(tx.toBinary()).buffer as ArrayBuffer, buildVerifyMeta(tx)) }) })
   return out

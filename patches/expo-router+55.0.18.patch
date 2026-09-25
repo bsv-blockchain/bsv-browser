@@ -1,0 +1,26 @@
+diff --git a/node_modules/expo-router/build/fork/getPathFromState-forks.js b/node_modules/expo-router/build/fork/getPathFromState-forks.js
+index e6692ab..4e0b2e3 100644
+--- a/node_modules/expo-router/build/fork/getPathFromState-forks.js
++++ b/node_modules/expo-router/build/fork/getPathFromState-forks.js
+@@ -41,7 +41,7 @@ exports.appendBaseUrl = appendBaseUrl;
+ exports.getPathWithConventionsCollapsed = getPathWithConventionsCollapsed;
+ exports.isDynamicPart = isDynamicPart;
+ const native_1 = require("@react-navigation/native");
+-const queryString = __importStar(require("query-string"));
++const queryString = require("query-string").default;
+ const matchers_1 = require("../matchers");
+ function validatePathConfig({ preserveDynamicRoutes, preserveGroups, shouldEncodeURISegment, ...options }) {
+     (0, native_1.validatePathConfig)(options);
+diff --git a/node_modules/expo-router/build/fork/getPathFromState.js b/node_modules/expo-router/build/fork/getPathFromState.js
+index 2adcbf6..567306e 100644
+--- a/node_modules/expo-router/build/fork/getPathFromState.js
++++ b/node_modules/expo-router/build/fork/getPathFromState.js
+@@ -36,7 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.getPathFromState = getPathFromState;
+ exports.getPathDataFromState = getPathDataFromState;
+ exports.appendBaseUrl = appendBaseUrl;
+-const queryString = __importStar(require("query-string"));
++const queryString = require("query-string").default;
+ const expo = __importStar(require("./getPathFromState-forks"));
+ const navigationParams_1 = require("../navigationParams");
+ // END FORK

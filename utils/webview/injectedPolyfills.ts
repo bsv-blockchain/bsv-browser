@@ -1,3 +1,5 @@
+import { injectedPolyfillsSource } from './injectedScriptSources'
+
 // Build the injected JavaScript for the WebView from readable TS code instead of a giant string
 // The function below runs inside the WebView context. Do NOT reference any RN variables directly.
 function injectedPolyfills(
@@ -875,8 +877,8 @@ export function buildInjectedJavaScript(
   enableWalletFeatures = true,
   forwardConsoleLogs = false
 ) {
-  // Serialize the function and immediately invoke it with the provided arguments.
+  // Use source captured before Hermes compilation; runtime function strings are opaque.
   // The trailing `true;` is required by react-native-webview on iOS — without it
   // the injected script is silently discarded.
-  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)}, ${isAndroid}, ${isDev}, ${enableWalletFeatures}, ${forwardConsoleLogs});true;`
+  return `(${injectedPolyfillsSource})(${JSON.stringify(acceptLanguage)}, ${isAndroid}, ${isDev}, ${enableWalletFeatures}, ${forwardConsoleLogs});true;`
 }

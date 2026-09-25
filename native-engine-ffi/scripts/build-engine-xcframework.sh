@@ -98,22 +98,11 @@ fi
 echo "    tree clean: exactly one $K256_VERSIONS, no dkls-family crates"
 
 # ---------------------------------------------------------------------------
-# BSV-RS-PIN.md — record the engine dep commit per build (design doc §2).
+# BSV-RS-PIN.md — record the actual locked registry dependency, not a sibling checkout.
 # ---------------------------------------------------------------------------
-BSV_RS_DIR="$CRATE_DIR/../../bsv-rs"
-BSV_RS_HASH="$(git -C "$BSV_RS_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
-BSV_RS_DIRTY="$(git -C "$BSV_RS_DIR" status --porcelain 2>/dev/null | head -1 || true)"
-{
-  echo "# BSV-RS-PIN — bsv-rs path-dep commit recorded per xcframework build"
-  echo
-  echo "Auto-refreshed by scripts/build-engine-xcframework.sh; commit this file"
-  echo "with any build whose artifacts are recorded as evidence."
-  echo
-  echo "- bsv-rs commit: \`$BSV_RS_HASH\`$( [[ -n "$BSV_RS_DIRTY" ]] && echo ' (WORKING TREE DIRTY at build time)' )"
-  echo "- recorded: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "- configuration: $CONFIGURATION"
-} > "$CRATE_DIR/BSV-RS-PIN.md"
-echo "==> BSV-RS-PIN.md refreshed (bsv-rs $BSV_RS_HASH)"
+cargo metadata --manifest-path "$CARGO_MANIFEST" --locked --format-version 1 \
+  | /usr/bin/python3 "$SCRIPT_DIR/record-engine-dependency.py" "$LOCK" "$CRATE_DIR/BSV-RS-PIN.md"
+echo "==> BSV-RS-PIN.md refreshed from the locked registry package"
 
 echo "==> Ensuring rust targets installed"
 rustup target add "$DEVICE_TARGET" "$SIM_TARGET" "$SIM_TARGET_X86" >/dev/null

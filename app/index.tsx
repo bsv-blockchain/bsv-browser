@@ -74,6 +74,7 @@ import { durations } from '@bsv/expo-wallet-toolbox/core/theme/motion'
 import { useHistory } from '@/hooks/useHistory'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useMemoryHygiene } from '@/hooks/useMemoryHygiene'
+import { useWebViewSource } from '@/hooks/useWebViewSource'
 import { perf } from '@/utils/perf'
 import { shouldForwardWebViewLogs } from '@bsv/expo-wallet-toolbox/core/logging'
 import { useRenderCount } from '@/hooks/useRenderCount'
@@ -218,6 +219,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
   } = props
 
   const getTab = useCallback(() => tabStore.tabs.find(t => t.id === tabId), [tabId])
+  const sourceUri = useWebViewSource(uri, getTab()?.url ?? uri)
 
   // Stable per-tab wrappers so the app-level handlers know which tab fired the
   // event (the warm pool mounts several WebViews; only the active one's events
@@ -332,7 +334,7 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
       <WebView
         ref={webviewRef}
         source={{
-          uri: uri,
+          uri: sourceUri,
           headers: { 'Accept-Language': acceptLanguage }
         }}
         userAgent={
@@ -548,6 +550,18 @@ const WebViewHost = React.memo(function WebViewHost(props: WebViewHostProps) {
         }}
         onLoadProgress={({ nativeEvent }: any) => {
           if (!isActive) return
+          // Some same-document Android navigations finish through progress
+          // without a page-finished callback. Ignore delayed old-route events.
+          if (nativeEvent.progress === 1 && normalizeUrlForHistory(nativeEvent.url) === getTab()?.url) {
+            onNavForTab({ ...nativeEvent, loading: false, navigationType: 'other' })
+            tabStore.clearSwitchLoading()
+            onActivePainted?.()
+            loadProgress.value = withSequence(
+              withTiming(1, { duration: durations.instant }),
+              withDelay(300, withTiming(0, { duration: 0 }))
+            )
+            return
+          }
           const next = nativeEvent.progress * 0.9
           if (next > loadProgress.value) loadProgress.value = withTiming(next, { duration: durations.quick })
         }}
@@ -1498,10 +1512,10 @@ const Browser = observer(function Browser() {
       // Debounce history push so that rapid onNavigationStateChange events
       // (which often carry stale titles from the *previous* page) settle before
       // we commit an entry.  Only the final event's metadata is recorded.
-      if (!navState.loading && cleanUrl !== kNEW_TAB_URL) {
+      if (cleanUrl !== kNEW_TAB_URL && isValidUrl(cleanUrl)) {
         if (historyDebounceTimer.current) clearTimeout(historyDebounceTimer.current)
         const url = cleanUrl
-        const title = navState.title || cleanUrl
+        const title = !navState.loading && navState.title ? navState.title : cleanUrl
         historyDebounceTimer.current = setTimeout(() => {
           pushHistory({ title, url, timestamp: Date.now() }).catch(() => {})
           historyDebounceTimer.current = null

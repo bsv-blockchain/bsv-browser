@@ -15,3 +15,13 @@ describe('WebView injected polyfills', () => {
     expect(script).toContain(', true, false);true;')
   })
 })
+
+it('builds executable page source when Hermes hides function source', () => {
+  const original = Function.prototype.toString
+  try {
+    Function.prototype.toString = () => 'function () { [bytecode] }'
+    const script = buildInjectedJavaScript('en-US', true, false, true, false)
+    expect(script).not.toContain('[bytecode]')
+    expect(() => new Function(script)).not.toThrow()
+  } finally { Function.prototype.toString = original }
+})

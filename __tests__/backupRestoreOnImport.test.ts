@@ -7,7 +7,9 @@
  * wallet that looks healthy and is missing outputs.
  */
 import { PrivateKey } from '@bsv/sdk'
-import type { SyncChunk } from '@bsv/wallet-toolbox-mobile/out/src/sdk/WalletStorage.interfaces'
+import type { sdk } from '@bsv/wallet-toolbox-mobile'
+
+type SyncChunk = sdk.SyncChunk
 import type { DeviceSummary, LogEntry } from '@bsv/expo-wallet-toolbox/core/backup/client'
 import { encodeChunk, emptyChunk } from '@bsv/expo-wallet-toolbox/core/backup/codec'
 import { deriveBackupWallet } from '@bsv/expo-wallet-toolbox/core/backup/derive'

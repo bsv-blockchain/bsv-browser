@@ -1,0 +1,13 @@
+diff --git a/node_modules/react-native-quick-crypto/lib/commonjs/index.js b/node_modules/react-native-quick-crypto/lib/commonjs/index.js
+index 5940f7d..cd79b03 100644
+--- a/node_modules/react-native-quick-crypto/lib/commonjs/index.js
++++ b/node_modules/react-native-quick-crypto/lib/commonjs/index.js
+@@ -331,8 +331,4 @@ if (global.process.nextTick == null) {
+ 
+ // exports
+ var _default = exports.default = QuickCrypto;
+-// Additional exports for CommonJS compatibility
+-module.exports = QuickCrypto;
+-module.exports.default = QuickCrypto;
+-module.exports.install = install;
+ //# sourceMappingURL=index.js.map
