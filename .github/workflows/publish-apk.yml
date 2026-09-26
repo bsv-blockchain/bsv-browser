@@ -41,7 +41,7 @@ jobs:
             --wait \
             --json)
           APK_URL=$(echo "$BUILD_JSON" | jq -r \
-            '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // .buildUrl // empty')
+            '(if type == "array" then .[0] else . end) | .artifacts.buildUrl // .artifacts.applicationArchiveUrl // .buildUrl // empty')
           if [ -z "$APK_URL" ] || [ "$APK_URL" = "null" ]; then
             echo "::error::Failed to retrieve APK URL from EAS build output."
             exit 1
