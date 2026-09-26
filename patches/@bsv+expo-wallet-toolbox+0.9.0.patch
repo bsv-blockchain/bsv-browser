@@ -1,7 +1,7 @@
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
 --- a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
 +++ b/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
-@@ -1343,20 +1343,7 @@
+@@ -1400,20 +1400,7 @@
                label={t('pay_step_continue')}
                icon="arrow-forward"
              />
@@ -23,7 +23,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSe
  
            {outbox.length > 0 && (
              <OutgoingSection
-@@ -1554,7 +1541,7 @@
+@@ -1643,7 +1630,7 @@
            amountText={sent.amountText}
            statusNote={sent.statusNote}
            recipientName={sent.recipient}

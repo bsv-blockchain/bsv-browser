@@ -16,15 +16,14 @@ jest.mock('@react-native-async-storage/async-storage', () => {
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { PrivateKey } from '@bsv/sdk'
-import type { sdk } from '@bsv/wallet-toolbox-mobile'
-type SyncChunk = sdk.SyncChunk
 import { BackupHttpError, ERR_SEQ_CONFLICT } from '@bsv/expo-wallet-toolbox/core/backup/client'
-import { emptyChunk } from '@bsv/expo-wallet-toolbox/core/backup/codec'
+import { decodeEntry, emptyChunk } from '@bsv/expo-wallet-toolbox/core/backup/codec'
 import { GENERATION_CHUNK_THRESHOLD } from '@bsv/expo-wallet-toolbox/core/backup/constants'
 import { loadCursor, saveCursor, freshCursor, zeroOffsets } from '@bsv/expo-wallet-toolbox/core/backup/cursor'
-import { backupPseudonym } from '@bsv/expo-wallet-toolbox/core/backup/derive'
+import { backupPseudonym, deriveBackupWallet } from '@bsv/expo-wallet-toolbox/core/backup/derive'
 import { setBackupPushEnabled } from '@bsv/expo-wallet-toolbox/core/backup/preference'
 import { pushOnce } from '@bsv/expo-wallet-toolbox/core/backup/push'
+import type { SyncChunk } from '@bsv/expo-wallet-toolbox/core/toolboxTypes'
 
 const PRIMARY = new PrivateKey(11).toArray('be', 32)
 const IDENTITY = '02' + 'ab'.repeat(32)
@@ -42,8 +41,20 @@ function chunkWith (counts: { provenTxs?: number, outputs?: number }, updatedAt 
   return c as unknown as SyncChunk
 }
 
-function fakeStorage (chunk: SyncChunk): { getSyncChunk: jest.Mock } {
-  return { getSyncChunk: jest.fn().mockResolvedValue(chunk) }
+function fakeStorage (
+  chunk: SyncChunk,
+  kv: Record<string, string> = {}
+): { getSyncChunk: jest.Mock, getKeyValue: jest.Mock, setKeyValue: jest.Mock } {
+  const map = new Map<string, string>(Object.entries(kv))
+  return {
+    getSyncChunk: jest.fn().mockResolvedValue(chunk),
+    // Every non-empty-chunk push now also reads the app-owned KV rows to fold into the same
+    // envelope (XR-011) — a bare `{ getSyncChunk }` stub would throw "getKeyValue is not a
+    // function" on any test that reaches that far, so every caller of this helper gets a
+    // working (empty by default) KV store for free.
+    getKeyValue: jest.fn(async (k: string) => map.get(k)),
+    setKeyValue: jest.fn(async (k: string, v: string) => void map.set(k, v))
+  }
 }
 
 /**
@@ -55,7 +66,7 @@ function fakeStorage (chunk: SyncChunk): { getSyncChunk: jest.Mock } {
  * holds a fixed set of records and filters them, which is what makes the
  * boundary behaviour observable.
  */
-function inclusiveSinceStorage (updatedAt: string[]): { getSyncChunk: jest.Mock } {
+function inclusiveSinceStorage (updatedAt: string[]): { getSyncChunk: jest.Mock, getKeyValue: jest.Mock, setKeyValue: jest.Mock } {
   const rows = updatedAt.map((t, i) => ({ provenTxId: i, rawTx: [1, 2, 3], updated_at: t }))
   return {
     getSyncChunk: jest.fn(async (args: any) => {
@@ -66,7 +77,9 @@ function inclusiveSinceStorage (updatedAt: string[]): { getSyncChunk: jest.Mock 
       // `>=`, exactly as the column comparison does.
       c.provenTxs = rows.filter(r => since == null || r.updated_at >= since).slice(offset)
       return c as unknown as SyncChunk
-    })
+    }),
+    getKeyValue: jest.fn().mockResolvedValue(undefined),
+    setKeyValue: jest.fn()
   }
 }
 
@@ -220,7 +233,9 @@ describe('pushOnce', () => {
       })
     }
 
-    // One record, so exactly one upload however many times the monitor ticks.
+    // One record, so exactly one upload of it — sealing never appends a separate entry
+    // (see push.test.ts's own 'pushOnce seals' block below), so no matter how many more
+    // times the monitor ticks after the window closes, nothing further is sent.
     expect(client.append).toHaveBeenCalledTimes(1)
   })
 
@@ -242,6 +257,55 @@ describe('pushOnce', () => {
     expect(client.append).toHaveBeenCalledTimes(1)
   })
 
+  it('XR-016: rotates to a fresh generation when the device clock has moved backward', async () => {
+    // A window closes at T (>= T+1ms from here on) exactly as the previous test does.
+    // The clock then jumps BACKWARD to T-1hour, and the app (using that now-wrong clock)
+    // writes a new record stamped T-30min — strictly BELOW the closed window's boundary, so
+    // the plain `updated_at >= since` scan can never select it again on its own.
+    jest.useFakeTimers()
+    try {
+      jest.setSystemTime(new Date('2026-08-01T00:00:00.000Z'))
+      const client = fakeClient()
+      const closedWindowStorage = inclusiveSinceStorage(['2026-08-01T00:00:00.000Z'])
+      // Pass one uploads, pass two finds the window exhausted and closes it — same as
+      // 'advances past the boundary' above.
+      for (let pass = 0; pass < 2; pass++) {
+        await pushOnce({
+          storage: closedWindowStorage as any,
+          primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+        })
+      }
+      expect(client.append).toHaveBeenCalledTimes(1)
+
+      jest.setSystemTime(new Date('2026-07-31T23:00:00.000Z')) // T - 1 hour: the rollback.
+      // Storage now holds BOTH the original record and the new, orphaned one — a real
+      // device's database is never emptied by a clock change.
+      const afterRollbackStorage = inclusiveSinceStorage([
+        '2026-08-01T00:00:00.000Z',
+        '2026-07-31T23:30:00.000Z' // T - 30 min: below the closed window's boundary.
+      ])
+
+      await pushOnce({
+        storage: afterRollbackStorage as any,
+        primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+      })
+
+      // A silent no-op (the pre-fix behaviour) would leave this at 1 forever. The fix
+      // detects the regression, rotates to a fresh generation (no `since` filter — a full
+      // snapshot sees every record regardless of its timestamp), and pushes again.
+      expect(client.append).toHaveBeenCalledTimes(2)
+      const cursor = await loadCursor('main', PSEUDONYM, DEVICE)
+      expect(cursor.generation).toBe(2)
+      // Sequence one of the NEW generation, not a continuation of the old one — a rotation
+      // is a full resnapshot, so the previously-orphaned record travels in the same chunk
+      // as everything else rather than needing to be found some other way.
+      expect(client.append.mock.calls[1][1]).toBe(2)
+      expect(client.append.mock.calls[1][2]).toBe(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it('still collects a record written in the same millisecond as the boundary', async () => {
     // The reason the advance is safe: a window only closes when nothing at or after
     // `since` is left beyond the offsets, so anything sharing the boundary
@@ -260,7 +324,8 @@ describe('pushOnce', () => {
       })
     }
 
-    // All three shared the boundary and all three went up, in one chunk, once.
+    // All three shared the boundary and all three went up, in one chunk, once — the window
+    // closing after it appends nothing further (see 'pushOnce seals' below).
     expect(client.append).toHaveBeenCalledTimes(1)
     const chunk = storage.getSyncChunk.mock.results[0].value
     await expect(chunk.then((c: any) => c.provenTxs.length)).resolves.toBe(3)
@@ -271,6 +336,11 @@ describe('pushOnce', () => {
     // mark, which is the state the old code kept re-reading from. No migration handles
     // this: the next window re-reads the boundary once more, and the close after it moves
     // past. So each wallet pays at most one final duplicate and then goes quiet.
+    //
+    // This cursor also happens to be exactly the back-fill shape pushOnce looks for (since
+    // already set, chunks already pushed in this generation, initialChunkCount never set)
+    // — an older build's cursor predates sealing entirely — so the very first pass
+    // back-fills initialChunkCount purely locally before reading anything.
     const client = fakeClient()
     const storage = inclusiveSinceStorage(['2026-08-01T00:00:00.000Z'])
     await saveCursor('main', PSEUDONYM, DEVICE, {
@@ -287,8 +357,11 @@ describe('pushOnce', () => {
       })
     }
 
+    // The back-fill costs no append at all — only the one final duplicate of the
+    // still-unpushed boundary record goes up, now carrying the back-filled seal.
     expect(client.append).toHaveBeenCalledTimes(1)
     expect((await loadCursor('main', PSEUDONYM, DEVICE)).since).toBe('2026-08-01T00:00:00.001Z')
+    expect((await loadCursor('main', PSEUDONYM, DEVICE)).initialChunkCount).toBe(7)
   })
 
   it('rotates to a new generation past the threshold, at a window boundary', async () => {
@@ -383,6 +456,74 @@ describe('pushOnce', () => {
   })
 })
 
+describe('XR-011: pushOnce appData', () => {
+  async function decodedAppData (ciphertext: number[]): Promise<Record<string, unknown> | undefined> {
+    const wallet = deriveBackupWallet(PRIMARY, 'main')
+    const decoded = await decodeEntry(wallet, ciphertext, 'main')
+    return decoded.appData as Record<string, unknown> | undefined
+  }
+
+  it('folds the current localpay_pending/peerpay_outbox rows into the pushed envelope', async () => {
+    const client = fakeClient()
+    const storage = fakeStorage(chunkWith({ provenTxs: 1 }), {
+      localpay_pending: '[{"id":"p1"}]',
+      peerpay_outbox: '[{"id":"o1"}]'
+    })
+
+    await pushOnce({
+      storage: storage as any, primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+
+    expect(client.append).toHaveBeenCalledTimes(1)
+    expect(await decodedAppData(client.append.mock.calls[0][4])).toEqual({
+      localpayPending: '[{"id":"p1"}]',
+      peerpayOutbox: '[{"id":"o1"}]'
+    })
+  })
+
+  it('omits appData entirely when nothing app-owned is queued, so the envelope is unchanged', async () => {
+    const client = fakeClient()
+    const storage = fakeStorage(chunkWith({ provenTxs: 1 }))
+
+    await pushOnce({
+      storage: storage as any, primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+
+    expect(await decodedAppData(client.append.mock.calls[0][4])).toBeUndefined()
+  })
+
+  it('never appends purely to carry appData: a window closing with nothing new sends nothing, even with a queued payment', async () => {
+    // The dangerous shape this must never produce: the toolbox's own processSyncChunk treats
+    // EVERY entity array being empty as its completion sentinel regardless of the entry's
+    // position in the log (see codec.ts's encodeChunk docs) — an appended, entity-empty
+    // "appData-only" entry would make a live restore stop early and drop whatever real
+    // chunks were appended after it.
+    const client = fakeClient()
+    const storage = fakeStorage(emptyChunk('a', 'b', IDENTITY), { localpay_pending: '[{"id":"p1"}]' })
+
+    const r = await pushOnce({
+      storage: storage as any, primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+
+    expect(client.append).not.toHaveBeenCalled()
+    expect(r.pushed).toBe(0)
+    expect(r.windowClosed).toBe(true)
+  })
+
+  it('counts appData bytes toward the oversize gate, so a huge queue is never silently dropped from the check', async () => {
+    const client = fakeClient()
+    const hugePending = JSON.stringify([{ id: 'p1', blob: 'x'.repeat(2_000_000) }])
+    const storage = fakeStorage(chunkWith({ provenTxs: 1 }), { localpay_pending: hugePending })
+
+    const r = await pushOnce({
+      storage: storage as any, primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+
+    expect(r.oversized).toBe(true)
+    expect(client.append).not.toHaveBeenCalled()
+  })
+})
+
 // ── oversize guard ────────────────────────────────────────────────────────
 //
 // The cap now comes from the server's own limits document rather than a local
@@ -437,6 +578,124 @@ describe('pushOnce oversize guard', () => {
     expect(client.append).toHaveBeenCalled()
     expect(r.pushed).toBe(1)
     expect(r.oversized).toBeFalsy()
+  })
+})
+
+// ── seals ──────────────────────────────────────────────────────────────
+//
+// P1-backup-incomplete-generation's fix: a generation's log carries no notion of
+// "complete" on its own, so a restore landing mid-rotation could replay a partial
+// snapshot and report success. A seal riding on an ORDINARY chunk's own envelope, once
+// this device's view of the generation's initial snapshot is provably whole, is what
+// RemoteSyncReader/restore.ts check for on the read side. No separate entry is ever
+// appended for it — see codec.ts's encodeChunk docs on why a dedicated marker is unsafe
+// for a reader that predates it.
+describe('pushOnce seals', () => {
+  async function decodedSeal (
+    ciphertext: number[]
+  ): Promise<{ generation: number, initialChunkCount: number } | undefined> {
+    const wallet = deriveBackupWallet(PRIMARY, 'main')
+    const decoded = await decodeEntry(wallet, ciphertext, 'main')
+    return decoded.seal
+  }
+
+  it('records initialChunkCount when the first window closes, then seals every later chunk — never a new entry', async () => {
+    const client = fakeClient()
+
+    // Two real chunks, in the still-open first window (since stays undefined) — neither
+    // carries a seal, since the window has not closed yet.
+    await pushOnce({
+      storage: fakeStorage(chunkWith({ provenTxs: 1 })) as any,
+      primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+    await pushOnce({
+      storage: fakeStorage(chunkWith({ provenTxs: 1 })) as any,
+      primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+    expect(client.append).toHaveBeenCalledTimes(2)
+    for (const call of client.append.mock.calls) {
+      expect(await decodedSeal(call[4])).toBeUndefined()
+    }
+
+    // The window closes: nothing left to send, no append at all — initialChunkCount is
+    // recorded purely in the cursor.
+    const closing = await pushOnce({
+      storage: fakeStorage(emptyChunk('a', 'b', IDENTITY)) as any,
+      primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+    expect(closing.windowClosed).toBe(true)
+    expect(client.append).toHaveBeenCalledTimes(2)
+    expect((await loadCursor('main', PSEUDONYM, DEVICE)).initialChunkCount).toBe(2)
+
+    // The next real chunk (a pure delta) carries the seal referencing that count.
+    await pushOnce({
+      storage: fakeStorage(chunkWith({ provenTxs: 1 })) as any,
+      primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+    expect(client.append).toHaveBeenCalledTimes(3)
+    expect(await decodedSeal(client.append.mock.calls[2][4])).toEqual({ generation: 1, initialChunkCount: 2 })
+
+    // A SECOND window close in the same generation — pure delta continuation — must not
+    // move initialChunkCount, and closing itself never appends anything.
+    const secondClose = await pushOnce({
+      storage: fakeStorage(emptyChunk('a', 'b', IDENTITY)) as any,
+      primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+    expect(secondClose.windowClosed).toBe(true)
+    expect(client.append).toHaveBeenCalledTimes(3)
+    expect((await loadCursor('main', PSEUDONYM, DEVICE)).initialChunkCount).toBe(2)
+
+    // A further delta still carries the ORIGINAL seal, not one referencing the later count.
+    await pushOnce({
+      storage: fakeStorage(chunkWith({ provenTxs: 1 })) as any,
+      primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+    expect(client.append).toHaveBeenCalledTimes(4)
+    expect(await decodedSeal(client.append.mock.calls[3][4])).toEqual({ generation: 1, initialChunkCount: 2 })
+
+    // Every append was a real chunk — no extra entry was ever appended for sealing.
+    expect(client.append).toHaveBeenCalledTimes(4)
+  })
+
+  it('back-fills initialChunkCount for a cursor whose window already closed under an older build, with no append at all', async () => {
+    // Simulates a device that pushed three chunks and closed its window before sealing
+    // existed: `since` and `chunksInGeneration` are set, but `initialChunkCount` has never
+    // existed on this cursor.
+    await saveCursor('main', PSEUDONYM, DEVICE, {
+      ...freshCursor(),
+      since: '2026-08-01T00:00:00.001Z',
+      seq: 3,
+      chunksInGeneration: 3
+    })
+    const client = fakeClient()
+
+    const r = await pushOnce({
+      storage: fakeStorage(chunkWith({ provenTxs: 1 })) as any,
+      primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+
+    // The back-fill itself costs no network round trip; this pass's one append is the real
+    // chunk it read, now carrying the back-filled seal.
+    expect(r.pushed).toBe(1)
+    expect(client.append).toHaveBeenCalledTimes(1)
+    expect(await decodedSeal(client.append.mock.calls[0][4])).toEqual({ generation: 1, initialChunkCount: 3 })
+    expect((await loadCursor('main', PSEUDONYM, DEVICE)).initialChunkCount).toBe(3)
+  })
+
+  it('never seals an empty wallet that has pushed nothing at all', async () => {
+    const client = fakeClient()
+
+    await pushOnce({
+      storage: fakeStorage(emptyChunk('a', 'b', IDENTITY)) as any,
+      primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+    await pushOnce({
+      storage: fakeStorage(emptyChunk('a', 'b', IDENTITY)) as any,
+      primaryKey: PRIMARY, chain: 'main', identityKey: IDENTITY, client, deviceId: DEVICE
+    })
+
+    expect(client.append).not.toHaveBeenCalled()
+    expect((await loadCursor('main', PSEUDONYM, DEVICE)).initialChunkCount).toBeUndefined()
   })
 })
 

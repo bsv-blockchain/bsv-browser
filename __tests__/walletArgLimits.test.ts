@@ -111,7 +111,45 @@ describe('checkWalletArgs', () => {
   it('ignores calls that carry no transaction bytes', () => {
     expect(checkWalletArgs('getPublicKey', { identityKey: true }, L)).toBeNull()
     expect(checkWalletArgs('listOutputs', { basket: 'x' }, L)).toBeNull()
-    expect(checkWalletArgs('encrypt', { plaintext: new Array(5_000_000).fill(0) }, L)).toBeNull()
+  })
+
+  describe('XR-026: byte-bearing crypto calls', () => {
+    // Legitimate encrypt/decrypt/HMAC/signature payloads in this app are a
+    // hash or a short ciphertext — nothing like a transaction — so these
+    // pass comfortably under the cap.
+    it('passes the payloads pages actually send', () => {
+      expect(checkWalletArgs('encrypt', { plaintext: new Array(1024).fill(0) }, L)).toBeNull()
+      expect(checkWalletArgs('decrypt', { ciphertext: new Array(1024).fill(0) }, L)).toBeNull()
+      expect(checkWalletArgs('createHmac', { data: new Array(32).fill(0) }, L)).toBeNull()
+      expect(
+        checkWalletArgs('verifyHmac', { data: new Array(32).fill(0), hmac: new Array(32).fill(0) }, L)
+      ).toBeNull()
+      expect(checkWalletArgs('createSignature', { hashToDirectlySign: new Array(32).fill(0) }, L)).toBeNull()
+      expect(
+        checkWalletArgs(
+          'verifySignature',
+          { hashToDirectlyVerify: new Array(32).fill(0), signature: new Array(72).fill(0) },
+          L
+        )
+      ).toBeNull()
+    })
+
+    // XR-026: previously NONE of these had any per-call size cap at all —
+    // 'ignores calls that carry no transaction bytes' (above) used to assert
+    // exactly this 5,000,000-byte encrypt plaintext was ignored.
+    it('refuses an oversize payload on every byte-bearing crypto call', () => {
+      expect(checkWalletArgs('encrypt', { plaintext: new Array(5_000_000).fill(0) }, L)).toMatchObject({
+        field: 'plaintext',
+        limit: L.cryptoPayload
+      })
+      expect(checkWalletArgs('decrypt', { ciphertext: new Array(5_000_000).fill(0) }, L)?.field).toBe('ciphertext')
+      expect(checkWalletArgs('createHmac', { data: new Array(5_000_000).fill(0) }, L)?.field).toBe('data')
+      expect(checkWalletArgs('createSignature', { data: new Array(5_000_000).fill(0) }, L)?.field).toBe('data')
+    })
+
+    it('halves the crypto payload cap on a low-tier device, same as the aggregate', () => {
+      expect(limitsForTier('low').cryptoPayload).toBe(limitsForTier('mid').cryptoPayload / 2)
+    })
   })
 
   it('survives malformed args without throwing', () => {
