@@ -65,16 +65,16 @@ function frameFor(transaction: Uint8Array, outputIndex = 0): PaymentFrame {
   } as PaymentFrame
 }
 
-/** A payee wallet that derives exactly one key, and records how it was asked.
+/** A payee whose wallet derives exactly one key, and records how it was asked.
  *
- * `getServices` is unused by every check that runs before the new SPV/script
+ * The chain tracker is unused by every check that runs before the SPV/script
  * verifier, so it only needs to be real for the tests that reach it — a
  * caller that reaches it without one gets a TypeError, not a false pass.
  */
-function payeeWallet(chainTracker?: ChainTracker) {
+function payeeDeps(chainTracker?: ChainTracker) {
   return {
-    getPublicKey: jest.fn(async () => ({ publicKey: payeeKey.toString() })),
-    getServices: () => ({ getChainTracker: async () => chainTracker as ChainTracker })
+    wallet: { getPublicKey: jest.fn(async () => ({ publicKey: payeeKey.toString() })) },
+    chainTracker: chainTracker as ChainTracker
   }
 }
 
@@ -163,26 +163,26 @@ function atomicBeefWithTxidOnlyAncestor(tx: Transaction, ancestorId: string): Ui
 async function validFrame(
   outputs: { satoshis: number; scriptHex: string }[],
   opts?: { ancestorSatoshis?: number; outputIndex?: number }
-): Promise<{ frame: PaymentFrame; wallet: ReturnType<typeof payeeWallet>; ancestor: Transaction }> {
+): Promise<{ frame: PaymentFrame; deps: ReturnType<typeof payeeDeps>; ancestor: Transaction }> {
   const payerKey = PrivateKey.fromRandom()
   const ancestorSatoshis = opts?.ancestorSatoshis ?? outputs.reduce((s, o) => s + o.satoshis, 0)
   const ancestor = minedAncestor(payerKey, ancestorSatoshis)
   const tx = await spendAncestor(ancestor, payerKey, outputs)
   const frame = frameFor(atomicBeefOf(tx), opts?.outputIndex ?? 0)
-  const wallet = payeeWallet(trackerAccepting(ancestor))
-  return { frame, wallet, ancestor }
+  const deps = payeeDeps(trackerAccepting(ancestor))
+  return { frame, deps, ancestor }
 }
 
 describe('verifyFramePayment', () => {
   it('returns the satoshis of the output that locks to this device’s derived key', async () => {
-    const { frame, wallet } = await validFrame([{ satoshis: 4200, scriptHex: minesScript() }])
-    await expect(verifyFramePayment(wallet, frame, 'admin.com')).resolves.toEqual({ kind: 'bsv', satoshis: 4200 })
+    const { frame, deps } = await validFrame([{ satoshis: 4200, scriptHex: minesScript() }])
+    await expect(verifyFramePayment(deps, frame, 'admin.com')).resolves.toEqual({ kind: 'bsv', satoshis: 4200 })
   })
 
   it('derives with the payee’s own key, keyed by the frame’s nonces and the sender', async () => {
-    const { frame, wallet } = await validFrame([{ satoshis: 1, scriptHex: minesScript() }])
-    await verifyFramePayment(wallet, frame, 'admin.com')
-    expect(wallet.getPublicKey).toHaveBeenCalledWith(
+    const { frame, deps } = await validFrame([{ satoshis: 1, scriptHex: minesScript() }])
+    await verifyFramePayment(deps, frame, 'admin.com')
+    expect(deps.wallet.getPublicKey).toHaveBeenCalledWith(
       {
         protocolID: PEERPAY_PROTOCOL_ID,
         keyID: 'cHJlZml4 c3VmZml4',
@@ -194,14 +194,14 @@ describe('verifyFramePayment', () => {
   })
 
   it('reads the output named by outputIndex, not the first one', async () => {
-    const { frame, wallet } = await validFrame(
+    const { frame, deps } = await validFrame(
       [
         { satoshis: 9, scriptHex: '76a914' + '00'.repeat(20) + '88ac' },
         { satoshis: 777, scriptHex: minesScript() }
       ],
       { outputIndex: 1 }
     )
-    await expect(verifyFramePayment(wallet, frame, 'admin.com')).resolves.toEqual({
+    await expect(verifyFramePayment(deps, frame, 'admin.com')).resolves.toEqual({
       kind: 'bsv',
       satoshis: 777
     })
@@ -211,7 +211,7 @@ describe('verifyFramePayment', () => {
   // Accepting it acks ok, the payer broadcasts, and the payee is credited nothing.
   it('refuses an output that pays a stranger', async () => {
     const transaction = beefOf([{ satoshis: 4200, scriptHex: '76a914' + '11'.repeat(20) + '88ac' }])
-    await expect(verifyFramePayment(payeeWallet(), frameFor(transaction), 'admin.com')).rejects.toMatchObject({
+    await expect(verifyFramePayment(payeeDeps(), frameFor(transaction), 'admin.com')).rejects.toMatchObject({
       name: 'FrameVerifyError',
       kind: 'not_mine'
     })
@@ -219,7 +219,7 @@ describe('verifyFramePayment', () => {
 
   it('refuses a zero-satoshi output', async () => {
     const transaction = beefOf([{ satoshis: 0, scriptHex: minesScript() }])
-    await expect(verifyFramePayment(payeeWallet(), frameFor(transaction), 'admin.com')).rejects.toMatchObject({
+    await expect(verifyFramePayment(payeeDeps(), frameFor(transaction), 'admin.com')).rejects.toMatchObject({
       kind: 'not_mine'
     })
   })
@@ -233,7 +233,7 @@ describe('verifyFramePayment', () => {
     tx.outputs[0].satoshis = undefined
     const spy = jest.spyOn(Transaction, 'fromAtomicBEEF').mockReturnValue(tx)
     try {
-      await expect(verifyFramePayment(payeeWallet(), frameFor(new Uint8Array([1])), 'admin.com')).rejects.toMatchObject(
+      await expect(verifyFramePayment(payeeDeps(), frameFor(new Uint8Array([1])), 'admin.com')).rejects.toMatchObject(
         { kind: 'not_mine' }
       )
     } finally {
@@ -243,14 +243,14 @@ describe('verifyFramePayment', () => {
 
   it('treats unreadable transaction bytes as a decode failure, not a mismatch', async () => {
     const frame = frameFor(new Uint8Array([1, 2, 3, 4, 5]))
-    await expect(verifyFramePayment(payeeWallet(), frame, 'admin.com')).rejects.toMatchObject({
+    await expect(verifyFramePayment(payeeDeps(), frame, 'admin.com')).rejects.toMatchObject({
       kind: 'unparseable'
     })
   })
 
   it('treats an outputIndex past the end as a decode failure', async () => {
     const frame = frameFor(beefOf([{ satoshis: 4200, scriptHex: minesScript() }]), 3)
-    await expect(verifyFramePayment(payeeWallet(), frame, 'admin.com')).rejects.toMatchObject({
+    await expect(verifyFramePayment(payeeDeps(), frame, 'admin.com')).rejects.toMatchObject({
       kind: 'unparseable'
     })
   })
@@ -258,12 +258,12 @@ describe('verifyFramePayment', () => {
   it('surfaces a wallet that cannot derive as an error, never as a pass', async () => {
     const w = { getPublicKey: jest.fn(async () => Promise.reject(new Error('locked'))) }
     await expect(
-      verifyFramePayment(w as never, frameFor(beefOf([{ satoshis: 1, scriptHex: minesScript() }])), 'admin.com')
+      verifyFramePayment({ wallet: w, chainTracker: trackerRejectingEverything() }, frameFor(beefOf([{ satoshis: 1, scriptHex: minesScript() }])), 'admin.com')
     ).rejects.toThrow('locked')
   })
 
   it('is a FrameVerifyError, so callers can switch on kind', async () => {
-    const err = await verifyFramePayment(payeeWallet(), frameFor(new Uint8Array([0])), 'admin.com').catch(e => e)
+    const err = await verifyFramePayment(payeeDeps(), frameFor(new Uint8Array([0])), 'admin.com').catch(e => e)
     expect(err).toBeInstanceOf(FrameVerifyError)
   })
 })
@@ -280,8 +280,8 @@ describe('verifyFramePayment', () => {
 // credited for it while offline.
 describe('verifyFramePayment: SPV/script verification (P0-1)', () => {
   it('still verifies a valid frame end to end (regression)', async () => {
-    const { frame, wallet } = await validFrame([{ satoshis: 4200, scriptHex: minesScript() }])
-    await expect(verifyFramePayment(wallet, frame, 'admin.com')).resolves.toEqual({ kind: 'bsv', satoshis: 4200 })
+    const { frame, deps } = await validFrame([{ satoshis: 4200, scriptHex: minesScript() }])
+    await expect(verifyFramePayment(deps, frame, 'admin.com')).resolves.toEqual({ kind: 'bsv', satoshis: 4200 })
   })
 
   // The hole this call closes: a real mined ancestor, a properly-addressed
@@ -296,14 +296,14 @@ describe('verifyFramePayment: SPV/script verification (P0-1)', () => {
     tx.addOutput({ satoshis: 4200, lockingScript: LockingScript.fromHex(minesScript()) })
 
     const frame = frameFor(atomicBeefOf(tx))
-    const wallet = payeeWallet(trackerAccepting(ancestor))
+    const deps = payeeDeps(trackerAccepting(ancestor))
 
     // Mimics the caller's shape (NearbyFlow's settleReceived): the settle-path
     // write only ever runs AFTER verifyFramePayment resolves. If verification
     // itself is broken, this mock proves the settle path was never reached.
     const settleWrite = jest.fn()
     const settleLikeCaller = async () => {
-      const verified = await verifyFramePayment(wallet, frame, 'admin.com')
+      const verified = await verifyFramePayment(deps, frame, 'admin.com')
       settleWrite()
       return verified
     }
@@ -320,9 +320,9 @@ describe('verifyFramePayment: SPV/script verification (P0-1)', () => {
     const tx = await spendAncestor(ancestor, payerKey, [{ satoshis: 5000, scriptHex: minesScript() }])
 
     const frame = frameFor(atomicBeefOf(tx))
-    const wallet = payeeWallet(trackerAccepting(ancestor))
+    const deps = payeeDeps(trackerAccepting(ancestor))
 
-    await expect(verifyFramePayment(wallet, frame, 'admin.com')).rejects.toMatchObject({
+    await expect(verifyFramePayment(deps, frame, 'admin.com')).rejects.toMatchObject({
       name: 'FrameVerifyError',
       kind: 'unparseable'
     })
@@ -337,9 +337,9 @@ describe('verifyFramePayment: SPV/script verification (P0-1)', () => {
     const tx = await spendAncestor(ancestor, payerKey, [{ satoshis: 4200, scriptHex: minesScript() }])
 
     const frame = frameFor(atomicBeefWithTxidOnlyAncestor(tx, ancestor.id('hex')))
-    const wallet = payeeWallet(trackerAccepting(ancestor))
+    const deps = payeeDeps(trackerAccepting(ancestor))
 
-    await expect(verifyFramePayment(wallet, frame, 'admin.com')).rejects.toMatchObject({
+    await expect(verifyFramePayment(deps, frame, 'admin.com')).rejects.toMatchObject({
       name: 'FrameVerifyError',
       kind: 'unparseable'
     })
@@ -353,11 +353,11 @@ describe('verifyFramePayment: SPV/script verification (P0-1)', () => {
     const tx = await spendAncestor(ancestor, payerKey, [{ satoshis: 4200, scriptHex: minesScript() }])
 
     const frame = frameFor(atomicBeefOf(tx))
-    const wallet = payeeWallet(trackerRejectingEverything())
+    const deps = payeeDeps(trackerRejectingEverything())
 
-    await expect(verifyFramePayment(wallet, frame, 'admin.com')).rejects.toMatchObject({
+    await expect(verifyFramePayment(deps, frame, 'admin.com')).rejects.toMatchObject({
       name: 'FrameVerifyError',
-      kind: 'unparseable'
+      kind: 'root_unverified'
     })
   })
 })
@@ -427,7 +427,7 @@ describe('verifyFramePayment: token kind', () => {
   }
 
   it('returns the decoded token amount, assetId, and what COVER says must still be submitted', async () => {
-    const result = await verifyFramePayment(payeeWallet(), tokenFrame(), 'test', covers)
+    const result = await verifyFramePayment(payeeDeps(), tokenFrame(), 'test', covers)
     expect(result).toEqual({ kind: 'token', assetId: ASSET_ID, amount: 500, mustSubmit: ['tip'] })
   })
 
@@ -453,7 +453,7 @@ describe('verifyFramePayment: token kind', () => {
     const transaction = new Uint8Array(beef.toBinaryAtomic(tip.id('hex')))
 
     await expect(
-      verifyFramePayment(payeeWallet(), tokenFrame({ transaction }), 'test', covers)
+      verifyFramePayment(payeeDeps(), tokenFrame({ transaction }), 'test', covers)
     ).rejects.toMatchObject({ kind: 'not_covered' })
   })
 
@@ -475,14 +475,14 @@ describe('verifyFramePayment: token kind', () => {
     const transaction = new Uint8Array(beef.toBinaryAtomic(tip.id('hex')))
 
     await expect(
-      verifyFramePayment(payeeWallet(), tokenFrame({ transaction }), 'test', covers)
+      verifyFramePayment(payeeDeps(), tokenFrame({ transaction }), 'test', covers)
     ).resolves.toMatchObject({ kind: 'token', amount: 500 })
   })
 
   it('derives with the mandala FT protocol, not PEERPAY', async () => {
-    const wallet = payeeWallet()
-    await verifyFramePayment(wallet, tokenFrame(), 'test', covers)
-    expect(wallet.getPublicKey).toHaveBeenCalledWith(
+    const deps = payeeDeps()
+    await verifyFramePayment(deps, tokenFrame(), 'test', covers)
+    expect(deps.wallet.getPublicKey).toHaveBeenCalledWith(
       expect.objectContaining({ protocolID: FT_PROTOCOL_ID, forSelf: true }),
       'test'
     )
@@ -491,18 +491,18 @@ describe('verifyFramePayment: token kind', () => {
   it('refuses a token output locked to someone else as not_mine', async () => {
     const otherPkh = Hash.hash160(Utils.toArray('02'.padEnd(66, 'c'), 'hex'))
     const frame = tokenFrame({ transaction: beefOf([{ satoshis: 1, scriptHex: tokenScript(500, otherPkh) }]) })
-    await expect(verifyFramePayment(payeeWallet(), frame, 'test', covers)).rejects.toMatchObject({ kind: 'not_mine' })
+    await expect(verifyFramePayment(payeeDeps(), frame, 'test', covers)).rejects.toMatchObject({ kind: 'not_mine' })
   })
 
   it('refuses an output whose script assetId disagrees with the frame', async () => {
     const frame = tokenFrame()
     frame.token!.assetId = 'cd'.repeat(32) + '.1'
-    await expect(verifyFramePayment(payeeWallet(), frame, 'test', covers)).rejects.toMatchObject({ kind: 'not_mine' })
+    await expect(verifyFramePayment(payeeDeps(), frame, 'test', covers)).rejects.toMatchObject({ kind: 'not_mine' })
   })
 
   it('refuses a non-token script under kind token as not_mine', async () => {
     const frame = tokenFrame({ transaction: beefOf([{ satoshis: 1, scriptHex: minesScript() }]) })
-    await expect(verifyFramePayment(payeeWallet(), frame, 'test', covers)).rejects.toMatchObject({ kind: 'not_mine' })
+    await expect(verifyFramePayment(payeeDeps(), frame, 'test', covers)).rejects.toMatchObject({ kind: 'not_mine' })
   })
 
   // §9: "a frame that fails COVER is refused at hand-over exactly like a
@@ -511,13 +511,13 @@ describe('verifyFramePayment: token kind', () => {
   it('refuses a frame COVER rejects, with its own kind', async () => {
     const cover = async (): Promise<CoverResult> => ({ ok: false, reason: 'uncovered_ancestor' })
     await expect(
-      verifyFramePayment(payeeWallet(), tokenFrame(), 'test', { cover, asset: ASSET })
+      verifyFramePayment(payeeDeps(), tokenFrame(), 'test', { cover, asset: ASSET })
     ).rejects.toMatchObject({ name: 'FrameVerifyError', kind: 'not_covered' })
   })
 
   it('names the COVER reason in the refusal, so a stuck chain is diagnosable', async () => {
     const cover = async (): Promise<CoverResult> => ({ ok: false, reason: 'unsafe_asset' })
-    const err = await verifyFramePayment(payeeWallet(), tokenFrame(), 'test', { cover, asset: ASSET }).catch(e => e)
+    const err = await verifyFramePayment(payeeDeps(), tokenFrame(), 'test', { cover, asset: ASSET }).catch(e => e)
     expect(String(err.message)).toMatch(/unsafe_asset/)
   })
 
@@ -533,7 +533,7 @@ describe('verifyFramePayment: token kind', () => {
     const frame = tokenFrame()
     frame.token!.overlayIdentityKey = '02'.padEnd(66, 'a')
 
-    const err = await verifyFramePayment(payeeWallet(), frame, 'test', { cover, asset: ASSET }).catch(e => e)
+    const err = await verifyFramePayment(payeeDeps(), frame, 'test', { cover, asset: ASSET }).catch(e => e)
 
     expect(err).toMatchObject({ name: 'FrameVerifyError', kind: 'not_covered' })
     expect(String(err.message)).toMatch(/unsafe_asset/)
@@ -548,7 +548,7 @@ describe('verifyFramePayment: token kind', () => {
     const frame = tokenFrame()
     frame.token!.overlayUrl = 'https://overlay.attacker.example'
 
-    await expect(verifyFramePayment(payeeWallet(), frame, 'test', { cover, asset: ASSET })).rejects.toMatchObject({
+    await expect(verifyFramePayment(payeeDeps(), frame, 'test', { cover, asset: ASSET })).rejects.toMatchObject({
       kind: 'not_covered'
     })
     expect(cover).not.toHaveBeenCalled()
@@ -558,14 +558,14 @@ describe('verifyFramePayment: token kind', () => {
     const frame = tokenFrame()
     frame.token!.overlayUrl = ASSET.overlayUrl + '/'
     frame.token!.overlayIdentityKey = ASSET.overlayIdentityKey.toUpperCase()
-    await expect(verifyFramePayment(payeeWallet(), frame, 'test', covers)).resolves.toMatchObject({ kind: 'token' })
+    await expect(verifyFramePayment(payeeDeps(), frame, 'test', covers)).resolves.toMatchObject({ kind: 'token' })
   })
 
   // Fail closed, exactly as a missing verifier does: no configured asset is no
   // anchor, and an unanchored COVER walk proves nothing.
   it('refuses a token frame when no configured asset was supplied at all', async () => {
     const cover = jest.fn(async (): Promise<CoverResult> => ({ ok: true, mustSubmit: [] }))
-    await expect(verifyFramePayment(payeeWallet(), tokenFrame(), 'test', { cover })).rejects.toMatchObject({
+    await expect(verifyFramePayment(payeeDeps(), tokenFrame(), 'test', { cover })).rejects.toMatchObject({
       kind: 'not_covered'
     })
     expect(cover).not.toHaveBeenCalled()
@@ -574,7 +574,7 @@ describe('verifyFramePayment: token kind', () => {
   // Fail closed. A caller that forgot to wire the verifier must not get a
   // credit that looks identical to a covered one: no verifier is no evidence.
   it('refuses a token frame when no COVER verifier was supplied at all', async () => {
-    await expect(verifyFramePayment(payeeWallet(), tokenFrame(), 'test')).rejects.toMatchObject({ kind: 'not_covered' })
+    await expect(verifyFramePayment(payeeDeps(), tokenFrame(), 'test')).rejects.toMatchObject({ kind: 'not_covered' })
   })
 
   // Ownership is checked BEFORE coverage: a frame that pays someone else is
@@ -584,7 +584,7 @@ describe('verifyFramePayment: token kind', () => {
     const cover = jest.fn(async (): Promise<CoverResult> => ({ ok: true, mustSubmit: [] }))
     const otherPkh = Hash.hash160(Utils.toArray('02'.padEnd(66, 'c'), 'hex'))
     const frame = tokenFrame({ transaction: beefOf([{ satoshis: 1, scriptHex: tokenScript(500, otherPkh) }]) })
-    await expect(verifyFramePayment(payeeWallet(), frame, 'test', { cover, asset: ASSET })).rejects.toMatchObject({
+    await expect(verifyFramePayment(payeeDeps(), frame, 'test', { cover, asset: ASSET })).rejects.toMatchObject({
       kind: 'not_mine'
     })
     expect(cover).not.toHaveBeenCalled()
@@ -592,8 +592,8 @@ describe('verifyFramePayment: token kind', () => {
 
   it('leaves the BSV path untouched: no verifier needed, no cover call', async () => {
     const cover = jest.fn(async (): Promise<CoverResult> => ({ ok: true, mustSubmit: [] }))
-    const { frame, wallet } = await validFrame([{ satoshis: 4200, scriptHex: minesScript() }])
-    await expect(verifyFramePayment(wallet, frame, 'test', { cover })).resolves.toEqual({
+    const { frame, deps } = await validFrame([{ satoshis: 4200, scriptHex: minesScript() }])
+    await expect(verifyFramePayment(deps, frame, 'test', { cover })).resolves.toEqual({
       kind: 'bsv',
       satoshis: 4200
     })
@@ -608,6 +608,7 @@ describe('declineReasonFor', () => {
     expect(declineReasonFor('unparseable')).toBe('decode_failed')
     expect(declineReasonFor('not_mine')).toBe('session_mismatch')
     expect(declineReasonFor('not_covered')).toBe('not_covered')
+    expect(declineReasonFor('root_unverified')).toBe('root_unverified')
   })
 
   it('falls back to decode_failed for anything it does not recognise', () => {
