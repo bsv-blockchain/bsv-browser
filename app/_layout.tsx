@@ -13,6 +13,7 @@ import '@/utils/devMenu' // dev-only profiling controls in the expo-dev-client m
 import React, { useEffect } from 'react'
 import { View, useColorScheme } from 'react-native'
 import { Stack } from 'expo-router'
+import * as SystemUI from 'expo-system-ui'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { UserContextProvider, NativeHandlers } from '@bsv/expo-wallet-toolbox/core/context/UserContext'
 import packageJson from '../package.json'
@@ -171,6 +172,13 @@ export default function RootLayout() {
   // Root canvas — the colour every screen's own background sits on during
   // transitions, so it has to be the theme's canvas, not pure black/white.
   const backgroundColor = isDark ? '#0C0E12' : '#FFFFFF'
+
+  // The native root view (UIWindow / root view controller) sits behind the
+  // React tree and defaults to white; it shows through during screen
+  // transitions and edge-swipe-back. Keep it on the same canvas colour.
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(backgroundColor).catch(() => {})
+  }, [backgroundColor])
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
