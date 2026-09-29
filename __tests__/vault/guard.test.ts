@@ -798,7 +798,7 @@ test('blocks external createAction from reserving an admin-basket output by outp
   ).rejects.toBeInstanceOf(VaultAccessDenied)
   expect(calls.some(c => c.method === 'createAction')).toBe(false)
   // Only the named outpoint is looked up; history is never read.
-  expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${TXID}.0`])
+  expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${TXID}.0`], 'admin originator evil.com')
   expect(calls.some(c => c.method === 'listActions')).toBe(false)
 })
 
@@ -839,7 +839,7 @@ test.each(['00', '0e0', '-0', ''])(
         'evil.com'
       )
     ).rejects.toBeInstanceOf(VaultAccessDenied)
-    expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${TXID}.0`])
+    expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${TXID}.0`], 'admin originator evil.com')
     expect(calls.some(c => c.method === 'createAction')).toBe(false)
   }
 )
@@ -886,7 +886,7 @@ test('blocks external internalizeAction from reclassifying an admin-basket outpu
       'evil.com'
     )
   ).rejects.toBeInstanceOf(VaultAccessDenied)
-  expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${txid}.0`])
+  expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${txid}.0`], 'admin originator evil.com')
   expect(calls.some(c => c.method === 'internalizeAction')).toBe(false)
 })
 
@@ -980,8 +980,54 @@ test.each(['createAction', 'signAction'] as const)(
         : { reference: 'ordinary-ref', spends: {}, options: { sendWith: [TXID.toUpperCase()] } }
 
     await expect((guarded as any)[method](args, 'evil.com')).rejects.toBeInstanceOf(VaultAccessDenied)
-    expect(lookup.anyAdminTransaction).toHaveBeenCalledWith(method === 'createAction' ? [NORMAL_TXID, TXID] : [TXID])
+    expect(lookup.anyAdminTransaction).toHaveBeenCalledWith(
+      method === 'createAction' ? [NORMAL_TXID, TXID] : [TXID],
+      'admin originator evil.com'
+    )
     expect(calls.some(c => c.method === method)).toBe(false)
+  }
+)
+
+// WalletPermissionsManager labels each action `admin originator <o>` for spend
+// tracking. The lookup is told the caller's own label so that label does not
+// make the caller's own actions admin state; storage applies it
+// (__tests__/storage/vaultGuardSql.test.ts).
+test('tells the lookup the caller own originator label, in the form storage keeps it', async () => {
+  const { txid, atomic } = vaultTxBeef()
+  const { wallet } = fakeWallet()
+  const lookup = fakeLookup()
+  const guarded = guardVaultAccess(wallet, ADMIN, { lookup })
+  await guarded.internalizeAction(
+    {
+      tx: atomic,
+      description: 'Own payment',
+      outputs: [{ outputIndex: 0, protocol: 'basket insertion', insertionRemittance: { basket: 'normal' } }]
+    } as any,
+    'Fast.BRC.dev'
+  )
+  expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${txid}.0`], 'admin originator fast.brc.dev')
+  await guarded.createAction({ description: 'Batch', options: { sendWith: [NORMAL_TXID] } } as any, 'app.example')
+  expect(lookup.anyAdminTransaction).toHaveBeenCalledWith([NORMAL_TXID], 'admin originator app.example')
+})
+
+// `ADMIN.COM` and `admin.com ` are not the admin originator here, but storage
+// keeps their labels as the admin's, so they must not be ignored.
+test.each([undefined, '', 'ADMIN.COM', 'admin.com '])(
+  'ignores no originator label for caller %p',
+  async originator => {
+    const { txid, atomic } = vaultTxBeef()
+    const { wallet } = fakeWallet()
+    const lookup = fakeLookup()
+    const guarded = guardVaultAccess(wallet, ADMIN, { lookup })
+    await guarded.internalizeAction(
+      {
+        tx: atomic,
+        description: 'Payment',
+        outputs: [{ outputIndex: 0, protocol: 'basket insertion', insertionRemittance: { basket: 'normal' } }]
+      } as any,
+      originator
+    )
+    expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${txid}.0`], null)
   }
 )
 
