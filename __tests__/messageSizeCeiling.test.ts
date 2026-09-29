@@ -57,7 +57,12 @@ describe('sniffWalletRequestId', () => {
     expect(sniffWalletRequestId(request)).toBeUndefined()
   })
 
-  it('rejects ids with characters outside base64 or longer than 64 characters', () => {
+  it("reads window.CWI's fallback id when crypto was unavailable", () => {
+    const request = '{"type":"CWI","isInvocation":true,"id":"__cwi_3_1759000000000_k2j9xq","call":"createAction","args":{}}'
+    expect(sniffWalletRequestId(request)).toBe('__cwi_3_1759000000000_k2j9xq')
+  })
+
+  it('rejects ids with characters outside the id alphabet or longer than 64 characters', () => {
     expect(sniffWalletRequestId('{"type":"CWI","id":"</script>"')).toBeUndefined()
     expect(sniffWalletRequestId('{"type":"CWI","id":"' + 'A'.repeat(65) + '"')).toBeUndefined()
   })

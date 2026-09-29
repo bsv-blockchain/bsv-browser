@@ -42,7 +42,8 @@ export const WALLET_RESPONSE_TOO_LARGE = 'Wallet response exceeds the maximum pe
 /** How much of an oversized request is inspected for its id. The SDK writes `id` before `args`. */
 const REQUEST_ID_SNIFF_CHARS = 512
 const CWI_PREFIX = '{"type":"CWI"'
-const REQUEST_ID_PATTERN = /"id":"([A-Za-z0-9+/=]{1,64})"/
+// Base64 (the SDK and window.CWI) or window.CWI's __cwi_<n>_<ts>_<rand> fallback.
+const REQUEST_ID_PATTERN = /"id":"([A-Za-z0-9+/=_]{1,64})"/
 
 /**
  * Recovers the request id from a CWI message that is too large to parse, so the
