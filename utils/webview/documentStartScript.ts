@@ -1,6 +1,13 @@
 import { buildCWIProviderScript } from './cwiProvider'
 
 /**
+ * Only a short, visible-ASCII version string may be embedded into the
+ * injected script; spaces and control characters are refused to avoid
+ * ambiguous or malformed version strings.
+ */
+const WALLET_VERSION_PATTERN = /^[\x21-\x7e]{7,30}$/
+
+/**
  * Builds the document-start script installed in every WebView frame.
  *
  * The BRC-100 provider must exist in child frames so embedded apps can talk
@@ -8,19 +15,6 @@ import { buildCWIProviderScript } from './cwiProvider'
  * remain scoped to the top document; applying them to arbitrary third-party
  * frames would change page behaviour beyond the wallet surface.
  */
-/**
- * Only a plain, short version string may be embedded into the injected script.
- * Deviation from the task brief: the brief's literal pattern was
- * `/^[\x20-\x7e]{7,30}$/` (space included), but the brief's own test fixture
- * asserts that a version containing an internal space ('wallet- -1.0.0') must
- * NOT install the interceptor. \x20-\x7e is the standard "printable ASCII"
- * range and does include space, so that test cannot pass under the literal
- * regex. \x21-\x7e (visible, non-space ASCII) satisfies every test in
- * __tests__/documentStartScript.test.ts and is strictly more restrictive
- * (safer), so it was used here instead. Flagged in task-4-report.md.
- */
-const WALLET_VERSION_PATTERN = /^[\x21-\x7e]{7,30}$/
-
 export function buildWalletDocumentStartScript(mainFrameScript: string, walletVersion?: string): string {
   const versionLiteral =
     typeof walletVersion === 'string' && WALLET_VERSION_PATTERN.test(walletVersion)
