@@ -32,4 +32,18 @@ describe('buildWalletResponseScript', () => {
     expect(event.data).toBe(JSON.stringify(message))
     expect(child.postMessage).toHaveBeenCalledWith(JSON.stringify(message), 'https://peerpay.babbage.systems')
   })
+
+  it('accepts an already-serialized response', () => {
+    const child = { postMessage: jest.fn() }
+    const topDocument = {
+      location: { origin: 'https://babbageos.com' },
+      frames: [child],
+      dispatchEvent: jest.fn()
+    }
+    const serialized = JSON.stringify({ type: 'CWI', id: 'request-3', status: 'success', result: { ok: true } })
+
+    Function('window', buildWalletResponseScript(serialized, 'https://convo.babbage.systems'))(topDocument)
+
+    expect(child.postMessage).toHaveBeenCalledWith(serialized, 'https://convo.babbage.systems')
+  })
 })

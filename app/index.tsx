@@ -29,7 +29,13 @@ import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
 import { useWalletManagers } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { guardVaultAccess } from '@bsv/expo-wallet-toolbox/core/services/vault/guard'
 import { capWalletArgs } from '@bsv/expo-wallet-toolbox/core/services/capWalletArgs'
-import { messageTooLarge } from '@/utils/webview/messageSizeCeiling'
+import {
+  messageTooLarge,
+  responseTooLarge,
+  sniffWalletRequestId,
+  WALLET_REQUEST_TOO_LARGE,
+  WALLET_RESPONSE_TOO_LARGE
+} from '@/utils/webview/messageSizeCeiling'
 import { ADMIN_ORIGINATOR } from '@/context/config'
 import { WalletInterface } from '@bsv/sdk'
 import { useLocalStorage } from '@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider'
@@ -54,7 +60,7 @@ import { captureThumbnail, cleanupOrphanedThumbnails, thumbnailExists } from '@/
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildWalletDocumentStartScript } from '@/utils/webview/documentStartScript'
 import { resolveWalletFrameIdentity } from '@/utils/webview/walletOrigin'
-import { buildWalletResponseScript } from '@/utils/webview/walletResponseScript'
+import { buildWalletResponseScript, serializeWalletResponse } from '@/utils/webview/walletResponseScript'
 import { buildWalletErrorEnvelope, buildWalletSuccessEnvelope } from '@/utils/webview/walletEnvelope'
 import { normalizeWalletByteFields } from '@/utils/webview/walletByteJson'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
@@ -1200,13 +1206,6 @@ const Browser = observer(function Browser() {
       // messages; the tab URL is the fallback so getPublicKey still works.
       const frameIdentity = resolveWalletFrameIdentity(eventUrl, activeTab.url)
 
-      const sendResponseToWebView = (id: string, result: any) => {
-        if (!activeTab?.webviewRef?.current) return
-        activeTab.webviewRef.current.injectJavaScript(
-          buildWalletResponseScript(buildWalletSuccessEnvelope(id, result), frameIdentity?.responseOrigin)
-        )
-      }
-
       // Accepts a bare description or a thrown error; the envelope is normalized
       // so the page-side SDK can always parse it (see utils/webview/walletEnvelope.ts).
       const sendErrorToWebView = (id: string, error: unknown) => {
@@ -1216,12 +1215,27 @@ const Browser = observer(function Browser() {
         )
       }
 
+      const sendResponseToWebView = (id: string, result: any) => {
+        if (!activeTab?.webviewRef?.current) return
+        const serialized = serializeWalletResponse(buildWalletSuccessEnvelope(id, result))
+        if (responseTooLarge(serialized)) {
+          console.warn(`[webview] refused an oversize wallet response: ${serialized.length} chars`)
+          sendErrorToWebView(id, WALLET_RESPONSE_TOO_LARGE)
+          return
+        }
+        activeTab.webviewRef.current.injectJavaScript(buildWalletResponseScript(serialized, frameIdentity?.responseOrigin))
+      }
+
       // Absolute ceiling BEFORE the parse. A damage limiter, not a fix: the
       // native side has already built ~4 bytes per JSON character by the time
       // this runs (see utils/webview/messageSizeCeiling.ts). What it prevents is
       // the second, larger allocation — JSON.parse materialising the arrays.
       if (messageTooLarge(eventData)) {
         console.warn(`[webview] dropped an oversize message: ${eventData.length} chars`)
+        // Tell the page the call was refused; the SDK's connected substrate has
+        // no timeout, so silence would leave the caller waiting forever.
+        const id = sniffWalletRequestId(eventData)
+        if (id) sendErrorToWebView(id, WALLET_REQUEST_TOO_LARGE)
         return
       }
 

@@ -11,7 +11,7 @@ describe('WebView wallet byte JSON compatibility', () => {
     const index = readFileSync(resolve(process.cwd(), 'app/index.tsx'), 'utf8')
     const response = readFileSync(resolve(process.cwd(), 'utils/webview/walletResponseScript.ts'), 'utf8')
 
-    expect(response).toContain('const messageString = stringifyWalletPayload(message)')
+    expect(response).toContain('return stringifyWalletPayload(message)')
     expect(index).toContain('msg = normalizeWalletByteFields(JSON.parse(eventData))')
   })
 

@@ -5,11 +5,13 @@
  */
 import { stringifyWalletPayload } from './walletByteJson'
 
+/** stringifyWalletPayload, not JSON.stringify: wallet results carry byte fields that plain JSON mangles. */
+export function serializeWalletResponse(message: unknown): string {
+  return stringifyWalletPayload(message)
+}
+
 export function buildWalletResponseScript(message: unknown, responseOrigin?: string): string {
-  // stringifyWalletPayload, not JSON.stringify: wallet results can carry
-  // Uint8Array (and historically numeric-keyed) byte fields, which plain
-  // JSON.stringify mangles into {"0":..} records the page cannot use.
-  const messageString = stringifyWalletPayload(message)
+  const messageString = typeof message === 'string' ? message : serializeWalletResponse(message)
   const responseOriginString = JSON.stringify(responseOrigin ?? null)
   return `
     (function() {

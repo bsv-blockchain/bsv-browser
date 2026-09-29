@@ -1,7 +1,9 @@
 import {
   DOWNLOAD_BLOB_CHARS_MAX,
   MESSAGE_CHARS_MAX,
-  messageTooLarge
+  messageTooLarge,
+  responseTooLarge,
+  sniffWalletRequestId
 } from '@/utils/webview/messageSizeCeiling'
 
 describe('messageTooLarge', () => {
@@ -41,5 +43,34 @@ describe('messageTooLarge', () => {
 
   it('tolerates a non-string, which the RN bridge should never send', () => {
     expect(messageTooLarge(undefined as unknown as string)).toBe(false)
+  })
+})
+
+describe('sniffWalletRequestId', () => {
+  it('reads the id the SDK places near the front of a request', () => {
+    const request = '{"type":"CWI","isInvocation":true,"id":"Zm9vYmFyYmF6cXV4","call":"createAction","args":{"x":"' + 'y'.repeat(100) + '"}}'
+    expect(sniffWalletRequestId(request)).toBe('Zm9vYmFyYmF6cXV4')
+  })
+
+  it('ignores an id that only appears after the sniff window', () => {
+    const request = '{"type":"CWI","isInvocation":true,"call":"createAction","args":{"x":"' + 'y'.repeat(600) + '"},"id":"late"}'
+    expect(sniffWalletRequestId(request)).toBeUndefined()
+  })
+
+  it('rejects ids with characters outside base64 or longer than 64 characters', () => {
+    expect(sniffWalletRequestId('{"type":"CWI","id":"</script>"')).toBeUndefined()
+    expect(sniffWalletRequestId('{"type":"CWI","id":"' + 'A'.repeat(65) + '"')).toBeUndefined()
+  })
+
+  it('returns undefined for non-strings and non-CWI messages', () => {
+    expect(sniffWalletRequestId(undefined as unknown as string)).toBeUndefined()
+    expect(sniffWalletRequestId('{"type":"FILE_DOWNLOAD_BLOB","id":"abc"}')).toBeUndefined()
+  })
+})
+
+describe('responseTooLarge', () => {
+  it('flags a serialized response above the shared ceiling', () => {
+    expect(responseTooLarge('x'.repeat(MESSAGE_CHARS_MAX))).toBe(false)
+    expect(responseTooLarge('x'.repeat(MESSAGE_CHARS_MAX + 1))).toBe(true)
   })
 })

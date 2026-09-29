@@ -35,3 +35,27 @@ export function messageTooLarge(data: string): boolean {
   const limit = data.startsWith(DOWNLOAD_PREFIX) ? DOWNLOAD_BLOB_CHARS_MAX : MESSAGE_CHARS_MAX
   return data.length > limit
 }
+
+export const WALLET_REQUEST_TOO_LARGE = 'Wallet request exceeds the maximum permitted size'
+export const WALLET_RESPONSE_TOO_LARGE = 'Wallet response exceeds the maximum permitted size'
+
+/** How much of an oversized request is inspected for its id. The SDK writes `id` before `args`. */
+const REQUEST_ID_SNIFF_CHARS = 512
+const CWI_PREFIX = '{"type":"CWI"'
+const REQUEST_ID_PATTERN = /"id":"([A-Za-z0-9+/=]{1,64})"/
+
+/**
+ * Recovers the request id from a CWI message that is too large to parse, so the
+ * page can be told the request was refused instead of waiting forever. Reads a
+ * bounded prefix only; never the whole string.
+ */
+export function sniffWalletRequestId(data: string): string | undefined {
+  if (typeof data !== 'string' || !data.startsWith(CWI_PREFIX)) return undefined
+  const match = REQUEST_ID_PATTERN.exec(data.slice(0, REQUEST_ID_SNIFF_CHARS))
+  return match?.[1]
+}
+
+/** Outbound counterpart of messageTooLarge: a wallet response the host must not inject in one shot. */
+export function responseTooLarge(serialized: string): boolean {
+  return serialized.length > MESSAGE_CHARS_MAX
+}
