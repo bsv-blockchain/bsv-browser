@@ -11,7 +11,15 @@ export function serializeWalletResponse(message: unknown): string {
 }
 
 export function buildWalletResponseScript(message: unknown, responseOrigin?: string): string {
-  const messageString = typeof message === 'string' ? message : serializeWalletResponse(message)
+  return buildSerializedWalletResponseScript(serializeWalletResponse(message), responseOrigin)
+}
+
+/**
+ * For a response already produced by serializeWalletResponse (so its size could
+ * be checked first). The string is embedded as a JavaScript expression, so it
+ * must be that function's JSON output and nothing else.
+ */
+export function buildSerializedWalletResponseScript(messageString: string, responseOrigin?: string): string {
   const responseOriginString = JSON.stringify(responseOrigin ?? null)
   return `
     (function() {

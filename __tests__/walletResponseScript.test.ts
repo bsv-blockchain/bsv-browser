@@ -1,4 +1,8 @@
-import { buildWalletResponseScript } from '@/utils/webview/walletResponseScript'
+import {
+  buildSerializedWalletResponseScript,
+  buildWalletResponseScript,
+  serializeWalletResponse
+} from '@/utils/webview/walletResponseScript'
 
 describe('buildWalletResponseScript', () => {
   it('posts a wallet response back to a direct embedded frame', () => {
@@ -40,10 +44,25 @@ describe('buildWalletResponseScript', () => {
       frames: [child],
       dispatchEvent: jest.fn()
     }
-    const serialized = JSON.stringify({ type: 'CWI', id: 'request-3', status: 'success', result: { ok: true } })
+    const serialized = serializeWalletResponse({ type: 'CWI', id: 'request-3', status: 'success', result: { ok: true } })
 
-    Function('window', buildWalletResponseScript(serialized, 'https://convo.babbage.systems'))(topDocument)
+    Function('window', buildSerializedWalletResponseScript(serialized, 'https://convo.babbage.systems'))(topDocument)
 
     expect(child.postMessage).toHaveBeenCalledWith(serialized, 'https://convo.babbage.systems')
+  })
+
+  it('treats a string message as a value to serialize, never as script', () => {
+    const child = { postMessage: jest.fn() }
+    const topDocument = {
+      location: { origin: 'https://babbageos.com' },
+      frames: [child],
+      dispatchEvent: jest.fn()
+    }
+    const hostile = 'x); window.__pwned = true; ('
+
+    Function('window', buildWalletResponseScript(hostile, 'https://convo.babbage.systems'))(topDocument)
+
+    expect((topDocument as Record<string, unknown>).__pwned).toBeUndefined()
+    expect(child.postMessage).toHaveBeenCalledWith(JSON.stringify(hostile), 'https://convo.babbage.systems')
   })
 })

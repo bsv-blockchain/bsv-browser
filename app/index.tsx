@@ -60,7 +60,11 @@ import { captureThumbnail, cleanupOrphanedThumbnails, thumbnailExists } from '@/
 import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSourcePolyfill'
 import { buildWalletDocumentStartScript } from '@/utils/webview/documentStartScript'
 import { resolveWalletFrameIdentity } from '@/utils/webview/walletOrigin'
-import { buildWalletResponseScript, serializeWalletResponse } from '@/utils/webview/walletResponseScript'
+import {
+  buildSerializedWalletResponseScript,
+  buildWalletResponseScript,
+  serializeWalletResponse
+} from '@/utils/webview/walletResponseScript'
 import { buildWalletErrorEnvelope, buildWalletSuccessEnvelope } from '@/utils/webview/walletEnvelope'
 import { normalizeWalletByteFields } from '@/utils/webview/walletByteJson'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
@@ -1246,7 +1250,9 @@ const Browser = observer(function Browser() {
           sendErrorToWebView(id, WALLET_RESPONSE_TOO_LARGE)
           return
         }
-        activeTab.webviewRef.current.injectJavaScript(buildWalletResponseScript(serialized, frameIdentity?.responseOrigin))
+        activeTab.webviewRef.current.injectJavaScript(
+          buildSerializedWalletResponseScript(serialized, frameIdentity?.responseOrigin)
+        )
       }
 
       // Absolute ceiling BEFORE the parse. A damage limiter, not a fix: the
