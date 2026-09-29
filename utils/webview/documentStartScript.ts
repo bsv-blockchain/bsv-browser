@@ -38,8 +38,21 @@ export function buildWalletDocumentStartScript(mainFrameScript: string, walletVe
   // discovery (which @bsv/sdk bounds at one second per probe) independent of
   // how busy the app's JS thread is during page load. Every other call, and
   // anything that is not a small CWI invocation, still crosses the bridge.
+  //
+  // Only where the host's replies can actually land: the top document, or a
+  // same-origin frame directly under it. The host relays child-frame replies
+  // from the top document, and the SDK drops a relay whose origin is not the
+  // frame's own, so a cross-origin frame that passed discovery here would then
+  // wait forever on its first real call. Failing discovery is the honest answer.
   var version = ${versionLiteral};
   if (typeof version !== 'string') return;
+  if (window.top !== window) {
+    var reachable = false;
+    try {
+      reachable = window.parent === window.top && window.top.location.origin === window.location.origin;
+    } catch (_) {}
+    if (!reachable) return;
+  }
   var bridge = window.ReactNativeWebView;
   if (!bridge || typeof bridge.postMessage !== 'function') return;
   var wrapped = {

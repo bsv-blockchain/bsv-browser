@@ -36,7 +36,7 @@ describe('wallet document-start script', () => {
 
   function installBridge(version?: string) {
     const nativePostMessage = jest.fn()
-    const dispatched: Array<{ data: string }> = []
+    const dispatched: { data: string }[] = []
     const topDocument: Record<string, any> = {
       ReactNativeWebView: { postMessage: nativePostMessage },
       dispatchEvent: (event: { data: string }) => {
@@ -101,6 +101,56 @@ describe('wallet document-start script', () => {
     topDocument.ReactNativeWebView.postMessage(broken)
     topDocument.ReactNativeWebView.postMessage(42 as unknown as string)
     expect(nativePostMessage.mock.calls.map(call => call[0])).toEqual([huge, broken, 42])
+  })
+
+  function installFrame(frameOrigin: string, topOrigin: string | null, nested = false) {
+    const nativePostMessage = jest.fn()
+    const dispatched: { data: string }[] = []
+    // A cross-origin top throws on location access, as a real browser does.
+    const top: Record<string, any> = {}
+    Object.defineProperty(top, 'location', {
+      get() {
+        if (topOrigin === null) throw new Error('SecurityError')
+        return { origin: topOrigin }
+      }
+    })
+    const frame: Record<string, any> = {
+      top,
+      parent: nested ? {} : top,
+      location: { origin: frameOrigin },
+      ReactNativeWebView: { postMessage: nativePostMessage },
+      dispatchEvent: (event: { data: string }) => {
+        dispatched.push(event)
+        return true
+      },
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn()
+    }
+    execute(buildWalletDocumentStartScript('', 'wallet-brc100-1.0.0'), frame)
+    return { frame, nativePostMessage, dispatched }
+  }
+
+  it('answers getVersion in a same-origin frame directly under the top document', () => {
+    jest.useFakeTimers()
+    try {
+      const { frame, nativePostMessage, dispatched } = installFrame('https://app.example', 'https://app.example')
+      frame.ReactNativeWebView.postMessage(probe('probe-4'))
+      jest.runAllTimers()
+      expect(nativePostMessage).not.toHaveBeenCalled()
+      expect(dispatched).toHaveLength(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it.each([
+    ['a cross-origin frame', 'https://convo.babbage.systems', null, false],
+    ['a same-origin frame nested below another frame', 'https://app.example', 'https://app.example', true]
+  ])('leaves getVersion to the bridge in %s, where host replies cannot land', (_, frameOrigin, topOrigin, nested) => {
+    const { frame, nativePostMessage, dispatched } = installFrame(frameOrigin, topOrigin, nested)
+    frame.ReactNativeWebView.postMessage(probe('probe-5'))
+    expect(nativePostMessage).toHaveBeenCalledWith(probe('probe-5'))
+    expect(dispatched).toHaveLength(0)
   })
 
   it('does not install the interceptor for a version that is not 7-30 printable ASCII characters', () => {
