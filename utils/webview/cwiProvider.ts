@@ -21,6 +21,12 @@ export function buildCWIProviderScript(): string {
 
   var _idCounter = 0;
   function generateId() {
+    if (window.crypto && typeof window.crypto.getRandomValues === 'function' && typeof btoa === 'function') {
+      var bytes = window.crypto.getRandomValues(new Uint8Array(16));
+      var binary = '';
+      for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    }
     return '__cwi_' + (++_idCounter) + '_' + Date.now() + '_' +
       Math.random().toString(36).slice(2, 8);
   }
@@ -31,6 +37,12 @@ export function buildCWIProviderScript(): string {
       var timeoutId = null;
 
       var listener = function(e) {
+        // The host injects replies into this document (no source) or relays
+        // them from the parent frame; any other browsing context is not the
+        // wallet bridge.
+        var from = e.source;
+        if (from != null && from !== window && from !== window.parent) return;
+
         var data;
         try { data = JSON.parse(e.data); } catch(_) { return; }
         if (data.type !== 'CWI' || data.id !== id || data.isInvocation === true) return;
