@@ -30,7 +30,7 @@ import { useSheet } from '@/context/SheetContext'
 import type { SheetRoute } from '@/context/SheetContext'
 import type { Bookmark, HistoryEntry, Tab } from '@/shared/types/browser'
 import { kNEW_TAB_URL, SEARCH_ENGINES, DEFAULT_SEARCH_ENGINE_ID, safeBottomInset, ADDRESS_BAR_HEIGHT } from '@/shared/constants'
-import { buildLocationHrefScript, isValidUrl } from '@/utils/generalHelpers'
+import { isValidUrl } from '@/utils/generalHelpers'
 import { escapeForJsSingleQuote } from '@/utils/webview/errorPages'
 import tabStore from '@/stores/TabStore'
 import bookmarkStore from '@/stores/BookmarkStore'
@@ -584,7 +584,6 @@ export const AddressBar = observer(
         // Retry the cancelled target rather than reloading the stale document.
         cancelledLoadTabIds.current.delete(currentTab.id)
         injectNavigationSplash(currentTab.url)
-        currentTab.webviewRef?.current?.injectJavaScript(buildLocationHrefScript(currentTab.url))
       } else {
         currentTab.webviewRef?.current?.reload()
       }

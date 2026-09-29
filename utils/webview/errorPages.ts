@@ -1,3 +1,5 @@
+import { buildLocationHrefScript } from '@/utils/generalHelpers'
+
 /**
  * Escape a string for safe embedding inside a backtick template literal that is
  * itself injected into a WebView via injectJavaScript. Backslash MUST be escaped
@@ -247,4 +249,19 @@ export function navigationLoadingPage(targetUrl: string): string {
   </script>
 </body>
 </html>`
+}
+
+/**
+ * Script injected on address-bar navigation: paints the splash over the
+ * current page, then navigates to `url` from inside the page.
+ *
+ * WebKit's document.open() stops a pending navigation, and the WebView's own
+ * source load for `url` can start before or after this script runs. A splash
+ * that only paints can therefore cancel that load, and the cancel (-999) is
+ * swallowed, leaving the spinner up for good. Navigating afterwards makes the
+ * outcome the same whichever lands first.
+ */
+export function buildNavigationSplashScript(url: string): string {
+  const html = escapeForTemplateLiteral(navigationLoadingPage(url))
+  return `document.open();document.write(\`${html}\`);document.close();${buildLocationHrefScript(url)}`
 }
