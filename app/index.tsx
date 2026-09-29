@@ -743,6 +743,28 @@ const Browser = observer(function Browser() {
   /* ----------------------------- wallet context ----------------------------- */
   const { managers, walletBuilding } = useWalletManagers()
   const [wallet, setWallet] = useState<WalletInterface | undefined>()
+  // Fed into the document-start script so pages get getVersion answered in the
+  // page (see utils/webview/documentStartScript.ts). Undefined until the wallet
+  // exists, which also disables the shortcut in Web2 mode and before setup.
+  const [walletVersion, setWalletVersion] = useState<string | undefined>()
+  useEffect(() => {
+    if (!wallet) {
+      setWalletVersion(undefined)
+      return
+    }
+    let cancelled = false
+    wallet
+      .getVersion({})
+      .then(result => {
+        if (!cancelled) setWalletVersion(result.version)
+      })
+      .catch(() => {
+        if (!cancelled) setWalletVersion(undefined)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [wallet])
   const paymentHandlerRef = useRef<any>(null)
   const paymentInFlightUrl = useRef<string | null>(null)
   useEffect(() => {
@@ -1164,9 +1186,10 @@ const Browser = observer(function Browser() {
           '\n' +
           downloadInterceptScript +
           '\n' +
-          getPermissionScript(permissionsDeniedForCurrentDomain, pendingPermission)
+          getPermissionScript(permissionsDeniedForCurrentDomain, pendingPermission),
+        walletVersion
       ),
-    [downloadInterceptScript, permissionsDeniedForCurrentDomain, pendingPermission]
+    [downloadInterceptScript, permissionsDeniedForCurrentDomain, pendingPermission, walletVersion]
   )
 
   const routeWebViewMessage = useMemo(

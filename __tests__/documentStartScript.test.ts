@@ -33,4 +33,81 @@ describe('wallet document-start script', () => {
     expect(typeof topDocument.CWI?.getVersion).toBe('function')
     expect(topDocument.__mainFrameHook).toBe(true)
   })
+
+  function installBridge(version?: string) {
+    const nativePostMessage = jest.fn()
+    const dispatched: Array<{ data: string }> = []
+    const topDocument: Record<string, any> = {
+      ReactNativeWebView: { postMessage: nativePostMessage },
+      dispatchEvent: (event: { data: string }) => {
+        dispatched.push(event)
+        return true
+      },
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn()
+    }
+    topDocument.top = topDocument
+    execute(buildWalletDocumentStartScript('', version), topDocument)
+    return { topDocument, nativePostMessage, dispatched }
+  }
+
+  const probe = (id: string) =>
+    JSON.stringify({ type: 'CWI', isInvocation: true, id, call: 'getVersion', args: {} })
+
+  it('answers a getVersion probe in the page when the wallet version is known', () => {
+    jest.useFakeTimers()
+    try {
+      const { topDocument, nativePostMessage, dispatched } = installBridge('wallet-brc100-1.0.0')
+      topDocument.ReactNativeWebView.postMessage(probe('probe-1'))
+      expect(nativePostMessage).not.toHaveBeenCalled()
+      jest.runAllTimers()
+      expect(dispatched).toHaveLength(1)
+      expect(JSON.parse(dispatched[0].data)).toEqual({
+        type: 'CWI',
+        id: 'probe-1',
+        isInvocation: false,
+        status: 'success',
+        result: { version: 'wallet-brc100-1.0.0' }
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('forwards every other wallet call and every non-CWI message to the native bridge', () => {
+    const { topDocument, nativePostMessage, dispatched } = installBridge('wallet-brc100-1.0.0')
+    const createAction = JSON.stringify({ type: 'CWI', isInvocation: true, id: 'a', call: 'createAction', args: {} })
+    const response = JSON.stringify({ type: 'CWI', isInvocation: false, id: 'b', call: 'getVersion' })
+    const camera = JSON.stringify({ type: 'CAMERA_REQUEST' })
+    topDocument.ReactNativeWebView.postMessage(createAction)
+    topDocument.ReactNativeWebView.postMessage(response)
+    topDocument.ReactNativeWebView.postMessage(camera)
+    expect(nativePostMessage.mock.calls.map(call => call[0])).toEqual([createAction, response, camera])
+    expect(dispatched).toHaveLength(0)
+  })
+
+  it('forwards a getVersion probe to the bridge when the wallet version is unknown', () => {
+    const { topDocument, nativePostMessage, dispatched } = installBridge(undefined)
+    topDocument.ReactNativeWebView.postMessage(probe('probe-2'))
+    expect(nativePostMessage).toHaveBeenCalledWith(probe('probe-2'))
+    expect(dispatched).toHaveLength(0)
+  })
+
+  it('forwards oversized or malformed CWI strings without parsing them', () => {
+    const { topDocument, nativePostMessage } = installBridge('wallet-brc100-1.0.0')
+    const huge = '{"type":"CWI","isInvocation":true,"id":"x","call":"getVersion","args":{"pad":"' + 'y'.repeat(5000) + '"}}'
+    const broken = '{"type":"CWI",'
+    topDocument.ReactNativeWebView.postMessage(huge)
+    topDocument.ReactNativeWebView.postMessage(broken)
+    topDocument.ReactNativeWebView.postMessage(42 as unknown as string)
+    expect(nativePostMessage.mock.calls.map(call => call[0])).toEqual([huge, broken, 42])
+  })
+
+  it('does not install the interceptor for a version that is not 7-30 printable ASCII characters', () => {
+    for (const bad of ['short', 'x'.repeat(31), 'wallet- -1.0.0', 'v1.0.0</script>' + 'x'.repeat(20)]) {
+      const { topDocument, nativePostMessage } = installBridge(bad)
+      topDocument.ReactNativeWebView.postMessage(probe('probe-3'))
+      expect(nativePostMessage).toHaveBeenCalledWith(probe('probe-3'))
+    }
+  })
 })
