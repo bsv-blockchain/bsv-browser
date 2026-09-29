@@ -1,3 +1,4 @@
+import { WindowCWISubstrate } from '@bsv/sdk'
 import { buildCWIProviderScript } from '@/utils/webview/cwiProvider'
 
 type Listener = (event: { data: string; source?: unknown }) => void
@@ -93,5 +94,41 @@ describe('window.CWI provider', () => {
     const data = JSON.stringify({ type: 'CWI', id, isInvocation: false, status: 'error', code: 1, description: 'nope' })
     for (const listener of Array.from(listeners)) listener({ data, source: null })
     await expect(pending).rejects.toMatchObject({ code: 1, message: 'nope' })
+  })
+
+  it('works behind the SDK window.CWI substrate, which wraps each method in a Proxy', async () => {
+    const { win, listeners, postMessage } = installProvider()
+    const realWindow = (global as any).window
+    ;(global as any).window = win
+    let substrate: WindowCWISubstrate
+    try {
+      substrate = new WindowCWISubstrate()
+    } finally {
+      ;(global as any).window = realWindow
+    }
+    const pending = substrate.listOutputs({ basket: 'event tickets' })
+    const { id, call } = JSON.parse(postMessage.mock.calls[0][0])
+    expect(call).toBe('listOutputs')
+    const data = JSON.stringify({
+      type: 'CWI',
+      id,
+      isInvocation: false,
+      status: 'success',
+      result: { totalOutputs: 0, outputs: [] }
+    })
+    for (const listener of Array.from(listeners)) listener({ data, source: null })
+    await expect(pending).resolves.toEqual({ totalOutputs: 0, outputs: [] })
+  })
+
+  it('keeps window.CWI methods tamper-proof', () => {
+    const { win } = installProvider()
+    const original = win.CWI.createAction
+    try {
+      win.CWI.createAction = () => 'hijacked'
+    } catch (_) {
+      // Throws only in strict mode; either way the method must survive.
+    }
+    expect(() => Object.defineProperty(win.CWI, 'createAction', { value: () => 'hijacked' })).toThrow(TypeError)
+    expect(win.CWI.createAction).toBe(original)
   })
 })
