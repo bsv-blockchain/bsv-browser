@@ -55,6 +55,7 @@ import { nativeSpoofSetup, mediaSourcePolyfill } from '@/utils/webview/mediaSour
 import { buildWalletDocumentStartScript } from '@/utils/webview/documentStartScript'
 import { resolveWalletFrameIdentity } from '@/utils/webview/walletOrigin'
 import { buildWalletResponseScript } from '@/utils/webview/walletResponseScript'
+import { buildWalletErrorEnvelope, buildWalletSuccessEnvelope } from '@/utils/webview/walletEnvelope'
 import { normalizeWalletByteFields } from '@/utils/webview/walletByteJson'
 import { getPaymentHandler } from '@/utils/webview/bsvPaymentHandler'
 import {
@@ -1201,27 +1202,18 @@ const Browser = observer(function Browser() {
 
       const sendResponseToWebView = (id: string, result: any) => {
         if (!activeTab?.webviewRef?.current) return
-        const message = {
-          type: 'CWI',
-          id,
-          isInvocation: false,
-          result,
-          status: 'ok'
-        }
-        activeTab.webviewRef.current.injectJavaScript(buildWalletResponseScript(message, frameIdentity?.responseOrigin))
+        activeTab.webviewRef.current.injectJavaScript(
+          buildWalletResponseScript(buildWalletSuccessEnvelope(id, result), frameIdentity?.responseOrigin)
+        )
       }
 
-      const sendErrorToWebView = (id: string, description: string, code: number = 1) => {
+      // Accepts a bare description or a thrown error; the envelope is normalized
+      // so the page-side SDK can always parse it (see utils/webview/walletEnvelope.ts).
+      const sendErrorToWebView = (id: string, error: unknown) => {
         if (!activeTab?.webviewRef?.current) return
-        const message = {
-          type: 'CWI',
-          id,
-          isInvocation: false,
-          status: 'error',
-          code,
-          description
-        }
-        activeTab.webviewRef.current.injectJavaScript(buildWalletResponseScript(message, frameIdentity?.responseOrigin))
+        activeTab.webviewRef.current.injectJavaScript(
+          buildWalletResponseScript(buildWalletErrorEnvelope(id, error), frameIdentity?.responseOrigin)
+        )
       }
 
       // Absolute ceiling BEFORE the parse. A damage limiter, not a fix: the
@@ -1315,7 +1307,7 @@ const Browser = observer(function Browser() {
         if (isWeb2Mode) {
           // Web2 mode: wallet calls are not supported, send error immediately
           if (msg.type === 'CWI' && msg.id) {
-            sendErrorToWebView(msg.id, 'Wallet is disabled in Web2 mode', 1)
+            sendErrorToWebView(msg.id, 'Wallet is disabled in Web2 mode')
           }
           return
         }
@@ -1323,7 +1315,7 @@ const Browser = observer(function Browser() {
           // Should not normally reach here — the WebView loads about:blank
           // until the wallet is ready.  Guard just in case.
           if (msg.type === 'CWI' && msg.id) {
-            sendErrorToWebView(msg.id, 'Wallet is still initializing', 1)
+            sendErrorToWebView(msg.id, 'Wallet is still initializing')
           }
           return
         }
@@ -1333,7 +1325,7 @@ const Browser = observer(function Browser() {
         // bottom, so it is the landing spot for "you need a wallet for this",
         // not the create-or-import chooser.
         if (msg.type === 'CWI' && msg.id) {
-          sendErrorToWebView(msg.id, 'Wallet is not authenticated', 1)
+          sendErrorToWebView(msg.id, 'Wallet is not authenticated')
         }
         router.push('/wallet')
         return
@@ -1341,7 +1333,7 @@ const Browser = observer(function Browser() {
 
       if (!frameIdentity) {
         if (msg.type === 'CWI' && msg.id) {
-          sendErrorToWebView(msg.id, 'Unable to verify the wallet request origin', 1)
+          sendErrorToWebView(msg.id, 'Unable to verify the wallet request origin')
         }
         return
       }
@@ -1422,8 +1414,8 @@ const Browser = observer(function Browser() {
             throw new Error('Unsupported method.')
         }
         sendResponseToWebView(msg.id, response)
-      } catch (error: any) {
-        sendErrorToWebView(msg.id, error?.message || 'unknown error', error?.code || 1)
+      } catch (error) {
+        sendErrorToWebView(msg.id, error)
       } finally {
         perfEnd()
       }

@@ -8,7 +8,7 @@ describe('buildWalletResponseScript', () => {
       frames: [child],
       dispatchEvent: jest.fn()
     }
-    const message = { type: 'CWI', id: 'request-1', status: 'ok', result: { version: '1.0.0' } }
+    const message = { type: 'CWI', id: 'request-1', status: 'success', result: { version: '1.0.0' } }
 
     Function('window', buildWalletResponseScript(message, 'https://convo.babbage.systems'))(topDocument)
 
@@ -23,7 +23,7 @@ describe('buildWalletResponseScript', () => {
       frames: [child],
       dispatchEvent: jest.fn()
     }
-    const message = { type: 'CWI', id: 'request-2', status: 'ok', result: { publicKey: '02ab' } }
+    const message = { type: 'CWI', id: 'request-2', status: 'success', result: { publicKey: '02ab' } }
 
     Function('window', buildWalletResponseScript(message, 'https://peerpay.babbage.systems'))(topDocument)
 

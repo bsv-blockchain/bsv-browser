@@ -40,13 +40,37 @@ describe('embedded-frame wallet round trip', () => {
           type: 'CWI',
           id: invocation.id,
           isInvocation: false,
-          status: 'ok',
+          status: 'success',
           result: { version: '1.0.0' }
         },
         identity?.responseOrigin
       )
     )(topDocument)
 
+    await expect(response).resolves.toEqual({ version: '1.0.0' })
+  })
+
+  it('still resolves the historical status ok dialect in the injected provider', async () => {
+    const listeners = new Set<(event: { data: string }) => void>()
+    const nativePostMessage = jest.fn()
+    const frame: Record<string, any> = {
+      top: {},
+      webkit: { messageHandlers: { ReactNativeWebView: { postMessage: nativePostMessage } } },
+      addEventListener: (type: string, listener: (event: { data: string }) => void) => {
+        if (type === 'message') listeners.add(listener)
+      },
+      removeEventListener: (type: string, listener: (event: { data: string }) => void) => {
+        if (type === 'message') listeners.delete(listener)
+      }
+    }
+    Function('window', buildWalletDocumentStartScript(''))(frame)
+    const response = frame.CWI.getVersion({})
+    const invocation = JSON.parse(nativePostMessage.mock.calls[0][0])
+    for (const listener of listeners) {
+      listener({
+        data: JSON.stringify({ type: 'CWI', id: invocation.id, isInvocation: false, status: 'ok', result: { version: '1.0.0' } })
+      })
+    }
     await expect(response).resolves.toEqual({ version: '1.0.0' })
   })
 
@@ -93,7 +117,7 @@ describe('embedded-frame wallet round trip', () => {
           type: 'CWI',
           id: invocation.id,
           isInvocation: false,
-          status: 'ok',
+          status: 'success',
           result: { publicKey: '02ab' }
         },
         identity?.responseOrigin
