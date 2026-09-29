@@ -54,15 +54,44 @@ describe('window.CWI provider', () => {
     await expect(pending).resolves.toEqual({ version: '1.0.0' })
   })
 
-  it('uses cryptographically random request ids when crypto is available', () => {
+  it('uses cryptographically random request ids when crypto is available', async () => {
     const getRandomValues = jest.fn((bytes: Uint8Array) => {
       bytes.fill(7)
       return bytes
     })
-    const { win, postMessage } = installProvider({ crypto: { getRandomValues } })
-    win.CWI.getVersion({})
+    const { win, listeners, postMessage } = installProvider({ crypto: { getRandomValues } })
+    const pending = win.CWI.getVersion({})
     expect(getRandomValues).toHaveBeenCalledTimes(1)
     const { id } = JSON.parse(postMessage.mock.calls[0][0])
     expect(id).toBe(Buffer.alloc(16, 7).toString('base64'))
+    // Settle the call so its 60 s timeout does not outlive the test.
+    reply(listeners, id, null)
+    await expect(pending).resolves.toEqual({ version: '1.0.0' })
+  })
+
+  it('surfaces the toolbox error name as err.code when the host sends one', async () => {
+    const { win, listeners, postMessage } = installProvider()
+    const pending = win.CWI.createAction({})
+    const { id } = JSON.parse(postMessage.mock.calls[0][0])
+    const data = JSON.stringify({
+      type: 'CWI',
+      id,
+      isInvocation: false,
+      status: 'error',
+      code: 7,
+      name: 'WERR_INSUFFICIENT_FUNDS',
+      description: 'Insufficient funds.'
+    })
+    for (const listener of Array.from(listeners)) listener({ data, source: null })
+    await expect(pending).rejects.toMatchObject({ code: 'WERR_INSUFFICIENT_FUNDS', message: 'Insufficient funds.' })
+  })
+
+  it('keeps the numeric code when the host sends no error name', async () => {
+    const { win, listeners, postMessage } = installProvider()
+    const pending = win.CWI.createAction({})
+    const { id } = JSON.parse(postMessage.mock.calls[0][0])
+    const data = JSON.stringify({ type: 'CWI', id, isInvocation: false, status: 'error', code: 1, description: 'nope' })
+    for (const listener of Array.from(listeners)) listener({ data, source: null })
+    await expect(pending).rejects.toMatchObject({ code: 1, message: 'nope' })
   })
 })

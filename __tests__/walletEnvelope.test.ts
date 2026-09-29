@@ -32,6 +32,11 @@ describe('normalizeWalletErrorCode', () => {
       expect(normalizeWalletErrorCode(code)).toBe(WALLET_ERROR_UNKNOWN)
     }
   )
+
+  it('prefers an explicit numeric code over the name mapping', () => {
+    expect(normalizeWalletErrorCode(3, 'WERR_INSUFFICIENT_FUNDS')).toBe(3)
+    expect(normalizeWalletErrorCode('WERR_INSUFFICIENT_FUNDS', 'WERR_INSUFFICIENT_FUNDS')).toBe(7)
+  })
 })
 
 describe('normalizeWalletErrorDescription', () => {
@@ -74,8 +79,49 @@ describe('buildWalletErrorEnvelope', () => {
       isInvocation: false,
       status: 'error',
       code: WALLET_ERROR_UNKNOWN,
-      description: 'Permission denied.'
+      description: 'Permission denied.',
+      name: 'ERR_PERMISSION_DENIED'
     })
+  })
+
+  // Shaped like the toolbox's WalletError: `code` is a getter over the WERR_* name.
+  class ToolboxError extends Error {
+    constructor(name: string, message: string) {
+      super(message)
+      this.name = name
+    }
+    get code() {
+      return this.name
+    }
+  }
+
+  it.each([
+    ['WERR_REVIEW_ACTIONS', 5],
+    ['WERR_INVALID_PARAMETER', 6],
+    ['WERR_INSUFFICIENT_FUNDS', 7]
+  ])('maps toolbox %s onto its assigned code %i so the SDK keeps the description', (name, code) => {
+    expect(buildWalletErrorEnvelope('req-7', new ToolboxError(name, 'Specific reason.'))).toEqual({
+      type: 'CWI',
+      id: 'req-7',
+      isInvocation: false,
+      status: 'error',
+      code,
+      description: 'Specific reason.',
+      name
+    })
+  })
+
+  it('keeps an unassigned toolbox error on the unknown code but still names it', () => {
+    expect(buildWalletErrorEnvelope('req-8', new ToolboxError('WERR_UNAUTHORIZED', 'Denied.'))).toMatchObject({
+      code: WALLET_ERROR_UNKNOWN,
+      name: 'WERR_UNAUTHORIZED'
+    })
+  })
+
+  it('omits a name that is not a toolbox error identifier', () => {
+    const envelope = buildWalletErrorEnvelope('req-9', Object.assign(new TypeError('bad'), { code: 'lowercase oops' }))
+    expect(envelope).not.toHaveProperty('name')
+    expect(envelope.code).toBe(WALLET_ERROR_UNKNOWN)
   })
 
   it('accepts a bare description string and a code-less error', () => {

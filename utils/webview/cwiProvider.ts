@@ -52,7 +52,9 @@ export function buildCWIProviderScript(): string {
 
         if (data.status === 'error') {
           var err = new Error(data.description || 'Wallet error');
-          err.code = data.code;
+          // The toolbox names its errors (WERR_*); window.CWI callers have
+          // always branched on that string, so prefer it over the numeric code.
+          err.code = typeof data.name === 'string' ? data.name : data.code;
           reject(err);
         } else {
           resolve(data.result);
