@@ -49,10 +49,10 @@ describe('printRecoveryShares', () => {
     const result = await printRecoveryShares({ mnemonic: mnemonic.toString() })
 
     expect(result).toEqual({ ok: true, format: 'entropy' })
-    // XR-110: one print job per share, never all of the threshold in one job.
-    expect(printAsync).toHaveBeenCalledTimes(3)
+    // One job, one dialog, every share as its own page (XR-110 reverted).
+    expect(printAsync).toHaveBeenCalledTimes(1)
 
-    const shares = printAsync.mock.calls.map(call => sharesFromHtml((call[0] as { html: string }).html)).flat()
+    const shares = sharesFromHtml((printAsync.mock.calls[0][0] as { html: string }).html)
     expect(shares).toHaveLength(3)
 
     const recovered = recoverSecretFromShares(shares.slice(0, 2))
@@ -60,15 +60,14 @@ describe('printRecoveryShares', () => {
     expect(recovered.kind === 'entropy' && Mnemonic.fromEntropy(recovered.entropy).toString()).toBe(mnemonic.toString())
   })
 
-  test('XR-110: no single print job carries more than one recovery share', async () => {
+  test('puts each share on its own page of a single print job', async () => {
     const mnemonic = Mnemonic.fromRandom(128)
     await printRecoveryShares({ mnemonic: mnemonic.toString() })
 
-    expect(printAsync).toHaveBeenCalledTimes(3)
-    for (const call of printAsync.mock.calls) {
-      const html = (call[0] as { html: string }).html
-      expect(sharesFromHtml(html)).toHaveLength(1)
-    }
+    expect(printAsync).toHaveBeenCalledTimes(1)
+    const html = (printAsync.mock.calls[0][0] as { html: string }).html
+    expect(html.match(/<div class="page[ "]/g)).toHaveLength(3)
+    expect(html.match(/Share \d of 3/g)).toEqual(['Share 1 of 3', 'Share 2 of 3', 'Share 3 of 3'])
   })
 
   test('refuses a 24-word wallet, because 32 bytes of entropy leaves no room for the tag', async () => {
