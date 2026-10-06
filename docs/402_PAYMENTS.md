@@ -20,10 +20,9 @@ x-bsv-server: 03a1b2c3...  (server identity key)
 
 ### 2. Detection
 
-The 402 is detected through two paths (whichever fires first):
+The 402 is detected through the **`onHttpError` callback**: React Native WebView fires it for a non-2xx response to a page load. Headers are not available through this path.
 
-- **`onHttpError` callback** — React Native WebView fires this for non-2xx responses. Headers are not available through this path.
-- **Fetch polyfill** — The injected `fetch` wrapper in `injectedPolyfills.ts` intercepts 402 responses from JS-initiated requests and posts a `PAYMENT_REQUIRED` message to React Native with the full headers.
+A 402 returned to a page's own `fetch()` or `XMLHttpRequest` is left to the page; the browser does not pay it. (An injected fetch wrapper once meant to do this never ran, since Hermes cannot serialize it, and was removed. The app no longer accepts `PAYMENT_REQUIRED` messages from pages, which let any page name the URL, amount and payee of a payment charged to another site.)
 
 Since WebView native navigations don't expose response headers, the payment handler **re-fetches the URL** itself when headers are empty, to read the `x-bsv-sats` and `x-bsv-server` values directly.
 
@@ -59,10 +58,10 @@ The server receives the payment headers, decodes the BEEF, and calls `wallet.int
 │  GET /articles/slug ──────────────────► Server          │
 │                              ◄──────── 402 + headers    │
 │                                                         │
-│  onHttpError / fetch polyfill                           │
+│  onHttpError                                            │
 │       │                                                 │
 │       ▼                                                 │
-│  React Native (index.tsx handleMessage / onHttpError)   │
+│  React Native (index.tsx onHttpError)                   │
 │       │                                                 │
 │       ▼                                                 │
 │  BsvPaymentHandler.handle402()                          │
@@ -83,8 +82,7 @@ The server receives the payment headers, decodes the BEEF, and calls `wallet.int
 |------|------|
 | `utils/webview/bsvPaymentHandler.ts` | Core 402 handler — probe, payment construction, retry, caching |
 | `utils/webview/errorPages.ts` | Static fallback HTML for 402, 403, 404, 500 |
-| `utils/webview/injectedPolyfills.ts` | Fetch wrapper that posts `PAYMENT_REQUIRED` messages for JS-initiated requests |
-| `app/index.tsx` | Wires handler into `onHttpError` and `handleMessage`, initializes handler with wallet |
+| `app/index.tsx` | Wires handler into `onHttpError`, initializes handler with wallet |
 
 ## Error Handling
 

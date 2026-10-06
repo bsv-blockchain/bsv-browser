@@ -1113,15 +1113,8 @@ const Browser = observer(function Browser() {
   /* -------------------------------------------------------------------------- */
 
   const injectedJavaScript = useMemo(
-    () =>
-      buildInjectedJavaScript(
-        getAcceptLanguageHeader(),
-        Platform.OS === 'android',
-        __DEV__,
-        !isWeb2Mode,
-        shouldForwardWebViewLogs()
-      ),
-    [getAcceptLanguageHeader, isWeb2Mode]
+    () => buildInjectedJavaScript({ isDev: __DEV__, forwardConsoleLogs: shouldForwardWebViewLogs() }),
+    []
   )
 
   // Standalone blob download intercept — plain JS string injected before content loads.
@@ -1319,31 +1312,6 @@ const Browser = observer(function Browser() {
             console.debug(logPrefix, ...msg.args)
             break
         }
-        return
-      }
-
-      if (msg.type === 'PAYMENT_REQUIRED' && paymentHandlerRef.current) {
-        // Skip if a payment is already being handled for this URL (e.g. onHttpError already fired)
-        if (paymentInFlightUrl.current === msg.url) return
-        paymentInFlightUrl.current = msg.url
-        if (activeTab?.webviewRef?.current) {
-          activeTab.webviewRef.current.injectJavaScript(
-            `document.open();document.write(\`${escapeForTemplateLiteral(paymentLoadingPage)}\`);document.close();`
-          )
-        }
-        paymentHandlerRef.current
-          .handle402(msg.url, msg.status, msg.headers || {})
-          .then((html: string | null) => {
-            if (html && activeTab?.webviewRef?.current) {
-              activeTab.webviewRef.current.injectJavaScript(
-                `document.open();document.write(\`${escapeForTemplateLiteral(html)}\`);document.close();`
-              )
-            }
-          })
-          .catch(() => {})
-          .finally(() => {
-            paymentInFlightUrl.current = null
-          })
         return
       }
 

@@ -1,882 +1,125 @@
-// Build the injected JavaScript for the WebView from readable TS code instead of a giant string
-// The function below runs inside the WebView context. Do NOT reference any RN variables directly.
-function injectedPolyfills(
-  acceptLanguage: string,
-  isAndroid: boolean,
-  isDev: boolean,
-  enableWalletFeatures: boolean,
+// Builds the script injected into every page in web3 mode (the WebView's
+// `injectedJavaScript`).
+//
+// Written as a plain string template, not a serialized function. The previous
+// version injected `injectedPolyfills.toString()`, but Hermes compiles
+// functions to bytecode and returns "function … { [bytecode] }" for them, in
+// dev and release alike, so pages received nothing runnable and none of it
+// ever ran. cwiProvider.ts moved to a string for the same reason. Keep this
+// file to plain ES5 inside the template: nothing here is transpiled.
+
+export interface InjectedJavaScriptOptions {
+  /** Development build: forward every console.log, info and debug call. */
+  isDev: boolean
+  /** Relay page console output to React Native (dev-menu toggle, off by default). */
   forwardConsoleLogs: boolean
-) {
-  if (isDev)
-    console.log('[Polyfill] injectedPolyfills running, before=', !!(window as any).__downloadInterceptInstalled)
-
-  // Console logging bridge: install as early as possible
-  // Only install when explicitly requested. Patching every page console and
-  // discarding the messages on the RN side still floods the native bridge.
-  if (forwardConsoleLogs && !(window as any).__consolePatched) {
-    const originalLog = console.log
-    const originalWarn = console.warn
-    const originalError = console.error
-    const originalInfo = console.info
-    const originalDebug = console.debug
-
-    const send = (method: string, args: any[]) => {
-      try {
-        ;(window as any).ReactNativeWebView?.postMessage(JSON.stringify({ type: 'CONSOLE', method, args }))
-      } catch {}
-    }
-
-    const LOG_SAMPLE_RATE = isDev ? 1 : 10
-    let logSeq = 0
-
-    console.log = function (...args: any[]) {
-      originalLog.apply(console, args as any)
-      if (++logSeq % LOG_SAMPLE_RATE === 0) send('log', args)
-    }
-
-    console.warn = function (...args: any[]) {
-      originalWarn.apply(console, args as any)
-      send('warn', args)
-    }
-
-    console.error = function (...args: any[]) {
-      originalError.apply(console, args as any)
-      send('error', args)
-    }
-
-    console.info = function (...args: any[]) {
-      originalInfo.apply(console, args as any)
-      if (isDev) send('info', args)
-    }
-
-    console.debug = function (...args: any[]) {
-      originalDebug.apply(console, args as any)
-      if (isDev) send('debug', args)
-    }
-    ;(window as any).__consolePatched = true
-    // Boot message to confirm injection ran (always forwarded — uses warn for visibility)
-    if (isDev) console.log('[Injected] Console bridge installed (dev mode)')
-  }
-
-  // Global active media streams tracker for cleanup on navigation
-  ;(function () {
-    try {
-      const g: any = window as any
-      if (!g.__activeMediaStreams) {
-        g.__activeMediaStreams = new Set()
-      }
-      const activeSet: Set<any> = g.__activeMediaStreams
-
-      function registerMockStream(stream: any) {
-        try {
-          activeSet.add(stream)
-        } catch {}
-        return stream
-      }
-
-      function stopAllActiveStreams() {
-        try {
-          activeSet.forEach((s: any) => {
-            try {
-              const tracks = s?.getTracks?.() || []
-              tracks.forEach((t: any) => {
-                try {
-                  t.stop && t.stop()
-                } catch {}
-              })
-            } catch {}
-          })
-          activeSet.clear()
-        } catch {}
-      }
-
-      // Attach cleanup on pagehide/unload
-      window.addEventListener('pagehide', stopAllActiveStreams)
-      window.addEventListener('beforeunload', stopAllActiveStreams)
-
-      // Expose helpers for internal use in this polyfill
-      ;(g as any).__registerMockStream = registerMockStream
-      ;(g as any).__stopAllMockStreams = stopAllActiveStreams
-    } catch {}
-  })()
-
-  // File download interception — capture <a download>, blob URLs, and data URLs
-  ;(function () {
-    if ((window as any).__downloadInterceptInstalled) return
-    ;(window as any).__downloadInterceptInstalled = true
-    try {
-      console.log('[DL] download intercept installing')
-
-      // Track blobs created via URL.createObjectURL so we can read them later
-      const blobRegistry = new Map<string, Blob>()
-      ;(window as any).__blobRegistry = blobRegistry
-      const origCreateObjectURL = URL.createObjectURL
-      const origRevokeObjectURL = URL.revokeObjectURL
-
-      URL.createObjectURL = function (obj: Blob | MediaSource) {
-        const url = origCreateObjectURL.call(URL, obj)
-        if (obj instanceof Blob) {
-          blobRegistry.set(url, obj)
-          console.log('[DL] createObjectURL registered blob, url=', url, 'size=', (obj as Blob).size)
-        }
-        return url
-      }
-      // Spoof toString so bot-detection sees native code
-      try {
-        Object.defineProperty(URL.createObjectURL, 'toString', {
-          value: () => 'function createObjectURL() { [native code] }',
-          writable: false,
-          configurable: false
-        })
-        Object.defineProperty(URL.createObjectURL, 'name', { value: 'createObjectURL', configurable: true })
-      } catch {}
-      try {
-        ;(window as any).__spoofNative?.(URL.createObjectURL, 'createObjectURL')
-      } catch {}
-
-      URL.revokeObjectURL = function (url: string) {
-        console.log('[DL] revokeObjectURL', url, 'inRegistry=', blobRegistry.has(url))
-        // Delay registry removal so async handlers (e.g. onShouldStartLoadWithRequest)
-        // can still read the Blob object after the URL is revoked
-        setTimeout(function () {
-          blobRegistry.delete(url)
-        }, 10000)
-        return origRevokeObjectURL.call(URL, url)
-      }
-      try {
-        Object.defineProperty(URL.revokeObjectURL, 'toString', {
-          value: () => 'function revokeObjectURL() { [native code] }',
-          writable: false,
-          configurable: false
-        })
-        Object.defineProperty(URL.revokeObjectURL, 'name', { value: 'revokeObjectURL', configurable: true })
-      } catch {}
-      try {
-        ;(window as any).__spoofNative?.(URL.revokeObjectURL, 'revokeObjectURL')
-      } catch {}
-
-      // Helper: read a Blob as base64 and post to React Native
-      function sendBlobAsBase64(blob: Blob, filename: string | null, mimeType: string) {
-        console.log('[DL] sendBlobAsBase64 filename=', filename, 'mimeType=', mimeType, 'size=', blob.size)
-        const reader = new FileReader()
-        reader.onloadend = function () {
-          if (typeof reader.result !== 'string') return
-          // reader.result is "data:<mime>;base64,<data>" — strip prefix
-          const base64 = reader.result.split(',')[1] || ''
-          ;(window as any).ReactNativeWebView?.postMessage(
-            JSON.stringify({
-              type: 'FILE_DOWNLOAD_BLOB',
-              base64: base64,
-              mimeType: mimeType || 'application/octet-stream',
-              filename: filename || null
-            })
-          )
-        }
-        reader.readAsDataURL(blob)
-      }
-
-      // Override HTMLAnchorElement.prototype.click to catch detached-element programmatic clicks
-      // (e.g. `a.click()` called on an element never appended to the DOM)
-      const origAnchorClick = HTMLAnchorElement.prototype.click
-      HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
-        const self = this
-        const href = this.href
-        console.log('[DL] anchor.click() intercepted href=', href)
-        if (href && href.startsWith('blob:')) {
-          const blob = blobRegistry.get(href)
-          console.log('[DL] blob: url click, inRegistry=', !!blob)
-          if (blob) {
-            sendBlobAsBase64(blob, this.getAttribute('download'), blob.type || 'application/octet-stream')
-            return
-          }
-        }
-        if (href && href.startsWith('data:')) {
-          fetch(href)
-            .then(function (r: Response) {
-              return r.blob()
-            })
-            .then(function (b: Blob) {
-              sendBlobAsBase64(b, self.getAttribute('download'), b.type || 'application/octet-stream')
-            })
-            .catch(function () {})
-          return
-        }
-        return origAnchorClick.call(this)
-      }
-      // Spoof toString so bot-detection sees native code
-      try {
-        Object.defineProperty(HTMLAnchorElement.prototype.click, 'toString', {
-          value: () => 'function click() { [native code] }',
-          writable: false,
-          configurable: false
-        })
-      } catch {}
-      try {
-        ;(window as any).__spoofNative?.(HTMLAnchorElement.prototype.click, 'click')
-      } catch {}
-
-      // Intercept anchor clicks in the capture phase (for attached elements)
-      document.addEventListener(
-        'click',
-        function (e: MouseEvent) {
-          const anchor = (e.target as HTMLElement)?.closest?.('a') as HTMLAnchorElement | null
-          if (!anchor) return
-          const href = anchor.href
-          if (!href) return
-
-          const hasDownload = anchor.hasAttribute('download')
-          const downloadAttr = anchor.getAttribute('download') || null
-
-          // blob: URL — intercept regardless of download attribute
-          if (href.startsWith('blob:')) {
-            e.preventDefault()
-            e.stopImmediatePropagation()
-            const blob = blobRegistry.get(href)
-            if (blob) {
-              sendBlobAsBase64(blob, downloadAttr, blob.type || 'application/octet-stream')
-            } else {
-              fetch(href)
-                .then(function (r) {
-                  return r.blob()
-                })
-                .then(function (b) {
-                  sendBlobAsBase64(b, downloadAttr, b.type || 'application/octet-stream')
-                })
-                .catch(function () {})
-            }
-            return
-          }
-
-          // data: URL — intercept regardless of download attribute
-          if (href.startsWith('data:')) {
-            e.preventDefault()
-            e.stopImmediatePropagation()
-            fetch(href)
-              .then(function (r) {
-                return r.blob()
-              })
-              .then(function (b) {
-                sendBlobAsBase64(b, downloadAttr, b.type || 'application/octet-stream')
-              })
-              .catch(function () {})
-            return
-          }
-
-          // Regular URL with download attribute — let native side handle it
-          if (!hasDownload) return
-          e.preventDefault()
-          e.stopImmediatePropagation()
-          ;(window as any).ReactNativeWebView?.postMessage(
-            JSON.stringify({
-              type: 'FILE_DOWNLOAD_URL',
-              url: href,
-              filename: downloadAttr
-            })
-          )
-        },
-        true // capture phase
-      )
-
-      // Override window.open for blob/data URL popups
-      const origOpen = window.open
-      ;(window as any).open = function (url?: string, target?: string, features?: string) {
-        if (url && url.startsWith('blob:')) {
-          const blob = blobRegistry.get(url)
-          if (blob) {
-            sendBlobAsBase64(blob, null, blob.type || 'application/octet-stream')
-            return null
-          }
-        }
-        if (url && url.startsWith('data:')) {
-          fetch(url)
-            .then(function (r) {
-              return r.blob()
-            })
-            .then(function (b) {
-              sendBlobAsBase64(b, null, b.type || 'application/octet-stream')
-            })
-            .catch(function () {})
-          return null
-        }
-        return origOpen?.call(window, url, target, features) || null
-      }
-      // Spoof toString so bot-detection sees native code
-      try {
-        Object.defineProperty((window as any).open, 'toString', {
-          value: () => 'function open() { [native code] }',
-          writable: false,
-          configurable: false
-        })
-        Object.defineProperty((window as any).open, 'name', { value: 'open', configurable: true })
-      } catch {}
-      try {
-        ;(window as any).__spoofNative?.((window as any).open, 'open')
-      } catch {}
-    } catch (e) {
-      // Silently fail — download interception is non-critical
-    }
-  })()
-
-  // Camera access polyfill - provides mock streams to prevent WKWebView camera access.
-  // On Android the WebView can access the camera natively via getUserMedia, so we skip
-  // this polyfill and let the native path (+ onPermissionRequest) handle it instead.
-  if (!isAndroid) {
-    ;(function () {
-      if (!navigator.mediaDevices) return
-
-      const originalGetUserMedia = navigator.mediaDevices.getUserMedia?.bind(navigator.mediaDevices)
-
-      function createMockMediaStream(): MediaStream {
-        const mockTrack = {
-          id: 'mock-video-' + Date.now(),
-          kind: 'video',
-          label: 'React Native Camera',
-          enabled: true,
-          muted: false,
-          readyState: 'live',
-          stop() {
-            this.readyState = 'ended'
-          },
-          addEventListener() {},
-          removeEventListener() {},
-          getSettings: () => ({ width: 640, height: 480, frameRate: 30 })
-        }
-
-        return {
-          id: 'mock-stream-' + Date.now(),
-          active: true,
-          getTracks: () => [mockTrack],
-          getVideoTracks: () => [mockTrack],
-          getAudioTracks: () => [],
-          addEventListener() {},
-          removeEventListener() {}
-        } as unknown as MediaStream
-      }
-
-      navigator.mediaDevices.getUserMedia = function (constraints) {
-        const hasVideo = constraints?.video === true || (typeof constraints?.video === 'object' && constraints.video)
-
-        if (hasVideo) {
-          // Notify React Native of camera request
-          ;(window as any).ReactNativeWebView?.postMessage(
-            JSON.stringify({
-              type: 'CAMERA_REQUEST',
-              constraints
-            })
-          )
-
-          // Return mock stream immediately to prevent native camera
-          return Promise.resolve(createMockMediaStream())
-        }
-
-        // Allow audio-only requests through original implementation
-        return originalGetUserMedia
-          ? originalGetUserMedia(constraints)
-          : Promise.reject(new Error('Media not supported'))
-      }
-      // Spoof toString so bot-detection sees native code
-      try {
-        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'toString', {
-          value: () => 'function getUserMedia() { [native code] }',
-          writable: false,
-          configurable: false
-        })
-        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'name', {
-          value: 'getUserMedia',
-          configurable: true
-        })
-      } catch {}
-      try {
-        ;(window as any).__spoofNative?.(navigator.mediaDevices.getUserMedia, 'getUserMedia')
-      } catch {}
-    })()
-  }
-
-  // Push Notification API polyfill
-  ;(function () {
-    // Check if Notification API already exists
-    if ((window as any).Notification != null) {
-      return
-    }
-    ;(function () {
-      const style = document.createElement('style')
-      style.innerHTML = '* { -webkit-tap-highlight-color: transparent; }'
-      document.head.appendChild(style)
-    })()
-    // Polyfill Notification constructor
-    ;(window as any).Notification = function (this: any, title: string, options: any = {}) {
-      this.title = title
-      this.body = options.body || ''
-      this.icon = options.icon || ''
-      this.tag = options.tag || ''
-      this.data = options.data || null
-
-      // Send notification to native
-      ;(window as any).ReactNativeWebView?.postMessage(
-        JSON.stringify({
-          type: 'SHOW_NOTIFICATION',
-          title: this.title,
-          body: this.body,
-          icon: this.icon,
-          tag: this.tag,
-          data: this.data
-        })
-      )
-
-      return this
-    } as any
-
-    // Static methods
-    ;(window as any).Notification.requestPermission = function (callback?: (permission: string) => void) {
-      return new Promise(resolve => {
-        ;(window as any).ReactNativeWebView?.postMessage(
-          JSON.stringify({
-            type: 'REQUEST_NOTIFICATION_PERMISSION',
-            callback: true
-          })
-        )
-
-        // Listen for response
-        const handler = (event: MessageEvent) => {
-          try {
-            const data = JSON.parse((event as any).data)
-            if (data.type === 'NOTIFICATION_PERMISSION_RESPONSE') {
-              window.removeEventListener('message', handler)
-              const permission = data.permission
-              if (callback) callback(permission)
-              resolve(permission)
-            }
-          } catch {}
-        }
-        window.addEventListener('message', handler)
-      })
-    }
-    ;(window as any).Notification.permission = 'default'
-
-    // ServiceWorker registration polyfill for push
-    if (!('serviceWorker' in navigator)) {
-      ;(navigator as any).serviceWorker = {
-        register: function () {
-          return Promise.resolve({
-            pushManager: {
-              subscribe: function (options: any) {
-                return new Promise(resolve => {
-                  ;(window as any).ReactNativeWebView?.postMessage(
-                    JSON.stringify({
-                      type: 'PUSH_SUBSCRIBE',
-                      options: options
-                    })
-                  )
-
-                  const handler = (event: MessageEvent) => {
-                    try {
-                      const data = JSON.parse((event as any).data)
-                      if (data.type === 'PUSH_SUBSCRIPTION_RESPONSE') {
-                        window.removeEventListener('message', handler)
-                        resolve(data.subscription)
-                      }
-                    } catch {}
-                  }
-                  window.addEventListener('message', handler)
-                })
-              },
-              getSubscription: function () {
-                return new Promise(resolve => {
-                  ;(window as any).ReactNativeWebView?.postMessage(
-                    JSON.stringify({
-                      type: 'GET_PUSH_SUBSCRIPTION'
-                    })
-                  )
-
-                  const handler = (event: MessageEvent) => {
-                    try {
-                      const data = JSON.parse((event as any).data)
-                      if (data.type === 'PUSH_SUBSCRIPTION_RESPONSE') {
-                        window.removeEventListener('message', handler)
-                        resolve(data.subscription)
-                      }
-                    } catch {}
-                  }
-                  window.addEventListener('message', handler)
-                })
-              }
-            }
-          })
-        }
-      }
-    }
-
-    // Fullscreen API polyfill
-    if (!document.documentElement.requestFullscreen) {
-      ;(document.documentElement as any).requestFullscreen = function () {
-        return new Promise((resolve, reject) => {
-          ;(window as any).ReactNativeWebView?.postMessage(
-            JSON.stringify({
-              type: 'REQUEST_FULLSCREEN'
-            })
-          )
-
-          const handler = (event: MessageEvent) => {
-            try {
-              const data = JSON.parse((event as any).data)
-              if (data.type === 'FULLSCREEN_RESPONSE') {
-                window.removeEventListener('message', handler)
-                if (data.success) {
-                  resolve(undefined)
-                } else {
-                  reject(new Error('Fullscreen request denied'))
-                }
-              }
-            } catch {}
-          }
-          window.addEventListener('message', handler)
-        })
-      }
-    }
-
-    if (!document.exitFullscreen) {
-      ;(document as any).exitFullscreen = function () {
-        return new Promise(resolve => {
-          ;(window as any).ReactNativeWebView?.postMessage(
-            JSON.stringify({
-              type: 'EXIT_FULLSCREEN'
-            })
-          )
-
-          const handler = (event: MessageEvent) => {
-            try {
-              const data = JSON.parse((event as any).data)
-              if (data.type === 'FULLSCREEN_RESPONSE') {
-                window.removeEventListener('message', handler)
-                resolve(undefined)
-              }
-            } catch {}
-          }
-          window.addEventListener('message', handler)
-        })
-      }
-    }
-
-    // Define fullscreen properties
-    Object.defineProperty(document, 'fullscreenElement', {
-      get: function () {
-        return (window as any).__fullscreenElement || null
-      }
-    })
-
-    Object.defineProperty(document as any, 'fullscreen', {
-      get: function () {
-        return !!(window as any).__fullscreenElement
-      }
-    })
-
-    // Listen for fullscreen changes from native
-    window.addEventListener('message', function (event: MessageEvent) {
-      try {
-        const data = JSON.parse((event as any).data)
-        if (data.type === 'FULLSCREEN_CHANGE') {
-          ;(window as any).__fullscreenElement = data.isFullscreen ? document.documentElement : null
-          document.dispatchEvent(new Event('fullscreenchange'))
-        }
-      } catch {}
-    })
-
-    // Completely replace getUserMedia to prevent WKWebView camera access
-    if (navigator.mediaDevices) {
-      // Completely override getUserMedia - never call original for video constraints
-      navigator.mediaDevices.getUserMedia = function (constraints: any) {
-        console.log('[WebView] getUserMedia intercepted:', constraints)
-
-        // Check if requesting video - if so, handle in React Native
-        const hasVideo =
-          constraints &&
-          (constraints.video === true || (typeof constraints.video === 'object' && constraints.video !== false))
-
-        if (hasVideo) {
-          console.log('[WebView] Video requested - handling in React Native')
-          // Send request to native - handle camera completely in React Native
-          ;(window as any).ReactNativeWebView?.postMessage(
-            JSON.stringify({
-              type: 'CAMERA_REQUEST',
-              constraints: constraints
-            })
-          )
-
-          return new Promise((resolve, reject) => {
-            const handler = (event: MessageEvent) => {
-              try {
-                const data = JSON.parse((event as any).data)
-                if (data.type === 'CAMERA_RESPONSE') {
-                  window.removeEventListener('message', handler)
-                  if (data.success) {
-                    // Create a more complete mock MediaStream
-                    const mockVideoTrack: any = {
-                      id: 'mock-video-track-' + Date.now(),
-                      kind: 'video',
-                      label: 'React Native Camera',
-                      enabled: true,
-                      muted: false,
-                      readyState: 'live',
-                      stop: () => console.log('[WebView] Mock video track stopped'),
-                      addEventListener: () => {},
-                      removeEventListener: () => {},
-                      dispatchEvent: () => false,
-                      getSettings: () => ({ width: 640, height: 480, frameRate: 30 }),
-                      getCapabilities: () => ({ width: { min: 320, max: 1920 }, height: { min: 240, max: 1080 } }),
-                      getConstraints: () => constraints.video || {}
-                    }
-
-                    const mockStream: any = {
-                      id: 'mock-stream-' + Date.now(),
-                      active: true,
-                      getTracks: () => [mockVideoTrack],
-                      getVideoTracks: () => [mockVideoTrack],
-                      getAudioTracks: () => [],
-                      addEventListener: () => {},
-                      removeEventListener: () => {},
-                      dispatchEvent: () => false,
-                      addTrack: () => {},
-                      removeTrack: () => {},
-                      clone: () => mockStream
-                    }
-                    console.log('[WebView] Resolving with mock stream:', mockStream)
-                    // Register for unified cleanup
-                    try {
-                      ;(window as any).__registerMockStream?.(mockStream)
-                    } catch {}
-                    resolve(mockStream)
-                  } else {
-                    reject(new Error(data.error || 'Camera access denied'))
-                  }
-                }
-              } catch (e) {
-                reject(e)
-              }
-            }
-            window.addEventListener('message', handler)
-
-            // Timeout after 10 seconds
-            setTimeout(() => {
-              window.removeEventListener('message', handler)
-              reject(new Error('Camera request timeout'))
-            }, 10000)
-          })
-        } else if (constraints && constraints.audio && !hasVideo) {
-          // Handle microphone requests in React Native
-          console.log('[WebView] Audio-only requested - handling in React Native')
-          ;(window as any).ReactNativeWebView?.postMessage(
-            JSON.stringify({
-              type: 'MICROPHONE_REQUEST',
-              constraints: constraints
-            })
-          )
-
-          return new Promise((resolve, reject) => {
-            const handler = (event: MessageEvent) => {
-              try {
-                const data = JSON.parse((event as any).data)
-                if (data.type === 'MICROPHONE_RESPONSE') {
-                  window.removeEventListener('message', handler)
-                  if (data.success) {
-                    // Create a mock audio-only MediaStream
-                    const mockAudioTrack: any = {
-                      id: 'mock-audio-track-' + Date.now(),
-                      kind: 'audio',
-                      label: 'React Native Microphone',
-                      enabled: true,
-                      muted: false,
-                      readyState: 'live',
-                      stop: () => console.log('[WebView] Mock audio track stopped'),
-                      addEventListener: () => {},
-                      removeEventListener: () => {},
-                      dispatchEvent: () => false,
-                      getSettings: () => ({ sampleRate: 48000, channelCount: 1 }),
-                      getCapabilities: () => ({ sampleRate: { min: 8000, max: 48000 } }),
-                      getConstraints: () => constraints.audio || {}
-                    }
-
-                    const mockStream: any = {
-                      id: 'mock-audio-stream-' + Date.now(),
-                      active: true,
-                      getTracks: () => [mockAudioTrack],
-                      getVideoTracks: () => [],
-                      getAudioTracks: () => [mockAudioTrack],
-                      addEventListener: () => {},
-                      removeEventListener: () => {},
-                      dispatchEvent: () => false,
-                      addTrack: () => {},
-                      removeTrack: () => {},
-                      clone: () => mockStream
-                    }
-                    console.log('[WebView] Resolving with mock audio stream:', mockStream)
-                    // Register for unified cleanup
-                    try {
-                      ;(window as any).__registerMockStream?.(mockStream)
-                    } catch {}
-                    resolve(mockStream)
-                  } else {
-                    reject(new Error(data.error || 'Microphone access denied'))
-                  }
-                }
-              } catch (e) {
-                reject(e)
-              }
-            }
-            window.addEventListener('message', handler)
-
-            // Timeout after 10 seconds
-            setTimeout(() => {
-              window.removeEventListener('message', handler)
-              reject(new Error('Microphone request timeout'))
-            }, 10000)
-          })
-        } else {
-          // No media requested
-          return Promise.reject(new Error('No media constraints specified'))
-        }
-      }
-
-      // Spoof toString so bot-detection sees native code
-      try {
-        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'toString', {
-          value: () => 'function getUserMedia() { [native code] }',
-          writable: false,
-          configurable: false
-        })
-        Object.defineProperty(navigator.mediaDevices.getUserMedia, 'name', {
-          value: 'getUserMedia',
-          configurable: true
-        })
-      } catch {}
-      try {
-        ;(window as any).__spoofNative?.(navigator.mediaDevices.getUserMedia, 'getUserMedia')
-      } catch {}
-
-      // Also override the deprecated navigator.getUserMedia if it exists
-      if ((navigator as any).getUserMedia) {
-        ;(navigator as any).getUserMedia = function (constraints: any, success: any, error: any) {
-          navigator.mediaDevices.getUserMedia(constraints).then(success).catch(error)
-        }
-      }
-    }
-
-    // Console patch already installed above at IIFE entry; duplicate fallback removed.
-    // (Early-bridge guard makes the secondary patch redundant and previously double-wrapped
-    // console methods on Android where both paths could execute.)
-
-    // Web2 pages should keep the browser's native fetch/XHR implementations.
-    // Wallet mode needs interception only so HTTP 402 can be handed to RN.
-    if (enableWalletFeatures) {
-      const originalFetch = (window as any).fetch
-      const patchedFetch = async function (this: any, input: any, init: any = {}) {
-        // Merge headers
-        const headers = new Headers(init.headers)
-        if (!headers.has('Accept-Language')) {
-          headers.set('Accept-Language', acceptLanguage)
-        }
-
-        // Update init with new headers
-        const newInit = {
-          ...init,
-          headers: headers
-        }
-
-        const response = await originalFetch.call(this, input, newInit)
-
-        if (response.status === 402) {
-          const headersObj: Record<string, string> = {}
-          response.headers.forEach((v: string, k: string) => {
-            headersObj[k] = v
-          })
-          const reqUrl = typeof input === 'string' ? input : input && input.url ? input.url : ''
-          ;(window as any).ReactNativeWebView?.postMessage(
-            JSON.stringify({
-              type: 'PAYMENT_REQUIRED',
-              url: reqUrl,
-              status: 402,
-              headers: headersObj
-            })
-          )
-          // Don't return 402 to page JS — RN handles payment and replaces page content.
-          // Never-resolving promise prevents page from retrying or reacting to 402.
-          return new Promise(() => {})
-        }
-
-        return response
-      }
-      // Restore native toString so bot-detection checks see "[native code]"
-      try {
-        Object.defineProperty(patchedFetch, 'toString', {
-          value: () => 'function fetch() { [native code] }',
-          writable: false,
-          configurable: false
-        })
-        Object.defineProperty(patchedFetch, 'name', { value: 'fetch', configurable: true })
-      } catch {}
-      try {
-        ;(window as any).__spoofNative?.(patchedFetch, 'fetch')
-      } catch {}
-      ;(window as any).fetch = patchedFetch
-
-      // Also intercept XMLHttpRequest for older APIs
-      const originalXHROpen = XMLHttpRequest.prototype.open
-      const originalXHRSend = XMLHttpRequest.prototype.send
-
-      XMLHttpRequest.prototype.open = function (
-        this: any,
-        method: any,
-        url: any,
-        async?: any,
-        user?: any,
-        password?: any
-      ) {
-        ;(this as any)._method = method
-        ;(this as any)._url = url
-        return originalXHROpen.call(this, method, url, async, user, password)
-      }
-      // Restore native toString on patched XHR prototype methods
-      try {
-        Object.defineProperty(XMLHttpRequest.prototype.open, 'toString', {
-          value: () => 'function open() { [native code] }',
-          writable: false,
-          configurable: false
-        })
-      } catch {}
-      try {
-        ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.open, 'open')
-      } catch {}
-
-      XMLHttpRequest.prototype.send = function (this: any, data: any) {
-        // Add Accept-Language header if not already set
-        // Note: getRequestHeader does not exist on standard XHR; this matches the previous behavior
-        if (!(this as any).getRequestHeader || !(this as any).getRequestHeader('Accept-Language')) {
-          ;(this as any).setRequestHeader('Accept-Language', acceptLanguage)
-        }
-        return originalXHRSend.call(this, data)
-      }
-      try {
-        Object.defineProperty(XMLHttpRequest.prototype.send, 'toString', {
-          value: () => 'function send() { [native code] }',
-          writable: false,
-          configurable: false
-        })
-      } catch {}
-      try {
-        ;(window as any).__spoofNative?.(XMLHttpRequest.prototype.send, 'send')
-      } catch {}
-    }
-  })()
 }
 
-export function buildInjectedJavaScript(
-  acceptLanguage: string,
-  isAndroid: boolean,
-  isDev: boolean = __DEV__,
-  enableWalletFeatures = true,
-  forwardConsoleLogs = false
-) {
-  // Serialize the function and immediately invoke it with the provided arguments.
-  // The trailing `true;` is required by react-native-webview on iOS — without it
-  // the injected script is silently discarded.
-  return `(${injectedPolyfills.toString()})(${JSON.stringify(acceptLanguage)}, ${isAndroid}, ${isDev}, ${enableWalletFeatures}, ${forwardConsoleLogs});true;`
+// Relays page console calls as { type: 'CONSOLE', method, args } messages,
+// which app/index.tsx prints with a [WebView] prefix. Outside dev builds only
+// one console.log in ten is relayed; warn and error always are.
+const CONSOLE_BRIDGE = `
+  if (!window.__consolePatched) {
+    var post = function (method, args) {
+      try {
+        window.ReactNativeWebView.postMessage(
+          JSON.stringify({ type: 'CONSOLE', method: method, args: Array.prototype.slice.call(args) })
+        );
+      } catch (e) {}
+    };
+    var logSampleRate = isDev ? 1 : 10;
+    var logSeq = 0;
+    var relay = function (method, shouldPost) {
+      var original = console[method];
+      if (typeof original !== 'function') return;
+      console[method] = function () {
+        original.apply(console, arguments);
+        if (shouldPost()) post(method, arguments);
+      };
+    };
+    relay('log', function () { return ++logSeq % logSampleRate === 0; });
+    relay('warn', function () { return true; });
+    relay('error', function () { return true; });
+    relay('info', function () { return isDev; });
+    relay('debug', function () { return isDev; });
+    window.__consolePatched = true;
+  }
+`
+
+// iPhone WebKit has no element Fullscreen API. Where it is missing, route
+// requestFullscreen / exitFullscreen to the app (REQUEST_FULLSCREEN /
+// EXIT_FULLSCREEN, handled in messageRouter.ts), which hides its chrome and
+// answers with FULLSCREEN_RESPONSE and FULLSCREEN_CHANGE. The app always
+// shows the whole page, so the requesting element is only what
+// document.fullscreenElement reports.
+const FULLSCREEN_POLYFILL = `
+  if (typeof Element !== 'undefined' && typeof Element.prototype.requestFullscreen !== 'function') {
+    var fullscreenElement = null;
+    var requestedElement = null;
+    var parseMessage = function (event) {
+      if (typeof event.data !== 'string') return null;
+      try { return JSON.parse(event.data); } catch (e) { return null; }
+    };
+    var askApp = function (type, onResponse) {
+      var listener = function (event) {
+        var data = parseMessage(event);
+        if (!data || data.type !== 'FULLSCREEN_RESPONSE') return;
+        window.removeEventListener('message', listener);
+        onResponse(data);
+      };
+      window.addEventListener('message', listener);
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: type }));
+    };
+    Element.prototype.requestFullscreen = function () {
+      var element = this;
+      return new Promise(function (resolve, reject) {
+        try {
+          askApp('REQUEST_FULLSCREEN', function (data) {
+            if (data.success) {
+              requestedElement = element;
+              resolve();
+            } else {
+              reject(new TypeError('Fullscreen request denied'));
+            }
+          });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    };
+    document.exitFullscreen = function () {
+      return new Promise(function (resolve, reject) {
+        try {
+          askApp('EXIT_FULLSCREEN', function () { resolve(); });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    };
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: function () { return fullscreenElement; }
+    });
+    Object.defineProperty(document, 'fullscreenEnabled', {
+      configurable: true,
+      get: function () { return true; }
+    });
+    window.addEventListener('message', function (event) {
+      var data = parseMessage(event);
+      if (!data || data.type !== 'FULLSCREEN_CHANGE') return;
+      fullscreenElement = data.isFullscreen ? requestedElement || document.documentElement : null;
+      if (!data.isFullscreen) requestedElement = null;
+      document.dispatchEvent(new Event('fullscreenchange'));
+    });
+  }
+`
+
+export function buildInjectedJavaScript({ isDev, forwardConsoleLogs }: InjectedJavaScriptOptions): string {
+  // The trailing `true;` is required by react-native-webview on iOS; without
+  // it the injected script is silently discarded.
+  return `(function () {
+  var isDev = ${isDev ? 'true' : 'false'};
+${forwardConsoleLogs ? CONSOLE_BRIDGE : ''}
+${FULLSCREEN_POLYFILL}
+})();true;`
 }
