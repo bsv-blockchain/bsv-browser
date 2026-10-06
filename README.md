@@ -197,7 +197,7 @@ Create a `.env.local` file in the project root. The app reads `EXPO_PUBLIC_*` va
 | ------------------------------------ | ---------------------------------------- | ------------------------------------ |
 | `EXPO_PUBLIC_DEFAULT_WAB_URL`        | Reserved for future WAB support          | `noWAB` (self-custodial, hardcoded)  |
 | `EXPO_PUBLIC_DEFAULT_STORAGE_URL`    | Reserved for future remote storage       | `local` (local-only, hardcoded)      |
-| `EXPO_PUBLIC_DEFAULT_MESSAGEBOX_URL` | MessageBox service URL                   | `https://messagebox.babbage.systems` |
+| `EXPO_PUBLIC_DEFAULT_MESSAGEBOX_URL` | MessageBox service URL                   | `https://messagebox.bsvblockchain.tech` |
 | `EXPO_PUBLIC_DEFAULT_CHAIN`          | Network: `main`, `test`, or `teratest`   | `main`                               |
 | `EXPO_PUBLIC_DEFAULT_HOMEPAGE`       | Default browser homepage URL             | --                                   |
 | `EXPO_PUBLIC_ADMIN_ORIGINATOR`       | Admin originator identifier              | `admin.com`                          |
