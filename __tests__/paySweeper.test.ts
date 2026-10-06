@@ -57,7 +57,7 @@ describe('shouldSweepNow', () => {
   })
 
   it('pins the interval', () => {
-    expect(SWEEP_INTERVAL_MS).toBe(30_000)
+    expect(SWEEP_INTERVAL_MS).toBe(5_000)
   })
 })
 

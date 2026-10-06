@@ -72,7 +72,7 @@ import {
   getErrorPage,
   getNativeErrorInfo,
   paymentLoadingPage,
-  navigationLoadingPage,
+  buildNavigationSplashScript,
   escapeForTemplateLiteral,
   escapeForJsSingleQuote
 } from '@/utils/webview/errorPages'
@@ -1083,14 +1083,17 @@ const Browser = observer(function Browser() {
    * user-initiated navigation paths. Programmatic URL changes (manifest
    * start-url redirect, hybrid history goBack/goForward) skip the splash
    * since those already render through other affordances.
+   *
+   * The injected script also navigates to `url` itself: its document.open()
+   * cancels the source load if that has already started (see
+   * buildNavigationSplashScript).
    */
   const injectNavigationSplash = useCallback((url: string) => {
     const ref = tabStore.activeTab?.webviewRef?.current
     if (!ref) return
     if (!/^https?:\/\//i.test(url)) return
     try {
-      const html = escapeForTemplateLiteral(navigationLoadingPage(url))
-      ref.injectJavaScript(`document.open();document.write(\`${html}\`);document.close();`)
+      ref.injectJavaScript(buildNavigationSplashScript(url))
     } catch {
       // Non-fatal — splash is a UX nicety, not required.
     }

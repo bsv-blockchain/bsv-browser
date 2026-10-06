@@ -80,12 +80,22 @@ export function buildCWIProviderScript(): string {
     });
   }
 
+  // Each method is a getter-only, non-configurable accessor rather than a
+  // frozen data property: still impossible to replace, but the SDK's
+  // WindowCWISubstrate wraps window.CWI in a Proxy whose get returns a
+  // validating wrapper, and a Proxy may only return a different value for a
+  // non-configurable property when that property is an accessor.
   var cwi = {};
   for (var i = 0; i < methods.length; i++) {
     (function(methodName) {
-      cwi[methodName] = function(args) {
+      var method = function(args) {
         return invoke(methodName, typeof args !== 'undefined' ? args : {});
       };
+      Object.defineProperty(cwi, methodName, {
+        get: function() { return method; },
+        enumerable: true,
+        configurable: false
+      });
     })(methods[i]);
   }
 
