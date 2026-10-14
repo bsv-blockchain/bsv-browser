@@ -18,6 +18,8 @@ const mockGetMnemonic = jest.fn()
 const mockUnlock = jest.fn()
 const mockGetRecoveredKey = jest.fn()
 const mockSetRecoveredKey = jest.fn()
+const mockDeleteMnemonic = jest.fn()
+const mockDeleteRecoveredKey = jest.fn()
 const mockBuildRecoveredKey = jest.fn()
 const mockRecoverMnemonic = jest.fn()
 const mockWriteFile = jest.fn()
@@ -69,6 +71,8 @@ jest.mock('@bsv/expo-wallet-toolbox/core/context/LocalStorageProvider', () => ({
     unlock: mockUnlock,
     getRecoveredKey: mockGetRecoveredKey,
     setRecoveredKey: mockSetRecoveredKey,
+    deleteMnemonic: mockDeleteMnemonic,
+    deleteRecoveredKey: mockDeleteRecoveredKey,
     hasStoredIdentity: mockHasStoredIdentity,
     secretsReady: mockSecretsReady
   })
@@ -124,6 +128,8 @@ beforeEach(() => {
   mockUnlock.mockResolvedValue({ status: 'unlocked' })
   mockGetMnemonic.mockResolvedValue(mockPhrase)
   mockGetRecoveredKey.mockResolvedValue(null)
+  mockDeleteMnemonic.mockResolvedValue(undefined)
+  mockDeleteRecoveredKey.mockResolvedValue(undefined)
   mockGenerate.mockReturnValue({ mnemonic: mockPhrase, identityKey: mockIdentityKey })
   mockBuild.mockResolvedValue(undefined)
   mockRebuild.mockResolvedValue(undefined)
@@ -703,6 +709,80 @@ it.each([
   expect(mockBuild).not.toHaveBeenCalled()
   expect(mockBuildRecoveredKey).not.toHaveBeenCalled()
   expect(mockAttest).toHaveBeenCalledWith(identity(), 'phrase')
+})
+
+describe('an import over an existing wallet replaces its identity', () => {
+  const importedHex = '01'.padStart(64, '0')
+  const importedHexIdentity = () => PrivateKey.fromHex(importedHex).toPublicKey().toString()
+  const otherWif = () => PrivateKey.fromHex('02'.padStart(64, '0')).toWif()
+
+  // The device keychain, and the toolbox's rebuild over it: WalletContext's
+  // auto-build reads the mnemonic first and falls back to the recovered key
+  // only when no mnemonic is stored.
+  let keychain: { mnemonic?: string; recoveredKey?: string }
+  let builtIdentity: string | undefined
+
+  beforeEach(() => {
+    mockFlow = 'import'
+    mockExistingIdentity = true
+    mockWalletBuilt = true
+    builtIdentity = undefined
+    mockStoreMnemonic.mockImplementation(async (phrase: string) => {
+      keychain.mnemonic = phrase
+      return true
+    })
+    mockSetRecoveredKey.mockImplementation(async (wif: string) => {
+      keychain.recoveredKey = wif
+      return true
+    })
+    mockDeleteMnemonic.mockImplementation(async () => {
+      delete keychain.mnemonic
+    })
+    mockDeleteRecoveredKey.mockImplementation(async () => {
+      delete keychain.recoveredKey
+    })
+    mockRebuild.mockImplementation(async () => {
+      if (keychain.mnemonic) builtIdentity = mockRecoverMnemonic(keychain.mnemonic).identityKey
+      else if (keychain.recoveredKey) builtIdentity = PrivateKey.fromWif(keychain.recoveredKey).toPublicKey().toString()
+    })
+  })
+
+  async function importValue(value: string) {
+    const screen = await renderScreen()
+    fireEvent.changeText(screen.getByPlaceholderText('enter_recovery_words'), value)
+    await act(async () => fireEvent.press(screen.getAllByText('import_wallet')[1]))
+    return screen
+  }
+
+  it('a hex key imported over a phrase wallet becomes the identity the rebuild builds', async () => {
+    keychain = { mnemonic: mockPhrase }
+    await importValue(importedHex)
+
+    expect(mockRebuild).toHaveBeenCalledWith({ restoreFromBackup: true })
+    expect(builtIdentity).toBe(importedHexIdentity())
+    expect(keychain).toEqual({ recoveredKey: PrivateKey.fromHex(importedHex).toWif() })
+    expect(mockAttest).toHaveBeenCalledWith(importedHexIdentity(), 'phrase')
+  })
+
+  it('a phrase imported over a hex-key wallet leaves no stale key behind', async () => {
+    keychain = { recoveredKey: otherWif() }
+    await importValue(mockPhrase)
+
+    expect(builtIdentity).toBe(mockIdentityKey)
+    expect(keychain).toEqual({ mnemonic: mockPhrase })
+  })
+
+  it('keeps the existing secret when the new one is refused', async () => {
+    keychain = { mnemonic: mockPhrase }
+    mockSetRecoveredKey.mockResolvedValue(false)
+    const { showAlert } = jest.requireMock('@bsv/expo-wallet-toolbox/ui/components/ui/AlertCard')
+    jest.mocked(showAlert).mockResolvedValue('cancel')
+    await importValue(importedHex)
+
+    expect(keychain).toEqual({ mnemonic: mockPhrase })
+    expect(mockDeleteMnemonic).not.toHaveBeenCalled()
+    expect(mockRebuild).not.toHaveBeenCalled()
+  })
 })
 
 
