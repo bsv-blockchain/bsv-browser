@@ -1,6 +1,6 @@
 # The wallet prices a page-supplied unlocking script by its hex length
 
-Recorded 2026-10-14. Issue: bsv-blockchain/bsv-browser#161. Pull request (draft): bsv-blockchain/bsv-browser#162.
+Recorded 2026-10-14. Issue: bsv-blockchain/bsv-browser#161. Pull request (draft): bsv-blockchain/bsv-browser#162; its twin on Calgooon/bsv-browser: #36.
 
 ## The defect
 
