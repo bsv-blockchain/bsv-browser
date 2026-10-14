@@ -35,6 +35,16 @@ function template(): Transaction {
   )
 }
 
+function managerOver(underlying: object): any {
+  return new WalletPermissionsManager(underlying as never, 'admin.example', {
+    encryptWalletMetadata: false,
+    seekSpendingPermissions: false
+  })
+}
+
+// Toolbox releases before the binding (2.3.2, for one) pass signAction straight through.
+const bundledManagerBinds = managerOver({}).pendingActionTemplates instanceof Map
+
 /** A wallet that does what the toolbox signer does: apply the spends, broadcast, refuse to abort a sent action. */
 function standIn(tamper: (tx: Transaction) => void = () => {}) {
   const broadcasts: string[] = []
@@ -62,16 +72,15 @@ function standIn(tamper: (tx: Transaction) => void = () => {}) {
     }
     return { aborted: true }
   })
-  const manager = new WalletPermissionsManager({ signAction, abortAction } as never, 'admin.example', {
-    encryptWalletMetadata: false,
-    seekSpendingPermissions: false
-  }) as any
+  const manager = managerOver({ signAction, abortAction })
   manager.pendingActionOriginators.set(REFERENCE, ORIGINATOR)
   manager.pendingActionTemplates.set(REFERENCE, template())
   return { manager, broadcasts, signAction }
 }
 
-describe('WalletPermissionsManager.signAction binding (bundled toolbox)', () => {
+const describeBinding = bundledManagerBinds ? describe : describe.skip
+
+describeBinding('WalletPermissionsManager.signAction binding (bundled toolbox)', () => {
   test("honours the page's BRC-100 spends[vin].sequenceNumber", async () => {
     const { manager, broadcasts } = standIn()
 
