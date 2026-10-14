@@ -15,13 +15,13 @@ Recorded 2026-10-14.
 
 `@bsv/wallet-toolbox-mobile` 2.14.4 (locked on this branch), `node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs`. `SigningPolicyPermissionsManager` (`@bsv/expo-wallet-toolbox`, `core/services/signingPermissionPolicy.ts:140`) extends `WalletPermissionsManager` and does not override `signAction`.
 
-| step | line | what |
-| --- | --- | --- |
-| template | `:41744` | createAction stores the draft: `this.pendingActionTemplates.set(reference, tx)` |
-| 1. broadcast | `:42026` | `const result = await this.underlying.signAction(...)`: the wallet applies the spends (`input.sequence = spend.sequenceNumber`), signs and broadcasts |
+| step         | line               | what                                                                                                                                                                                                                                                                     |
+| ------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| template     | `:41744`           | createAction stores the draft: `this.pendingActionTemplates.set(reference, tx)`                                                                                                                                                                                          |
+| 1. broadcast | `:42026`           | `const result = await this.underlying.signAction(...)`: the wallet applies the spends (`input.sequence = spend.sequenceNumber`), signs and broadcasts                                                                                                                    |
 | 2. the check | `:42033`, `:41976` | `this.assertAuthorizedSignResult(requestArgs.reference, requestArgs.spends, result)`: `(finalized.inputs[index].sequence ?? 4294967295) !== (authorized.inputs[index].sequence ?? 4294967295)` throws `Wallet finalization substituted an authorized transaction input.` |
-| 3. the abort | `:42038`, `:41990` | the catch: `await this.blockAndAbortAction(requestArgs.reference); throw error;`. `blockAndAbortAction` awaits the wallet's `abortAction` |
-| the mask | `:18210` | `abortAction` refuses a sent action: `throw new WERR_INVALID_PARAMETER("reference", "an inprocess, outgoing action that has not been signed and shared to the network.")`. That throw leaves the catch before `throw error` |
+| 3. the abort | `:42038`, `:41990` | the catch: `await this.blockAndAbortAction(requestArgs.reference); throw error;`. `blockAndAbortAction` awaits the wallet's `abortAction`                                                                                                                                |
+| the mask     | `:18210`           | `abortAction` refuses a sent action: `throw new WERR_INVALID_PARAMETER("reference", "an inprocess, outgoing action that has not been signed and shared to the network.")`. That throw leaves the catch before `throw error`                                              |
 
 The same order is on ts-stack `main` (2.14.9): `WalletPermissionsManager.ts`, `signAction` and `assertAuthorizedSignResult`.
 
@@ -47,11 +47,11 @@ ts-stack tests: `src/__tests/WalletPermissionsManager.signBinding.test.ts`, RED 
 
 `__tests__/signActionBinding.test.ts` drives the bundled `WalletPermissionsManager.signAction` with a stand-in wallet that applies the spends, broadcasts, and refuses to abort a sent action.
 
-| test | on 2.14.4 | with the fix |
-| --- | --- | --- |
-| honours the page's `spends[vin].sequenceNumber` | RED: rejects with `WERR_INVALID_PARAMETER`, the abort's words | green |
-| a refusal after the send reaches the page with its own words | RED: the abort's words | green |
-| a spend outside the template is refused before the wallet signs | RED: the wallet called once | green |
+| test                                                            | on 2.14.4                                                     | with the fix |
+| --------------------------------------------------------------- | ------------------------------------------------------------- | ------------ |
+| honours the page's `spends[vin].sequenceNumber`                 | RED: rejects with `WERR_INVALID_PARAMETER`, the abort's words | green        |
+| a refusal after the send reaches the page with its own words    | RED: the abort's words                                        | green        |
+| a spend outside the template is refused before the wallet signs | RED: the wallet called once                                   | green        |
 
 "With the fix" was run by applying ts-stack#1078's change to the bundled `out/index.mobile.cjs` locally; the dependency is not patched in this repo. The suite runs only when the bundled manager keeps pending templates: on Calgooon/bsv-browser `master`, which locks `@bsv/wallet-toolbox-mobile` 2.3.2 and whose `signAction` passes straight through (no binding, so no defect), it is skipped.
 
