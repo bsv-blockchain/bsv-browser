@@ -273,7 +273,7 @@ const b64urlToBytes = (s: string) => {
 }
 
 const asset = (): SessionAsset => ({
-  id: 'ab'.repeat(32) + '.0',
+  id: 'ab'.repeat(32) + '_0',
   label: 'Example Dollar',
   ticker: 'EXD',
   decimals: 2,
@@ -315,7 +315,7 @@ describe('session asset block', () => {
   it('refuses a 66-char assetId that is not a valid txid.vout shape', () => {
     const s = mintSession({ ...baseMintArgs(), asset: asset() })
     const raw = JSON.parse(new TextDecoder().decode(b64urlToBytes(encodeSession(s).slice('bsvpay1:'.length))))
-    raw.t.i = 'z'.repeat(64) + '.0'
+    raw.t.i = 'z'.repeat(64) + '_0'
     const forged = 'bsvpay1:' + bytesToB64url(new TextEncoder().encode(JSON.stringify(raw)))
     expect(() => decodeSession(forged)).toThrow(CodecError)
   })

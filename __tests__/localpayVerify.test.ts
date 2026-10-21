@@ -25,7 +25,7 @@ import { FrameVerifyError, FT_PROTOCOL_ID, declineReasonFor, verifyFramePayment 
 import type { CoverResult } from '@bsv/expo-wallet-toolbox/core/mandala/types'
 import { PEERPAY_PROTOCOL_ID } from '@bsv/expo-wallet-toolbox/core/localpay/pending'
 import type { PaymentFrame } from '@bsv/expo-wallet-toolbox/core/localpay/codec'
-import { MandalaToken } from '@bsv/templates'
+import { MandalaToken } from '@bsv/expo-wallet-toolbox/core/mandala/token'
 
 const payeeKey = PrivateKey.fromRandom().toPublicKey()
 const senderIdentityKey = '02' + 'ab'.repeat(32)
@@ -362,7 +362,7 @@ describe('verifyFramePayment: SPV/script verification (P0-1)', () => {
   })
 })
 
-const ASSET_ID = 'ab'.repeat(32) + '.0'
+const ASSET_ID = 'ab'.repeat(32) + '_0'
 const payeePkh = () => Hash.hash160(Utils.toArray(payeeKey.toString(), 'hex'))
 
 function tokenScript(amount: number, pkh: number[] = payeePkh()): string {
@@ -496,7 +496,7 @@ describe('verifyFramePayment: token kind', () => {
 
   it('refuses an output whose script assetId disagrees with the frame', async () => {
     const frame = tokenFrame()
-    frame.token!.assetId = 'cd'.repeat(32) + '.1'
+    frame.token!.assetId = 'cd'.repeat(32) + '_0'
     await expect(verifyFramePayment(payeeDeps(), frame, 'test', covers)).rejects.toMatchObject({ kind: 'not_mine' })
   })
 

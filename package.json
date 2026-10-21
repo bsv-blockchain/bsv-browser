@@ -3,7 +3,7 @@
   "description": "BSV Browser - Enabling identity, micropayments, and use of BSV websites on mobile devices",
   "author": "BSV Association",
   "main": "index.js",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "license": "Open BSV",
   "scripts": {
     "start": "expo start --dev-client",
@@ -38,14 +38,15 @@
     "@bsv/backup-cache-client": "^0.1.0",
     "@bsv/btms": "^1.2.3",
     "@bsv/btms-permission-module": "^1.2.1",
-    "@bsv/expo-wallet-toolbox": "^0.14.0",
-    "@bsv/mandala": "^0.2.0",
+    "@bsv/expo-wallet-toolbox": "^0.19.0",
+    "@bsv/mandala": "^0.4.1",
     "@bsv/message-box-client": "^2.5.4",
     "@bsv/react-native-localpay-transport": "0.1.1",
     "@bsv/sdk": "^2.8.11",
-    "@bsv/templates": "^1.10.3",
+    "@bsv/templates": "^2.0.0",
     "@bsv/wallet-relay": "^0.5.1",
     "@bsv/wallet-toolbox-mobile": "^2.14.4",
+    "@bsv/webrtpay": "^0.2.1",
     "@callstack/liquid-glass": "^0.7.1",
     "@dicebear/core": "^9.2.2",
     "@dicebear/identicon": "^9.2.2",
@@ -127,6 +128,7 @@
     "react-native-tab-view": "^4.1.2",
     "react-native-view-shot": "5.1.0",
     "react-native-web": "^0.21.0",
+    "react-native-webrtc": "^155.0.1",
     "react-native-webview": "13.16.1",
     "react-native-worklets": "0.10.1",
     "react-native-yubikey": "file:./packages/react-native-yubikey",
@@ -184,7 +186,7 @@
       "^expo-sqlite$": "<rootDir>/__tests__/__mocks__/expo-sqlite.js"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|expo-.*|react-native-localize|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/expo-wallet-toolbox|@bsv/mandala|@bsv/react-native-localpay-transport|@bsv/auth)/)",
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|expo-.*|react-native-localize|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-gesture-handler|react-native-worklets|expo-modules-core|@noble/secp256k1|@noble/curves|@noble/hashes|@bsv/backup-cache-client|@bsv/expo-wallet-toolbox|@bsv/mandala|@bsv/react-native-localpay-transport|@bsv/auth|@bsv/webrtpay)/)",
       "/node_modules/react-native-reanimated/plugin/"
     ],
     "setupFiles": [

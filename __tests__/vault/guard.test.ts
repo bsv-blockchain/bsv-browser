@@ -308,25 +308,33 @@ test('allows non-privileged ops from any origin', async () => {
 })
 
 test.each([
-  ['getPublicKey', [2, 'mandala token']],
-  ['createSignature', [2, 'mandala token']],
-  ['getPublicKey', [2, ' Mandala Token ']]
+  ['getPublicKey', 'self'],
+  ['getPublicKey', 'anyone'],
+  ['createSignature', 'self'],
+  ['revealSpecificKeyLinkage', 'self']
 ] as const)(
-  // XR-020: the FT rail ([2,'mandala token']) is this wallet's OWN
-  // payment-signing namespace, not Vault state -- but a paired origin must
-  // still be unable to mint a raw signature or public key under it, or it can
-  // assemble an unauthorized spend without ever going through
-  // createAction/signAction.
-  'reserves the wallet-internal FT protocol from external %s calls (%p)',
-  async (method, protocolID) => {
+  // The token protocol is no longer reserved here: its 'p ' prefix routes it
+  // to MandalaTokenModule, which gates connected-app signing itself.
+  'passes external token-protocol %s calls (counterparty %p) on to the permissions manager',
+  async (method, counterparty) => {
     const { wallet, calls } = fakeWallet()
     const guarded = guardVaultAccess(wallet, ADMIN)
-    await expect(
-      (guarded[method] as any)({ protocolID, keyID: 'x', counterparty: 'anyone' }, 'evil.com')
-    ).rejects.toBeInstanceOf(VaultAccessDenied)
-    expect(calls.find(call => call.method === method)).toBeUndefined()
+    await (guarded[method] as any)({ protocolID: [2, 'p mandala token'], keyID: 'x', counterparty, data: [1] }, 'evil.com')
+    expect(calls.find(call => call.method === method)).toBeDefined()
   }
 )
+
+test('still refuses a privileged external token-protocol call', async () => {
+  const { wallet, calls } = fakeWallet()
+  const guarded = guardVaultAccess(wallet, ADMIN)
+  await expect(
+    guarded.getPublicKey(
+      { protocolID: [2, 'p mandala token'], keyID: 'x', counterparty: 'self', privileged: true } as any,
+      'evil.com'
+    )
+  ).rejects.toBeInstanceOf(VaultAccessDenied)
+  expect(calls.find(c => c.method === 'getPublicKey')).toBeUndefined()
+})
 
 test.each([
   'getPublicKey',
@@ -428,137 +436,10 @@ test('still refuses a privileged external BRC-29 call', async () => {
   expect(calls.find(c => c.method === 'createSignature')).toBeUndefined()
 })
 
-describe('FT getPublicKey toward another party', () => {
-  // The payer (forSelf false) and payee (forSelf true) steps of the FT rail
-  // derive toward the other party's identity key. ECDH is symmetric, so that
-  // party can compute the same public key itself: revealing it neither signs
-  // nor leaks anything. 'anyone' and the wallet's own key (FT change) stay
-  // reserved.
-  const walletKey = new PrivateKey(11).toPublicKey()
-  const bob = new PrivateKey(12).toPublicKey()
-  const anyone = new PrivateKey(1).toPublicKey()
-  const uncompressed = (key: typeof bob) => key.encode(false, 'hex') as string
-
-  function railWallet(identity: () => Promise<{ publicKey: string }> = async () => ({ publicKey: walletKey.toString() })) {
-    const { wallet, calls } = fakeWallet()
-    wallet.getPublicKey = async (args: any, originator?: string) => {
-      if (args?.identityKey === true) return await identity()
-      calls.push({ method: 'getPublicKey', args, originator })
-      return { publicKey: 'derived' }
-    }
-    return { guarded: guardVaultAccess(wallet, ADMIN), calls }
-  }
-
-  test.each([
-    ['mandala token', undefined],
-    ['mandala token', false],
-    [' Mandala Token ', true]
-  ] as const)('allows %p toward another identity key (forSelf %p)', async (name, forSelf) => {
-    const { guarded, calls } = railWallet()
-    const args = { protocolID: [2, name], keyID: 'prefix suffix', counterparty: bob.toString(), forSelf }
-    await expect(guarded.getPublicKey(args as any, 'fast.brc.dev')).resolves.toEqual({ publicKey: 'derived' })
-    expect(calls).toEqual([{ method: 'getPublicKey', args, originator: 'fast.brc.dev' }])
-  })
-
-  test.each([
-    ['the literal anyone', 'anyone'],
-    ['the literal self', 'self'],
-    ['1·G compressed', anyone.toString()],
-    ['1·G uncompressed', uncompressed(anyone)],
-    ["the wallet's own key", walletKey.toString()],
-    ["the wallet's own key, uncompressed", uncompressed(walletKey)],
-    ['a hex string that is not a curve point', '02' + '00'.repeat(32)],
-    ['no counterparty (defaults to self)', undefined],
-    ['a non-string counterparty', { toString: () => new PrivateKey(12).toPublicKey().toString() }]
-  ] as const)('still reserves getPublicKey toward %s', async (_label, counterparty) => {
-    const { guarded, calls } = railWallet()
-    await expect(
-      guarded.getPublicKey(
-        { protocolID: [2, 'mandala token'], keyID: 'x', counterparty, forSelf: true } as any,
-        'evil.com'
-      )
-    ).rejects.toBeInstanceOf(VaultAccessDenied)
-    expect(calls).toEqual([])
-  })
-
-  test('derives from the same counterparty it checked, even if the arguments change underneath', async () => {
-    const { guarded, calls } = railWallet()
-    let reads = 0
-    const args = {
-      protocolID: [2, 'mandala token'],
-      keyID: 'x',
-      get counterparty() {
-        reads++
-        return reads === 1 ? bob.toString() : walletKey.toString()
-      }
-    }
-    await guarded.getPublicKey(args as any, 'evil.com')
-    expect(calls).toHaveLength(1)
-    expect(calls[0].args.counterparty).toBe(bob.toString())
-  })
-
-  test('derives under the same protocol it checked, even if the arguments change underneath', async () => {
-    const { guarded, calls } = railWallet()
-    let reads = 0
-    const protocolID: any[] = [2]
-    Object.defineProperty(protocolID, 1, {
-      enumerable: true,
-      get: () => (++reads <= 2 ? 'mandala token' : 'vault')
-    })
-    await guarded.getPublicKey({ protocolID, keyID: 'x', counterparty: bob.toString() } as any, 'evil.com')
-    expect(calls).toHaveLength(1)
-    expect(calls[0].args.protocolID).toEqual([2, 'mandala token'])
-  })
-
-  test('still reserves a privileged getPublicKey toward another identity key', async () => {
-    const { guarded, calls } = railWallet()
-    await expect(
-      guarded.getPublicKey(
-        { protocolID: [2, 'mandala token'], keyID: 'x', counterparty: bob.toString(), privileged: true } as any,
-        'evil.com'
-      )
-    ).rejects.toBeInstanceOf(VaultAccessDenied)
-    expect(calls).toEqual([])
-  })
-
-  test('denies when the wallet identity key cannot be read', async () => {
-    const { guarded, calls } = railWallet(async () => {
-      throw new Error('locked')
-    })
-    await expect(
-      guarded.getPublicKey(
-        { protocolID: [2, 'mandala token'], keyID: 'x', counterparty: bob.toString() } as any,
-        'evil.com'
-      )
-    ).rejects.toBeInstanceOf(VaultAccessDenied)
-    expect(calls).toEqual([])
-  })
-
-  test.each([
-    'createSignature',
-    'encrypt',
-    'decrypt',
-    'createHmac',
-    'verifyHmac',
-    'verifySignature',
-    'revealCounterpartyKeyLinkage',
-    'revealSpecificKeyLinkage'
-  ] as const)('still reserves %s toward another identity key', async method => {
-    const { guarded, calls } = railWallet()
-    await expect(
-      (guarded as any)[method](
-        { protocolID: [2, 'mandala token'], keyID: 'x', counterparty: bob.toString(), forSelf: true },
-        'evil.com'
-      )
-    ).rejects.toBeInstanceOf(VaultAccessDenied)
-    expect(calls.find(c => c.method === method)).toBeUndefined()
-  })
-})
-
 test('still allows the admin originator to use the FT protocol directly', async () => {
   const { wallet, calls } = fakeWallet()
   const guarded = guardVaultAccess(wallet, ADMIN)
-  await guarded.getPublicKey({ protocolID: [2, 'mandala token'], keyID: 'x', counterparty: 'anyone' } as any, ADMIN)
+  await guarded.getPublicKey({ protocolID: [2, 'p mandala token'], keyID: 'x', counterparty: 'anyone' } as any, ADMIN)
   expect(calls.find(c => c.method === 'getPublicKey')).toBeDefined()
 })
 
