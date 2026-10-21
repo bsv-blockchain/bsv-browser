@@ -1,7 +1,103 @@
+diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/localpay/pending.ts b/node_modules/@bsv/expo-wallet-toolbox/core/localpay/pending.ts
+index 112f58f..b575880 100644
+--- a/node_modules/@bsv/expo-wallet-toolbox/core/localpay/pending.ts
++++ b/node_modules/@bsv/expo-wallet-toolbox/core/localpay/pending.ts
+@@ -8,6 +8,7 @@ import { MANDALA_ACTION_LABEL, MANDALA_BASKET } from '../mandala/bundle'
+ import { MANDALA_ACTION_LABEL as MANDALA_TOKEN_SPEND_LABEL } from '../mandala/permissionModule'
+ import type { AdmissionEntryWire } from '../mandala/types'
+ import { isRetriableInternalizeFailure } from '../mandala/drain'
++import { failedPostReason } from '../pay/creditErrors'
+ 
+ export const PENDING_KEY = 'localpay_pending'
+ /**
+@@ -665,7 +666,7 @@ export async function processPending(
+         }
+       }
+     } catch (e) {
+-      const error = e instanceof Error ? e.message : String(e)
++      const error = failedPostReason(e) ?? (e instanceof Error ? e.message : String(e))
+       await updateStatus(storage, p.id, 'failed', error)
+       results.push({ id: p.id, success: false, error })
+     }
+diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/mandala/drain.ts b/node_modules/@bsv/expo-wallet-toolbox/core/mandala/drain.ts
+index e8dc773..54801be 100644
+--- a/node_modules/@bsv/expo-wallet-toolbox/core/mandala/drain.ts
++++ b/node_modules/@bsv/expo-wallet-toolbox/core/mandala/drain.ts
+@@ -711,6 +711,9 @@ const RETRIABLE_INTERNALIZE_PATTERNS: readonly RegExp[] = [
+   /network request failed/i,
+   /timed? ?out/i,
+   /econnreset|econnrefused|enotfound|fetch failed/i,
++  // internalizeAction posts an unproven payment itself (wallet-toolbox-mobile
++  // 2.14.7+); when no broadcaster answered, `failedPostReason` says so.
++  /no broadcaster could be reached/i,
+   // `processPending`'s own pre-internalize settlement write (§4.2/§4.3 guard
+   // #2). A failure there is a local storage fault, not a bad frame: the money
+   // is real, the frame is durable, and the next tick tries the same write
+diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/pay/creditErrors.ts b/node_modules/@bsv/expo-wallet-toolbox/core/pay/creditErrors.ts
+index aedf390..8c00148 100644
+--- a/node_modules/@bsv/expo-wallet-toolbox/core/pay/creditErrors.ts
++++ b/node_modules/@bsv/expo-wallet-toolbox/core/pay/creditErrors.ts
+@@ -8,10 +8,46 @@
+  */
+ export type CreditFailureKind = 'environmental' | 'double_spend' | 'structural'
+ 
++/**
++ * internalizeAction (wallet-toolbox-mobile 2.14.7 and later) posts an unproven payment
++ * itself and throws WERR_REVIEW_ACTIONS, crediting nothing, when the post fails. Its
++ * `reviewActionResults` say why: a double spend, an invalid transaction, or, when every
++ * result is a service error, no broadcaster could be reached.
++ */
++function classifyFailedPost(e: unknown): CreditFailureKind | undefined {
++  const review = e as { name?: unknown; reviewActionResults?: unknown } | null
++  if (review?.name !== 'WERR_REVIEW_ACTIONS' || !Array.isArray(review.reviewActionResults)) return undefined
++  const statuses = review.reviewActionResults.map(r => (r as { status?: unknown } | null)?.status)
++  if (statuses.length === 0) return undefined
++  if (statuses.includes('doubleSpend')) return 'double_spend'
++  if (statuses.every(s => s === 'serviceError')) return 'environmental'
++  return 'structural'
++}
++
++/**
++ * Why internalizeAction's post of a payment failed, in words, for callers that
++ * keep only a message: WERR_REVIEW_ACTIONS's own message does not say. The
++ * environmental wording is matched by `isRetriableInternalizeFailure`.
++ */
++export function failedPostReason(e: unknown): string | undefined {
++  switch (classifyFailedPost(e)) {
++    case 'environmental':
++      return 'The payment could not be broadcast: no broadcaster could be reached'
++    case 'double_spend':
++      return 'The payment could not be broadcast: the network reported a double spend'
++    case 'structural':
++      return 'The payment could not be broadcast: the network rejected the transaction'
++    default:
++      return undefined
++  }
++}
++
+ export function classifyCreditError(
+   e: unknown,
+   ctx?: { lastMissHeight?: number; offline?: boolean }
+ ): CreditFailureKind {
++  const failedPost = classifyFailedPost(e)
++  if (failedPost) return failedPost
+   const message = e instanceof Error ? e.message : typeof e === 'string' ? e : ''
+   if (/invalid status failed|doubleSpend|double.?spend/i.test(message)) return 'double_spend'
+   // Headers behind or the device offline: any credit failure is treated as
+@@ -21,7 +57,7 @@ export function classifyCreditError(
+   if (ctx?.offline) return 'environmental'
+   if (ctx?.lastMissHeight != null) return 'environmental'
+   if (
+-    /network request failed|timed? ?out|chaintracks|database is locked|database table is locked|database-locked|failed to retrieve messages|not found on refresh/i.test(
++    /network request failed|timed? ?out|chaintracks|database is locked|database table is locked|database-locked|failed to retrieve messages|not found on refresh|no broadcaster could be reached/i.test(
+       message
+     )
+   )
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
+index f474e70..13aaf54 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
 +++ b/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
-@@ -1445,20 +1445,7 @@
+@@ -1445,20 +1445,7 @@ function UniversalSendInner(
                label={t('pay_step_continue')}
                icon="arrow-forward"
              />
@@ -23,7 +119,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSe
  
            {outbox.length > 0 && (
              <OutgoingSection
-@@ -1688,7 +1675,7 @@
+@@ -1688,7 +1675,7 @@ function UniversalSendInner(
            amountText={sent.amountText}
            statusNote={sent.statusNote}
            recipientName={sent.recipient}
@@ -33,9 +129,10 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSe
            dismissTo={dismissTo}
          />
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx
+index c3405a7..c17e7c9 100644
 --- a/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx
 +++ b/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx
-@@ -304,7 +304,7 @@
+@@ -304,7 +304,7 @@ function ActivityRowBase({
        cancelled = true
      }
    }, [counterpartyIdentityKey, contactsStore, walletUserId])
