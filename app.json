@@ -17,6 +17,7 @@
     },
     "plugins": [
       "./plugins/withNfcReaderEntitlement",
+      "./plugins/withoutWebRTCMediaProjection",
       [
         "./plugins/withXcodeLastUpgradeVersion",
         {
