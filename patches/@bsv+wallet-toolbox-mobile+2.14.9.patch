@@ -1,8 +1,8 @@
 diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
-index 5873ba4..4099a90 100644
+index e1aed2c..0897c22 100644
 --- a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
 +++ b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
-@@ -9458,10 +9458,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {
+@@ -9470,10 +9470,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {
  * @throws WERR_INVALID_PARAMETER if any unlocking script is invalid, if sourceTXID is invalid, if beef doesn't contain required transactions.
  */
  async function verifyUnlockScripts(txid, beef, verifier) {
@@ -162,7 +162,7 @@ index 5873ba4..4099a90 100644
  async function completeSignedTransaction(prior, spends, wallet) {
  	for (const [key, spend] of Object.entries(spends)) {
  		const vin = Number(key);
-@@ -9472,7 +9620,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9484,7 +9632,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
  		input.unlockingScript = asBsvSdkScript(spend.unlockingScript);
  		if (spend.sequenceNumber !== void 0) input.sequence = spend.sequenceNumber;
  	}
@@ -171,7 +171,7 @@ index 5873ba4..4099a90 100644
  		const counterparties = /* @__PURE__ */ new Map();
  		const counterparty = (publicKey) => {
  			let parsed = counterparties.get(publicKey);
-@@ -9498,7 +9646,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9510,7 +9658,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
  			keyID: template.getKeyID(),
  			counterparty: unlockerPubKey
  		}));
@@ -180,7 +180,7 @@ index 5873ba4..4099a90 100644
  		for (let index = 0; index < prepared.length; index++) {
  			const { pdi, template } = prepared[index];
  			const unlockTemplate = template.unlockWithDerivedPrivateKey(derivedPrivateKeys[index], pdi.sourceSatoshis, asBsvSdkScript(pdi.lockingScript));
-@@ -9521,7 +9669,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9533,7 +9681,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
  			attributes: { "crypto.managed_input_count": prior.pdi.length }
  		}, () => prepareUnlockingTemplates(keys));
  	});
@@ -189,7 +189,7 @@ index 5873ba4..4099a90 100644
  	if (wallet.telemetry.enabled) await wallet.telemetry.withSpan("wallet.crypto.transaction_sign", {
  		component: "wallet-toolbox",
  		carrier: prior.args,
-@@ -12824,7 +12972,12 @@ var Wallet = class {
+@@ -12908,7 +13056,12 @@ var Wallet = class {
  			offset: 0
  		} : vargs;
  		const r = this.actionBatch.overlayListActions(await this.storage.listActions(storageArgs), vargs);
@@ -203,7 +203,7 @@ index 5873ba4..4099a90 100644
  		return r;
  	}
  	get storageParty() {
-@@ -13126,6 +13279,12 @@ var Wallet = class {
+@@ -13212,6 +13365,12 @@ var Wallet = class {
  			prepareKnownTxidsForCreateAction(this, args);
  			const { auth, vargs } = this.validateAuthAndArgs(args, _bsv_sdk_wallet_validationHelpers.validateCreateActionArgs, logger);
  			logger?.log("validated args");
@@ -216,7 +216,7 @@ index 5873ba4..4099a90 100644
  			vargs.includeAllSourceTransactions = this.includeAllSourceTransactions;
  			if (this.randomVals != null && this.randomVals.length > 1) vargs.randomVals = [...this.randomVals];
  			const brc177Requested = hasBrc177NoSendExpiryLabel(vargs.labels);
-@@ -14098,6 +14257,11 @@ async function resolveInputScript(storage, userId, vargs, input, beef, preloaded
+@@ -14186,6 +14345,11 @@ async function resolveInputScript(storage, userId, vargs, input, beef, preloaded
  	} }));
  	if (output != null) applyStoredInputScript(output, input, vargs);
  	else await applyBeefInputScript(storage, beef, input);
@@ -228,7 +228,7 @@ index 5873ba4..4099a90 100644
  }
  async function validateNoSendChange(storage, userId, vargs, changeBasket) {
  	const r = [];
-@@ -14151,10 +14315,16 @@ function makeFundingParams(args) {
+@@ -14239,11 +14403,17 @@ function makeFundingParams(args) {
  		changeFirstSatoshis: compatibilityFallback ? 1 : preferredSatoshis,
  		changeLockingScriptLength: 25,
  		changeUnlockingScriptLength: 107,
@@ -241,6 +241,7 @@ index 5873ba4..4099a90 100644
 +		// from noSend.
 +		targetNetCount: (vargs.labels ?? []).includes("vault-deposit") ? void 0 : changeBasket.numberOfDesiredUTXOs - healthyChangeCount,
  		maxChangeOutputs: brc177?.kind === "protected" ? 1 : storage.managedChangePolicy.maxOutputsPerAction,
+ 		surplusToFee: brc177?.kind === "protected",
 -		surplusPoolShaping: !compatibilityFallback,
 -		maxMigrationInputs: compatibilityFallback ? 0 : storage.managedChangePolicy.migrationInputsPerAction,
 +		surplusPoolShaping: !compatibilityFallback && !(vargs.labels ?? []).includes("vault-deposit"),
@@ -249,10 +250,10 @@ index 5873ba4..4099a90 100644
  	};
  }
 diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
-index c23d07a..88ac55f 100644
+index ac25c38..0830c32 100644
 --- a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
 +++ b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
-@@ -9423,10 +9423,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {
+@@ -9435,10 +9435,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {
  * @throws WERR_INVALID_PARAMETER if any unlocking script is invalid, if sourceTXID is invalid, if beef doesn't contain required transactions.
  */
  async function verifyUnlockScripts(txid, beef, verifier) {
@@ -412,7 +413,7 @@ index c23d07a..88ac55f 100644
  async function completeSignedTransaction(prior, spends, wallet) {
  	for (const [key, spend] of Object.entries(spends)) {
  		const vin = Number(key);
-@@ -9437,7 +9585,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9449,7 +9597,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
  		input.unlockingScript = asBsvSdkScript(spend.unlockingScript);
  		if (spend.sequenceNumber !== void 0) input.sequence = spend.sequenceNumber;
  	}
@@ -421,7 +422,7 @@ index c23d07a..88ac55f 100644
  		const counterparties = /* @__PURE__ */ new Map();
  		const counterparty = (publicKey) => {
  			let parsed = counterparties.get(publicKey);
-@@ -9463,7 +9611,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9475,7 +9623,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
  			keyID: template.getKeyID(),
  			counterparty: unlockerPubKey
  		}));
@@ -430,7 +431,7 @@ index c23d07a..88ac55f 100644
  		for (let index = 0; index < prepared.length; index++) {
  			const { pdi, template } = prepared[index];
  			const unlockTemplate = template.unlockWithDerivedPrivateKey(derivedPrivateKeys[index], pdi.sourceSatoshis, asBsvSdkScript(pdi.lockingScript));
-@@ -9486,7 +9634,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
+@@ -9498,7 +9646,7 @@ async function completeSignedTransaction(prior, spends, wallet) {
  			attributes: { "crypto.managed_input_count": prior.pdi.length }
  		}, () => prepareUnlockingTemplates(keys));
  	});
@@ -439,7 +440,7 @@ index c23d07a..88ac55f 100644
  	if (wallet.telemetry.enabled) await wallet.telemetry.withSpan("wallet.crypto.transaction_sign", {
  		component: "wallet-toolbox",
  		carrier: prior.args,
-@@ -12789,7 +12937,12 @@ var Wallet = class {
+@@ -12873,7 +13021,12 @@ var Wallet = class {
  			offset: 0
  		} : vargs;
  		const r = this.actionBatch.overlayListActions(await this.storage.listActions(storageArgs), vargs);
@@ -453,7 +454,7 @@ index c23d07a..88ac55f 100644
  		return r;
  	}
  	get storageParty() {
-@@ -13091,6 +13244,12 @@ var Wallet = class {
+@@ -13177,6 +13330,12 @@ var Wallet = class {
  			prepareKnownTxidsForCreateAction(this, args);
  			const { auth, vargs } = this.validateAuthAndArgs(args, validateCreateActionArgs, logger);
  			logger?.log("validated args");
@@ -466,7 +467,7 @@ index c23d07a..88ac55f 100644
  			vargs.includeAllSourceTransactions = this.includeAllSourceTransactions;
  			if (this.randomVals != null && this.randomVals.length > 1) vargs.randomVals = [...this.randomVals];
  			const brc177Requested = hasBrc177NoSendExpiryLabel(vargs.labels);
-@@ -14063,6 +14222,11 @@ async function resolveInputScript(storage, userId, vargs, input, beef, preloaded
+@@ -14151,6 +14310,11 @@ async function resolveInputScript(storage, userId, vargs, input, beef, preloaded
  	} }));
  	if (output != null) applyStoredInputScript(output, input, vargs);
  	else await applyBeefInputScript(storage, beef, input);
@@ -478,7 +479,7 @@ index c23d07a..88ac55f 100644
  }
  async function validateNoSendChange(storage, userId, vargs, changeBasket) {
  	const r = [];
-@@ -14116,10 +14280,16 @@ function makeFundingParams(args) {
+@@ -14204,11 +14368,17 @@ function makeFundingParams(args) {
  		changeFirstSatoshis: compatibilityFallback ? 1 : preferredSatoshis,
  		changeLockingScriptLength: 25,
  		changeUnlockingScriptLength: 107,
@@ -491,6 +492,7 @@ index c23d07a..88ac55f 100644
 +		// from noSend.
 +		targetNetCount: (vargs.labels ?? []).includes("vault-deposit") ? void 0 : changeBasket.numberOfDesiredUTXOs - healthyChangeCount,
  		maxChangeOutputs: brc177?.kind === "protected" ? 1 : storage.managedChangePolicy.maxOutputsPerAction,
+ 		surplusToFee: brc177?.kind === "protected",
 -		surplusPoolShaping: !compatibilityFallback,
 -		maxMigrationInputs: compatibilityFallback ? 0 : storage.managedChangePolicy.migrationInputsPerAction,
 +		surplusPoolShaping: !compatibilityFallback && !(vargs.labels ?? []).includes("vault-deposit"),
