@@ -1,5 +1,4 @@
 diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
-index e1aed2c..0897c22 100644
 --- a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
 +++ b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.cjs
 @@ -9470,10 +9470,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {
@@ -250,7 +249,6 @@ index e1aed2c..0897c22 100644
  	};
  }
 diff --git a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
-index ac25c38..0830c32 100644
 --- a/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
 +++ b/node_modules/@bsv/wallet-toolbox-mobile/out/index.mobile.mjs
 @@ -9435,10 +9435,158 @@ async function verifyUnlockScriptsBatch(txids, beef, verifier) {

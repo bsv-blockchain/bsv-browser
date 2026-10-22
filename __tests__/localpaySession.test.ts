@@ -1,5 +1,22 @@
+import QRCode from 'qrcode'
 import {
-  mintSession, encodeSession, decodeSession, instanceName, CAP_AWDL, CAP_NEARBY, SESSION_VERSION, CAP_BLE, type SessionAsset,
+  mintSession,
+  encodeSession,
+  decodeSession,
+  instanceName,
+  CAP_AWDL,
+  CAP_NEARBY,
+  SESSION_VERSION,
+  CAP_BLE,
+  CAP_BLE_SCAN,
+  HINT_ONLINE,
+  HINT_ONLINE_KNOWN,
+  HINT_NET,
+  HINT_WIFI,
+  HINT_BT,
+  HINT_NFC,
+  RUNG_MASK,
+  type SessionAsset
 } from '@bsv/expo-wallet-toolbox/core/localpay/session'
 import { CodecError } from '@bsv/expo-wallet-toolbox/core/localpay/codec'
 
@@ -8,7 +25,7 @@ const args = {
   amount: 5000,
   derivationPrefix: 'cHJlZml4',
   derivationSuffix: 'c3VmZml4',
-  supportsAwdl: true,
+  supportsAwdl: true
 }
 
 // Helper to encode a custom JSON envelope as a QR string
@@ -42,6 +59,90 @@ describe('localpay session', () => {
     expect(mintSession({ ...args, supportsAwdl: false }).caps & CAP_AWDL).toBe(0)
   })
 
+  // ── Capability word layout (spec §4) ──
+  //
+  // Low byte: rungs the payee is LISTENING ON right now; the payer's ladder
+  // reads only these. High bits: device hints for copy and future rungs. A
+  // clear bit means "false or unknown"; only ONLINE gets a companion KNOWN bit
+  // because it is the one probe that can time out.
+
+  it('defines the rung and hint bits from spec §4', () => {
+    expect(CAP_AWDL).toBe(0x01)
+    expect(CAP_NEARBY).toBe(0x02)
+    expect(CAP_BLE).toBe(0x04)
+    expect(HINT_ONLINE).toBe(0x0100)
+    expect(HINT_ONLINE_KNOWN).toBe(0x0200)
+    expect(HINT_NET).toBe(0x0400)
+    expect(HINT_WIFI).toBe(0x0800)
+    expect(HINT_BT).toBe(0x1000)
+    expect(HINT_NFC).toBe(0x2000)
+    expect(RUNG_MASK).toBe(0x00ff)
+    // Every hint lives above the rung byte; no hint can be mistaken for a rung.
+    for (const hint of [HINT_ONLINE, HINT_ONLINE_KNOWN, HINT_NET, HINT_WIFI, HINT_BT, HINT_NFC]) {
+      expect(hint & RUNG_MASK).toBe(0)
+    }
+  })
+
+  it('sets the BLE capability bit only when advertised', () => {
+    expect(mintSession({ ...args, supportsBle: true }).caps & CAP_BLE).toBe(CAP_BLE)
+    expect(mintSession({ ...args, supportsBle: false }).caps & CAP_BLE).toBe(0)
+    // Omitted means not advertised: the existing caller in NearbyFlow does not
+    // pass it yet and must keep minting exactly what it mints today.
+    expect(mintSession(args).caps & CAP_BLE).toBe(0)
+    // The BLE rung does not disturb the other rungs.
+    expect(mintSession({ ...args, supportsBle: true }).caps & CAP_AWDL).toBe(CAP_AWDL)
+  })
+
+  it('mints the BLE scan bit only alongside the BLE rung bit', () => {
+    expect(CAP_BLE_SCAN).toBe(0x08)
+    expect(mintSession({ ...args, supportsBle: true, supportsBleScan: true }).caps & CAP_BLE_SCAN).toBe(CAP_BLE_SCAN)
+    expect(mintSession({ ...args, supportsBle: true, supportsBleScan: false }).caps & CAP_BLE_SCAN).toBe(0)
+    expect(mintSession({ ...args, supportsBle: true }).caps & CAP_BLE_SCAN).toBe(0)
+    // A scanner with no advertiser behind it would strand iOS payers: refused at the mint.
+    expect(mintSession({ ...args, supportsBle: false, supportsBleScan: true }).caps & (CAP_BLE | CAP_BLE_SCAN)).toBe(0)
+  })
+
+  it('round-trips the scan bit through the QR text', () => {
+    const s = mintSession({ ...args, supportsBle: true, supportsBleScan: true })
+    expect(decodeSession(encodeSession(s)).caps & CAP_BLE_SCAN).toBe(CAP_BLE_SCAN)
+  })
+
+  it('masks hints to the non-rung bits and ORs them into caps', () => {
+    // A caller that smuggles a rung bit inside `hints` must not be able to
+    // advertise a listener it never started: rungs come from supports* only.
+    const hints = HINT_ONLINE | HINT_BT | CAP_AWDL
+    const withAwdl = mintSession({ ...args, supportsAwdl: true, hints })
+    expect(withAwdl.caps & HINT_ONLINE).toBe(HINT_ONLINE)
+    expect(withAwdl.caps & HINT_BT).toBe(HINT_BT)
+    expect(withAwdl.caps & CAP_AWDL).toBe(CAP_AWDL)
+    expect(withAwdl.caps & HINT_NET).toBe(0)
+    const withoutAwdl = mintSession({ ...args, supportsAwdl: false, hints })
+    expect(withoutAwdl.caps & HINT_ONLINE).toBe(HINT_ONLINE)
+    expect(withoutAwdl.caps & HINT_BT).toBe(HINT_BT)
+    expect(withoutAwdl.caps & CAP_AWDL).toBe(0)
+    expect(withoutAwdl.caps & RUNG_MASK).toBe(0)
+    // No hints at all is the same word as today.
+    expect(mintSession(args).caps).toBe(CAP_AWDL)
+    expect(mintSession({ ...args, hints: 0 }).caps).toBe(CAP_AWDL)
+  })
+
+  it('round-trips every defined bit through the QR', () => {
+    const s = mintSession({
+      ...args,
+      supportsAwdl: true,
+      supportsNearby: true,
+      supportsBle: true,
+      hints: HINT_ONLINE | HINT_ONLINE_KNOWN | HINT_NET | HINT_WIFI | HINT_BT | HINT_NFC
+    })
+    expect(s.caps).toBe(0x3f07)
+    // decodeSession is untouched by this change: `c` was already "any number",
+    // so the new bits survive the wire with no decoder work (spec §4).
+    const back = decodeSession(encodeSession(s))
+    expect(back.caps).toBe(s.caps)
+    expect(back.caps & RUNG_MASK).toBe(CAP_AWDL | CAP_NEARBY | CAP_BLE)
+    expect(back.caps & ~RUNG_MASK).toBe(0x3f00)
+  })
+
   it('mints distinct sessions', () => {
     const a = mintSession(args)
     const b = mintSession(args)
@@ -55,7 +156,29 @@ describe('localpay session', () => {
   })
 
   it('stays small enough for one static QR', () => {
-    expect(encodeSession(mintSession(args)).length).toBeLessThan(300)
+    // A real createNonce is base64 of 48 bytes (16 random ‖ 32-byte HMAC) =
+    // 64 chars; the short fixture nonces above understate the QR by ~150
+    // chars. Mint what the payee actually mints: two 64-char nonces, an OS
+    // hint, an amount, and every hint bit lit (`c` = 0x3f01, 5 JSON chars).
+    const nonce = () => Buffer.alloc(48, 7).toString('base64')
+    expect(nonce().length).toBe(64)
+    const s = mintSession({
+      ...args,
+      derivationPrefix: nonce(),
+      derivationSuffix: nonce(),
+      os: 'ios',
+      hints: 0x3f00
+    })
+    expect(s.caps).toBe(0x3f01)
+    const text = encodeSession(s)
+    // Measured 446 chars (spec §4 cites 428-450 for open/amount requests).
+    // base64url of fixed-length random bytes has a fixed length, so this is
+    // deterministic; the band leaves room for a 1-2 digit amount change.
+    expect(text.length).toBeGreaterThanOrEqual(400)
+    expect(text.length).toBeLessThanOrEqual(470)
+    // The size class that matters is the QR version at error level M: v16-M
+    // is what the 288 px session QR renders today and must not regress.
+    expect(QRCode.create(text, { errorCorrectionLevel: 'M' }).version).toBeLessThanOrEqual(16)
   })
 
   it('rejects malformed QR text', () => {
@@ -81,7 +204,7 @@ describe('localpay session', () => {
       i: args.identityKey,
       a: 5000,
       p: 'cHJlZml4',
-      x: 'c3VmZml4',
+      x: 'c3VmZml4'
     })
     expect(() => decodeSession(qr)).toThrow(CodecError)
   })
@@ -94,7 +217,7 @@ describe('localpay session', () => {
       i: args.identityKey,
       a: 5000,
       p: 'cHJlZml4',
-      x: 'c3VmZml4',
+      x: 'c3VmZml4'
     })
     expect(() => decodeSession(qr)).toThrow(CodecError)
   })
@@ -107,7 +230,7 @@ describe('localpay session', () => {
       k: 'AAAA',
       i: args.identityKey,
       a: 5000,
-      x: 'c3VmZml4',
+      x: 'c3VmZml4'
     })
     expect(() => decodeSession(qr)).toThrow(CodecError)
   })
@@ -120,7 +243,7 @@ describe('localpay session', () => {
       k: 'AAAA',
       i: args.identityKey,
       a: 5000,
-      p: 'cHJlZml4',
+      p: 'cHJlZml4'
     })
     expect(() => decodeSession(qr)).toThrow(CodecError)
   })
@@ -128,23 +251,21 @@ describe('localpay session', () => {
   // The amount drives both the payer's confirm screen and the payee's
   // session-binding check, so anything that is not a whole positive satoshi
   // count must be refused at the door rather than rendered.
-  const amountQr = (a: unknown) => encodeCustomQR({
-    v: SESSION_VERSION,
-    c: 0,
-    s: 'A'.repeat(22), // 16 bytes
-    k: 'A'.repeat(43), // 32 bytes
-    i: args.identityKey,
-    a,
-    p: 'cHJlZml4',
-    x: 'c3VmZml4',
-  })
+  const amountQr = (a: unknown) =>
+    encodeCustomQR({
+      v: SESSION_VERSION,
+      c: 0,
+      s: 'A'.repeat(22), // 16 bytes
+      k: 'A'.repeat(43), // 32 bytes
+      i: args.identityKey,
+      a,
+      p: 'cHJlZml4',
+      x: 'c3VmZml4'
+    })
 
-  it.each([-1, -5000, 0, 0.5, 1234.56, 2 ** 53, 'ten', null])(
-    'rejects a non-positive-integer amount %p',
-    a => {
-      expect(() => decodeSession(amountQr(a))).toThrow(CodecError)
-    }
-  )
+  it.each([-1, -5000, 0, 0.5, 1234.56, 2 ** 53, 'ten', null])('rejects a non-positive-integer amount %p', a => {
+    expect(() => decodeSession(amountQr(a))).toThrow(CodecError)
+  })
 
   it('accepts a valid positive integer amount', () => {
     expect(decodeSession(amountQr(5000)).amount).toBe(5000)
@@ -191,7 +312,7 @@ describe('localpay session', () => {
       k: 'A'.repeat(43),
       i: args.identityKey,
       p: 'cHJlZml4',
-      x: 'c3VmZml4',
+      x: 'c3VmZml4'
     })
     expect(decodeSession(qr).amount).toBeUndefined()
   })
@@ -215,7 +336,7 @@ describe('localpay session', () => {
       i: args.identityKey,
       a: 5000,
       p: 'cHJlZml4',
-      x: 'c3VmZml4',
+      x: 'c3VmZml4'
     })
     expect(() => decodeSession(qr)).toThrow(CodecError)
   })
@@ -258,7 +379,7 @@ const baseMintArgs = () => ({
   identityKey: '02'.padEnd(66, 'd'),
   derivationPrefix: 'cA',
   derivationSuffix: 'cw',
-  supportsAwdl: true,
+  supportsAwdl: true
 })
 
 const bytesToB64url = (b: Uint8Array) => {
@@ -278,7 +399,7 @@ const asset = (): SessionAsset => ({
   ticker: 'EXD',
   decimals: 2,
   overlayUrl: 'https://overlay.issuer.example',
-  overlayIdentityKey: '03'.padEnd(66, 'b'),
+  overlayIdentityKey: '03'.padEnd(66, 'b')
 })
 
 describe('session asset block', () => {
@@ -310,12 +431,42 @@ describe('session asset block', () => {
     expect(() => decodeSession(forged)).toThrow(CodecError)
   })
 
+  // XR-043: an extreme decimals value from a session QR reached
+  // ui/tokenFormat.ts's formatters unbounded and crashed the confirmation
+  // view with `RangeError: Invalid string length`.
+  it('XR-043: refuses an out-of-range asset decimals value at decode', () => {
+    const s = mintSession({ ...baseMintArgs(), asset: asset() })
+    const raw = JSON.parse(new TextDecoder().decode(b64urlToBytes(encodeSession(s).slice('bsvpay1:'.length))))
+    raw.t.d = Number.MAX_SAFE_INTEGER
+    const forged = 'bsvpay1:' + bytesToB64url(new TextEncoder().encode(JSON.stringify(raw)))
+    expect(() => decodeSession(forged)).toThrow(CodecError)
+  })
+
+  it('XR-043: 18 decimals still decodes; 19 is refused', () => {
+    const eighteen = mintSession({ ...baseMintArgs(), asset: { ...asset(), decimals: 18 } })
+    expect(decodeSession(encodeSession(eighteen)).asset?.decimals).toBe(18)
+
+    const raw = JSON.parse(new TextDecoder().decode(b64urlToBytes(encodeSession(eighteen).slice('bsvpay1:'.length))))
+    raw.t.d = 19
+    const forged = 'bsvpay1:' + bytesToB64url(new TextEncoder().encode(JSON.stringify(raw)))
+    expect(() => decodeSession(forged)).toThrow(CodecError)
+  })
+
+  // Validated at the mint too, not only at decode (same principle as `amount`
+  // above it in this file) — an out-of-range figure minted on THIS device
+  // would render on its own screen before any decoder ever saw it.
+  it('XR-043: refuses an out-of-range asset decimals value at mint', () => {
+    expect(() => mintSession({ ...baseMintArgs(), asset: { ...asset(), decimals: 19 } })).toThrow(CodecError)
+    expect(() => mintSession({ ...baseMintArgs(), asset: { ...asset(), decimals: -1 } })).toThrow(CodecError)
+    expect(() => mintSession({ ...baseMintArgs(), asset: { ...asset(), decimals: 2.5 } })).toThrow(CodecError)
+  })
+
   // The old check (`length < 66 && includes('.')`) accepted this: 66 chars,
   // has a dot, but the 64-char half is not hex — not a real "<txid>.<vout>".
   it('refuses a 66-char assetId that is not a valid txid.vout shape', () => {
     const s = mintSession({ ...baseMintArgs(), asset: asset() })
     const raw = JSON.parse(new TextDecoder().decode(b64urlToBytes(encodeSession(s).slice('bsvpay1:'.length))))
-    raw.t.i = 'z'.repeat(64) + '_0'
+    raw.t.i = 'z'.repeat(64) + '.0'
     const forged = 'bsvpay1:' + bytesToB64url(new TextEncoder().encode(JSON.stringify(raw)))
     expect(() => decodeSession(forged)).toThrow(CodecError)
   })

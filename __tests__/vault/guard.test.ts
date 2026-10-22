@@ -164,10 +164,7 @@ test('guard.ts itself strips customInstructions from listActions outputs for a n
   expect(external.actions[0].outputs[0].customInstructions).toBeUndefined()
 
   // The app's own view is untouched by this guard.
-  const admin = await guarded.listActions(
-    { labels: [], includeOutputs: true, limit: 10, offset: 0 } as any,
-    ADMIN
-  )
+  const admin = await guarded.listActions({ labels: [], includeOutputs: true, limit: 10, offset: 0 } as any, ADMIN)
   expect(admin.actions[0].outputs[0].customInstructions).toBeDefined()
 })
 
@@ -236,10 +233,7 @@ test.each([
     const { wallet, calls } = fakeWallet()
     const guarded = guardVaultAccess(wallet, ADMIN)
     await expect(
-      (guarded[method] as any)(
-        { protocolID, keyID: 'test:1', counterparty: 'self' },
-        'evil.com'
-      )
+      (guarded[method] as any)({ protocolID, keyID: 'test:1', counterparty: 'self' }, 'evil.com')
     ).rejects.toBeInstanceOf(VaultAccessDenied)
     expect(calls.find(call => call.method === method)).toBeUndefined()
   }
@@ -319,7 +313,10 @@ test.each([
   async (method, counterparty) => {
     const { wallet, calls } = fakeWallet()
     const guarded = guardVaultAccess(wallet, ADMIN)
-    await (guarded[method] as any)({ protocolID: [2, 'p mandala token'], keyID: 'x', counterparty, data: [1] }, 'evil.com')
+    await (guarded[method] as any)(
+      { protocolID: [2, 'p mandala token'], keyID: 'x', counterparty, data: [1] },
+      'evil.com'
+    )
     expect(calls.find(call => call.method === method)).toBeDefined()
   }
 )
@@ -668,19 +665,17 @@ test.each([
 // includeTransactions each row also carries a full aggregate BEEF, big
 // enough to plausibly OOM a mobile app. This must be refused before it
 // reaches the underlying wallet, exactly like the listActions bounds above.
-test.each([
-  { limit: 1001 },
-  { limit: 10000 },
-  { limit: 101, include: 'entire transactions' },
-  { offset: 10_001 }
-])('bounds external listOutputs request before it reaches the underlying wallet: %p', async invalid => {
-  const { wallet, calls } = fakeWallet()
-  const guarded = guardVaultAccess(wallet, ADMIN)
-  await expect(guarded.listOutputs({ basket: 'x', ...invalid } as any, 'evil.com')).rejects.toBeInstanceOf(
-    VaultAccessDenied
-  )
-  expect(calls.some(c => c.method === 'listOutputs')).toBe(false)
-})
+test.each([{ limit: 1001 }, { limit: 10000 }, { limit: 101, include: 'entire transactions' }, { offset: 10_001 }])(
+  'bounds external listOutputs request before it reaches the underlying wallet: %p',
+  async invalid => {
+    const { wallet, calls } = fakeWallet()
+    const guarded = guardVaultAccess(wallet, ADMIN)
+    await expect(guarded.listOutputs({ basket: 'x', ...invalid } as any, 'evil.com')).rejects.toBeInstanceOf(
+      VaultAccessDenied
+    )
+    expect(calls.some(c => c.method === 'listOutputs')).toBe(false)
+  }
+)
 
 test('allows an external listOutputs call within the bound, and an admin call above it', async () => {
   const { wallet, calls } = fakeWallet()
@@ -997,24 +992,21 @@ test('tells the lookup the caller own originator label, in the form storage keep
 
 // `ADMIN.COM` and `admin.com ` are not the admin originator here, but storage
 // keeps their labels as the admin's, so they must not be ignored.
-test.each([undefined, '', 'ADMIN.COM', 'admin.com '])(
-  'ignores no originator label for caller %p',
-  async originator => {
-    const { txid, atomic } = vaultTxBeef()
-    const { wallet } = fakeWallet()
-    const lookup = fakeLookup()
-    const guarded = guardVaultAccess(wallet, ADMIN, { lookup })
-    await guarded.internalizeAction(
-      {
-        tx: atomic,
-        description: 'Payment',
-        outputs: [{ outputIndex: 0, protocol: 'basket insertion', insertionRemittance: { basket: 'normal' } }]
-      } as any,
-      originator
-    )
-    expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${txid}.0`], null)
-  }
-)
+test.each([undefined, '', 'ADMIN.COM', 'admin.com '])('ignores no originator label for caller %p', async originator => {
+  const { txid, atomic } = vaultTxBeef()
+  const { wallet } = fakeWallet()
+  const lookup = fakeLookup()
+  const guarded = guardVaultAccess(wallet, ADMIN, { lookup })
+  await guarded.internalizeAction(
+    {
+      tx: atomic,
+      description: 'Payment',
+      outputs: [{ outputIndex: 0, protocol: 'basket insertion', insertionRemittance: { basket: 'normal' } }]
+    } as any,
+    originator
+  )
+  expect(lookup.anyAdminOutpoint).toHaveBeenCalledWith([`${txid}.0`], null)
+})
 
 test.each(['createAction', 'signAction'] as const)(
   'passes external %s sendWith of ordinary transactions',
