@@ -68,7 +68,11 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "6755637932"
+        "ascApiKeyPath": "/Users/personal/Certificates/AuthKey_23GZFDBWMS.p8",
+        "ascApiKeyId": "23GZFDBWMS",
+        "ascApiKeyIssuerId": "296a2a8a-ed8d-466f-967c-6c8e59100f5e",
+        "ascAppId": "6755637932",
+        "appleTeamId": "SV8SWTHA2H"
       },
       "android": {
         "track": "internal",
