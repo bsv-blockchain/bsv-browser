@@ -37,7 +37,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ErrorBoundary } from '@bsv/expo-wallet-toolbox/ui/components/ui/ErrorBoundary'
 import { configureToolbox } from '@bsv/expo-wallet-toolbox'
 import { DirectPayProvider } from '@bsv/expo-wallet-toolbox/core/directpay/DirectPayProvider'
-import { withReactNativeDataChannels } from '@bsv/expo-wallet-toolbox/core/directpay/reactNativeRtc'
 import { RTCPeerConnection } from 'react-native-webrtc'
 
 // Host-supplied toolbox configuration. Must run at module scope, before anything from the
@@ -58,12 +57,12 @@ configureToolbox({
   backupUrl: process.env.EXPO_PUBLIC_BACKUP_URL ?? null,
   vaultEnabled: false,
   // Live (WebRTC) push payments: pay a person directly while both apps are open, with the
-  // message box as the fallback. The relay and STUN servers are the toolbox defaults. The
-  // adapter lets @bsv/webrtpay 0.2.1 accept react-native-webrtc's data channels (Android
-  // reports -1 and iOS 65535 for an unset limit); drop it once webrtpay ships the fix.
+  // message box as the fallback. The relay and STUN servers are the toolbox defaults.
+  // @bsv/webrtpay 0.2.2 reads react-native-webrtc's unset data-channel limits (Android -1,
+  // iOS 65535) itself, so RTCPeerConnection goes in unwrapped.
   directPay: {
     enabled: true,
-    RTCPeerConnection: withReactNativeDataChannels(RTCPeerConnection)
+    RTCPeerConnection
   },
   services: {
     main: {

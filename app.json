@@ -6,7 +6,7 @@
       "bsv-browser",
       "bsv-wallet"
     ],
-    "version": "1.8.0",
+    "version": "1.8.1",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
@@ -17,6 +17,7 @@
     },
     "plugins": [
       "./plugins/withNfcReaderEntitlement",
+      "./plugins/withoutWebRTCMediaProjection",
       [
         "./plugins/withXcodeLastUpgradeVersion",
         {
