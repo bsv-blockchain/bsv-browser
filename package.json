@@ -33,6 +33,7 @@
     "postinstall": "patch-package",
     "test": "jest"
   },
+  "//": "@bsv/wallet-toolbox-mobile: bump to the first release whose removeUnlockScripts records a page-supplied unlocking script by its bytes, not its hex length (issue #161, __tests__/unlockingScriptLength.test.ts goes green on it). Unpublished as of 2.14.9.",
   "dependencies": {
     "@bsv/air-gap": "^0.1.3",
     "@bsv/backup-cache-client": "^0.1.0",
