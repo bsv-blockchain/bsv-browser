@@ -126,12 +126,15 @@ Measured on shipped Hermes v0.14.1: peak RSS ≈ **20× N** central, **30× N** 
 | single output `lockingScript` | 100 KB | 25 KB |
 | sum of output `lockingScript` | 500 KB | — |
 | `outputs` / `inputs` array length | 1,000 | — |
-| declared `inputs[i].unlockingScriptLength` | 100,000 | — |
-| sum of declared `unlockingScriptLength` | 500,000 | — |
-| `signAction` spend `unlockingScript` | 100 KB | — |
+| declared `inputs[i].unlockingScriptLength` | 100,000; in-tab pages: the aggregate (4 MB, 2 MB low) | — |
+| sum of declared `unlockingScriptLength` | 500,000; in-tab pages: the aggregate (4 MB, 2 MB low) | — |
+| supplied `createAction` `inputs[i].unlockingScript` | 100 KB; in-tab pages: the aggregate (4 MB, 2 MB low) | — |
+| `signAction` spend `unlockingScript` | 100 KB; in-tab pages: the aggregate (4 MB, 2 MB low) | — |
 | `inputBEEF` | 2 MB | 256 KB |
 | `internalizeAction` `args.tx` | 1 MB | 64 KB |
 | `customInstructions` per output | 4 KB | — |
+
+**Amended 2026-10-22: unlocking scripts on the in-tab page surface.** The 100 KB unlocking-script caps were sized to observed traffic (the 65,536-byte AtomicBEEF), not to any covenant's witness, and they refused a legitimate one: a covenant whose witness carries data (a hashed body, a merkle path, a BEEF) supplied a 339,094-byte input script and was refused before any sheet. A *supplied* unlocking script is real bytes the aggregate already counts, so a per-input cap below the aggregate bounds no memory the aggregate does not; the aggregate stays the one memory bound. A *declared* length carries no bytes and its cap guards the fee the wallet reserves, so it is held to the aggregate per input and summed: a page cannot declare more than one call could ever supply, a later `signAction` that honours it is held to the same aggregate, and the fee it implies is on the spend sheet. The page wallet in [app/index.tsx](../../../app/index.tsx) composes `capWalletArgs` with [utils/pageWalletArgLimits.ts](../../../utils/pageWalletArgLimits.ts); every other limit, and the toolbox's own surfaces, are unchanged. The 8,000,000-character pre-parse ceiling below still applies, so a hex script binds there at about 3.8 MiB before the 4 MB aggregate.
 
 The declared `unlockingScriptLength` cap cannot be substituted by a byte cap: the SDK only cross-checks it against a *supplied* script (`validationHelpers.js:372-375`), so a page can declare 959,871 per input with a near-empty payload and make the wallet fund a ~1 MB-per-input transaction. Also refuse a page-supplied `lockingScript` whose first byte is `0xff` — provably unspendable, and it closes the decoder-poisoning path.
 
