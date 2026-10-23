@@ -20,7 +20,11 @@ import { useTranslation } from 'react-i18next'
 import { useWallet } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { PrivateKey } from '@bsv/sdk'
 import { generateMnemonicWallet, recoverMnemonicWallet, validateMnemonic } from '@bsv/expo-wallet-toolbox/core/mnemonicWallet'
-import { backupAttestation, type BackupMedium } from '@bsv/expo-wallet-toolbox/core/services/vault/backupAttestation'
+import {
+  backupAttestation,
+  recordBackupAttestation,
+  type BackupMedium
+} from '@bsv/expo-wallet-toolbox/core/services/vault/backupAttestation'
 import { printRecoveryShares } from '@bsv/expo-wallet-toolbox/ui/printRecoveryShares'
 import * as Clipboard from 'expo-clipboard'
 import { Directory } from 'expo-file-system'
@@ -45,8 +49,17 @@ type BackupMaterial = {
 export default function MnemonicScreen() {
   const { t } = useTranslation()
   const { colors, isDark } = useTheme()
-  const { buildWalletFromMnemonic, buildWalletFromRecoveredKey, rebuildWallet, backupRestore, getBackupRestore, walletBuilt, walletBuilding } =
-    useWallet()
+  const {
+    buildWalletFromMnemonic,
+    buildWalletFromRecoveredKey,
+    rebuildWallet,
+    backupRestore,
+    getBackupRestore,
+    walletBuilt,
+    walletBuilding,
+    getManagers,
+    adminOriginator
+  } = useWallet()
   const { setMnemonic: storeMnemonic, createMnemonic, getMnemonic, setRecoveredKey, getRecoveredKey, hasStoredIdentity, secretsReady, unlock } = useLocalStorage()
   const { flow } = useLocalSearchParams<{ flow?: 'backup' | 'import' }>()
 
@@ -325,20 +338,32 @@ export default function MnemonicScreen() {
   }
 
   // Handwritten backups become eligible after the delay; elapsed time alone
-  // never marks a wallet backed up. Export attestations need no duplicate write.
+  // never marks a wallet backed up. Export attestations need no duplicate write
+  // for the phrase-derived key; Confirm still writes the wallet-scoped flag the
+  // reminder banner reads, which can be a different identity.
   const handleConfirmBackup = async () => {
     if (!backupSession || backupSessionRef.current !== backupSession || !confirmationAvailable || backupBusy || confirmingRef.current || exportingRef.current || flowRef.current !== flow) return
     confirmingRef.current = true
     setLoading(true)
     try {
       const progress = backupProgressRef.current?.session === backupSession ? backupProgressRef.current : null
+      const medium = progress?.medium ?? 'phrase'
       if (!progress?.attested) {
-        const medium = progress?.medium ?? 'phrase'
         await backupAttestation.set(backupSession.identityKey, medium)
         if (backupSessionRef.current !== backupSession) return
         backupProgressRef.current = { session: backupSession, medium, attested: true }
       }
+      // WalletHome's reminder reads needsReminder(getPublicKey({ identityKey: true })),
+      // not the phrase-derived key above. Persist under that same identity or
+      // "Your Wallet is Not Backed Up" survives Confirm and every later launch.
+      const wallet = getManagers?.()?.permissionsManager
+      const walletRecorded = wallet ? await recordBackupAttestation(wallet, adminOriginator, medium) : false
       if (backupSessionRef.current !== backupSession) return
+      if ((wallet && !walletRecorded) || (!wallet && !backupProgressRef.current?.attested)) {
+        confirmingRef.current = false
+        showToast('Unable to save backup confirmation. Please try again.', { type: 'error' })
+        return
+      }
       if (isBackup) {
         showToast('Backup confirmed', { type: 'success' })
         router.back()
