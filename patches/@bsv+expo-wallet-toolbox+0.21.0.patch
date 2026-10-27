@@ -20,7 +20,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSe
 -            </PressableScale>
 -          )}
 +          ) : null}
- 
+
            {outbox.length > 0 && (
              <OutgoingSection
 @@ -1740,7 +1727,7 @@ function UniversalSendInner(
@@ -44,3 +44,71 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/Activity
    const onPressFace = useCallback(() => {
      if (!counterpartyIdentityKey) return
      loadExpoRouter().router.push({ pathname: '/contact', params: { identityKey: counterpartyIdentityKey } } as never)
+diff --git a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.tsx b/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.tsx
+--- a/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.tsx
++++ b/node_modules/@bsv/expo-wallet-toolbox/core/context/WalletContext.tsx
+@@ -811,9 +811,14 @@
+ interface WalletContextProps {
+   children: React.ReactNode
+   onToast?: WalletContextToast
++  /** Trusted host modules, rebuilt and disposed with the active wallet. */
++  permissionModuleHost?: {
++    create: (wallet: Wallet) => Record<string, unknown>
++    dispose: () => void
++  }
+ }
+
+-export const WalletContextProvider: React.FC<WalletContextProps> = ({ children = <></>, onToast }) => {
++export const WalletContextProvider: React.FC<WalletContextProps> = ({ children = <></>, onToast, permissionModuleHost }) => {
+   const { t } = useTranslation()
+   const [managers, setManagers] = useState<ManagerState>({})
+   const [storage, setStorage] = useState<StorageExpoSQLite | null>(null)
+@@ -1470,6 +1475,7 @@
+   // Build wallet function
+   const buildWallet = useCallback(
+     async (primaryKey: number[], privilegedKeyManager: PrivilegedKeyManager): Promise<any> => {
++      permissionModuleHost?.dispose()
+       // Captured before anything is opened: everything this build publishes is
+       // conditional on the app still wanting THIS build by the time it gets there.
+       const buildToken = buildGenRef.current.current()
+@@ -2044,6 +2050,7 @@
+         })
+
+         // Setup permissions with provided callbacks and BTMS module.
++        if (!stillWanted()) throw new Error('Wallet session changed before host modules were created')
+         const permissionsManager = new SigningPolicyPermissionsManager(wallet, adminOriginator, {
+           differentiatePrivilegedOperations: true,
+           seekBasketInsertionPermissions: false,
+@@ -2074,7 +2081,7 @@
+           // signing is exempt (SigningPolicyPermissionsManager).
+           seekProtocolPermissionsForSigning: true,
+           seekSpendingPermissions: true,
+-          permissionModules: { btms: btmsModule, mandala: mandalaModule }
++          permissionModules: { btms: btmsModule, mandala: mandalaModule, ...permissionModuleHost?.create(wallet) }
+         } as any)
+
+         if (protocolPermissionCallback) {
+@@ -3099,6 +3106,7 @@
+    * anything can resume against the departing wallet.
+    */
+   const teardownBuiltWallet = useCallback(async () => {
++    permissionModuleHost?.dispose()
+     // Invalidate Vault operations before the first teardown await. Otherwise a
+     // signer/listing already in flight can resume against the departing wallet.
+     vaultStore.clearScope()
+@@ -3939,6 +3947,7 @@
+   // Cleanup monitor on unmount
+   useEffect(() => {
+     return () => {
++      permissionModuleHost?.dispose()
+       try {
+         monitorRef.current?.stopTasks()
+       } catch {}
+@@ -3961,6 +3970,7 @@
+   }, [])
+
+   const logout = useCallback((): Promise<boolean> => {
++    permissionModuleHost?.dispose()
+     logWithTimestamp(F, 'Logout')
+     // A build still running for the departing wallet must never publish (nor
+     // record its identity into the fresh profile store).
