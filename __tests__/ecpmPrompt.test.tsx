@@ -1,3 +1,4 @@
+jest.mock('@bsv/expo-wallet-toolbox/core/theme/ThemeContext', () => ({ useTheme: () => ({ colors: { backgroundSecondary: '#fff', textPrimary: '#111' } }) }))
 import React from 'react'
 import { fireEvent, render } from '@testing-library/react-native'
 import { Modal } from 'react-native'
@@ -30,7 +31,7 @@ test('native consent displays the scope and forwards an explicit approval', () =
 test('deny and native back dismissal fail closed', () => {
   const { answer, session } = prompt()
   const view = render(<EcpmPrompt session={session} />)
-  fireEvent.press(view.getByText('Deny'))
+  fireEvent.press(view.getByText('Don’t allow'))
   expect(answer).toHaveBeenLastCalledWith(false)
   fireEvent(view.UNSAFE_getByType(Modal), 'requestClose')
   expect(answer).toHaveBeenLastCalledWith(false)

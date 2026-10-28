@@ -1,0 +1,19 @@
+{
+  "sourceCommit": "240b9c3a4c07266fae97e986dd62858cec62aa68",
+  "sourcePR": "https://github.com/bsv-blockchain/ts-stack/pull/1431",
+  "sourceStatus": "DRAFT; further TS Stack work held by operator",
+  "generator": "scripts/backport-permission-sessions.mjs at sourceCommit",
+  "walletOnlyArtifactVerification": true,
+  "results": [
+    {
+      "package": "@bsv/wallet-toolbox-mobile",
+      "originalVersion": "2.14.9",
+      "originalTarballSha256": "b1597b2e383b0aadcbfd8367edb0db4f347533023e8095975efe0eee9bd6871f",
+      "artifactSha256": "79de34d2406f1204ef0bade28d7e69bd9983d614e57bf144b7e4b7c5425d419a",
+      "runtimeBundles": 2,
+      "unchangedOtherMethods": 392,
+      "unchangedOtherFiles": 7,
+      "frozenOwningMethodsMatch": true
+    }
+  ]
+}
