@@ -97,12 +97,7 @@ jobs:
           E2E_ANDROID_ARCH: x86_64
         run: |
           set -o pipefail
-          mkdir -p e2e/output "$HOME/node-shim"
-          # Gradle reports "node exited 1" without the script's stderr.
-          cp e2e/scripts/node-fail-log.sh "$HOME/node-shim/node"
-          chmod +x "$HOME/node-shim/node"
-          export NODE_REAL="$(command -v node)"
-          export PATH="$HOME/node-shim:$PATH"
+          mkdir -p e2e/output
           bash e2e/scripts/build-android.sh 2>&1 | tee e2e/output/build-android.log
 
       - name: Emulator and Maestro

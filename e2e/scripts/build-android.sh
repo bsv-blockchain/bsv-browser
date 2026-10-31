@@ -15,7 +15,16 @@ export NODE_ENV="${NODE_ENV:-production}"
 npx expo prebuild --platform android --no-install
 
 GRADLE_PROPS="$ROOT/android/gradle.properties"
-grep -q 'org.gradle.workers.max' "$GRADLE_PROPS" || echo 'org.gradle.workers.max=2' >> "$GRADLE_PROPS"
+# expo prebuild writes expo.inlineModules.watchedDirectories=[] as the last
+# line and does not always terminate it. Appending the next property onto
+# that line makes the value `[]org.gradle.workers.max=2`, which the Expo
+# autolinking step then fails to JSON.parse.
+if ! grep -q 'org.gradle.workers.max' "$GRADLE_PROPS"; then
+  if [[ -n "$(tail -c 1 "$GRADLE_PROPS" || true)" ]]; then
+    printf '\n' >>"$GRADLE_PROPS"
+  fi
+  printf 'org.gradle.workers.max=2\n' >>"$GRADLE_PROPS"
+fi
 
 cd "$ROOT/android"
 ARGS=()
