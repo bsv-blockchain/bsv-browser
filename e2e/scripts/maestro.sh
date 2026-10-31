@@ -30,6 +30,7 @@ set -e
 if [[ "$code" -ne 0 ]]; then
   if command -v adb >/dev/null 2>&1 && adb get-state >/dev/null 2>&1; then
     adb logcat -d -t 8000 > "$ROOT/e2e/output/logcat.txt" || true
+    adb exec-out uiautomator dump /dev/tty > "$ROOT/e2e/output/ui.xml" 2>/dev/null || true
   fi
   if [[ -d "$HOME/.maestro/tests" ]]; then
     mkdir -p "$ROOT/e2e/output/maestro-tests"

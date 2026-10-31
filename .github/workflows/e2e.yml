@@ -179,7 +179,8 @@ jobs:
             ls -d /Applications/Xcode*.app
             exit 1
           fi
-          selected="${apps[-1]}"
+          # macOS runners ship Bash 3.2, which has no negative array index.
+          selected="${apps[${#apps[@]}-1]}"
           sudo xcode-select -s "$selected"
           xcodebuild -version
           xcrun swift --version

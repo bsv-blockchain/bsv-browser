@@ -11,6 +11,9 @@ export EXPO_PUBLIC_E2E=1
 export CI="${CI:-1}"
 # Release bundles and expo-constants read NODE_ENV. Gradle does not set it.
 export NODE_ENV="${NODE_ENV:-production}"
+# Metro reads .env. A Gradle-spawned Node process does not always inherit the
+# shell export, and without this flag the release bundle omits the status label.
+printf 'EXPO_PUBLIC_E2E=1\n' > "$ROOT/.env"
 
 npx expo prebuild --platform android --no-install
 
@@ -36,6 +39,12 @@ fi
 APK="$ROOT/android/app/build/outputs/apk/release/app-release.apk"
 if [[ ! -f "$APK" ]]; then
   echo "Release APK was not produced at $APK" >&2
+  exit 1
+fi
+# The status id is built from this prefix. If the bundle was compiled without
+# the e2e flag, the prefix is tree-shaken out and every flow fails at launch.
+if ! unzip -p "$APK" assets/index.android.bundle | grep -a -q 'e2e-status-'; then
+  echo "Release bundle does not contain the e2e status label. EXPO_PUBLIC_E2E was not inlined." >&2
   exit 1
 fi
 echo "$APK"
