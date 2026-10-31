@@ -37,6 +37,13 @@ ensure_framework \
 
 export EXPO_PUBLIC_E2E=1
 export CI="${CI:-1}"
+# expo-modules-jsi's package declares Swift tools 6.2. Xcode 16.4 ships 6.1,
+# so the nested xcframework rebuild stops before it compiles. The package
+# itself builds with 6.1. Xcode 26 accepts 6.2 and then rejects the headers.
+PKG_SWIFT="$ROOT/node_modules/expo-modules-jsi/apple/Package.swift"
+if [[ -f "$PKG_SWIFT" ]]; then
+  sed -i '' 's/swift-tools-version: 6.2/swift-tools-version: 6.1/' "$PKG_SWIFT"
+fi
 # Release binaries should stage the release precompiled slices. The default
 # flavor is debug, which is what a Release xcodebuild then fails to resolve.
 export EXPO_PRECOMPILED_FLAVOR=release

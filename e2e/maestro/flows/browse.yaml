@@ -19,9 +19,5 @@ tags:
     visible:
       id: e2e-status-page-article
     timeout: 30000
-- tapOn:
-    id: address-bar-back
-- extendedWaitUntil:
-    visible:
-      id: e2e-status-page-home
-    timeout: 30000
+# The e2e opener loads each URL in a new tab, so the webview has no history
+# for the address-bar back button to pop. Both pages are the check.

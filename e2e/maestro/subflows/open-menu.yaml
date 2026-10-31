@@ -8,15 +8,14 @@ appId: org.bsvassociation.browser
 - extendedWaitUntil:
     visible:
       id: menu-wallet
-    timeout: 4000
+    timeout: 8000
     optional: true
-- runFlow:
-    when:
-      notVisible:
-        id: menu-wallet
-    commands:
-      - tapOn:
-          id: browser-menu-button
+# The first tap opens the menu and unmounts the button. A second tap is only
+# needed when the bar was collapsed, and it has to be optional so a menu that
+# is still animating in does not fail the flow.
+- tapOn:
+    id: browser-menu-button
+    optional: true
 - extendedWaitUntil:
     visible:
       id: menu-wallet

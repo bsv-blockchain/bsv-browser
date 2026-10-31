@@ -148,11 +148,7 @@ const AddressBarRowImpl: React.FC<AddressBarRowProps> = ({
             onSubmitEditing={onSubmit}
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType={
-              process.env.EXPO_PUBLIC_E2E === '1'
-                ? 'default'
-                : Platform.select({ ios: 'web-search', default: 'url' })
-            }
+            keyboardType={Platform.select({ ios: 'web-search', default: 'url' })}
             returnKeyType="go"
             style={[
               styles.urlInput,

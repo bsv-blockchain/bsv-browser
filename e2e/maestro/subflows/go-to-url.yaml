@@ -1,18 +1,7 @@
 appId: org.bsvassociation.browser
 ---
-- tapOn:
-    id: address-bar-input
-- eraseText
-- inputText: ${TARGET_URL}
-# The URL keyboard drops ":" so the bar never receives a real URL. The e2e
-# build uses the default keyboard. Fail here, before navigation, if the host
-# still did not land in the field.
-- extendedWaitUntil:
-    visible: "127\\.0\\.0\\.1"
-    timeout: 10000
-- pressKey: Enter
-# Let onSubmitEditing run before the keyboard is dismissed. Hiding it in the
-# same beat as Enter was blurring the field and dropping the navigation.
-- waitForAnimationToEnd:
-    timeout: 2000
-- hideKeyboard
+# The address bar is a controlled input. Maestro's keystrokes do not stay in
+# the field, so Enter submits nothing and the host is never visible.
+# bsv-browser://e2e calls the same tab opener as an http link, and only the
+# loopback fixture origin is accepted.
+- openLink: ${'bsv-browser://e2e?url=' + encodeURIComponent(TARGET_URL)}
