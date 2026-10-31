@@ -39,4 +39,15 @@ export EXPO_PUBLIC_E2E=1
 export CI="${CI:-1}"
 # Prebuild with the flag so the simulator allows loopback HTTP. This edits the
 # committed ios/ project (NSAllowsLocalNetworking). Do not commit that diff.
-npx expo run:ios --configuration Release --no-bundler
+npx expo prebuild --platform ios --no-install
+(
+  cd ios
+  pod install
+  # CocoaPods adds Swift packages. xcodebuild otherwise exits 65 with a blank
+  # "Could not resolve package dependencies" before the app target compiles.
+  xcodebuild -resolvePackageDependencies \
+    -workspace BSVBrowser.xcworkspace \
+    -scheme BSVBrowser \
+    -configuration Release
+)
+npx expo run:ios --configuration Release --no-bundler --no-install

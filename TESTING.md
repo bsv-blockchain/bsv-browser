@@ -136,13 +136,15 @@ If the address bar's first menu tap only expands the bar, `open-menu.yaml` taps 
 
 `.github/workflows/e2e.yml`
 
-- **Fixture and policy** on Ubuntu. No device.
-- **Android emulator** on Ubuntu. API 34, x86_64, release APK, then Maestro. Artifacts: `maestro-android` on failure.
-- **iOS simulator** on `macos-15`. Builds the xcframeworks, then a Release simulator app, then Maestro. Artifacts: `maestro-ios` on failure.
+The fixture job runs on every pull request. It does not boot a device.
 
-iOS is the expensive job. It exists because the suite has to run on both platforms. If macOS minutes become a problem, keep the Android job on pull requests and run the iOS job with `workflow_dispatch` only. That is a product decision, not a technical limit of Maestro.
+The Android and iOS jobs run only when a release is being gated:
 
-Device jobs do not run until the static job is green.
+- The pull request has the **`release`** label. Adding the label starts them. Later pushes to that PR run them again while the label stays on. This repo has no existing version or release label. `eas-build` is the label that asks EAS to build a binary, so this suite does not reuse it.
+- A version tag `v*` is pushed. That is the backstop for a release that did not go through a labeled PR.
+- Someone starts the workflow with `workflow_dispatch`.
+
+Device jobs still wait for the fixture job. On failure they upload `e2e/output` (`maestro-android` / `maestro-ios`).
 
 ## Gaps
 

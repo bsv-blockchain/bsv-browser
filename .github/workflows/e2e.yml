@@ -1,15 +1,19 @@
-# End-to-end suite. Android runs on a Linux emulator. iOS runs on a macOS
-# simulator and also builds the gitignored Rust xcframeworks, so it spends
-# macOS minutes. Both jobs upload Maestro's debug output when they fail.
+# End-to-end suite.
 #
-# The static job does not boot a device. It checks the testnet lock and the
-# fixture server. Device jobs wait for it so a broken fixture does not spend
-# a macOS runner.
+# The fixture job is cheap and runs on every pull request. The Android and
+# iOS device jobs boot emulators, so they run only when a release is being
+# gated: the PR has the `release` label, a `v*` tag was pushed, or someone
+# started the workflow by hand. This repo has no existing version/release
+# label (`eas-build` is for creating EAS binaries, not for this suite).
 
 name: E2E
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 concurrency:
@@ -51,6 +55,10 @@ jobs:
   e2e-android:
     name: Android emulator
     needs: e2e-static
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'release'))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -100,6 +108,18 @@ jobs:
           mkdir -p e2e/output
           bash e2e/scripts/build-android.sh 2>&1 | tee e2e/output/build-android.log
 
+      # The emulator action's default treats every GitHub-hosted Linux runner as
+      # "no nested virt" and passes -accel off. x86_64 then cannot finish booting.
+      # /dev/kvm is present but not writable by the runner user until chmod.
+      - name: Enable KVM
+        run: |
+          if [[ ! -e /dev/kvm ]]; then
+            echo "This runner has no /dev/kvm, so an x86_64 emulator cannot boot."
+            exit 1
+          fi
+          sudo chmod 666 /dev/kvm
+          ls -l /dev/kvm
+
       - name: Emulator and Maestro
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -108,6 +128,8 @@ jobs:
           target: google_apis
           profile: pixel_6
           disable-animations: true
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 900
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
             export PATH="$HOME/.maestro/bin:$PATH"
@@ -125,6 +147,10 @@ jobs:
   e2e-ios:
     name: iOS simulator
     needs: e2e-static
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'release'))
     runs-on: macos-15
     timeout-minutes: 180
     steps:
