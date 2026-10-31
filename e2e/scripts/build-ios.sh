@@ -37,17 +37,46 @@ ensure_framework \
 
 export EXPO_PUBLIC_E2E=1
 export CI="${CI:-1}"
+# Release binaries should stage the release precompiled slices. The default
+# flavor is debug, which is what a Release xcodebuild then fails to resolve.
+export EXPO_PRECOMPILED_FLAVOR=release
 # Prebuild with the flag so the simulator allows loopback HTTP. This edits the
 # committed ios/ project (NSAllowsLocalNetworking). Do not commit that diff.
 npx expo prebuild --platform ios --no-install
 (
   cd ios
   pod install
-  # CocoaPods adds Swift packages. xcodebuild otherwise exits 65 with a blank
-  # "Could not resolve package dependencies" before the app target compiles.
-  xcodebuild -resolvePackageDependencies \
-    -workspace BSVBrowser.xcworkspace \
-    -scheme BSVBrowser \
-    -configuration Release
 )
-npx expo run:ios --configuration Release --no-bundler --no-install
+
+# `expo run:ios` shells out to xcodebuild and keeps the entire stderr buffer in
+# the Node process. On Xcode 16.4 that stderr is a blank
+# "Could not resolve package dependencies" plus the whole target graph, and the
+# Node process is killed before the .app exists. This workspace has no remote
+# Swift packages (resolution prints an empty package list), so skip that step
+# and build the simulator app directly.
+DERIVED="$ROOT/ios/build"
+rm -rf "$DERIVED"
+xcodebuild \
+  -workspace "$ROOT/ios/BSVBrowser.xcworkspace" \
+  -scheme BSVBrowser \
+  -configuration Release \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath "$DERIVED" \
+  -disableAutomaticPackageResolution \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+
+APP="$DERIVED/Build/Products/Release-iphonesimulator/BSVBrowser.app"
+if [[ ! -d "$APP" ]]; then
+  echo "Release simulator app was not produced at $APP" >&2
+  find "$DERIVED" -name '*.app' -type d >&2 || true
+  exit 1
+fi
+
+DEVICE="${E2E_IOS_DEVICE:-iPhone 16}"
+if ! xcrun simctl list devices booted | grep -q "$DEVICE"; then
+  xcrun simctl boot "$DEVICE" || true
+fi
+xcrun simctl bootstatus "$DEVICE" -b
+xcrun simctl install booted "$APP"
+echo "Installed $APP on $DEVICE"

@@ -23,4 +23,17 @@ fi
 mkdir -p e2e/output
 # Do not echo E2E_MNEMONIC. Maestro may still record the typed phrase in a
 # failed restore flow's log; that phrase is testnet-only and cannot broadcast.
+set +e
 maestro test --debug-output "$ROOT/e2e/output" -e "E2E_MNEMONIC=${E2E_MNEMONIC}" e2e/maestro/flows
+code=$?
+set -e
+if [[ "$code" -ne 0 ]]; then
+  if command -v adb >/dev/null 2>&1 && adb get-state >/dev/null 2>&1; then
+    adb logcat -d -t 500 > "$ROOT/e2e/output/logcat.txt" || true
+  fi
+  if [[ -d "$HOME/.maestro/tests" ]]; then
+    mkdir -p "$ROOT/e2e/output/maestro-tests"
+    cp -R "$HOME/.maestro/tests/." "$ROOT/e2e/output/maestro-tests/" || true
+  fi
+  exit "$code"
+fi

@@ -29,21 +29,31 @@ export function E2EStatus() {
     return () => clearTimeout(timer)
   }, [])
 
+  const testId = e2eStatusTestId(status)
+  // Below the status bar and above the gesture bar, with a real size.
+  // A 12px label at the top of the screen sits under the system bars, and
+  // Maestro then reports the id as not visible.
   return (
     <Text
-      testID={e2eStatusTestId(status)}
-      accessibilityLabel={status}
+      testID={testId}
+      nativeID={testId}
+      accessibilityLabel={testId}
+      accessible
+      collapsable={false}
       pointerEvents="none"
       importantForAccessibility="yes"
       style={{
         position: 'absolute',
-        left: 0,
-        top: 0,
-        width: 12,
-        height: 12,
-        fontSize: 4,
-        color: '#111',
-        zIndex: 100000
+        left: 8,
+        top: 48,
+        minWidth: 160,
+        height: 28,
+        fontSize: 12,
+        lineHeight: 28,
+        color: '#FFFFFF',
+        backgroundColor: '#111111',
+        zIndex: 100000,
+        elevation: 100000
       }}
     >
       {status}

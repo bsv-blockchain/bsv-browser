@@ -137,10 +137,7 @@ jobs:
           disable-linux-hw-accel: false
           emulator-boot-timeout: 900
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: |
-            export PATH="$HOME/.maestro/bin:$PATH"
-            export E2E_SKIP_BUILD=1
-            bash e2e/scripts/run-android.sh
+          script: bash e2e/scripts/ci-android.sh
 
       - name: Upload Maestro output
         if: failure()
