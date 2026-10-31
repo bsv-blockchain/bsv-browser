@@ -140,7 +140,7 @@ The fixture job runs on every pull request. It does not boot a device.
 
 The Android and iOS jobs run only when a release is being gated:
 
-- The pull request has the **`release`** label. Adding the label starts them. Later pushes to that PR run them again while the label stays on. This repo has no existing version or release label. `eas-build` is the label that asks EAS to build a binary, so this suite does not reuse it.
+- The pull request has the **`release`** label. Adding the label starts them. Later pushes to that PR run them again while the label stays on. This repo has no existing version or release label. `eas-build` is the label that asks EAS to build a binary, so this suite does not reuse it. Create `release` once (the automation token cannot create labels) and then apply it to the PR.
 - A version tag `v*` is pushed. That is the backstop for a release that did not go through a labeled PR.
 - Someone starts the workflow with `workflow_dispatch`.
 
