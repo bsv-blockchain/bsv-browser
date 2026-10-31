@@ -25,6 +25,11 @@ tags:
     visible: "You have"
     timeout: 30000
 - tapOn: "Settings"
+# BSV Network lives in the collapsed Advanced section of wallet settings.
+- extendedWaitUntil:
+    visible: "Advanced"
+    timeout: 20000
+- tapOn: "Advanced"
 - extendedWaitUntil:
     visible: "BSV Network"
     timeout: 20000

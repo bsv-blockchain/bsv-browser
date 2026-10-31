@@ -6,10 +6,13 @@ appId: org.bsvassociation.browser
 # http intent is ambiguous with the system browser, so CI drives that path
 # with `e2e/scripts/open-http.sh`.
 - runFlow: ../subflows/launch.yaml
+# An incomplete pairing link is ignored on purpose (no error sheet). The
+# browser stays where it was.
 - openLink: bsv-browser://pair
 - extendedWaitUntil:
-    visible: "Invalid or missing pairing parameters"
-    timeout: 20000
+    visible:
+      id: browser-menu-button
+    timeout: 15000
 - launchApp:
     clearState: false
 - openLink: peerpay:not-a-key

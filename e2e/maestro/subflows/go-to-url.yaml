@@ -2,7 +2,11 @@ appId: org.bsvassociation.browser
 ---
 - tapOn:
     id: address-bar-input
-- eraseText: 120
+- eraseText
 - inputText: ${TARGET_URL}
 - pressKey: Enter
+# Let onSubmitEditing run before the keyboard is dismissed. Hiding it in the
+# same beat as Enter was blurring the field and dropping the navigation.
+- waitForAnimationToEnd:
+    timeout: 2000
 - hideKeyboard

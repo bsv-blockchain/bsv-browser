@@ -54,7 +54,9 @@ npx expo prebuild --platform ios --no-install
 # Node process is killed before the .app exists. This workspace has no remote
 # Swift packages (resolution prints an empty package list), so skip that step
 # and build the simulator app directly.
-DERIVED="$ROOT/ios/build"
+# Not ios/build. React Native codegen writes ios/build/generated, and using
+# that directory as derived data deletes those files before they compile.
+DERIVED="$ROOT/e2e/output/ios-derived"
 rm -rf "$DERIVED"
 xcodebuild \
   -workspace "$ROOT/ios/BSVBrowser.xcworkspace" \
