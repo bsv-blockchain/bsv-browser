@@ -13,3 +13,9 @@ appId: org.bsvassociation.browser
 - tapOn:
     text: "(?i)don.?t allow|not now"
     optional: true
+# The status label paints before the address bar. Flows that tap the menu
+# immediately were racing that first paint.
+- extendedWaitUntil:
+    visible:
+      id: browser-menu-button
+    timeout: 30000

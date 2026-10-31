@@ -6,19 +6,26 @@ appId: org.bsvassociation.browser
 # http intent is ambiguous with the system browser, so CI drives that path
 # with `e2e/scripts/open-http.sh`.
 - runFlow: ../subflows/launch.yaml
-# An incomplete pairing link is ignored on purpose (no error sheet). The
-# browser stays where it was.
+# PairScreen sets this exact banner when the link has no pairing params.
 - openLink: bsv-browser://pair
+- extendedWaitUntil:
+    visible: "Invalid or missing pairing parameters"
+    timeout: 20000
+- launchApp:
+    clearState: false
 - extendedWaitUntil:
     visible:
       id: browser-menu-button
-    timeout: 15000
-- launchApp:
-    clearState: false
+    timeout: 20000
+# The pay screen's malformed-link banner is part of the send form, which is
+# mounted once a wallet exists.
+- runFlow: ../subflows/ensure-wallet.yaml
+- tapOn:
+    id: wallet-back
 - openLink: peerpay:not-a-key
 - extendedWaitUntil:
     visible: "PeerPay link contains an invalid identity key"
-    timeout: 20000
+    timeout: 45000
 - launchApp:
     clearState: false
 - extendedWaitUntil:

@@ -168,7 +168,21 @@ jobs:
           cache: npm
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+        run: |
+          # ExpoModulesJSI rebuilds a Swift package that needs tools version 6.2.
+          # Xcode 16.4 only has Swift 6.1, and that rebuild then fails with a blank
+          # looking "Could not resolve package dependencies".
+          shopt -s nullglob
+          apps=(/Applications/Xcode_26*.app)
+          if ((${#apps[@]} == 0)); then
+            echo "This runner has no Xcode 26, which is what ships Swift tools 6.2."
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          selected="${apps[-1]}"
+          sudo xcode-select -s "$selected"
+          xcodebuild -version
+          xcrun swift --version
 
       # macOS runners ship rustup on PATH without ~/.cargo/env. Sourcing that
       # file unconditionally fails the step before any target is installed.

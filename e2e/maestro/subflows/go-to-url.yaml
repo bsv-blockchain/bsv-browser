@@ -4,6 +4,12 @@ appId: org.bsvassociation.browser
     id: address-bar-input
 - eraseText
 - inputText: ${TARGET_URL}
+# The URL keyboard drops ":" so the bar never receives a real URL. The e2e
+# build uses the default keyboard. Fail here, before navigation, if the host
+# still did not land in the field.
+- extendedWaitUntil:
+    visible: "127\\.0\\.0\\.1"
+    timeout: 10000
 - pressKey: Enter
 # Let onSubmitEditing run before the keyboard is dismissed. Hiding it in the
 # same beat as Enter was blurring the field and dropping the navigation.

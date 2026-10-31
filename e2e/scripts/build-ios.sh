@@ -75,7 +75,22 @@ if [[ ! -d "$APP" ]]; then
   exit 1
 fi
 
-DEVICE="${E2E_IOS_DEVICE:-iPhone 16}"
+DEVICE="${E2E_IOS_DEVICE:-}"
+if [[ -z "$DEVICE" ]]; then
+  DEVICE="$(
+    xcrun simctl list devices available |
+      grep -E 'iPhone' |
+      grep -v unavailable |
+      sed -E 's/^[[:space:]]*([^(]+) \(.*/\1/' |
+      sed 's/[[:space:]]*$//' |
+      tail -1
+  )"
+fi
+if [[ -z "$DEVICE" ]]; then
+  echo "No iPhone simulator is available." >&2
+  xcrun simctl list devices available >&2
+  exit 1
+fi
 if ! xcrun simctl list devices booted | grep -q "$DEVICE"; then
   xcrun simctl boot "$DEVICE" || true
 fi
