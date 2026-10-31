@@ -9,6 +9,8 @@ cd "$ROOT"
 
 export EXPO_PUBLIC_E2E=1
 export CI="${CI:-1}"
+# Release bundles and expo-constants read NODE_ENV. Gradle does not set it.
+export NODE_ENV="${NODE_ENV:-production}"
 
 npx expo prebuild --platform android --no-install
 
@@ -20,7 +22,7 @@ ARGS=()
 if [[ -n "${E2E_ANDROID_ARCH:-}" ]]; then
   ARGS+=("-PreactNativeArchitectures=${E2E_ANDROID_ARCH}")
 fi
-./gradlew :app:assembleRelease --no-daemon "${ARGS[@]}"
+./gradlew :app:assembleRelease --no-daemon --stacktrace "${ARGS[@]}"
 
 APK="$ROOT/android/app/build/outputs/apk/release/app-release.apk"
 if [[ ! -f "$APK" ]]; then
