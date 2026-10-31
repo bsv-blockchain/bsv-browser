@@ -69,8 +69,20 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # ubuntu-latest already has an Android SDK. android-actions/setup-android@v3
+      # replaces cmdline-tools and then runs `sdkmanager --licenses` without
+      # feeding "yes", so the job dies on the first license prompt.
+      - name: Use the preinstalled Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006"
 
       - name: Install dependencies
         run: npm ci
@@ -83,7 +95,10 @@ jobs:
       - name: Build e2e release APK
         env:
           E2E_ANDROID_ARCH: x86_64
-        run: bash e2e/scripts/build-android.sh
+        run: |
+          set -o pipefail
+          mkdir -p e2e/output
+          bash e2e/scripts/build-android.sh 2>&1 | tee e2e/output/build-android.log
 
       - name: Emulator and Maestro
         uses: reactivecircus/android-emulator-runner@v2
@@ -125,15 +140,21 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
 
+      # macOS runners ship rustup on PATH without ~/.cargo/env. Sourcing that
+      # file unconditionally fails the step before any target is installed.
       - name: Setup Rust
         run: |
           if ! command -v rustup >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           fi
-          # shellcheck disable=SC1090
-          source "$HOME/.cargo/env"
+          if [[ -f "$HOME/.cargo/env" ]]; then
+            # shellcheck disable=SC1091
+            source "$HOME/.cargo/env"
+          fi
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          if [[ -d "$HOME/.cargo/bin" ]]; then
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -144,7 +165,10 @@ jobs:
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
       - name: Build simulator app
-        run: bash e2e/scripts/build-ios.sh
+        run: |
+          set -o pipefail
+          mkdir -p e2e/output
+          bash e2e/scripts/build-ios.sh 2>&1 | tee e2e/output/build-ios.log
 
       - name: Maestro
         run: |
