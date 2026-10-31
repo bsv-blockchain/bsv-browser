@@ -1,0 +1,42 @@
+appId: org.bsvassociation.browser
+---
+- runFlow: ../subflows/launch.yaml
+- runFlow:
+    file: ../subflows/go-to-url.yaml
+    env:
+      TARGET_URL: http://127.0.0.1:8787/article
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-page-article
+    timeout: 30000
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-bookmark
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-browser
+- extendedWaitUntil:
+    visible: "E2E Article"
+    timeout: 15000
+- tapOn:
+    text: "See All"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: bookmark-row
+    timeout: 15000
+- tapOn: "Close"
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-browser
+- tapOn:
+    text: "See All"
+    index: 1
+- extendedWaitUntil:
+    visible:
+      id: history-row
+    timeout: 15000
+- tapOn:
+    id: history-clear
+- assertNotVisible:
+    id: history-row

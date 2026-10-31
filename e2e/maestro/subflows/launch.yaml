@@ -1,0 +1,15 @@
+appId: org.bsvassociation.browser
+---
+# Fresh install. clearState wipes the previous wallet; the e2e build then
+# forces the new profile onto testnet.
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-boot
+    timeout: 120000
+# First-launch OS sheets (notifications). Optional, so a build that never
+# asks does not fail. This runs before any in-app permission sheet exists.
+- tapOn:
+    text: "(?i)don.?t allow|not now"
+    optional: true

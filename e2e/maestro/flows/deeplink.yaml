@@ -1,0 +1,40 @@
+appId: org.bsvassociation.browser
+---
+# Pairing and peerpay are real schemes. The bsv-browser://e2e link is an
+# e2e-only hook that calls the same browser opener as an http link, restricted
+# to the loopback fixture. iOS also opens the http URL directly; Android's
+# http intent is ambiguous with the system browser, so CI drives that path
+# with `e2e/scripts/open-http.sh`.
+- runFlow: ../subflows/launch.yaml
+- openLink: bsv-browser://pair
+- extendedWaitUntil:
+    visible: "Invalid or missing pairing parameters"
+    timeout: 20000
+- launchApp:
+    clearState: false
+- openLink: peerpay:not-a-key
+- extendedWaitUntil:
+    visible: "PeerPay link contains an invalid identity key"
+    timeout: 20000
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-boot
+    timeout: 120000
+- openLink: "bsv-browser://e2e?url=http%3A%2F%2F127.0.0.1%3A8787%2Fdeeplink"
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-page-deeplink
+    timeout: 30000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - launchApp:
+          clearState: false
+      - openLink: http://127.0.0.1:8787/article
+      - extendedWaitUntil:
+          visible:
+            id: e2e-status-page-article
+          timeout: 30000

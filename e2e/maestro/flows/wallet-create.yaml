@@ -1,0 +1,30 @@
+appId: org.bsvassociation.browser
+---
+# Create, then confirm the backup sheet. The words are on screen; Maestro
+# does not copy them. Failure screenshots can contain that fresh testnet
+# phrase. The e2e build cannot broadcast it.
+- runFlow: ../subflows/launch.yaml
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-wallet
+- runFlow: ../subflows/create-wallet.yaml
+- extendedWaitUntil:
+    visible: "Back up keys now"
+    timeout: 30000
+- tapOn: "Back up keys now"
+- extendedWaitUntil:
+    visible: "Save these words"
+    timeout: 30000
+- assertVisible:
+    id: mnemonic-words
+- scrollUntilVisible:
+    element:
+      id: mnemonic-confirm
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 100
+- tapOn:
+    id: mnemonic-confirm
+- extendedWaitUntil:
+    visible: "You have"
+    timeout: 30000

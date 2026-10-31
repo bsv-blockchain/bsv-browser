@@ -3,6 +3,7 @@ import type { WalletInterface, WalletProtocol } from '@bsv/sdk'
 import { getErrorPage } from './errorPages'
 import { handleUrlDownload } from './downloadHandler'
 import { mark, measureAsync } from '@/utils/perfMarks'
+import { noteE2E } from '@/utils/e2e/status'
 
 const BRC29_PROTOCOL_ID: WalletProtocol = [2, '3241645161d8']
 const HEADER_PREFIX = 'x-bsv-'
@@ -298,6 +299,9 @@ export class BsvPaymentHandler {
 
       return getErrorPage(402)
     } catch {
+      // The fixture server never sees a successful broadcast. Maestro waits on
+      // this status (and on the in-app error page) instead of a settled payment.
+      noteE2E('payment:failed')
       return getErrorPage(402)
     } finally {
       endTotal()

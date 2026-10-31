@@ -1,0 +1,8 @@
+appId: org.bsvassociation.browser
+---
+- tapOn:
+    id: address-bar-input
+- eraseText: 120
+- inputText: ${TARGET_URL}
+- pressKey: Enter
+- hideKeyboard

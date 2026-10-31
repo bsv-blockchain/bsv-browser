@@ -1,0 +1,27 @@
+appId: org.bsvassociation.browser
+tags:
+  - smoke
+---
+- runFlow: ../subflows/launch.yaml
+- runFlow:
+    file: ../subflows/go-to-url.yaml
+    env:
+      TARGET_URL: http://127.0.0.1:8787/
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-page-home
+    timeout: 30000
+- runFlow:
+    file: ../subflows/go-to-url.yaml
+    env:
+      TARGET_URL: http://127.0.0.1:8787/article
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-page-article
+    timeout: 30000
+- tapOn:
+    id: address-bar-back
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-page-home
+    timeout: 30000

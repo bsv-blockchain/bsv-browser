@@ -1,0 +1,16 @@
+appId: org.bsvassociation.browser
+---
+# A collapsed address bar uses the first tap to expand. The second opens the menu.
+- tapOn:
+    id: browser-menu-button
+- runFlow:
+    when:
+      notVisible:
+        id: menu-wallet
+    commands:
+      - tapOn:
+          id: browser-menu-button
+- extendedWaitUntil:
+    visible:
+      id: menu-wallet
+    timeout: 10000

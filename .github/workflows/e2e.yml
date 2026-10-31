@@ -1,0 +1,161 @@
+# End-to-end suite. Android runs on a Linux emulator. iOS runs on a macOS
+# simulator and also builds the gitignored Rust xcframeworks, so it spends
+# macOS minutes. Both jobs upload Maestro's debug output when they fail.
+#
+# The static job does not boot a device. It checks the testnet lock and the
+# fixture server. Device jobs wait for it so a broken fixture does not spend
+# a macOS runner.
+
+name: E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-static:
+    name: Fixture and policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Policy and fixture tests
+        run: npx jest __tests__/e2e --watchman=false --ci
+
+      - name: Fixture server smoke
+        run: |
+          node e2e/fixtures/server.js > /tmp/e2e-fixture.log 2>&1 &
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            curl -sf http://127.0.0.1:8787/health && break
+            sleep 1
+          done
+          curl -s -D - -o /dev/null http://127.0.0.1:8787/paid | grep -i 'x-bsv-sats: 250001'
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8787/arc/v1/tx)
+          test "$code" = "403"
+
+  e2e-android:
+    name: Android emulator
+    needs: e2e-static
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Build e2e release APK
+        env:
+          E2E_ANDROID_ARCH: x86_64
+        run: bash e2e/scripts/build-android.sh
+
+      - name: Emulator and Maestro
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            export PATH="$HOME/.maestro/bin:$PATH"
+            export E2E_SKIP_BUILD=1
+            bash e2e/scripts/run-android.sh
+
+      - name: Upload Maestro output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-android
+          path: e2e/output
+          if-no-files-found: ignore
+
+  e2e-ios:
+    name: iOS simulator
+    needs: e2e-static
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Setup Rust
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          # shellcheck disable=SC1090
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Build simulator app
+        run: bash e2e/scripts/build-ios.sh
+
+      - name: Maestro
+        run: |
+          export PATH="$HOME/.maestro/bin:$PATH"
+          export E2E_SKIP_BUILD=1
+          bash e2e/scripts/run-ios.sh
+
+      - name: Upload Maestro output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-ios
+          path: e2e/output
+          if-no-files-found: ignore

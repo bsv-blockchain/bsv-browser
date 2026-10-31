@@ -1,0 +1,21 @@
+appId: org.bsvassociation.browser
+---
+- runFlow: ../subflows/launch.yaml
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-new-tab
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-tabs
+- extendedWaitUntil:
+    visible:
+      id: tabs-new
+    timeout: 15000
+- assertVisible:
+    id: tabs-clear
+- tapOn:
+    id: tabs-new
+- tapOn:
+    id: tabs-done
+- assertVisible:
+    id: browser-menu-button

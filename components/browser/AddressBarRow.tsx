@@ -84,6 +84,9 @@ const AddressBarRowImpl: React.FC<AddressBarRowProps> = ({
               delayLongPress={350}
               style={styles.navButton}
               activeOpacity={0.6}
+              testID="address-bar-back"
+              accessibilityRole="button"
+              accessibilityLabel="Back"
             >
               <Ionicons
                 name="chevron-back"
@@ -102,6 +105,9 @@ const AddressBarRowImpl: React.FC<AddressBarRowProps> = ({
                   delayLongPress={350}
                   style={styles.navButton}
                   activeOpacity={0.6}
+                  testID="address-bar-forward"
+                  accessibilityRole="button"
+                  accessibilityLabel="Forward"
                 >
                   <Ionicons name="chevron-forward" size={22} color={gc.accent} />
                 </TouchableOpacity>
@@ -132,6 +138,8 @@ const AddressBarRowImpl: React.FC<AddressBarRowProps> = ({
           )}
           <TextInput
             ref={inputRef}
+            testID="address-bar-input"
+            accessibilityLabel="Address"
             editable
             value={displayText === 'new-tab-page' ? '' : displayText}
             onChangeText={onChangeText}
@@ -158,11 +166,23 @@ const AddressBarRowImpl: React.FC<AddressBarRowProps> = ({
               <Ionicons name="close-circle" size={18} color={gc.tertiary} />
             </TouchableOpacity>
           ) : isLoading ? (
-            <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
+            <TouchableOpacity
+              onPress={onReloadOrStop}
+              style={styles.inputAction}
+              testID="address-bar-reload"
+              accessibilityRole="button"
+              accessibilityLabel="Stop"
+            >
               <Ionicons name="close" size={18} color={gc.secondary} />
             </TouchableOpacity>
           ) : !isNewTab ? (
-            <TouchableOpacity onPress={onReloadOrStop} style={styles.inputAction}>
+            <TouchableOpacity
+              onPress={onReloadOrStop}
+              style={styles.inputAction}
+              testID="address-bar-reload"
+              accessibilityRole="button"
+              accessibilityLabel="Reload"
+            >
               <Ionicons name="refresh" size={16} color={gc.secondary} />
             </TouchableOpacity>
           ) : null}
