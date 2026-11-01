@@ -4,6 +4,11 @@ appId: org.bsvassociation.browser
 # forces the new profile onto testnet.
 - launchApp:
     clearState: true
+# The emulator sometimes puts an ANR dialog over the launcher ("Pixel Launcher
+# isn't responding") and the app never becomes visible.
+- tapOn:
+    text: "Wait"
+    optional: true
 - extendedWaitUntil:
     visible:
       id: e2e-status-boot
