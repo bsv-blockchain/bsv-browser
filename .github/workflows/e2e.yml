@@ -169,11 +169,19 @@ jobs:
 
       - name: Select Xcode
         run: |
-          # Xcode 26's clang rejects ExpoModulesJSI's RuntimeScheduler.h
-          # (SWIFT_RETURNS_RETAINED on a type that is not a shared reference).
-          # Xcode 16.4 compiles that package once its tools version is lowered
-          # in the build script. Stay on the default Xcode, which is 16.4 here.
-          sudo xcode-select -s /Applications/Xcode.app
+          # expo-modules-jsi is a Swift 6.2 package. Xcode 16.4's Swift 6.1
+          # cannot compile it. Xcode 26 can, after the build script drops two
+          # header annotations that 26's clang rejects.
+          shopt -s nullglob
+          apps=(/Applications/Xcode_26*.app)
+          if ((${#apps[@]} == 0)); then
+            echo "This runner has no Xcode 26."
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          # Bash 3.2 on macOS has no negative array index.
+          selected="${apps[${#apps[@]}-1]}"
+          sudo xcode-select -s "$selected"
           xcodebuild -version
           xcrun swift --version
 
