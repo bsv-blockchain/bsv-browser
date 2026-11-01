@@ -3,8 +3,6 @@ appId: org.bsvassociation.browser
 # A collapsed address bar uses the first tap to expand, and that tap unmounts
 # nothing. An expanded bar opens the menu and unmounts the button immediately.
 # Wait before deciding on a second tap, or the second tap races the unmount.
-# On Android the kebab unmounts while the URL keyboard is up.
-- hideKeyboard
 - extendedWaitUntil:
     visible:
       id: browser-menu-button
