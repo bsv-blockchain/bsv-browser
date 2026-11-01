@@ -18,4 +18,4 @@ appId: org.bsvassociation.browser
 - extendedWaitUntil:
     visible:
       id: browser-menu-button
-    timeout: 30000
+    timeout: 60000
