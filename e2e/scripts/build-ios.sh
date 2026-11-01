@@ -74,10 +74,34 @@ export EXPO_PRECOMPILED_FLAVOR=release
 # Prebuild with the flag so the simulator allows loopback HTTP. This edits the
 # committed ios/ project (NSAllowsLocalNetworking). Do not commit that diff.
 npx expo prebuild --platform ios --no-install
-if ! grep -q CLANG_ENABLE_EXPLICIT_MODULES ios/Podfile; then
-  echo "expo prebuild dropped the explicit-modules override from ios/Podfile" >&2
-  exit 1
-fi
+# prebuild rewrites ios/Podfile from the template and drops the committed
+# post_install override. Put explicit modules back off for every pod target.
+python3 - <<'PY'
+from pathlib import Path
+path = Path("ios/Podfile")
+text = path.read_text()
+needle = "    react_native_post_install("
+insert = """    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |build_config|
+        build_config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+        build_config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+      end
+    end
+    installer.pods_project.save
+"""
+if "CLANG_ENABLE_EXPLICIT_MODULES" not in text:
+    if needle not in text:
+        raise SystemExit("Podfile has no react_native_post_install call")
+    # The override has to run after react_native_post_install returns, so
+    # append it at the end of the post_install block by inserting before the
+    # block's closing, which is the first '  end' after the call.
+    idx = text.find(needle)
+    end = text.find("\n  end\n", idx)
+    if end < 0:
+        raise SystemExit("could not find the end of post_install")
+    text = text[:end] + "\n" + insert + text[end:]
+    path.write_text(text)
+PY
 (
   cd ios
   pod install
