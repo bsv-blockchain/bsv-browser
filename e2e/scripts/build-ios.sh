@@ -57,7 +57,10 @@ from pathlib import Path
 path = Path(sys.argv[1])
 text = path.read_text()
 needle = "    CLANG_ENABLE_CODE_COVERAGE=NO"
-insert = '    OTHER_SWIFT_FLAGS="-Xfrontend -disable-upcoming-feature -Xfrontend NonisolatedNonsendingByDefault"\n'
+insert = (
+    '    OTHER_SWIFT_FLAGS="-Xfrontend -disable-upcoming-feature -Xfrontend NonisolatedNonsendingByDefault"\n'
+    '    SWIFT_ENABLE_EXPLICIT_MODULES=NO\n'
+)
 if needle not in text:
     raise SystemExit(f"did not find coverage flag in {path}")
 path.write_text(text.replace(needle, insert + needle, 1))
