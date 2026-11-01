@@ -45,12 +45,23 @@ SCHEDULER_H="$ROOT/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cx
 if [[ -f "$SCHEDULER_H" ]]; then
   sed -i '' 's/SWIFT_RETURNS_RETAINED RuntimeScheduler/RuntimeScheduler/g' "$SCHEDULER_H"
 fi
-# The package is Swift 6 mode. Xcode 26 then errors on `sending` captures in
-# JavaScriptRuntime.swift. Swift 5 mode keeps the 6.2 syntax and treats those
-# as the language the published package was written against.
-PKG_SWIFT="$ROOT/node_modules/expo-modules-jsi/apple/Package.swift"
-if [[ -f "$PKG_SWIFT" ]]; then
-  sed -i '' 's/swiftLanguageModes: \[.v6\]/swiftLanguageModes: [.v5]/' "$PKG_SWIFT"
+# Xcode 26 enables NonisolatedNonsendingByDefault, which turns the package's
+# JavaScriptActor closures into `sending` errors. Leave the package in Swift 6
+# mode (Swift 5 mode misparses its regex literals) and turn that feature off
+# for the nested xcframework rebuild only.
+BUILD_SH="$ROOT/node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh"
+if [[ -f "$BUILD_SH" ]] && ! grep -q NonisolatedNonsendingByDefault "$BUILD_SH"; then
+  python3 - "$BUILD_SH" <<'PY'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "    CLANG_ENABLE_CODE_COVERAGE=NO"
+insert = '    OTHER_SWIFT_FLAGS="-Xfrontend -disable-upcoming-feature -Xfrontend NonisolatedNonsendingByDefault"\n'
+if needle not in text:
+    raise SystemExit(f"did not find coverage flag in {path}")
+path.write_text(text.replace(needle, insert + needle, 1))
+PY
 fi
 # Release binaries should stage the release precompiled slices. The default
 # flavor is debug, which is what a Release xcodebuild then fails to resolve.
