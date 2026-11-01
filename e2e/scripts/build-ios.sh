@@ -60,6 +60,7 @@ needle = "    CLANG_ENABLE_CODE_COVERAGE=NO"
 insert = (
     '    OTHER_SWIFT_FLAGS="-Xfrontend -disable-upcoming-feature -Xfrontend NonisolatedNonsendingByDefault"\n'
     '    SWIFT_ENABLE_EXPLICIT_MODULES=NO\n'
+    '    CLANG_ENABLE_EXPLICIT_MODULES=NO\n'
 )
 if needle not in text:
     raise SystemExit(f"did not find coverage flag in {path}")
