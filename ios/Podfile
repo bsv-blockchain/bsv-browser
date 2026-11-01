@@ -61,5 +61,14 @@ target 'BSVBrowser' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+    # Xcode 26's clang module scanner fails to find <exception> while building
+    # ExpoModulesJSI_Cxx. Explicit modules are off for every pod target.
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |build_config|
+        build_config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+        build_config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+      end
+    end
+    installer.pods_project.save
   end
 end

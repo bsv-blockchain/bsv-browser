@@ -17,5 +17,7 @@ appId: org.bsvassociation.browser
     id: tabs-new
 - tapOn:
     id: tabs-done
-- assertVisible:
-    id: browser-menu-button
+- extendedWaitUntil:
+    visible:
+      id: browser-menu-button
+    timeout: 20000

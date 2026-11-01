@@ -1,12 +1,20 @@
 appId: org.bsvassociation.browser
 ---
-# A collapsed address bar uses the first tap to expand, and that tap unmounts
-# nothing. An expanded bar opens the menu and unmounts the button immediately.
-# Wait before deciding on a second tap, or the second tap races the unmount.
+# A focused address bar unmounts the kebab. Tap the page to blur it, then wait.
+- runFlow:
+    when:
+      notVisible:
+        id: browser-menu-button
+    commands:
+      - tapOn:
+          point: "50%,75%"
+      - hideKeyboard
 - extendedWaitUntil:
     visible:
       id: browser-menu-button
-    timeout: 20000
+    timeout: 30000
+# A collapsed address bar uses the first tap to expand. An expanded bar opens
+# the menu and unmounts the button. Wait before a second tap.
 - tapOn:
     id: browser-menu-button
 - extendedWaitUntil:

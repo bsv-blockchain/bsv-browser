@@ -61,6 +61,7 @@ insert = (
     '    OTHER_SWIFT_FLAGS="-Xfrontend -disable-upcoming-feature -Xfrontend NonisolatedNonsendingByDefault"\n'
     '    SWIFT_ENABLE_EXPLICIT_MODULES=NO\n'
     '    CLANG_ENABLE_EXPLICIT_MODULES=NO\n'
+    '    OTHER_CFLAGS="-isystem $(xcrun --sdk iphonesimulator --show-sdk-path)/usr/include/c++/v1"\n'
 )
 if needle not in text:
     raise SystemExit(f"did not find coverage flag in {path}")
@@ -73,6 +74,10 @@ export EXPO_PRECOMPILED_FLAVOR=release
 # Prebuild with the flag so the simulator allows loopback HTTP. This edits the
 # committed ios/ project (NSAllowsLocalNetworking). Do not commit that diff.
 npx expo prebuild --platform ios --no-install
+if ! grep -q CLANG_ENABLE_EXPLICIT_MODULES ios/Podfile; then
+  echo "expo prebuild dropped the explicit-modules override from ios/Podfile" >&2
+  exit 1
+fi
 (
   cd ios
   pod install
@@ -96,6 +101,8 @@ xcodebuild \
   -derivedDataPath "$DERIVED" \
   -disableAutomaticPackageResolution \
   CODE_SIGNING_ALLOWED=NO \
+  SWIFT_ENABLE_EXPLICIT_MODULES=NO \
+  CLANG_ENABLE_EXPLICIT_MODULES=NO \
   build
 
 APP="$DERIVED/Build/Products/Release-iphonesimulator/BSVBrowser.app"
