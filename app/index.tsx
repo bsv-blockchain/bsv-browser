@@ -90,6 +90,7 @@ import { shouldForwardWebViewLogs } from '@bsv/expo-wallet-toolbox/core/logging'
 import { useRenderCount } from '@/hooks/useRenderCount'
 import { PerfProfiler } from '@/components/PerfProfiler'
 import { mark } from '@/utils/perfMarks'
+import { noteE2E } from '@/utils/e2e/status'
 import { TaskBackupPush } from '@bsv/expo-wallet-toolbox/core/monitor/TaskBackupPush'
 
 /**
@@ -1276,6 +1277,11 @@ const Browser = observer(function Browser() {
       // Records frequency-per-type so a chatty page (e.g. CONSOLE flood) is
       // obvious in perf.dump(). Zero-cost in production.
       perf.measure(`webview.message:${msg?.type}`, 0)
+
+      if (msg.type === 'E2E' && process.env.EXPO_PUBLIC_E2E === '1' && typeof msg.status === 'string') {
+        noteE2E(msg.status)
+        return
+      }
 
       if (msg.type === 'FIND_IN_PAGE_RESULT') {
         // Find-in-page state lives in AddressBar; forward the result through its

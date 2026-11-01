@@ -220,6 +220,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
             Keyboard.dismiss()
             tabStore.clearAllTabs()
           }}
+          testID="tabs-clear"
           accessibilityLabel="Close all tabs"
         >
           <Ionicons name="trash-outline" size={20} color={colors.accent} />
@@ -234,6 +235,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
             }}
             size={24}
             color={colors.accent}
+            testID="tabs-new"
             accessibilityLabel="New tab"
           />
         )}
@@ -242,6 +244,7 @@ const TabsOverviewBase: React.FC<TabsOverviewProps> = ({
           onPress={onDismiss}
           size={24}
           color={colors.accent}
+          testID="tabs-done"
           accessibilityLabel="Done"
         />
       </BlurChrome>

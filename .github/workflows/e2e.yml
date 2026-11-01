@@ -1,0 +1,232 @@
+# End-to-end suite.
+#
+# The fixture job is cheap and runs on every pull request. The Android and
+# iOS device jobs boot emulators, so they run only when a release is being
+# gated: the PR has the `release` label, a `v*` tag was pushed, or someone
+# started the workflow by hand. This repo has no existing version/release
+# label (`eas-build` is for creating EAS binaries, not for this suite).
+
+name: E2E
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-static:
+    name: Fixture and policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Policy and fixture tests
+        run: npx jest __tests__/e2e --watchman=false --ci
+
+      - name: Fixture server smoke
+        run: |
+          node e2e/fixtures/server.js > /tmp/e2e-fixture.log 2>&1 &
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            curl -sf http://127.0.0.1:8787/health && break
+            sleep 1
+          done
+          curl -s -D - -o /dev/null http://127.0.0.1:8787/paid | grep -i 'x-bsv-sats: 250001'
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8787/arc/v1/tx)
+          test "$code" = "403"
+
+  e2e-android:
+    name: Android emulator
+    needs: e2e-static
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'release'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # ubuntu-latest already has an Android SDK. android-actions/setup-android@v3
+      # replaces cmdline-tools and then runs `sdkmanager --licenses` without
+      # feeding "yes", so the job dies on the first license prompt.
+      - name: Use the preinstalled Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          # The NDK zip download occasionally fails mid-unzip. Retry that fetch.
+          for attempt in 1 2 3; do
+            if "$SDK/cmdline-tools/latest/bin/sdkmanager" --install \
+              "platforms;android-36" \
+              "build-tools;36.0.0" \
+              "ndk;27.1.12297006"; then
+              break
+            fi
+            if [[ "$attempt" -eq 3 ]]; then
+              exit 1
+            fi
+            sleep 15
+          done
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Build e2e release APK
+        env:
+          E2E_ANDROID_ARCH: x86_64
+        run: |
+          set -o pipefail
+          mkdir -p e2e/output
+          bash e2e/scripts/build-android.sh 2>&1 | tee e2e/output/build-android.log
+
+      # The emulator action's default treats every GitHub-hosted Linux runner as
+      # "no nested virt" and passes -accel off. x86_64 then cannot finish booting.
+      # /dev/kvm is present but not writable by the runner user until chmod.
+      - name: Enable KVM
+        run: |
+          if [[ ! -e /dev/kvm ]]; then
+            echo "This runner has no /dev/kvm, so an x86_64 emulator cannot boot."
+            exit 1
+          fi
+          sudo chmod 666 /dev/kvm
+          ls -l /dev/kvm
+
+      - name: Emulator and Maestro
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 900
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash e2e/scripts/ci-android.sh
+
+      - name: Upload Maestro output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-android
+          path: e2e/output
+          if-no-files-found: ignore
+
+  e2e-ios:
+    name: iOS simulator
+    needs: e2e-static
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'release'))
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+
+      - name: Select Xcode
+        run: |
+          # expo-modules-jsi is a Swift 6.2 package. Xcode 16.4's Swift 6.1
+          # cannot compile it. Xcode 26 can, after the build script drops two
+          # header annotations that 26's clang rejects.
+          shopt -s nullglob
+          apps=(/Applications/Xcode_26*.app)
+          if ((${#apps[@]} == 0)); then
+            echo "This runner has no Xcode 26."
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          # Bash 3.2 on macOS has no negative array index.
+          selected="${apps[${#apps[@]}-1]}"
+          sudo xcode-select -s "$selected"
+          xcodebuild -version
+          xcrun swift --version
+
+      # macOS runners ship rustup on PATH without ~/.cargo/env. Sourcing that
+      # file unconditionally fails the step before any target is installed.
+      - name: Setup Rust
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          if [[ -f "$HOME/.cargo/env" ]]; then
+            # shellcheck disable=SC1091
+            source "$HOME/.cargo/env"
+          fi
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+          if [[ -d "$HOME/.cargo/bin" ]]; then
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Build simulator app
+        run: |
+          set -o pipefail
+          mkdir -p e2e/output
+          bash e2e/scripts/build-ios.sh 2>&1 | tee e2e/output/build-ios.log
+
+      - name: Maestro
+        run: |
+          export PATH="$HOME/.maestro/bin:$PATH"
+          export E2E_SKIP_BUILD=1
+          bash e2e/scripts/run-ios.sh
+
+      - name: Upload Maestro output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-ios
+          path: e2e/output
+          if-no-files-found: ignore

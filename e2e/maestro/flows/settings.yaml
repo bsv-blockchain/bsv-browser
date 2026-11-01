@@ -1,0 +1,36 @@
+appId: org.bsvassociation.browser
+tags:
+  - smoke
+---
+# Browser settings live in the menu sheet. The wallet network screen must
+# show Testnet: the e2e build rewrites the profile on every read.
+- runFlow: ../subflows/launch.yaml
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-browser
+- extendedWaitUntil:
+    visible:
+      id: search-engine-row
+    timeout: 15000
+- tapOn:
+    id: search-engine-row
+- tapOn:
+    id: search-engine-brave
+- assertVisible: "Brave"
+- tapOn: "Close"
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-wallet
+- extendedWaitUntil:
+    visible: "You have"
+    timeout: 30000
+- tapOn: "Settings"
+# BSV Network lives in the collapsed Advanced section of wallet settings.
+- extendedWaitUntil:
+    visible: "Advanced"
+    timeout: 20000
+- tapOn: "Advanced"
+- extendedWaitUntil:
+    visible: "BSV Network"
+    timeout: 20000
+- assertVisible: "Testnet"

@@ -63,6 +63,18 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "e2e": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_E2E": "1"
+      }
     }
   },
   "submit": {

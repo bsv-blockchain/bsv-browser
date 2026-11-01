@@ -41,12 +41,19 @@ interface RowProps {
   label: string
   onPress: () => void
   destructive?: boolean
+  testID?: string
 }
 
-const Row: React.FC<RowProps> = ({ icon, label, onPress, destructive }) => {
+const Row: React.FC<RowProps> = ({ icon, label, onPress, destructive, testID }) => {
   const { colors } = useTheme()
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.6}>
+    <TouchableOpacity
+      style={styles.row}
+      onPress={onPress}
+      activeOpacity={0.6}
+      testID={testID}
+      accessibilityRole="button"
+    >
       <Ionicons
         name={icon as any}
         size={22}
@@ -99,13 +106,17 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
   const cardContent = (
     <View style={styles.card}>
       {/* Actions group */}
-      {!isNewTab && canShare && <Row icon="share-outline" label={t('share')} onPress={dismiss(onShare)} />}
+      {!isNewTab && canShare && (
+        <Row icon="share-outline" label={t('share')} onPress={dismiss(onShare)} testID="menu-share" />
+      )}
       {!isNewTab && (
         <View style={styles.splitRow}>
           <TouchableOpacity
             style={styles.splitRowMain}
             onPress={isBookmarked ? onRemoveBookmark : onAddBookmark}
             activeOpacity={0.6}
+            testID="menu-bookmark"
+            accessibilityRole="button"
           >
             <Ionicons
               name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
@@ -118,14 +129,27 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
             </Text>
           </TouchableOpacity>
           <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
-          <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onFindInPage)} activeOpacity={0.6}>
+          <TouchableOpacity
+            style={styles.splitRowAction}
+            onPress={dismiss(onFindInPage)}
+            activeOpacity={0.6}
+            testID="menu-find"
+            accessibilityRole="button"
+            accessibilityLabel="Find in page"
+          >
             <Ionicons name="search-outline" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
         </View>
       )}
       {/* Browser — split row: Browser label | Desktop mode icon */}
       <View style={styles.splitRow}>
-        <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onBookmarks)} activeOpacity={0.6}>
+        <TouchableOpacity
+          style={styles.splitRowMain}
+          onPress={dismiss(onBookmarks)}
+          activeOpacity={0.6}
+          testID="menu-browser"
+          accessibilityRole="button"
+        >
           <Ionicons name="globe-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
           <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('browser')}</Text>
         </TouchableOpacity>
@@ -137,6 +161,9 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
             onToggleDesktopMode()
           }}
           activeOpacity={0.6}
+          testID="menu-desktop"
+          accessibilityRole="button"
+          accessibilityLabel="Desktop mode"
         >
           <Ionicons name={isDesktopMode ? 'desktop' : 'desktop-outline'} size={22} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -149,6 +176,7 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
         icon="bug-outline"
         label={t('bug_report')}
         onPress={dismiss(() => Linking.openURL('https://github.com/bsv-blockchain/bsv-browser/issues'))}
+        testID="menu-bug-report"
       />
       {/* Always "Wallet", never "Enable Web3": the wallet screen renders with
         or without a wallet behind it, and creation happens there on the first
@@ -157,14 +185,27 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
         Connections lists paired dApps, so it only appears once there is a
         wallet for them to be paired with. */}
       <View style={styles.splitRow}>
-        <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onWallet)} activeOpacity={0.6}>
+        <TouchableOpacity
+          style={styles.splitRowMain}
+          onPress={dismiss(onWallet)}
+          activeOpacity={0.6}
+          testID="menu-wallet"
+          accessibilityRole="button"
+        >
           <Ionicons name="wallet-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
           <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('wallet')}</Text>
         </TouchableOpacity>
         {!isWeb2Mode && (
           <>
             <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
-            <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onConnections)} activeOpacity={0.6}>
+            <TouchableOpacity
+              style={styles.splitRowAction}
+              onPress={dismiss(onConnections)}
+              activeOpacity={0.6}
+              testID="menu-connections"
+              accessibilityRole="button"
+              accessibilityLabel="Connections"
+            >
               <Ionicons name="link-outline" size={22} color={colors.textPrimary} />
             </TouchableOpacity>
           </>
@@ -175,12 +216,25 @@ export const MenuPopover: React.FC<MenuPopoverProps> = ({
 
       {/* Tabs — split row */}
       <View style={styles.splitRow}>
-        <TouchableOpacity style={styles.splitRowMain} onPress={dismiss(onTabs)} activeOpacity={0.6}>
+        <TouchableOpacity
+          style={styles.splitRowMain}
+          onPress={dismiss(onTabs)}
+          activeOpacity={0.6}
+          testID="menu-tabs"
+          accessibilityRole="button"
+        >
           <Ionicons name="copy-outline" size={22} color={colors.textPrimary} style={styles.rowIcon} />
           <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>{t('tabs')}</Text>
         </TouchableOpacity>
         <View style={[styles.splitDivider, { backgroundColor: colors.separator }]} />
-        <TouchableOpacity style={styles.splitRowAction} onPress={dismiss(onNewTab)} activeOpacity={0.6}>
+        <TouchableOpacity
+          style={styles.splitRowAction}
+          onPress={dismiss(onNewTab)}
+          activeOpacity={0.6}
+          testID="menu-new-tab"
+          accessibilityRole="button"
+          accessibilityLabel="New tab"
+        >
           <Ionicons name="add" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
       </View>

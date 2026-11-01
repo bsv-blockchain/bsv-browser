@@ -27,6 +27,7 @@ export default function Wallet() {
         <TouchableOpacity
           onPress={() => router.dismissTo('/')}
           style={[styles.back, { backgroundColor: colors.surfaceRaised, borderColor: colors.surfaceRaisedBorder }]}
+          testID="wallet-back"
           accessibilityRole="button"
           accessibilityLabel={t('back_to_browser')}
         >
