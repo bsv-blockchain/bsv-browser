@@ -16,6 +16,11 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Checkout needs contents read. Artifact upload needs actions write, granted
+# only on the device jobs that call actions/upload-artifact.
+permissions:
+  contents: read
+
 concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
@@ -55,6 +60,9 @@ jobs:
   e2e-android:
     name: Android emulator
     needs: e2e-static
+    permissions:
+      contents: read
+      actions: write
     if: >-
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
@@ -153,6 +161,9 @@ jobs:
   e2e-ios:
     name: iOS simulator
     needs: e2e-static
+    permissions:
+      contents: read
+      actions: write
     if: >-
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
