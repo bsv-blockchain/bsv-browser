@@ -37,7 +37,7 @@
 name = "native-engine-ffi"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 description = "Bytes-only UniFFI wrapper promoting the M5.3-proven Tier-3 engine spike: batch P2PKH sighash (midstates once per scope-class, via bsv-rs) + ECDSA sign (libsecp256k1, the M1-M4-proven core) for the BSV Browser iOS app."
 
 # Standalone single-crate workspace (the beef-ios-ffi / native-secp-poc

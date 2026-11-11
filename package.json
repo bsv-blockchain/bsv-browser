@@ -4,7 +4,7 @@
   "author": "BSV Association",
   "main": "index.js",
   "version": "1.8.1",
-  "license": "Open BSV",
+  "license": "Apache-2.0",
   "scripts": {
     "start": "expo start --dev-client",
     "android-dev-build": "eas build --profile development --platform android --local --verbose-logs --build-logger-level trace",
