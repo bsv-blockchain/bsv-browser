@@ -7,7 +7,7 @@ Pod::Spec.new do |s|
   s.version      = package['version']
   s.summary      = package['description']
   s.homepage     = 'https://github.com/Calgooon/bsv-browser'
-  s.license      = 'Open BSV'
+  s.license      = 'Apache-2.0'
   s.authors      = 'BSV Browser'
   s.platforms    = { ios: '15.1' }
   s.source       = { git: '.', tag: s.version.to_s }
