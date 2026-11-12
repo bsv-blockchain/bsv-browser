@@ -1,0 +1,25 @@
+appId: org.bsvassociation.browser
+---
+# Cold start after a wallet exists. On a simulator with no biometrics the
+# toolbox unlocks the degraded key with no OS sheet. Enrolled biometrics are
+# a gap: Maestro cannot complete the system prompt.
+- runFlow: ../subflows/launch.yaml
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-wallet
+- runFlow: ../subflows/create-wallet.yaml
+- stopApp
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-boot
+    timeout: 120000
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-wallet
+- extendedWaitUntil:
+    visible: "You have"
+    timeout: 60000
+- assertNotVisible: "Import from backup"
+- assertNotVisible: "Unlock your wallet"

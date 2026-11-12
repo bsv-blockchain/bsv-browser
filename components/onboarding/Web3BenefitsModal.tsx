@@ -53,7 +53,7 @@ const Web3BenefitsModal: React.FC<Web3BenefitsModalProps> = ({
           style={[styles.primaryButton, { backgroundColor: colors.accent }]}
           onPress={onGoToLogin}
         >
-          <Text style={[styles.primaryButtonText, { color: colors.textOnAccent }]}>
+          <Text testID="web3-get-started" style={[styles.primaryButtonText, { color: colors.textOnAccent }]}>
             Get Started
           </Text>
         </PressableScale>
@@ -62,7 +62,7 @@ const Web3BenefitsModal: React.FC<Web3BenefitsModalProps> = ({
           style={[styles.secondaryButton, { borderColor: colors.separator }]}
           onPress={onContinueWithoutLogin}
         >
-          <Text style={[styles.secondaryButtonText, { color: colors.textSecondary }]}>
+          <Text testID="web3-maybe-later" style={[styles.secondaryButtonText, { color: colors.textSecondary }]}>
             Maybe Later
           </Text>
         </PressableScale>

@@ -1,0 +1,12 @@
+appId: org.bsvassociation.browser
+---
+# Run this only after e2e/scripts/open-http.sh has delivered the fixture URL
+# to the already-installed app. It does not clear state and it does not stop
+# the process.
+- launchApp:
+    clearState: false
+    stopApp: false
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-page-deeplink
+    timeout: 60000

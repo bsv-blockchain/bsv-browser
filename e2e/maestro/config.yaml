@@ -1,0 +1,21 @@
+# Maestro workspace for BSV Browser.
+# Run the flows, not this file: `maestro test e2e/maestro/flows`
+flows:
+  - flows/*
+executionOrder:
+  continueOnFailure: false
+  flowsOrder:
+    - onboarding
+    - browse
+    - tabs
+    - bookmarks-history
+    - settings
+    - wallet-create
+    - wallet-restore
+    - unlock
+    - send-receive
+    - camera-permission
+    - permission-brc100
+    - identity-certificate
+    - micropayment-402
+    - deeplink

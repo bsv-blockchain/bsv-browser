@@ -1,0 +1,25 @@
+appId: org.bsvassociation.browser
+tags:
+  - smoke
+---
+# First launch is the browser in Web2 mode. There is no separate onboarding
+# wizard; the Web3 benefits sheet stays hidden until something asks for it.
+- runFlow: ../subflows/launch.yaml
+- assertVisible:
+    id: address-bar-input
+- assertVisible:
+    id: browser-menu-button
+- assertNotVisible: "Are you sure?"
+- assertNotVisible: "Get Started"
+- runFlow: ../subflows/open-menu.yaml
+- assertVisible:
+    id: menu-wallet
+- assertVisible:
+    id: menu-tabs
+- assertVisible:
+    id: menu-browser
+- tapOn:
+    id: menu-browser
+- assertVisible: "Homepage"
+- assertVisible: "Search Engine"
+- tapOn: "Close"

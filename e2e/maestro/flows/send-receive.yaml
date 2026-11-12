@@ -1,0 +1,27 @@
+appId: org.bsvassociation.browser
+---
+# Receive shows an address (or the generator's error). Send only fills the
+# recipient field with a public testnet example address and stops. It never
+# taps a send or review button.
+- runFlow: ../subflows/launch.yaml
+- runFlow: ../subflows/ensure-wallet.yaml
+- tapOn: "Get paid"
+- extendedWaitUntil:
+    visible: "Request Payment"
+    timeout: 30000
+- tapOn: "To a BSV address"
+- extendedWaitUntil:
+    visible: "Money sent here is added to your wallet automatically.*|Unable to generate BSV address"
+    timeout: 45000
+- tapOn: "Go Back"
+- extendedWaitUntil:
+    visible: "You have"
+    timeout: 20000
+- tapOn: "Pay"
+- extendedWaitUntil:
+    visible: "Name, Identifier, or BSV Address..."
+    timeout: 30000
+- tapOn: "Name, Identifier, or BSV Address..."
+- inputText: "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn"
+- hideKeyboard
+- assertVisible: "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn"

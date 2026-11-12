@@ -1,0 +1,12 @@
+appId: org.bsvassociation.browser
+---
+- runFlow: open-menu.yaml
+- tapOn:
+    id: menu-wallet
+- extendedWaitUntil:
+    visible: "You have"
+    timeout: 30000
+- runFlow:
+    when:
+      visible: "Import from backup"
+    file: create-wallet.yaml

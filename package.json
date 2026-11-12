@@ -31,7 +31,11 @@
     "prebuild:ios": "expo prebuild --platform ios --clean",
     "prebuild:android": "expo prebuild --platform android --clean",
     "postinstall": "patch-package",
-    "test": "jest"
+    "test": "jest",
+    "e2e:server": "node e2e/fixtures/server.js",
+    "e2e:maestro": "bash e2e/scripts/maestro.sh",
+    "e2e:android": "bash e2e/scripts/run-android.sh",
+    "e2e:ios": "bash e2e/scripts/run-ios.sh"
   },
   "dependencies": {
     "@bsv/air-gap": "^0.1.3",

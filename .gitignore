@@ -81,6 +81,10 @@ dev builds/
 credentials.json
 .superpowers/
 
+# Generated per E2E run. Never commit a phrase or a Maestro debug dump.
+e2e/.mnemonic
+e2e/output/
+
 # Local archive build derived data (see .easignore — keep the two in sync)
 ios/build-release/
 # Local xcodebuild output (e.g. ad-hoc Release simulator builds for screenshotting)

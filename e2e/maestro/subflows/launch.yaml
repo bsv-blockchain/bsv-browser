@@ -1,0 +1,26 @@
+appId: org.bsvassociation.browser
+---
+# Fresh install. clearState wipes the previous wallet; the e2e build then
+# forces the new profile onto testnet.
+- launchApp:
+    clearState: true
+# The emulator sometimes puts an ANR dialog over the launcher ("Pixel Launcher
+# isn't responding") and the app never becomes visible.
+- tapOn:
+    text: "Wait"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-boot
+    timeout: 120000
+# First-launch OS sheets (notifications). Optional, so a build that never
+# asks does not fail. This runs before any in-app permission sheet exists.
+- tapOn:
+    text: "(?i)don.?t allow|not now"
+    optional: true
+# The status label paints before the address bar. Flows that tap the menu
+# immediately were racing that first paint.
+- extendedWaitUntil:
+    visible:
+      id: browser-menu-button
+    timeout: 60000

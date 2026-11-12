@@ -70,7 +70,12 @@ const BookmarkRow = memo(
           if (direction === SwipeDirection.LEFT) { haptics.warning(); onDelete(item.url) }
         }}
       >
-        <Pressable style={[styles.bookmarkItem, itemStyle]} onPress={() => onSelect(item.url)}>
+        <Pressable
+          style={[styles.bookmarkItem, itemStyle]}
+          onPress={() => onSelect(item.url)}
+          testID="bookmark-row"
+          accessibilityRole="button"
+        >
           <ExpoImage
             source={{ uri: faviconUrl }}
             style={[styles.favicon, { backgroundColor: colors.fillTertiary }]}

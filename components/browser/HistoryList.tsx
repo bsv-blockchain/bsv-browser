@@ -66,7 +66,12 @@ const HistoryRow = memo(
           if (direction === SwipeDirection.LEFT) { haptics.warning(); onDelete(item.url) }
         }}
       >
-        <Pressable style={[styles.historyItem, itemStyle]} onPress={() => onSelect(item.url)}>
+        <Pressable
+          style={[styles.historyItem, itemStyle]}
+          onPress={() => onSelect(item.url)}
+          testID="history-row"
+          accessibilityRole="button"
+        >
           <Text numberOfLines={1} style={{ color: colors.textPrimary, fontSize: 15 }}>
             {item.title}
           </Text>
@@ -141,7 +146,12 @@ const HistoryListInner = ({ history, onSelect, onDelete, onClear, hideTitle = fa
     <View style={styles.container}>
       {!hideTitle && <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('history')}</Text>}
       {onClear && items.length > 0 && (
-        <TouchableOpacity style={[styles.clearBtn, { backgroundColor: colors.error }]} onPress={handleClear}>
+        <TouchableOpacity
+          style={[styles.clearBtn, { backgroundColor: colors.error }]}
+          onPress={handleClear}
+          testID="history-clear"
+          accessibilityRole="button"
+        >
           <Ionicons name="trash-outline" size={18} color="#fff" />
           <Text style={styles.clearBtnText}>{t('clear_all')}</Text>
         </TouchableOpacity>
