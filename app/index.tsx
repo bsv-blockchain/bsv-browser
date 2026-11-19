@@ -29,6 +29,7 @@ import { useTheme } from '@bsv/expo-wallet-toolbox/core/theme/ThemeContext'
 import { useWalletManagers } from '@bsv/expo-wallet-toolbox/core/context/WalletContext'
 import { guardVaultAccess } from '@bsv/expo-wallet-toolbox/core/services/vault/guard'
 import { capWalletArgs } from '@bsv/expo-wallet-toolbox/core/services/capWalletArgs'
+import { getDeviceTier } from '@bsv/expo-wallet-toolbox/core/deviceTier'
 import {
   messageTooLarge,
   responseTooLarge,
@@ -53,6 +54,7 @@ import { useWebAppManifest } from '@/hooks/useWebAppManifest'
 import { buildInjectedJavaScript } from '@/utils/webview/injectedPolyfills'
 import PermissionModal from '@/components/browser/PermissionModal'
 import { getPermissionState } from '@/utils/permissionsManager'
+import { pageWalletArgLimits } from '@/utils/pageWalletArgLimits'
 import { getPermissionScript } from '@/utils/permissionScript'
 import { createWebViewMessageRouter } from '@/utils/webview/messageRouter'
 import { handleUrlDownload, cleanupDownloadsCache } from '@/utils/webview/downloadHandler'
@@ -784,8 +786,15 @@ const Browser = observer(function Browser() {
       // guard's vault-inventory scan runs as the admin originator, which the
       // walletManager refuses from any caller, so wrapping it denied every
       // page's createAction. The toolbox has already guarded this object, so
-      // the call below returns its existing proxy.
-      setWallet(capWalletArgs(guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR)))
+      // the call below returns its existing proxy. Pages get the tier's limits
+      // with the unlocking-script caps at the aggregate, so a covenant witness
+      // that carries data fits: see utils/pageWalletArgLimits.ts.
+      setWallet(
+        capWalletArgs(
+          guardVaultAccess(managers.permissionsManager as any, ADMIN_ORIGINATOR),
+          pageWalletArgLimits(getDeviceTier())
+        )
+      )
       paymentHandlerRef.current = getPaymentHandler(managers.walletManager)
     } else if (isWeb2Mode) {
       setWallet(undefined)
