@@ -47,7 +47,18 @@ export default function MnemonicScreen() {
   const { colors, isDark } = useTheme()
   const { buildWalletFromMnemonic, buildWalletFromRecoveredKey, rebuildWallet, backupRestore, getBackupRestore, walletBuilt, walletBuilding } =
     useWallet()
-  const { setMnemonic: storeMnemonic, createMnemonic, getMnemonic, setRecoveredKey, getRecoveredKey, hasStoredIdentity, secretsReady, unlock } = useLocalStorage()
+  const {
+    setMnemonic: storeMnemonic,
+    createMnemonic,
+    getMnemonic,
+    deleteMnemonic,
+    setRecoveredKey,
+    getRecoveredKey,
+    deleteRecoveredKey,
+    hasStoredIdentity,
+    secretsReady,
+    unlock
+  } = useLocalStorage()
   const { flow } = useLocalSearchParams<{ flow?: 'backup' | 'import' }>()
 
   const [mode, setMode] = useState<MnemonicMode>(flow === 'backup' ? 'generate' : flow === 'import' ? 'import' : 'choose')
@@ -386,6 +397,11 @@ export default function MnemonicScreen() {
           if (choice === 'retry') await handleContinueWithImported()
           return
         }
+        // Only after the key is safely stored: a refusal between the two
+        // writes would otherwise leave the wallet with neither secret. The
+        // build reads a stored mnemonic before a recovered key, so a phrase
+        // left behind would rebuild the old identity, not the imported one.
+        await deleteMnemonic()
         if (walletBuilt) {
           // Replacing the auto-created wallet from onboarding's backup
           // reminder — buildWalletFromRecoveredKey no-ops once a wallet is
@@ -480,6 +496,9 @@ export default function MnemonicScreen() {
         if (choice === 'retry') await initializeWallet(mnemonicPhrase, opts)
         return
       }
+      // Exactly one secret kind survives an import: a key left from an
+      // earlier hex import must not outlive the phrase that replaced it.
+      await deleteRecoveredKey()
       // An imported phrase replays the encrypted backup log BEFORE the wallet becomes
       // usable — the phrase alone cannot rebuild change-output derivation data. A freshly
       // generated wallet passes no options and skips this entirely, since there is
