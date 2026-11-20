@@ -295,7 +295,7 @@ describe('isCompressedPublicKey', () => {
 })
 
 // ── Token requests over the handle rail: asset=<outpoint> [&amount=<base units>] ──
-const ASSET = 'ab'.repeat(32) + '.0'
+const ASSET = 'ab'.repeat(32) + '_0'
 
 describe('classifyScan — token requests', () => {
   it('reads asset and amount as a handle target, base units untouched', () => {

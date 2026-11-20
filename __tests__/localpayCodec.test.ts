@@ -251,7 +251,7 @@ const tokenSample = (): PaymentFrame => ({
   ...sample(),
   kind: 'token',
   token: {
-    assetId: 'ab'.repeat(32) + '.0',
+    assetId: 'ab'.repeat(32) + '_0',
     overlayUrl: 'https://overlay.issuer.example',
     overlayIdentityKey: '03'.padEnd(66, 'b'),
     certificates: [new Uint8Array([9, 9, 9]), new Uint8Array([])],

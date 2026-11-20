@@ -1,7 +1,7 @@
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
 --- a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
 +++ b/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSend.tsx
-@@ -1400,20 +1400,7 @@
+@@ -1491,20 +1491,7 @@ function UniversalSendInner(
                label={t('pay_step_continue')}
                icon="arrow-forward"
              />
@@ -23,7 +23,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSe
  
            {outbox.length > 0 && (
              <OutgoingSection
-@@ -1643,7 +1630,7 @@
+@@ -1740,7 +1727,7 @@ function UniversalSendInner(
            amountText={sent.amountText}
            statusNote={sent.statusNote}
            recipientName={sent.recipient}
@@ -35,7 +35,7 @@ diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/pay/UniversalSe
 diff --git a/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx b/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx
 --- a/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx
 +++ b/node_modules/@bsv/expo-wallet-toolbox/ui/components/wallet/ActivityRow.tsx
-@@ -304,7 +304,7 @@
+@@ -305,7 +305,7 @@ function ActivityRowBase({
        cancelled = true
      }
    }, [counterpartyIdentityKey, contactsStore, walletUserId])

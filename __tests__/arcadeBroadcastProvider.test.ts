@@ -6,6 +6,7 @@ import {
   createWocBroadcastService,
   handleArcResponse
 } from '@bsv/expo-wallet-toolbox/core/services/arcadeBroadcastProvider'
+import { NETWORKS, type AppChain } from '@bsv/expo-wallet-toolbox/core/networks'
 
 describe('handleArcResponse', () => {
   const txids = ['abc123']
@@ -207,7 +208,7 @@ describe('createWocBroadcastService classification', () => {
     const tx = new Transaction()
     const beef = new Beef()
     beef.mergeTransaction(tx)
-    const { service } = createWocBroadcastService('main')
+    const { service } = createWocBroadcastService(NETWORKS.main.woc!)
     return service(beef, [tx.id('hex')])
   }
 
@@ -330,7 +331,7 @@ describe('XR-060 remainder: bounds the broadcast body size itself, not just what
     const tx = new Transaction()
     const beef = new Beef()
     beef.mergeTransaction(tx)
-    const { service } = createWocBroadcastService('main')
+    const { service } = createWocBroadcastService(NETWORKS.main.woc!)
     const result = await service(beef, [tx.id('hex')])
     expect(result.status).not.toBe('success')
     expect(result.txidResults[0].serviceError).toBe(true)
@@ -357,7 +358,7 @@ describe('XR-060 remainder: bounds the broadcast body size itself, not just what
     const tx = new Transaction()
     const beef = new Beef()
     beef.mergeTransaction(tx)
-    const { service } = createWocBroadcastService('main')
+    const { service } = createWocBroadcastService(NETWORKS.main.woc!)
     const result = await service(beef, [tx.id('hex')])
     expect(result.status).not.toBe('success')
     expect(result.txidResults[0].serviceError).toBe(true)
@@ -410,7 +411,7 @@ describe('XR-063: a stalled body converts to a serviceError instead of hanging f
       text: () => new Promise(() => {})
     }) as unknown as typeof fetch
     const { tx, beef } = txOf()
-    const { service } = createWocBroadcastService('main')
+    const { service } = createWocBroadcastService(NETWORKS.main.woc!)
 
     const pending = service(beef, [tx.id('hex')])
     await jest.advanceTimersByTimeAsync(30_000)
@@ -422,24 +423,14 @@ describe('XR-063: a stalled body converts to a serviceError instead of hanging f
 })
 
 /**
- * XQ-011: `createWocBroadcastService`'s `chain` argument is
- * `WalletContext.tsx`'s un-normalized `walletChain` — a corrupted/garbage
- * persisted `finalConfig.network` value passes through `toWalletChain`
- * (core/config.tsx) unchanged, since that helper only special-cases the
- * literal `'teratest'` string. Every *other* consumer of that same raw value
- * (`chaintracksUrlFor`, the `backupChain` ternary that actually buckets which
- * local SQLite DB is opened, and `walletDbRegistry`'s registry key) fails
- * safe by collapsing any unrecognized chain string to a teratest/testnet
- * bucket. This one sibling switch did the opposite: its `else` branch
- * resolved an unrecognized chain string to the LIVE mainnet WhatsOnChain
- * broadcast endpoint — a live-network fetch is not itself an I3 fund-loss
- * path (the DB a corrupted build actually opens is bucketed by the
- * separately-normalized `backupChain`, so there are no real UTXOs to
- * broadcast), but resolving an untrusted/corrupted value to the most
- * privileged endpoint, rather than to the least, is the wrong fail-safe
- * direction and worth closing regardless.
+ * XQ-011: `createWocBroadcastService` used to take the raw, un-normalized
+ * chain string and pick a host with a ternary whose `else` resolved a
+ * corrupted value to the LIVE mainnet endpoint. Since expo-wallet-toolbox
+ * 0.20 it takes the network's own WhatsOnChain entry from `NETWORKS`: a
+ * network with no WhatsOnChain (or an unknown chain) has no entry, so the
+ * caller never registers the service and there is no fallback host to pick.
  */
-describe('XQ-011: createWocBroadcastService fails safe on an unrecognized chain string', () => {
+describe('XQ-011: createWocBroadcastService only reaches a network\'s own WhatsOnChain', () => {
   const txOf = () => {
     const tx = new Transaction()
     const beef = new Beef()
@@ -447,35 +438,31 @@ describe('XQ-011: createWocBroadcastService fails safe on an unrecognized chain 
     return { tx, beef }
   }
 
-  const urlOf = async (chain: string): Promise<string> => {
+  const urlOf = async (chain: AppChain): Promise<string> => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
       text: async () => ''
     }) as unknown as typeof fetch
     const { tx, beef } = txOf()
-    const { service } = createWocBroadcastService(chain)
+    const { service } = createWocBroadcastService(NETWORKS[chain].woc!)
     await service(beef, [tx.id('hex')])
     return (global.fetch as jest.Mock).mock.calls[0][0] as string
   }
 
-  it('main -> the mainnet endpoint (positive control)', async () => {
+  it('main -> the mainnet endpoint', async () => {
     expect(await urlOf('main')).toMatch(/^https:\/\/api\.whatsonchain\.com\/v1\/bsv\/main/)
   })
 
-  it('test -> the testnet endpoint (positive control)', async () => {
+  it('test -> the testnet endpoint', async () => {
     expect(await urlOf('test')).toMatch(/^https:\/\/api\.whatsonchain\.com\/v1\/bsv\/test/)
   })
 
-  it('ttn -> the teratest endpoint (positive control)', async () => {
-    expect(await urlOf('ttn')).toMatch(/^https:\/\/api\.woc-ttn\.bsvblockchain\.tech\/v1\/bsv\/test/)
+  it('teratest -> the teratest endpoint', async () => {
+    expect(await urlOf('teratest')).toMatch(/^https:\/\/api\.woc-ttn\.bsvblockchain\.tech\/v1\/bsv\/test/)
   })
 
-  it('an unrecognized/corrupted chain string never resolves to the live mainnet endpoint', async () => {
-    const url = await urlOf('garbage-value')
-    expect(url).not.toMatch(/^https:\/\/api\.whatsonchain\.com\/v1\/bsv\/main/)
-    // Matches every other sibling consumer of the same raw value: fail safe
-    // to the teratest/testnet host, not a privileged mainnet one.
-    expect(url).toMatch(/^https:\/\/api\.woc-ttn\.bsvblockchain\.tech\/v1\/bsv\/test/)
+  it('an unrecognized chain string has no WhatsOnChain entry to broadcast to', () => {
+    expect((NETWORKS as Record<string, { woc?: unknown } | undefined>)['garbage-value']?.woc).toBeUndefined()
   })
 })

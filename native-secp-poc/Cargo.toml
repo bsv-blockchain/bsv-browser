@@ -13,7 +13,7 @@
 name = "secp-native"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 description = "Bytes-only UniFFI wrapper over rust-secp256k1 (bitcoin-core libsecp256k1 C bindings): ECDSA sign/verify (RFC 6979, low-S, DER), pubkey create, tweak-add, ECDH shared point, BRC-42 deriveChild."
 
 # Standalone single-crate workspace (the beef-ios-ffi concurrency rule).

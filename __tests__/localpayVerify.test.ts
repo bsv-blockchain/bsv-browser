@@ -25,7 +25,7 @@ import { FrameVerifyError, FT_PROTOCOL_ID, declineReasonFor, verifyFramePayment 
 import type { CoverResult } from '@bsv/expo-wallet-toolbox/core/mandala/types'
 import { PEERPAY_PROTOCOL_ID } from '@bsv/expo-wallet-toolbox/core/localpay/pending'
 import type { PaymentFrame } from '@bsv/expo-wallet-toolbox/core/localpay/codec'
-import { MandalaToken } from '@bsv/templates'
+import { MandalaToken } from '@bsv/expo-wallet-toolbox/core/mandala/token'
 
 const payeeKey = PrivateKey.fromRandom().toPublicKey()
 const senderIdentityKey = '02' + 'ab'.repeat(32)
@@ -233,9 +233,9 @@ describe('verifyFramePayment', () => {
     tx.outputs[0].satoshis = undefined
     const spy = jest.spyOn(Transaction, 'fromAtomicBEEF').mockReturnValue(tx)
     try {
-      await expect(verifyFramePayment(payeeDeps(), frameFor(new Uint8Array([1])), 'admin.com')).rejects.toMatchObject(
-        { kind: 'not_mine' }
-      )
+      await expect(verifyFramePayment(payeeDeps(), frameFor(new Uint8Array([1])), 'admin.com')).rejects.toMatchObject({
+        kind: 'not_mine'
+      })
     } finally {
       spy.mockRestore()
     }
@@ -258,7 +258,11 @@ describe('verifyFramePayment', () => {
   it('surfaces a wallet that cannot derive as an error, never as a pass', async () => {
     const w = { getPublicKey: jest.fn(async () => Promise.reject(new Error('locked'))) }
     await expect(
-      verifyFramePayment({ wallet: w, chainTracker: trackerRejectingEverything() }, frameFor(beefOf([{ satoshis: 1, scriptHex: minesScript() }])), 'admin.com')
+      verifyFramePayment(
+        { wallet: w, chainTracker: trackerRejectingEverything() },
+        frameFor(beefOf([{ satoshis: 1, scriptHex: minesScript() }])),
+        'admin.com'
+      )
     ).rejects.toThrow('locked')
   })
 
@@ -362,7 +366,7 @@ describe('verifyFramePayment: SPV/script verification (P0-1)', () => {
   })
 })
 
-const ASSET_ID = 'ab'.repeat(32) + '.0'
+const ASSET_ID = 'ab'.repeat(32) + '_0'
 const payeePkh = () => Hash.hash160(Utils.toArray(payeeKey.toString(), 'hex'))
 
 function tokenScript(amount: number, pkh: number[] = payeePkh()): string {
@@ -452,9 +456,9 @@ describe('verifyFramePayment: token kind', () => {
     beef.mergeTransaction(tip)
     const transaction = new Uint8Array(beef.toBinaryAtomic(tip.id('hex')))
 
-    await expect(
-      verifyFramePayment(payeeDeps(), tokenFrame({ transaction }), 'test', covers)
-    ).rejects.toMatchObject({ kind: 'not_covered' })
+    await expect(verifyFramePayment(payeeDeps(), tokenFrame({ transaction }), 'test', covers)).rejects.toMatchObject({
+      kind: 'not_covered'
+    })
   })
 
   // The rightful case: input value covers (or exceeds, e.g. token change
@@ -474,9 +478,10 @@ describe('verifyFramePayment: token kind', () => {
     beef.mergeTransaction(tip)
     const transaction = new Uint8Array(beef.toBinaryAtomic(tip.id('hex')))
 
-    await expect(
-      verifyFramePayment(payeeDeps(), tokenFrame({ transaction }), 'test', covers)
-    ).resolves.toMatchObject({ kind: 'token', amount: 500 })
+    await expect(verifyFramePayment(payeeDeps(), tokenFrame({ transaction }), 'test', covers)).resolves.toMatchObject({
+      kind: 'token',
+      amount: 500
+    })
   })
 
   it('derives with the mandala FT protocol, not PEERPAY', async () => {
@@ -496,7 +501,7 @@ describe('verifyFramePayment: token kind', () => {
 
   it('refuses an output whose script assetId disagrees with the frame', async () => {
     const frame = tokenFrame()
-    frame.token!.assetId = 'cd'.repeat(32) + '.1'
+    frame.token!.assetId = 'cd'.repeat(32) + '_0'
     await expect(verifyFramePayment(payeeDeps(), frame, 'test', covers)).rejects.toMatchObject({ kind: 'not_mine' })
   })
 
@@ -510,9 +515,10 @@ describe('verifyFramePayment: token kind', () => {
   // has been written at this point, so the refusal is a provable "queued nothing".
   it('refuses a frame COVER rejects, with its own kind', async () => {
     const cover = async (): Promise<CoverResult> => ({ ok: false, reason: 'uncovered_ancestor' })
-    await expect(
-      verifyFramePayment(payeeDeps(), tokenFrame(), 'test', { cover, asset: ASSET })
-    ).rejects.toMatchObject({ name: 'FrameVerifyError', kind: 'not_covered' })
+    await expect(verifyFramePayment(payeeDeps(), tokenFrame(), 'test', { cover, asset: ASSET })).rejects.toMatchObject({
+      name: 'FrameVerifyError',
+      kind: 'not_covered'
+    })
   })
 
   it('names the COVER reason in the refusal, so a stuck chain is diagnosable', async () => {

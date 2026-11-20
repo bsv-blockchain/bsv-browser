@@ -23,7 +23,7 @@
 name = "native-engine-poc"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 description = "Host-only kill-test spike for the BSV Browser Tier-3 native engine: batch P2PKH sighash+sign over bsv-rs, midstates once per tx, bytes-only."
 
 # Standalone single-crate workspace (the beef-ios-ffi / native-secp-poc isolation rule).
