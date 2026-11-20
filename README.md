@@ -478,4 +478,4 @@ To add a new language, add a new key to the translations object and include it i
 
 ## License
 
-The code in this repository is licensed under the [Open BSV License v4](LICENSE.txt). Software and derivatives may only be used on the BSV blockchain and its test networks.
+The code in this repository is licensed under the [Apache License 2.0](LICENSE). Software and derivatives may only be used on the BSV blockchain and its test networks.
