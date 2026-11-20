@@ -9,6 +9,7 @@ import {
   isExternalBrowserUrl,
   shouldHandleExternalBrowserUrl
 } from '@/utils/externalUrlRouter'
+import { e2eDeepLinkTarget } from '@/utils/e2e/policy'
 
 /**
  * Simplified deep linking: when app receives http/https URL, navigate browser directly to it.
@@ -148,6 +149,17 @@ export function useDeepLinking() {
 
     const handleUrl = (url: string) => {
       if (!url) return
+      // E2E-only. Production bundles inline the flag to something other than
+      // "1", so this branch is dead there. The target is restricted to the
+      // loopback fixture origin.
+      if (process.env.EXPO_PUBLIC_E2E === '1') {
+        const fixtureUrl = e2eDeepLinkTarget(url)
+        if (fixtureUrl) {
+          console.log('[Deep Link] Opening e2e fixture:', fixtureUrl)
+          enqueueBrowserLink(fixtureUrl)
+          return
+        }
+      }
       if (isExternalBrowserUrl(url)) {
         console.log('[Deep Link] Opening URL directly:', url)
         enqueueBrowserLink(url)

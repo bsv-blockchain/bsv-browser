@@ -95,7 +95,7 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ visible, domain, perm
                 </View>
 
                 {/* Title */}
-                <Text style={[styles.title, { color: colors.textPrimary }]}>
+                <Text testID="permission-request" style={[styles.title, { color: colors.textPrimary }]}>
                     Permission Request
                 </Text>
 
@@ -116,7 +116,7 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ visible, domain, perm
                         ]}
                         onPress={() => decide(false)}
                     >
-                        <Text style={[styles.buttonDenyText, { color: colors.textSecondary }]}>
+                        <Text testID="permission-deny" style={[styles.buttonDenyText, { color: colors.textSecondary }]}>
                             Don&apos;t Allow
                         </Text>
                     </PressableScale>
@@ -131,7 +131,7 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ visible, domain, perm
                         ]}
                         onPress={() => decide(true)}
                     >
-                        <Text style={[styles.buttonAllowText, { color: colors.textOnAccent }]}>
+                        <Text testID="permission-allow" style={[styles.buttonAllowText, { color: colors.textOnAccent }]}>
                             Allow
                         </Text>
                     </PressableScale>

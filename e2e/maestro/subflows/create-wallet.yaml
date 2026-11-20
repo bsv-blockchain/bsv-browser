@@ -1,0 +1,22 @@
+appId: org.bsvassociation.browser
+---
+# Caller is already on the wallet screen of a fresh install (the
+# "Import from backup" prompt is up). Pay creates the wallet behind the
+# biometric advisory. Simulators without enrolled biometrics take the
+# toolbox's degraded path: no OS prompt, key stored without a biometric.
+- extendedWaitUntil:
+    visible: "Import from backup"
+    timeout: 30000
+- tapOn: "Pay"
+- extendedWaitUntil:
+    visible: "Secure Your Wallet"
+    timeout: 30000
+- tapOn: "Continue"
+- extendedWaitUntil:
+    visible: "Name, Identifier, or BSV Address..."
+    timeout: 120000
+- tapOn: "Go Back"
+- extendedWaitUntil:
+    visible: "You have"
+    timeout: 30000
+- assertNotVisible: "Import from backup"

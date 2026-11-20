@@ -1,0 +1,41 @@
+appId: org.bsvassociation.browser
+---
+# E2E_MNEMONIC is generated at run time and passed with `maestro -e`.
+# It is not stored in the repo. Import may try the (disabled) backup log
+# and offer Abandon; either path must end on a wallet.
+- runFlow: ../subflows/launch.yaml
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-wallet
+- extendedWaitUntil:
+    visible: "Import from backup"
+    timeout: 30000
+- tapOn: "Import from backup"
+- extendedWaitUntil:
+    visible:
+      id: mnemonic-input
+    timeout: 20000
+- tapOn:
+    id: mnemonic-input
+- inputText: "${E2E_MNEMONIC}"
+- hideKeyboard
+- tapOn:
+    id: mnemonic-import-submit
+- extendedWaitUntil:
+    visible: "Abandon"
+    optional: true
+    timeout: 20000
+- tapOn:
+    text: "Abandon"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: browser-menu-button
+    timeout: 120000
+- runFlow: ../subflows/open-menu.yaml
+- tapOn:
+    id: menu-wallet
+- extendedWaitUntil:
+    visible: "You have"
+    timeout: 30000
+- assertNotVisible: "Import from backup"

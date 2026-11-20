@@ -32,6 +32,8 @@ import { LanguageProvider } from '@/context/i18n/browserTranslations'
 import { BrowserModeProvider } from '@/context/BrowserModeContext'
 import Web3BenefitsModalHandler from '@/components/onboarding/Web3BenefitsModalHandler'
 import { WalletConnectionProvider } from '@bsv/expo-wallet-toolbox/core/context/WalletConnectionContext'
+import { E2EStatus } from '@/components/e2e/E2EStatus'
+import { E2E_ARC_URL } from '@/utils/e2e/policy'
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ErrorBoundary } from '@bsv/expo-wallet-toolbox/ui/components/ui/ErrorBoundary'
@@ -53,8 +55,15 @@ import { RTCPeerConnection } from 'react-native-webrtc'
 //
 // vaultEnabled stays off for this release: no Vault entry points, and the route reports it
 // unavailable. The package's storage-level vault guards still run either way.
+//
+// E2E builds never talk to the real backup service, and every chain's Arcade
+// endpoint is the local fixture, which refuses broadcasts. Chaintracks is left
+// on the public read-only default so a wallet can still sync headers.
+const e2eBuild = process.env.EXPO_PUBLIC_E2E === '1'
+const e2eArc = e2eBuild ? { arcUrl: E2E_ARC_URL } : null
+
 configureToolbox({
-  backupUrl: process.env.EXPO_PUBLIC_BACKUP_URL ?? null,
+  backupUrl: e2eBuild ? null : (process.env.EXPO_PUBLIC_BACKUP_URL ?? null),
   vaultEnabled: false,
   // Live (WebRTC) push payments: pay a person directly while both apps are open, with the
   // message box as the fallback. The relay and STUN servers are the toolbox defaults.
@@ -65,21 +74,21 @@ configureToolbox({
     RTCPeerConnection
   },
   services: {
-    main: {
+    main: e2eArc ?? {
       arcUrl: process.env.EXPO_PUBLIC_ARC_URL,
       arcApiKey: process.env.EXPO_PUBLIC_ARC_API_KEY,
       chaintracksUrl: process.env.EXPO_PUBLIC_CHAINTRACKS_URL,
       whatsOnChainApiKey: process.env.EXPO_PUBLIC_WOC_API_KEY,
       taalApiKey: process.env.EXPO_PUBLIC_WOC_API_KEY
     },
-    test: {
+    test: e2eArc ?? {
       arcUrl: process.env.EXPO_PUBLIC_TEST_ARC_URL,
       arcApiKey: process.env.EXPO_PUBLIC_TEST_ARC_API_KEY,
       chaintracksUrl: process.env.EXPO_PUBLIC_TEST_CHAINTRACKS_URL,
       whatsOnChainApiKey: process.env.EXPO_PUBLIC_TEST_WOC_API_KEY,
       taalApiKey: process.env.EXPO_PUBLIC_TEST_TAAL_API_KEY
     },
-    teratest: {
+    teratest: e2eArc ?? {
       arcUrl: process.env.EXPO_PUBLIC_TERATEST_ARC_URL,
       arcApiKey: process.env.EXPO_PUBLIC_TERATEST_ARC_API_KEY,
       chaintracksUrl: process.env.EXPO_PUBLIC_TERATEST_CHAINTRACKS_URL,
@@ -261,6 +270,7 @@ export default function RootLayout() {
                             <Stack.Screen name="not-found" />
                           </Stack>
                           <ToastHost />
+                          {e2eBuild ? <E2EStatus /> : null}
                         </View>
                        </VaultProvider>
                       </WalletConnectionProvider>

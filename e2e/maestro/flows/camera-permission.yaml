@@ -1,0 +1,20 @@
+appId: org.bsvassociation.browser
+---
+# The in-app sheet, not the OS dialog. Don't Allow rejects before the system
+# camera prompt.
+- runFlow: ../subflows/launch.yaml
+- runFlow:
+    file: ../subflows/go-to-url.yaml
+    env:
+      TARGET_URL: http://127.0.0.1:8787/camera
+- extendedWaitUntil:
+    visible: "Permission Request"
+    timeout: 30000
+- assertVisible:
+    id: permission-request
+- tapOn:
+    id: permission-deny
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-camera-denied
+    timeout: 20000

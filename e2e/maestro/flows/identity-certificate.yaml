@@ -1,0 +1,20 @@
+appId: org.bsvassociation.browser
+---
+# Certificate request. Reject it. The certifier pubkey in the fixture is a
+# synthetic test value, and the flow never taps Authorize.
+- runFlow: ../subflows/launch.yaml
+- runFlow: ../subflows/ensure-wallet.yaml
+- tapOn:
+    id: wallet-back
+- runFlow:
+    file: ../subflows/go-to-url.yaml
+    env:
+      TARGET_URL: http://127.0.0.1:8787/certificate
+- extendedWaitUntil:
+    visible: "Certificate Access|Authorize"
+    timeout: 45000
+- tapOn: "Reject"
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-certificate-rejected
+    timeout: 20000

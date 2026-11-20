@@ -31,7 +31,9 @@ import Celebration from '@bsv/expo-wallet-toolbox/ui/components/ui/Celebration'
 import PressableScale from '@bsv/expo-wallet-toolbox/ui/components/ui/PressableScale'
 
 type MnemonicMode = 'choose' | 'generate' | 'import'
-const HANDWRITTEN_BACKUP_DELAY_MS = 15_000
+// E2E builds confirm a backup immediately. The 15s wait is a real-user guard
+// so someone actually writes the words down; it only makes flows flaky.
+const HANDWRITTEN_BACKUP_DELAY_MS = process.env.EXPO_PUBLIC_E2E === '1' ? 400 : 15_000
 
 type BackupSession = { identityKey: string }
 type BackupProgress = { session: BackupSession; medium: BackupMedium; attested: boolean }
@@ -592,6 +594,7 @@ export default function MnemonicScreen() {
               onPress={handleGenerateNew}
               disabled={loading || walletBuilding}
               haptic="confirm"
+              testID="mnemonic-create"
             >
               <Ionicons name="add-circle-outline" size={22} color={colors.textOnAccent} style={s.btnIcon} />
               <View style={s.btnTextGroup}>
@@ -612,6 +615,7 @@ export default function MnemonicScreen() {
               ]}
               onPress={() => setMode('import')}
               haptic="tap"
+              testID="mnemonic-import"
             >
               <Ionicons name="download-outline" size={22} color={colors.accent} style={s.btnIcon} />
               <View style={s.btnTextGroup}>
@@ -676,7 +680,7 @@ export default function MnemonicScreen() {
               }
             ]}
           >
-            <Text style={[s.mnemonicDisplayText, { color: colors.textPrimary }]} selectable>
+            <Text testID="mnemonic-words" style={[s.mnemonicDisplayText, { color: colors.textPrimary }]} selectable>
               {recoveryValue}
             </Text>
           </View>
@@ -755,6 +759,7 @@ export default function MnemonicScreen() {
                 ]}
                 onPress={handleConfirmBackup}
                 disabled={backupBusy || !recoveryValue}
+                testID="mnemonic-confirm"
                 accessibilityRole="button"
                 accessibilityLabel={t('confirm', { defaultValue: 'Confirm' })}
                 accessibilityState={{ disabled: backupBusy || !recoveryValue, busy: backupBusy }}
@@ -803,6 +808,8 @@ export default function MnemonicScreen() {
               color: colors.textPrimary
             }
           ]}
+          testID="mnemonic-input"
+          accessibilityLabel="Recovery phrase"
           value={importedMnemonic}
           onChangeText={setImportedMnemonic}
           placeholder={t('enter_recovery_words')}
@@ -825,6 +832,7 @@ export default function MnemonicScreen() {
           onPress={handleContinueWithImported}
           disabled={!importedMnemonic.trim() || loading}
           haptic="confirm"
+          testID="mnemonic-import-submit"
         >
           {loading ? (
             <ActivityIndicator color={colors.textOnAccent} />

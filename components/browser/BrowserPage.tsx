@@ -183,6 +183,8 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
               style={[styles.homepageRow, { backgroundColor: colors.backgroundElevated }]}
               onPress={() => setEditingHomepage(true)}
               activeOpacity={0.6}
+              testID="homepage-row"
+              accessibilityRole="button"
             >
               <Ionicons
                 name="globe-outline"
@@ -210,6 +212,8 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
             style={[styles.homepageRow, { backgroundColor: colors.backgroundElevated }]}
             onPress={() => setSearchEngineExpanded(prev => !prev)}
             activeOpacity={0.6}
+            testID="search-engine-row"
+            accessibilityRole="button"
           >
             <Ionicons
               name={selectedEngine.icon as any}
@@ -241,6 +245,8 @@ const BrowserPageBase: React.FC<BrowserPageProps> = ({ onNavigate, inSheet = fal
                   ]}
                   onPress={() => selectSearchEngine(engine.id)}
                   activeOpacity={0.6}
+                  testID={`search-engine-${engine.id}`}
+                  accessibilityRole="button"
                 >
                   <Ionicons
                     name={engine.icon as any}

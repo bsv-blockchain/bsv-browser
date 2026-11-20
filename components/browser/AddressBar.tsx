@@ -995,6 +995,9 @@ export const AddressBar = observer(
                     justifyContent: 'center'
                   }}
                   activeOpacity={0.6}
+                  testID="browser-menu-button"
+                  accessibilityRole="button"
+                  accessibilityLabel="Menu"
                 >
                   <Ionicons name="ellipsis-horizontal" size={20} color={gc.accent} />
                 </TouchableOpacity>

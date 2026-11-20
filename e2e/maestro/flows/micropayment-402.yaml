@@ -1,0 +1,37 @@
+appId: org.bsvassociation.browser
+---
+# 402 challenge above the auto-approve threshold, so the spending sheet is
+# shown. Reject it. The fixture's /arc endpoint would refuse a broadcast
+# even if Authorize were tapped.
+- runFlow: ../subflows/launch.yaml
+- runFlow: ../subflows/ensure-wallet.yaml
+- tapOn:
+    id: wallet-back
+- runFlow:
+    file: ../subflows/go-to-url.yaml
+    env:
+      TARGET_URL: http://127.0.0.1:8787/paid
+- extendedWaitUntil:
+    visible: "Spending Authorization|payment:failed|Payment Required"
+    timeout: 45000
+- runFlow:
+    when:
+      visible: "Spending Authorization"
+    commands:
+      - tapOn: "Reject"
+- extendedWaitUntil:
+    visible: "payment:failed|Payment Required"
+    timeout: 30000
+# Direct createAction, same spending sheet, still rejected.
+- runFlow:
+    file: ../subflows/go-to-url.yaml
+    env:
+      TARGET_URL: http://127.0.0.1:8787/spend
+- extendedWaitUntil:
+    visible: "Spending Authorization|Authorize"
+    timeout: 45000
+- tapOn: "Reject"
+- extendedWaitUntil:
+    visible:
+      id: e2e-status-spend-rejected
+    timeout: 20000

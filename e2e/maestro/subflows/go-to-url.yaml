@@ -1,0 +1,7 @@
+appId: org.bsvassociation.browser
+---
+# The address bar is a controlled input. Maestro's keystrokes do not stay in
+# the field, so Enter submits nothing and the host is never visible.
+# bsv-browser://e2e calls the same tab opener as an http link, and only the
+# loopback fixture origin is accepted.
+- openLink: ${'bsv-browser://e2e?url=' + encodeURIComponent(TARGET_URL)}

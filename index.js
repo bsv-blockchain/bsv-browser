@@ -122,6 +122,13 @@ if (process.env.EXPO_PUBLIC_CR_DEVICE === '1') {
   }, 6000)
 }
 
+// E2E builds only. The flag is inlined at bundle time; production bundles skip
+// this branch. The shim must be installed before expo-router loads the wallet
+// providers, which read the profile network on their first effect.
+if (process.env.EXPO_PUBLIC_E2E === '1') {
+  require('./utils/e2e/install').installE2EHooks()
+}
+
 // Require after installation: static imports execute before this module body
 // and would let SDK primitives cache the pure-JS fallback before the seam exists.
 require('expo-router/entry')
