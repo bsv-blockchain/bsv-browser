@@ -1,0 +1,20 @@
+name: ECPM integration
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  ecpm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx patch-package --error-on-fail
+      - run: npm run test:ecpm
+      - run: npm test -- --runInBand __tests__/ecpmPrompt.test.tsx
