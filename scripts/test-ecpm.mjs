@@ -1,13 +1,27 @@
 import assert from 'node:assert/strict'
+import { hkdfSync } from 'node:crypto'
 import { readFile, writeFile, unlink } from 'node:fs/promises'
 import ts from 'typescript'
-import { KeyDeriver, PrivateKey, PublicKey, ProtoWallet, WalletWireProcessor, WalletWireTransceiver } from '@bsv/sdk'
+import { BigNumber, KeyDeriver, PrivateKey, PublicKey, ProtoWallet, WalletWireProcessor, WalletWireTransceiver } from '@bsv/sdk'
 import { WalletPermissionsManager, PrivilegedKeyManager } from '@bsv/wallet-toolbox-mobile'
 
 // Exercise the shipped host adapter with published cryptography and the real
 // permission manager and binary BRC-100 transport. No network or wallet funds.
 const source = new URL('../ecpm/ecpmSession.ts', import.meta.url)
 const compiled = new URL('./.ecpm-session-test.mjs', import.meta.url)
+
+function expectedScalar(childKey) {
+  const output = hkdfSync(
+    'sha256',
+    Uint8Array.from(childKey.toArray('be', 32)),
+    'BRC-229 p ecpm scalar v1',
+    'BRC-229 p ecpm scalar',
+    48
+  )
+  const order = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141')
+  const scalar = 1n + BigInt('0x' + Buffer.from(output).toString('hex')) % (order - 1n)
+  return BigNumber.fromHex(scalar.toString(16).padStart(64, '0'))
+}
 await writeFile(compiled, ts.transpileModule(await readFile(source, 'utf8'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext }
 }).outputText)
@@ -42,7 +56,7 @@ try {
     return result
   }
   const applied = await approved(() => manager.getPublicKey(args(), 'game.example'))
-  const scalar = keyDeriver.derivePrivateKey([2, 'p ecpm mental poker deal'], 'deck mask', 'self')
+  const scalar = expectedScalar(keyDeriver.derivePrivateKey([2, 'p ecpm mental poker deal'], 'deck mask', 'self'))
   assert.equal(applied.publicKey, PublicKey.fromString(point).mul(scalar).encode(true, 'hex'))
   assert.notEqual(applied.publicKey, point)
   assert.deepEqual(Object.keys(applied), ['publicKey'])
@@ -93,7 +107,7 @@ try {
   const privilegedArgs = args('apply', point, { privileged: true, privilegedReason: 'Shuffle protected deck' })
   const privilegedResult = await approved(() => privilegedManager.getPublicKey(privilegedArgs, 'game.example'))
   assert.equal(keyRequests, 1)
-  const privilegedScalar = new KeyDeriver(new PrivateKey(23)).derivePrivateKey([2, 'p ecpm mental poker deal'], 'deck mask', 'self')
+  const privilegedScalar = expectedScalar(new KeyDeriver(new PrivateKey(23)).derivePrivateKey([2, 'p ecpm mental poker deal'], 'deck mask', 'self'))
   assert.equal(privilegedResult.publicKey, PublicKey.fromString(point).mul(privilegedScalar).encode(true, 'hex'))
   assert.notEqual(privilegedResult.publicKey, applied.publicKey)
   await assert.rejects(privilegedManager.getPublicKey({ ...privilegedArgs, privilegedReason: 'Different reason', seekPermission: false }, 'game.example'))

@@ -29,9 +29,11 @@ try {
   manager.bindCallback('onProtocolPermissionRequested', async request => { individuals++; await manager.denyPermission(request.requestID) })
   const origin = 'poker.example', point = new PrivateKey(31).toPublicKey().toString()
   const args = (operation, value) => ({ protocolID: [2, `p ecpm ${operation} ${value} poker demo deck masking`], keyID: 'table/hand/one', counterparty: 'self' })
+  await assert.rejects(manager.getPublicKey({ ...args('apply', point), seekPermission: false }, origin))
+  assert.equal(groups, 0, 'a no-prompt call cannot create a grant')
   await manager.getPublicKey({ protocolID: [2, 'poker demo transcript'], keyID: 'table', counterparty: 'anyone' }, origin)
   let masked
-  for (let i = 0; i < 167; i++) masked = (await manager.getPublicKey(args('apply', point), origin)).publicKey
+  for (let i = 0; i < 167; i++) masked = (await manager.getPublicKey({ ...args('apply', point), seekPermission: false }, origin)).publicKey
   assert.equal((await manager.getPublicKey(args('remove', masked), origin)).publicKey, point)
   await manager.createSignature({ protocolID: [2, 'poker demo transcript'], keyID: 'table', counterparty: 'anyone', data: [1, 2, 3] }, origin)
   assert.equal(groups, 1); assert.equal(individuals, 0); assert.equal(manager.listSessionPermissions().length, 2)

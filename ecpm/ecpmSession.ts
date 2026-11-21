@@ -28,6 +28,7 @@ export class EcpmSession {
   private pending: EcpmPromptRequest[] = []
   private generation = 0
   private module?: ReturnType<typeof createEcpmModule>
+  private activeRequests = new Set<ReturnType<typeof createEcpmModule>>()
 
   getSnapshot = (): EcpmPromptRequest | null => this.pending[0] ?? null
   subscribe = (listener: () => void): (() => void) => {
@@ -39,17 +40,18 @@ export class EcpmSession {
   }
   private emit() { this.listeners.forEach(listener => listener()) }
 
-  private authorize = (request: EcpmAuthorizationRequest): Promise<boolean> => {
+  private authorize = (request: EcpmAuthorizationRequest, seekPermission?: boolean): Promise<boolean> => {
     if (this.listeners.size === 0 || this.pending.length >= 64) return Promise.resolve(false)
     const generation = this.generation
     const manager = this.permissions?.()
+    if (this.permissions && !manager && !request.privileged) return Promise.resolve(false)
     if (manager && !request.privileged) {
       const authorization = manager.ensureProtocolPermission({
         originator: request.originator, privileged: false,
         protocolID: [request.securityLevel, `p ecpm ${request.logicalProtocolID}`],
         counterparty: request.counterparty, usageType: 'generic',
         moduleDetails: { scheme: 'ecpm', operation: request.operation, point: request.point, keyID: request.keyID },
-        seekPermission: request.seekPermission,
+        seekPermission,
       }).then(allowed => allowed && generation === this.generation)
       let timeout: ReturnType<typeof setTimeout>
       const abandoned = new Promise<boolean>(resolve => {
@@ -61,7 +63,7 @@ export class EcpmSession {
       })
       return Promise.race([authorization, abandoned]).finally(() => clearTimeout(timeout))
     }
-    if (request.seekPermission === false) return Promise.resolve(false)
+    if (seekPermission === false) return Promise.resolve(false)
     return new Promise(resolve => {
       let settled = false
       const item: EcpmPromptRequest = {
@@ -87,10 +89,9 @@ export class EcpmSession {
     if (expectedGeneration !== undefined && expectedGeneration !== this.generation) throw new Error('ECPM wallet session changed during build')
     this.dispose()
     const generation = this.generation
-    const module = createEcpmModule({
+    const createModule = (seekPermission?: boolean) => createEcpmModule({
       keyDeriver: wallet.keyDeriver,
-      authorize: this.authorize,
-      authorizationTTL: this.permissions ? 0 : undefined,
+      authorize: request => this.authorize(request, seekPermission),
       privilegedKeyDeriver: async reason => {
         if (generation !== this.generation || !wallet.privilegedKeyManager) throw new Error('ECPM privileged wallet is unavailable')
         // Wallet Toolbox exposes this retrieval internally rather than in ProtoWallet.
@@ -103,19 +104,55 @@ export class EcpmSession {
         return new KeyDeriver(key)
       }
     })
+    const module = createModule()
     this.module = module
     return {
       onRequest: async (...args: Parameters<typeof module.onRequest>) => {
         try { return await module.onRequest(...args) } catch (error) { throw ecpmWalletError(error) }
       },
       onResponse: module.onResponse.bind(module),
-      handleRequest: async (...args: Parameters<typeof module.handleRequest>) => {
+      handleRequest: async (request: Parameters<typeof module.handleRequest>[0], next: Parameters<typeof module.handleRequest>[1]) => {
+        let requestModule: ReturnType<typeof createEcpmModule> | undefined
         try {
           if (generation !== this.generation) throw new Error('ECPM wallet session changed')
-          const result = await module.handleRequest(...args)
+          let moduleRequest = request
+          if (this.permissions) {
+            if (this.activeRequests.size >= 64) throw new Error('ECPM: authorization queue is full')
+            const args = Object.getOwnPropertyDescriptor(request, 'args')
+            const seek = args?.enumerable && args.value != null
+              ? Object.getOwnPropertyDescriptor(args.value, 'seekPermission')
+              : undefined
+            const noPrompt = seek?.enumerable === true && seek.value === false
+            // 0.2.0 only allows no-prompt calls against its own cache. Route
+            // these calls through the host's existing-grant lookup instead.
+            // Preserve the data-object descriptors and the original flag
+            // in the authorization callback. Neither path can open a prompt.
+            if (noPrompt && args) {
+              const descriptors = Object.getOwnPropertyDescriptors(args.value)
+              descriptors.seekPermission = { ...seek, value: true }
+              const requestDescriptors = Object.getOwnPropertyDescriptors(request)
+              requestDescriptors.args = {
+                ...args,
+                value: Object.create(Object.getPrototypeOf(args.value), descriptors)
+              }
+              moduleRequest = Object.create(Object.getPrototypeOf(request), requestDescriptors)
+            }
+            // Keep authorization lifetime with the wallet permission manager.
+            // A module instance used once cannot reuse a revoked wallet grant.
+            requestModule = createModule(noPrompt ? false : undefined)
+            this.activeRequests.add(requestModule)
+          }
+          const result = await (requestModule ?? module).handleRequest(moduleRequest, next)
           if (generation !== this.generation) throw new Error('ECPM wallet session changed')
           return result
-        } catch (error) { throw ecpmWalletError(error) }
+        } catch (error) {
+          throw ecpmWalletError(error)
+        } finally {
+          if (requestModule) {
+            requestModule.dispose()
+            this.activeRequests.delete(requestModule)
+          }
+        }
       }
     }
   }
@@ -125,6 +162,8 @@ export class EcpmSession {
     this.generation++
     this.module?.dispose()
     this.module = undefined
+    for (const request of this.activeRequests) request.dispose()
+    this.activeRequests.clear()
     for (const item of [...this.pending]) item.answer(false)
     return this.generation
   }

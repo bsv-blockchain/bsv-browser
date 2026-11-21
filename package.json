@@ -39,7 +39,7 @@
     "@bsv/backup-cache-client": "^0.1.0",
     "@bsv/btms": "^1.2.4",
     "@bsv/btms-permission-module": "^1.2.2",
-    "@bsv/ecpm-permission-module": "file:vendor/bsv-ecpm-permission-module-0.1.4-session.tgz",
+    "@bsv/ecpm-permission-module": "0.2.0",
     "@bsv/expo-wallet-toolbox": "^0.21.0",
     "@bsv/mandala": "^0.4.1",
     "@bsv/message-box-client": "^2.6.0",
